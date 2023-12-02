@@ -1,0 +1,44 @@
+Abstract
+A useful application of event sensing is visual odometry, especially in settings that require high-temporal resolution.
+The state-of-the-art method of contrast maximisation recov-ers the motion from a batch of events by maximising the contrast of the image of warped events. However, the cost scales with image resolution and the temporal resolution can be limited by the need for large batch sizes to yield suf-ﬁcient structure in the contrast image1. In this work, we pro-pose spatiotemporal registration as a compelling technique for event-based rotational motion estimation. We theoreti-cally justify the approach and establish its fundamental and practical advantages over contrast maximisation. In par-ticular, spatiotemporal registration also produces feature tracks as a by-product, which directly supports an efﬁcient visual odometry pipeline with graph-based optimisation for motion averaging. The simplicity of our visual odometry pipeline allows it to process more than 1 M events/second.
+We also contribute a new event dataset for visual odometry, where motion sequences with large velocity variations were acquired using a high-precision robot arm2. 1.
+
+Introduction
+Due to their ability to asynchronously detect intensity changes, event sensors are well suited for conducting visual odometry (VO) in applications that require high temporal resolution [16, 28, 43, 26, 41], e.g., high-agility robotic ma-nipulation, fast manoeuvring aerial vehicles. However, to fully reap the beneﬁts of event sensing for VO, efﬁcient al-gorithms are required to process event streams with low-latency to accurately recover the experienced motion.
+An event sensor produces an event stream S = {e}, where each e = (u, t, p) is a tuple containing the 2D image coordinates u, time stamp t and polarity p associated with a brightness change that exceeded the preset threshold. In scenarios where the event camera (i.e., event sensor plus op-tics and other components) moves in a static environment, 1See supplementary material for demonstration program. 2Dataset: https://github.com/liudaqikk/RobotEvt
+Figure 1. Conceptual difference between contrast maximisation and spatiotemporal registration for event-based motion estimation. the events are triggered mainly by the camera motion. The goal of VO is to recover the camera motion from S.
+Many event-based VO methods [47, 35, 20, 34] conduct
+“batching”, where small subsets of S are processed incre-mentally. Each batch E = {ei}N i=1 ⊂ S is acquired over a time window T = [α, β], where each ei = (ui, ti, pi) is associated with a 3D point in the camera FOV that triggered ei at time ti ∈ T . The core task is to estimate the relative motion M between α and β from E. The estimated M is then subject to the broader VO pipeline (more in Sec. 2). 1.1. Contrast maximisation
+A state-of-the-art approach to estimate M from E is con-trast maximisation (CM) [19]. Parametrising M by a vector
+ω ∈ Ω and letting D = {xj}P j=1 be the image domain (the set of pixel coordinates) of the event sensor, each candidate
+ω yields the image of warped events (IWE)
+N
+H(xj; ω) =
+κδ(xj − f (ui, ti; ω)), (1)
+Xi=1 14937
+where f warps ui to a position in H by reversing the motion
+ω from ti to the start of T . The form of f depends on the type of motion M(see [19] for details). The warped events are aggregated by a kernel κδ with bandwidth δ, e.g.,
+κδ(x) = exp(kxk2/2δ2). (2)
+The contrast of H is given by
+C(ω) = 1
+P
+P
+Xj=1 (H(xj; ω) − µ(ω))2, (3) where µ(ω) is the mean intensity of H the image. Both C and µ are functions of ω since H is dependent on ω. CM estimates ω by maximising C(ω), the intuition being that the correct ω will yield a sharp image H; see Fig. 1.
+Previous studies found CM effective in a number of event-based VO tasks [19], especially where M is a rota-tion, i.e., Ω = SO(3). However, there are a couple of fun-damental weaknesses in CM, as described in the following.
+Computational cost Maximising C(ω) can be done us-ing conjugate gradient [19] and branch-and-bound [25].
+Note that the cost to compute (3) depends on both
+• the number of pixels P ; and
+• the number of events N in the batch E.
+While P is a constant of the event sensor, N depends on the motion speed and scene complexity. A higher P increases the FOV and hence tends to increase N , however, the cost of C(ω) will increase with P even if N is constant.
+The basic analysis above indicates that the cost of CM (regardless of the algorithm) will also scale with both P and N . Fig. 2 plots the runtime of CM (using conjugate gradient) on input instances with increasing P and constant
+N , which shows a clear uptrend. While early event sensors have low resolutions (e.g., 240 × 180 on iniVation Davis 240C), current sensors can have up to 1 Megapixels (e.g., 1280 × 720 on Prophesee 720P CD, 1280 × 800 on CeleX-V). Following industry trends, event sensors will likely con-tinue to increase in resolution. To maintain the efﬁciency of
+CM on high-resolution sensors, a separate heuristic to re-duce the “image resolution” is needed (note that this is dif-ferent sparsifying E by reducing the number of events N ).
+Temporal resolution Intuitively the accuracy of estimat-ing M depends on capturing sufﬁcient “structure” in E. For a ﬁxed scene and motion rate, the amount of structure in E increases with the duration |T | = β − α [27]. Conversely to achieve VO with high temporal resolution, |T | should be as small as possible to minimise batching effects. The con-ﬂicting demands indicate a maximum temporal resolution achievable by an event-based motion estimation technique.
+Fig. 3 shows the motion estimation accuracy of CM on batches E of different durations |T | from sequence (a) Original scene. (b) Runtime vs num. of pixels P .
+Figure 2. Using the image in panel (a) as input to ESIM [33], we generated synthetic event batches as outputs of event sensors of varying resolution, from P = 240 × 180 to P = 1920 × 1440 pixels. By tuning the duration |T |, the batch size N was ﬁxed at 15, 000. Panel (b) illustrates the average runtime of CM and STR on the generated data as a function of resolution. (a) Error vs batch duration |T |. (b) Runtime vs batch size N .
+Figure 3. Motion estimation error and runtime of CM and STR.
+PureRot Mid Off of our event dataset (Sec. 3.3). Un-like the experiment in Fig. 2, the number of events N were varied according to |T |. Note the degradation in accuracy as |T | decreases (i.e., N decreases), which indicates a lower temporal resolution of CM (more results in Sec. 3.4). 1.2. Our contributions
+We propose spatiotemporal registration (STR) as a co-gent alternative to CM; see Fig. 1 on the concept of STR.
+Despite the relative simplicity of STR, it has not been thoroughly investigated for event-based motion estimation.
+Speciﬁcally, we will justify STR by examining the condi-tions in which it is valid (Sec. 3) and demonstrate that it is generally as accurate for rotational motion estimation but does not suffer from the fundamental weaknesses of CM demonstrated in Sec. 1.1 (more results in Sec. 3.4).
+Further, unlike CM, STR produces feature correspon-dences as a by-product (see Fig. 1). This directly enables a novel event-based VO pipeline (Sec. 4) that conducts fea-ture tracking and motion averaging. To support our exper-iments, we build a new event dataset for VO using a high-precision robot arm (Sec. 3.3 and our dateset website). 2.

@@ -1,0 +1,50 @@
+Abstract
+Estimating homography to align image pairs captured by different sensors or image pairs with large appearance changes is an important and general challenge for many computer vision applications. In contrast to others, we pro-pose a generic solution to pixel-wise align multimodal im-age pairs by extending the traditional Lucas-Kanade algo-rithm with networks. The key contribution in our method is how we construct feature maps, named as deep Lucas-Kanade feature map (DLKFM). The learned DLKFM can spontaneously recognize invariant features under various appearance-changing conditions. It also has two nice prop-erties for the Lucas-Kanade algorithm: (1) The template feature map keeps brightness consistency with the input feature map, thus the color difference is very small while (2) The Lucas-Kanade objective they are well-aligned. function built on DLKFM has a smooth landscape around ground truth homography parameters, so the iterative solu-tion of the Lucas-Kanade can easily converge to the ground truth. With those properties, directly updating the Lucas-Kanade algorithm on our feature maps will precisely align image pairs with large appearance changes. We share the datasets, code, and demo video online 1. 1.
+
+Introduction
+Pixel-wise alignment of multimodal image pair is an im-portant problem for many computer vision applications in the ﬁeld of medical imaging [12], remote sensing [45], and robotics [5]. For example, in the task of GPS denied naviga-tion [16], the drone needs to align the RGB image from the camera with the existing map from the satellite. Aligning those two images suffers from multimodal color represen-tations as well as appearance changes. In Fig. 1, we show a cross-season image pair with appearance changes and a
+Google Map and Satellite image pair with multimodal pat-1Codebase link: https://github.com/placeforyiming/CVPR21-Deep-Lucas-Kanade-Homography. Dr. Xinming Huang is the project manager of this paper, please contact him for further information.
+Figure 1. (Left) One image pair from our cross-season dataset cap-tured in Google Earth. Plant and trafﬁc are changing textures.
+Our DLKFM distinguishes invariant features which are roads and (Right) One image pair from our Google Map and buildings.
+Satellite dataset. Template comes from the static map and the in-put is the corresponding satellite map. Our DLKFM distinguishes invariant features which are those map labels. The red polygon is the ground truth position of the template on the input image. tern representations. To solve this problem, we propose a generic pipeline by extending the traditional Lucas-Kanade (LK) algorithm with neural networks. The key component is how to extract the feature map, named as deep Lucas-Kanade feature map (DLKFM). DLKFM is able to sponta-neously recognize invariant features in various multimodal cases, like the roads and houses in the cross-season exam-ple or map labels in the Google Map and Satellite exam-ple. DLKFM also helps the LK to converge successfully by shaping the landscape of the objective function.
+Homography or perspective transform is a general 2D image transformation, which maps pixel from one image to the other, denoted as ˆx = ˆH ˆx′, where ˆx and ˆx′ are homoge-neous coordinates, ˆH is an arbitrary 3 × 3 matrix. However, in 3D computer vision, parallax arises due to the change of the viewpoint, thus creates ambiguity for aligning 2D im-ages.
+In this paper, we consider the same ﬂat world as-sumption as [16], that the depth disparity is negligible like some UAV and remote sensing applications [32, 46]. Then, aligning the image pair is equivalent to estimating the ho-15950
+mography matrix.
+To estimate the homography, a straightforward solution is ﬁnding more than four matched points. This idea can be broadly summarized as the feature-based method includ-ing traditional SIFT [27], SURF [3], or recent deep learning methods D2 [13], LF-Net [34], R2D2 [37], etc. To further solve the challenge on multimodal images, some special features are also designed [45, 44]. However, those feature-based methods are facing the same generalizability prob-lem. Even for those learning-based features, ground truth labels provided by 3D reconstruction systems are necessary
+[38, 39]. This prohibits the generic training of those feature detectors and descriptors on multimodal images.
+Besides feature-based methods, direct method is the other way to calculate homography [2]. As the most fa-mous one, the Lucas-Kanade family [28] has a long his-tory and still stimulates new ideas in different aspects of computer vision [35, 43]. In this paper, we build a generic multimodal image alignment pipeline by extending Inverse
+Compositional Lucas-Kanade (IC-LK).
+Inverse Compositional Lucas-Kanade Algorithm. Let
+XI and XT represent input image and template image, re-spectively, the Lucas-Kanade objective is stated as follows min
+P
+||XT − W (XI , P )||2 2 (1) where W (·|P ) is the warping function which warps the in-put image based on transformation parameter set P .
+The Lucas-Kanade algorithm iteratively solves for the warp parameters Pk+1 = Pk + ∆P . At every iteration k, the warp increment ∆P is obtained by linearizing min
+∆P
+||XT − W (XI , Pk + ∆P )||2 2 (2) using ﬁrst order Taylor expansion min
+∆P
+||XT − W (XI , Pk) −
+∂W (XI , Pk)
+∂P
+∆P ||2 2 (3)
+Here, ∂W (XI , Pk)/∂P needs to be recomputed at every iteration as it depends on W (XI , Pk). The inverse com-positional(IC) [2] avoids this recomputing by applying the warp increments ∆P to the template instead of the input min
+∆P
+||W (XT , ∆P ) − W (XI , Pk)||2 2 (4) using the warp parameter update Pk+1 = Pk + (∆P )−1 as where ∆P is the inverse increment mapping. In the corre-sponding linearized equation min
+∆P
+||XT +
+∂W (XT , 0)
+∂P
+∆P − W (XI , Pk)||2 2 (5)
+∂W (XT , 0)/∂P does not depend on Pk and can thus be pre-computed, resulting in a more efﬁcient algorithm.
+Limitation of IC-LK on Multimodal Images.
+IC-LK keeps accumulating ∆P toward ground truth, thus it usu-ally has an accurate performance if it can work success-fully. However, Eq. 1 assumes the color difference between the input image and template image achieves the minimum value once they are aligned. This brightness consistency assumption does not hold when aligning multimodal image pairs as the input and template usually have different color pattern representations. Furthermore, minimizing Eq. 1 is a non-linear optimization task as the input image depends non-linearly on the warp parameters P , so there is no guar-antee the ﬁrst-order approximation solution of Eq. 5 can have a ∆P moving along the right direction to the ground truth without getting into the local minimum.
+Our Solution. To overcome the limitation of IC-LK on multimodal images, we hope feature maps processed after a
+Siamese network can satisfy those assumptions of IC-LK.
+To achieve this, we design a feature constructor inspired by classical feature extractors, such as Harris Corner [9].
+This feature constructor constructs one channel feature map by using eigenvalues of the local covariance matrix on out-put tensor. Then, we design a special loss function with two terms. The ﬁrst term helps feature maps to satisfy the brightness consistency assumption. The second term shapes the landscape of the Lucas-Kanade objective function, to help the ﬁrst-order linearized solution ∆P can successfully keep moving toward the ground truth homography param-eters. We show examples of learned deep Lucas-Kanade feature map (DLKFM) in Fig. 1.
+Contributions. In general, we extend the well-known tra-ditional Lucas-Kanade method with neural networks.
+In regard to applications [16, 46, 31], we propose a generic pipeline to align multimodal images. In regard to technical contributions, we develop two new speciﬁc technologies:
+• Feature constructor on multi-channel tensors. In or-der to avoid updating homography on heavy tensors, the single-channel DLKFM is constructed on the high dimensional network output. We calculate the covari-ance matrix of vectors in each 3 × 3 patch. Then, we approximate the ratio between the largest eigenvalue and the trace as an indicator to form a single channel feature map. In the ablation study section, we show this operation improves the performance by extracting meaningful features on the single-channel feature map.
+• Special loss function for the convergence of Lucas-Kanade. We design a special loss function based on constructed feature maps. This loss function makes two feature maps satisfy brightness consistency.
+It further helps the convergence of the Inverse Compo-sitional Lucas-Kanade algorithm by shaping the opti-mization objective with a supportive convex function.
+The landscape of the objective function on learned fea-ture maps is visualized in the section of ablation study. 15951
+2.

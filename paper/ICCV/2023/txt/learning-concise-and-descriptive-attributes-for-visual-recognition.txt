@@ -1,0 +1,385 @@
+Abstract
+Recent advances in foundation models present new op-portunities for interpretable visual recognition – one can
+ﬁrst query Large Language Models (LLMs) to obtain a set of attributes that describe each class, then apply vision-language models to classify images via these attributes. Pi-oneering work shows that querying thousands of attributes can achieve performance competitive with image features.
+However, our further investigation on 8 datasets reveals that LLM-generated attributes in a large quantity perform almost the same as random words. This surprising ﬁnd-ing suggests that signiﬁcant noise may be present in these attributes. We hypothesize that there exist subsets of at-tributes that can maintain the classiﬁcation performance with much smaller sizes, and propose a novel learning-to-search method to discover those concise sets of attributes.
+As a result, on the CUB dataset, our method achieves per-formance close to that of massive LLM-generated attributes (e.g., 10k attributes for CUB), yet using only 32 attributes in total to distinguish 200 bird species. Furthermore, our new paradigm demonstrates several additional beneﬁts: higher interpretability and interactivity for humans, and the ability to summarize knowledge for a recognition task. 1.
+
+Introduction
+Explaining black-box neural models is a critical research problem. For visual recognition, one line of research tries to classify objects with descriptions or attributes [12, 8, 39, 18, 22], which provide additional information beyond vi-sual cues such as activation maps [41, 40]. However, they require in-depth human analysis and intensive annotation to obtain key attributes for a particular recognition task. Such a paradigm is costly and thus impractical to scale up when the number of classes and domains grows.
+The recent advance of foundation models creates new
+⇤ equal contributions.
+LLM
+Attribute Pool Concise & Descriptive Attributes
+Class  
+Names
+Visual  
+Data 
+VLM 
+Visual Features
+Recognition 
+Interpretability 
+Interactivity 
+Knowledge
+Figure 1: Our proposed paradigm for visual recognition via learning a concise set of descriptive attributes. opportunities for building interpretable visual recognition models, as demonstrated by the powerful capabilities of models such as GPT-3 and ChatGPT in encoding world knowledge [5, 32, 21]. One can query useful visual at-tributes from LLMs and classify images via these attributes by converting visual features from vision-language models (VLMs) (e.g., CLIP [36]) into attribute scores [56]. One recent work [52] shows that a large set of attributes from
+LLMs (e.g., 50 attributes per class) can achieve compara-ble performance to image features in a linear probing set-ting. However, two key observations motivate us to re-think this formulation: (1) A large number of attributes dramati-cally hurts the interpretability of a model. It is unrealistic to manually check thousands of attributes to fully understand model decisions. (2) We surprisingly ﬁnd that when the number of attributes is large enough (e.g., the dimension of image features), random words drawn from the entire vo-cabulary can perform equally well as LLM-generated at-tributes. Moreover, reducing the number of random words by 25% can still attain competitive performance. This in-dicates that redundant and noisy information exists in the massive LLM-generated attributes.
+With our ﬁndings, we ask the research question: Can we learn a concise set of representative visual attributes in the form of natural language to explain how visual recognition works? For example, can we ﬁnd a few representative attributes to distinguish 200 bird species? This is a non-trivial problem. Even for humans, it is not easy to summa-rize what are the representative visual attributes given many visual classes. To tackle this challenge, we propose a novel learning-to-search method, which uses image-level labels to guide the searching of discriminative attributes. Speciﬁ-cally, we train a learnable dictionary to approximate the em-bedding space of VLMs, and then ﬁnd descriptive attributes in the latent text space via nearest neighbor search.
+In summary, we propose a new paradigm for visual recognition (Figure 1), which seeks to learn a concise set of visual attributes in the form of natural language. Once learned, there are several beneﬁts to our new paradigm: (1) Our discovered attributes are highly descriptive. On 8 visual recognition datasets, our model classiﬁes images via these attributes and achieves comparable classiﬁcation performance as image features, even if the number of at-tributes is much smaller than the dimension of image fea-tures. (2) The condensed sets of attributes enable strong interpretability for the model decision process through a few human-friendly text descriptions. (3) Additionally, our framework presents a natural language interface for humans to interact with. One can correct a wrong prediction dur-ing model inference, by perturbing the values of attribute scores where it made mistakes. (4) Lastly, these expressive attributes can be viewed as a concise form of knowledge to summarize useful features for a visual recognition task, without costly human effort.
+Overall, our contributions are three-fold:
+• Leveraging recent advances in foundation models, we propose a new paradigm for visual recognition by learning a concise set of attribute descriptions.
+• To ﬁnd these attributes, we propose a novel learning-to-search method which prunes the large attribute pool from large language models to a descriptive subset.
+• We conduct extensive experiments across 8 visual recognition datasets to validate our recognition effec-tiveness and efﬁciency with additional beneﬁts. 2. Methodology
+In this section, we introduce our key components for a new paradigm of visual recognition. It mainly consists of three modules: First, in Section 2.1, given an image do-main, we query large language models to obtain a large set of visual attributes for the categories of a task. Second, we use a semantic transformation (Section 2.2) to project the image features into attribute features via a vision-language model, where each dimension in the new space corresponds to an attribute concept, and a higher value represents higher correlation between the image and the attribute. Finally, given the large space of attributes, we propose a novel learning-to-search method (Section 2.4) to efﬁciently prune the attributes into a much smaller subset to obtain a concise model for classiﬁcation. 2.1. Generating Attribute Concepts via LLMs
+The ﬁrst step of our framework is to obtain a set of ap-propriate attribute concepts. Given a dataset with different categories, (e.g., CUB with 200 bird classes), what are the distinctive visual attributes to recognize them? Manually la-beling and designing these attribute concepts can be costly, and can not scale to large numbers of classes. Large Lan-guage Models (LLMs), such as GPT-3 [5] and ChatGPT, provide an alternative solution. We can view these language models as implicit knowledge bases with exceptional world knowledge on a variety of tasks and topics, which humans can easily interact with through natural language to query knowledge. To this end, prompt engineering, or the ability to ask good questions to language models, is still important.
+To effectively query knowledge from LLMs with regard to classifying images, we design two types of prompts.
+Instance Prompting for Class-level Features. For each class c in a given task, our ﬁrst design choice is to query class-level information from LLMs. We prompt a language model with the instance prompt:
+Q: What are the useful visual features to distinguish Yc in a photo? where Yc corresponds to the name of class c in the form of natural language.
+Batch Prompting for Group-level Features. For certain datasets (e.g., CIFAR-100 and ImageNet), there is inher-ently a hierarchy that some categories belong to the same group. For example, in CIFAR-100, there is a superclass for every ﬁve categories. Hence, we propose batch prompt-ing, where we ask the language model to reason about the distinctive visual features among a batch of categories:
+Q: Here are Ng kinds of Yg:
+. What are the useful visual features to distinguish them in a photo? where Ng is the number of classes in a group g, Yg is the name of the group, Yci corresponds to the name of each class ci in the form of natural language.
+Yc1 , Yc2 , . . . , YcM }
+{
+We present more details regarding our prompt design, robustness check of different prompts, and examples of the generated attributes in Appendix A. 2.2. Semantic Projection
+{ a1, a2, . . . , aN }
+After obtaining a pool consisting of N attribute concepts
+=
+, the second challenge is how we
+C can best leverage these attributes to build interpretable im-age classiﬁers. Recent advances of vision-language models such as CLIP bridge the gap between images and text, by pre-training models with large scale image-text pairs. In-tuitively, converting from images to text is a discretization process that will unavoidably lose rich semantic informa-tion stored in an image.
+To better preserve information, we use a semantic pro-jection that transforms a visual feature into an attribute
+(a)
+Class Names 
+Querying LLM
+Attribute Concepts
+Bobolink  
+Painted Bunting  
+Cardinal 
+Gray Catbird 
+European Goldfinch 
+… t e s a t a
+D
+Images
+: slim body a1
+: short beak a2 aN
+: blue legs
+E n c o d e r
+I m a g e
+L a y e r
+E m b e d d n g i
+Learnt 
+Embeddings 
+K   D
+Task-guided 
+Attribute Concept Searching
+Attribute Embeddings from VLM  short beak blue legs slim body bright yellow feather
+Find Nearest 
+Neighbor 
+… black strips green chest 
+N   D (b)
+E n c o d e r
+I m a g e
+T
+ 
+D   1
+Semantic Projection
+T short beak slim body 0.6 short beak
+Transpose 0.2 slim body bright yellow feather 0.7 bright yellow feather black strips
+K   D
+Forward
+Backward 0.8 black strips
+K   1
+P r o b n g i i
+L n e a r
+Label
+American  
+Goldfinch
+Figure 2: The framework of our model. attributes; (b) An example using the attributes for interpretable visual recognition. (a) Querying attributes from LLMs and ﬁnding a concise set of representative concept space. Given an image I, we convert the D-RD into an N-dimensional dimensional image feature V attribute concept vector A 2
+RN : 2
+V =⇥ V (I), Ti =⇥ T (ai) si = cos(V, Ti), i = 1, ..., N
+A = (s1, . . . , sN )T (1)
+·
+·
+,
+) is the cosine similarity between two vectors, where cos( si is the cosine similarity between two vectors. ⇥V and
+⇥T are the visual and text encoder of a VLM. Ti is the embedding of the i-th attribute in the attribute concept pool, i
+. A is the semantic vector of image I. 1, . . . , N 2{
+} and are not optimized for visual recognition or visual rea-soning tasks. We hypothesize that there exist subsets of attributes that can still achieve high classiﬁcation perfor-mance with a much smaller size. Intuitively, most attributes in the large attribute concept pool are irrelevant to classify a certain class. For example, attributes that describe dogs are less likely to be suitable attributes to recognize birds or cars.
+Practically, formatting a compact attribute set is also help-ful for humans to interact with the model and understand its behavior better. A small number of attributes is much easier for diagnostic purposes and making decisions with these neural models, which is the ultimate goal of building interpretable models. 2.3. The Hypothesis of Attribute Concept Space 2.4. Task-Guided Attribute Concept Searching
+Conceptually, our semantic projection resembles prin-cipal component analysis, where we aim to ﬁnd a set of bases in the form of natural language, and by projecting the images into these bases we obtain a new attribute concept space where each dimension in the space corresponds to a visual attribute concept. However, the large bag of attribute concepts we obtained from large language models is not the optimal language basis. As of today, LLMs are mod-els that noisily condense world knowledge from the web,
+Finding an expressive set of language bases is non-trivial.
+The massive attributes from LLMs are noisy, and ﬁnding a few representative attributes for hundreds of classes in a task can be challenging and costly, even for hu-man experts with domain knowledge. An exhaustive search is also impractical given the large text space.
+Inspired by dictionary learning and vector quantization techniques [43], we present a learning-to-search method that learns a dictionary to approximate an expressive sub-         
+2 set of attributes given ﬁxed K. Speciﬁcally, we ﬁrst deﬁne
+D, where K is a K-way cat-RK an embedding matrix E
+⇥ egorical that equals the number of attributes, and D is the dimensionality of embedding vectors V and Ti (i.e., the la-tent dimension of VLMs), where V and Ti is the image em-bedding and the i-th attribute embedding shown in Eq.(1).
+Since our goal is to ﬁnd K attributes to be expressive, we propose a task-guided attribute concept searching method to optimize for a particular task. For visual recognition tasks, we use a classiﬁcation head to project the dictionary into
+KC classes and guide the learning process with the categor-ical cross-entropy loss:
+Lce =
+  1
+M
+M
+KC i=1
+X c=1
+X yi,c log(pi,c) (2) where M is the number of images in a mini-batch, yi,c is the binary indicator of the i-th image in the mini-batch be-longing to class c, and pi,c is the predicted probability of the i-th image belonging to class c.
+But simply training with the guidance of the cross-entropy loss is suboptimal, as the embeddings E are not in the same space of T. Thus, we use the Mahalanobis distance as a constraint to encourage the embeddings to be optimized towards the latent space of vision-language models. Given a sampled probability distribution T, the Mahalanobis dis-tance of Ej from T is deﬁned as j mah =
+D (Ej  
+µ)S  1(Ej  
+µ) (3) q where µ = (µ1, ..., µD) is the mean vector and S is the positive-deﬁnite covariance matrix of T. Then the regular-ization term is deﬁned as: j mah =
+L 1
+K k j=1
+X j mah
+D (4)
+Overall, our model is optimized with a mixture of two losses:
+K
+Lloss =
+Lce +   j mah .
+L j=1
+X (5)
+After training, we have the embedding matrix E which will be used for searching the attributes from the attribute
+D, each row of E is concept pool a D-dimensional vector. We denote the j-th row of E as Ej.
+We use greedy search as follows:
+. Note that for E
+RK 2
+C
+⇤ cos(Ti, Ej),
+T⇤j = arg max
+,N i
+···
+} 2{
+= T⇤k, 1, s.t. T⇤j 6 where j is from 1 to K,
+ 8 1 k < j, (6) 1,
+· · · 2{
+, K
+As j iterates from 1 to K, we can ﬁnd K attribute embed-dings T⇤j , j
+, which corresponds to K ex-} pressive attribute concepts and are the condensed features containing the necessary knowledge for the task. With the selected attributes, we can calculate the semantic vector of each image as in Eq. (1), where each dimension of the vec-tor is a similarity score between the image and an attribute.
+We evaluate the performance of these semantic vectors with linear probes, and the obtained linear model is used for in-ference and analysis. 3. Experiments 3.1. Experimental Setup
+Datasets We conduct our experiments on 8 different im-age classiﬁcation datasets, including: CUB [44], CIFAR-10 and CIFAR-100 [24], Food-101 [4], Flower [31], Oxford-pets [33], Stanford-cars [23], Imagenet [9]. For Imagenet, it is not trivial to analyze all 1000 diverse classes. So we nar-row the scope to 397 animal classes, with 509,230/19,850 samples for train/test. We denote this subset as Imagenet-Animals. For other datasets, most of them include images within a speciﬁc domain (CUB, Flower, Food, Oxford-pets,
+Stanford-cars), while CIFAR-10 and CIFAR-100 contain broader classes that lie across domains.
+Implementation Details Our method involves two stages of training. The ﬁrst stage consists of task-guided learning of a dictionary E to approximate CLIP text embeddings and using this dictionary to ﬁnd K attributes for visual recogni-tion. For the Mahalanobis distance, the parameter   is tuned with a grid search in
+. The second 1, 0.1, 0.01, 0.001, 0
+}
+{ stage is one-layer linear probing to classify semantic vec-tors. The batchsize is set to 4,096 for all datasets except 32,768 on Imagenet-Animals for faster converging. We set the number of epochs to 5,000 epochs with early stopping.
+The learning rate is set to 0.01 in all experiments with an
+Adam optimizer [20]. Unless speciﬁed, we use GPT-3 and
+CLIP ViT-B/32 for all performance comparison.
+Baselines We compare with state-of-the-art works that leverage attributes either from human annotations or from
+LLMs. For a fair comparison, we use linear probes to eval-uate all methods: (1) CompDL [56] builds semantic vec-tors using CLIP scores between human-designed attributes (2) LaBO [52] is a recent work that builds and images. semantic vectors with a large set of attributes from LLMs. (3) Human [44, 22]. Attribute labels for each image are an-notated by humans. We compare with two versions: binary labels for each attribute, and calibrated labels with conﬁ-dence scores given by annotators.
+To validate the effectiveness of learning-to-search, we explore other baselines: (1) K-means. Perform K-means
+Datasets
+CUB
+CIFAR-10
+CIFAR-100
+Flower
+K
+LaBo
+Ours
+Datasets
+K
+LaBo
+Ours 32 200 400 8 10 20 64 100 200 32 102 204 – 60.27 60.93 63.88
+Food 62.61 64.05 – 77.47 78.11 80.09 84.84 87.99 – 73.31 75.10 75.12 76.94 77.29 – 80.88 80.98 87.26 86.76 89.02
+Oxford Pets
+Stanford cars
+Imagenet Animals 64 101 202 16 37 74 64 196 392 128 397 794 – 78.41 79.95 80.22 81.33 81.85 – 76.29 76.91 83.15 84.33 85.91 – 72.07 72.33 74.57 74.39 75.56 – 74.48 74.88 75.69 75.49 75.83
+Table 1: Comparison with state-of-the-art. LaBo is designed to use at least as many attributes as classes. We use “–” to denote non-applicability.
+K (# of attributes) 8 16 32 312
+Human Binary [44]
+Human Calibration [22]
+CompDL [56]
+Ours 4.02 3.75 12.64 31.67 7.31 7.15 26.41 48.55 10.11 9.78 28.69 60.27 47.38 43.37 52.60 65.17
+Table 2: Comparison with human annotations on CUB. clustering on CLIP attribute embeddings, then ﬁnd K at-tributes with nearest distance to each clustering center. In-tuitively this can be a strong baseline, as K attributes close to each center can be distinctive. (2) Uniform Sampling from the large attribute pool. (3) SVD. After obtaining the attribute embeddings T, we run SVD decomposition of T to get the top K vectors and ﬁnd attributes with the largest similarity with the K important vectors. (4) Similarity. We calculate the average score of each attribute across all im-ages and then ﬁnd the K attributes with the largest average scores. (5) Img Features. Black-box linear probing on la-tent image features with two linear layers and an intermedi-ate dimension K as a reference. 3.2. Main Results
+Comparison with previous work We ﬁrst compare our method with LaBo [52]. It is designed to use Mc concepts per class with default number of 50, which corresponds to 10,000 attributes for CUB. For fair-comparison, we set
+Mc as 1 and 2 in the experiments. As shown in Table 1, our method outperforms LaBo with the same number of at-tributes on both the full and few-shot setting. Furthermore, our method can achieve similar accuracy with only a smaller number of attributes (e.g., 32 attributes for CUB). These re-sults suggest that our learned attributes are discriminative enough to classify the images, despite given much fewer at-tributes.
+We then further compare with human annotations from
+CUB. For K < 312, we select attributes based on their
+Examples boy champagne allied whose acrobat eight centered lobby heads red,gray,snow wings orange wings lime,navy wings sloping forehead distinctive white throat bright red head and breast
+R
+S
+G
+Figure 3: Performance com-parison with random or sim-ilar words on CUB.
+Table 3: Examples from
+Random (R), Silimlar (S),
+GPT-3 (G) attributes accumulated conﬁdence score for all samples. As shown in Table 2, human annotated attributes are more noisy than
+CLIP similarities. With the same attributes, CLIP scores from CompDL build more expressive features. Further-more, our LLM-suggested attributes signiﬁcantly outper-form human designs, e.g. by using 16 attributes we achieve similar performance as 312 attributes deﬁned by humans.
+Large-scale attributes behave like random words We present our ﬁnding that LLM-generated attributes in a large quantity behave like random words. Speciﬁcally, we com-pare our method of using GPT-3 attributes with random or similar words. Here, we constructed random words by ran-domly choosing 1-5 words from the entire English vocabu-lary, and semantically similar words by combining 1-3 ran-dom colors with the noun “wings” as sufﬁx. As shown in Figure 3, when K = 512, random words perform as well as GPT-3 attributes in terms of classiﬁcation accuracy.
+Even reducing K from 512 to 256 does not signiﬁcantly hurt its performance. But when K is small (e.g., 64), the performance of random words drops dramatically. We con-jecture that it is because text embeddings randomly drawn from CLIP are nearly orthogonal bases [45]. Given an im-RD, projection with a set of K=D orthogo-age feature nal bases can perfectly preserve its information. We further 2
+(a) CUB (b) CIFAR10 (c) CIFAR-100 (d) Flower (e) Food (f) Oxford pets (g) Stanford cars (h) Imagenet Animals
+Figure 4: Overall Performance on all datasets. X-axis: number of attributes, Y-axis: Accuracy (%), “(f)” means “full”, i.e., all attributes in the pool are used. Uniform refers to uniform sampling. explore how similar words (e.g., red wings, yellow wings) behave. Embeddings of similar words in a trained language model are not orthogonal bases hence the projection will lose information when K is large (e.g., intuitively it is hard to classify 200 bird species using only the color combina-tion of wings). But as K gets smaller, since those similar words have close semantic meanings, they start to outper-form random words. Overall, these ﬁndings motivate us to
+ﬁnd a concise set of meaningful attributes while maintain-ing competitive performance.
+Number of attributes and selection methods Finally, we study performance change under different number of at-tributes in Figure 4. First, our method is competitive with image features when K is large. Reducing number of at-tributes K to the number of classes C (e.g., 512 to 128 for CUB) does not signiﬁcantly hurt performance, even for baseline methods. This validates our hypothesis that there is plenty of redundant information in the semantic space when the number of attributes is large (as used in LaBO [52]). It is possible to ﬁnd a subset of expressive attributes for visual recognition. Second, we also consistently outperform other methods such as K-means clustering and uniform sampling, demonstrating the effectiveness of our task-guided search-ing method. Third, a heuristic design such as K-means performs similar as uniform selection. Note that though there is a performance gap between image features and us-ing attributes, the gap can be minimized by using a stronger
+VLM, as the classiﬁcation accuracy of attributes relies on the accurate estimation of the correlation between images and attributes ( see more results in appendix D ).
+Datasets
+K
+CUB
+CIFAR-100 8 16 32 8 16 32
+GPT-3
+GPT-3-Imagenet 31.67 30.81 48.55 49.29 60.27 60.41 34.77 33.80 52.24 51.01 66.30 65.61
+Table 4: Ablation study w.r.t. different concept pools. 3.3. Ablation Study
+Robustness to the attribute pool First, we aim to explore the effects of different initialized attribute concept pools generated by LLMs. On CUB and CIFAR-100, we com-pare two attribute pools, attributes generated from classes in each dataset, and attributes generated from the full set of
+ImageNet classes. As shown in Table 4, even with the large and noisy attributes from ImageNet, our method can still ef-ﬁciently ﬁnd a small number of representative attributes for a task, and obtains competitive classiﬁcation performance.
+Effectiveness of learning-to-search Then, we discuss possible choices for selection out of the large attribute pool.
+Results are shown in Table 5 with the following observa-tions: heuristic methods such as K-means and SVD are not optimal choices for identifying the most distinctive at-tributes. In fact, they are sometimes less effective than uni-form sampling. This is likely because we need to iden-tify the most distinguishing attributes for visual recognition, rather than the most diverse ones based on text embeddings.
+Overall, our method signiﬁcantly outperforms other base-line selection methods, showing its efﬁcacy.
+are classified as Least Auklet because:
+• iridescent black body with blue and purple highlights
+• overall yellowish coloration
+• dark gray and white mottled feathers
+• large, round eyes with an orange ring around them
+• medium-sized sea bird with a white head and black cap
+• bright yellow throat, breast, and flanks with black bars
+Overall yellowish coloration
+[0.2134, 0.2089, 0.2355, 0.2090, 0.2402, 0.2121] ⟹
+Intervention
+Rhinoceros Auklet(Wrong) are classified as yellow billed cuckoo because:
+• gray and white streaked head, back, and chest
+• dark slate gray crown, back and wings with  white throat and yellowish belly
+• pinkish red breast patch with white edges 
+• white neck with a black collar and  chestnut red head and breast
+• distinctive large white wing patches edged  in bold black stripes
+• brownish head with yellow supercilium  (eyebrow) and white throat
+White neck with a black collar and  chestnut red head and breast
+[0.2782, 0.2810, 0.2334, 0.2318, 0.2242, 0.2405] ⟹
+Intervention
+Mangrove cuckoo (Wrong)
+[0.2134, 0.1789, 0.2355, 0.2090, 0.2402, 0.2121] ⟹
+[0.2782, 0.2810, 0.2334, 0.2618, 0.2242, 0.2405] ⟹ (a) Least Auklet (b) Yellow Billed Cuckoo
+Least Auklet (Correct) yellow billed cuckoo (Correct)
+Figure 5: Examples on interpretability and interactivity. (1) The upper half of each ﬁgure show important attributes for two classes of birds. We choose 6 out of 32 attributes with highest importance scores, which are computed by multiplication between clip scores and weights in the linear probe, deﬁned in Eq. (7). (2) The lower half of each ﬁgure demonstrates the intervention on the semantic vector (i.e., CLIP scores) to correct the prediction, we use  =0.03 for all interventions on clip scores as an empirical value. The array of 6 scores are of the same order as the attributes.
+Datasets
+CUB
+CIFAR-100
+K 8 16 32 8 16 32
+K-means
+Uniform
+SVD
+Similarity
+Ours 16.83 7.02 6.52 4.73 31.67 21.02 25.98 20.02 9.72 48.55 32.76 40.58 35.83 18.00 60.27 25.39 28.07 29.06 26.75 34.77 45.26 47.14 50.00 45.61 52.24 64.41 64.34 64.99 62.79 66.30
+Table 5: Ablation study w.r.t. different attribute selection strategies.
+Effectiveness of regularization We compare the Maha-lanobis distance (MAH) with two variations: (1) COS: For each vector Ej and Ti (of the i-th attribute) in the concept pool, we computed averaged cosine distance as follows:
+Lcos = 1
+K 2
+K
+K j=1
+X i=1
+X
+||
+T>i Ej
+Ti||||
+Ej|| (2) CE: Learning with Eq. (2) only. Results are in Table 6.
+Overall, Mahalanobis distance is an effective constraint to encourage the dictionary E to be close to the distribution of
+CLIP embeddings. 3.4. Analysis of Interpretability and Interactivity
+We perform analysis and visualizations to show that: (1) Our learned attributes provide interpretability. As shown in Figure 5, the upper half presents the images in a class c and high relevant attributes to recognize them.
+K as the weight of the
+Speciﬁcally, we denote W
+RKC ⇤ 2
+Dataset
+K
+MAH
+COS
+CE
+CUB 8 16 32 64 30.76 28.96 31.67 47.87 47.35 48.55 60.27 58.27 55.88 64.25 63.25 60.73
+Dataset
+CIFAR-100
+K
+MAH
+COS
+CE 8 16 32 64 34.77 31.98 32.45 52.24 51.15 50.83 65.91 65.02 66.29 73.31 72.80 73.25
+Table 6: Ablation study w.r.t. different regularization.
+FC layer in linear probing, where KC, K are the number of classes and attributes. Then for each image i and its
+RK, we multiply the corresponding semantic vector A score vector of image i with the corresponding row of the
+FC layer Wc to compute Importance Score IS 2
+RK: 2
+IS = Wc ⌦
+A (7)
+⌦ where means element-wise multiplication. Then we present attributes with the top absolute values of IS av-eraged over all samples in a class from the test set, with blue/orange bars indicating the positive/negative impor-tance. Higher absolute values denote greater signiﬁcance.
+Since all CLIP scores are positive [16], the positivity or neg-ativity of high IS signiﬁes their relevance to the class. (2) Our concise set of attributes enables simple inter-activity. As shown in the lower half of Figure 5, we can correct the model’s wrong predictions during inference by changing only a single similarity score between an image
+B
+U
+C 0 0 1
+R
+A
+F
+I
+C d o o
+F i s l a m n
+A t e n e g a m
+I
+• distinctive white throat
+• bright red head and breast
+• pinkish red breast patch with white edges 
+• bright yellow, green and blue plumage
+• Red face with a black cap and bib
+• Short legs for perching on reeds 
+• white and black spotted breast
+• sloping forehead 
+• a seat for the rider
+• catkins (flowers) in spring
+• many windows in the façade
+• five pairs of walking legs
+• smooth oval shaped sepals
+•
+• headboard and footboard
+• towers with conical roofs four-limbed primate
+• elbow macaroni noodles
+• Shredded pork meat in the middle of the sandwich 
+• large pieces of clams visible in the chowder
+• usually served in a warm wrap or burrito shell 
+• sliced into thin wedges or cubes 
+•
+•
+• a crisp, fried pastry dough exterior thinly sliced raw fish tender squid rings inside 
+• male finches have a bright red breast
+• brownish-yellow fur
+• small, four-limbed canid
+• long, black, shiny body
+• the carapace is rough and bumpy
+• white spots on the crab's shell
+• English setters are bred in England
+• long, wirehaired coat 0 1
+R
+A
+F
+I
+C r e w o l
+F s t e
+P d r o f x
+O s r a
+C d r o f n a t
+S
+• antlers (in males)
+• pointed bow and stern
+• propellers or jet engines
+• moist slimy skin
+•
+•
+• portholes along the hull
+• four wheels long head with a mane and tail landing gear large, yellow or orange flower head
+• Shiny wax coating on the spathe 
+•
+• bright pink color 
+• large, white petals with a yellow center
+• pink to purple colored petals with red lips
+• bright red and yellow petals
+• pink, white, or lavender flowers with five petals
+• deep purple or blue flowers
+• black and tan coloring
+• short coat of glossy black fur
+• Long legs and neck
+• Shade of red or wheaten color
+•
+• Pointed ears
+• white blaze on face and chest
+• greyish blue fur with silver tips large, round eyes
+• signature Lincoln split headlamps
+• large front grille with the signature BMW kidney  shape large size with a wheelbase of 149.4 inches
+“4Runner” badge on the rear liftgate
+•
+•
+• signature SRT8 grille with crosshair pattern
+• Porsche logo on front grille and trunk lid
+• S6 badge on the trunk lid
+• unique HUMMER H2 logo on front grille
+Figure 6: A concise set of 8 descriptive attributes learned for each dataset with sampled images. and the attribute that the CLIP model made a mistake on.
+This is a signiﬁcant simpliﬁcation compared with previous work [22] where they need to manipulate scores from a group of concepts for the CUB dataset. We present more user studies in appendix E. 3.5. Visualization of Our Discovered Attributes
+We show our learned descriptive attributes with K = 8 in Figure 6. Intuitively, we can observe these attributes are distinctive for each domain. Take birds recognition (CUB) as an example, the eight attributes covered most of the body parts of a bird (head, breast, legs, etc.). As we are con-densing knowledge from hundreds of bird classes, each at-tribute broadly covers many categories. A bright red head and breast can be a noticeable visual attribute for many bird species, such as the Northern Cardinal and the Vermilion
+Flycatcher. Overall, explaining a domain with a few de-scriptive attributes is challenging, even for an expert with sufﬁcient domain knowledge. But our model is able to au-tomatically provide a level of knowledge to help humans understand how visual recognition works.
+We then present case studies on CIFAR-10 with 4 at-tributes and CLIP scores of 10 random images from each class in Figure 7. In general, each image is activated in an distinguishable way in the heat map. Some attributes can distinguish a few classes, for example, cat and dog have airplane automobile bird cat deer dog frog horse ship truck fur coat of  varying colors  and patterns antlers (in males) crests on heads large body with  a cab and a bed
+Figure 7: Case study on CIFAR-10. The numbers are CLIP similarity scores between each image and attributes. higher activation on “fur coat” compared to automobile or truck. Thus “fur coat” may be an important feature to dif-ferentiate animals and vehicles. 4.

@@ -1,0 +1,248 @@
+Abstract
+Test-time adaptation (TTA) methods, which generally rely on the model’s predictions (e.g., entropy minimization) to adapt the source pretrained model to the unlabeled target domain, suffer from noisy signals originating from 1) incor-rect or 2) open-set predictions. Long-term stable adapta-tion is hampered by such noisy signals, so training mod-els without such error accumulation is crucial for practical
+TTA. To address these issues, including open-set TTA, we propose a simple yet effective sample selection method in-spired by the following crucial empirical finding. While en-tropy minimization compels the model to increase the prob-ability of its predicted label (i.e., confidence values), we found that noisy samples rather show decreased confidence values. To be more specific, entropy minimization attempts to raise the confidence values of an individual sample’s pre-diction, but individual confidence values may rise or fall due to the influence of signals from numerous other pre-∗Work done during an internship at Qualcomm AI Research.
+† Corresponding author.
+‡ Qualcomm AI Research is an initiative of
+Qualcomm Technologies, Inc. dictions (i.e., wisdom of crowds). Due to this fact, noisy signals misaligned with such ‘wisdom of crowds’, gener-ally found in the correct signals, fail to raise the individ-ual confidence values of wrong samples, despite attempts to increase them. Based on such findings, we filter out the samples whose confidence values are lower in the adapted model than in the original model, as they are likely to be noisy. Our method is widely applicable to existing TTA methods and improves their long-term adaptation perfor-mance in both image classification (e.g., 49.4% reduced error rates with TENT) and semantic segmentation (e.g., 11.7% gain in mIoU with TENT). 1.
+
+Introduction
+Despite the recent advancements of deep learning, mod-els still show a significant performance degradation when confronted with large domain shifts (e.g., changes of cities with different landscapes during autonomous driving) [8, 33, 39, 27, 11]. Among various studies, test-time adaptation (TTA) is at the center of attention due to its practicality in not requiring 1) the source data during the adaptation stage and 2) ground truth labels of the target domain [57].
+Figure 2: Utilizing confidence difference for selecting correct samples. Pseudo-labeling samples (i.e., selecting correct sam-ples) by using a fixed threshold does not guarantee a reasonable level of pseudo-labeling performance, which is demonstrated by the significantly low precision values. On the other hand, we maintain a reasonable level of both precision and recall by using the confidence difference between θo and θa, improving the test-time adaptation performance overall.
+TTA models widely utilize a self-training strategy (e.g., entropy minimization), which uses the model’s prediction as the target of the loss function [57, 9, 58, 46, 14, 13, 62, 47, 65, 24]. Since TTA models rely on their own predic-tions during the adaptation, they are inevitably prone to uti-lizing noisy signals.
+In this paper, noisy signals indicate supervisions that originated from 1) incorrect or 2) open-set predictions. Fig. 1 shows that performing adaptation with such noisy signals significantly degrades the TTA perfor-mance. Specifically, the pink pixels indicate the mispre-dicted pixels (e.g., predicting sidewalks as roads in the sec-ond row), and the red ones are the predictions on open-set classes that were not included in the train set (e.g., predict-ing guardrails and the garbage truck as roads in the first and second rows, respectively). Such an example clearly demonstrates that TTA in real-world applications needs to address such open-set classes since mispredicting guardrails as roads may cause serious accidents during autonomous driving. However, as shown in Fig. 3, previous studies fo-cused on TTA with covariate shifts (i.e., domain shifts) only and did not address TTA that also includes semantic shifts (i.e., including open-set classes). Regarding its significance and practicality, adaptation with unknown classes included (i.e., open-set TTA) should be also addressed.
+Fig. 2 shows our empirical analysis that discloses an im-portant finding to address such an issue. While entropy minimization enforces the model to increase the probabil-ity value of its predicted label (i.e., confidence values), we found that it often fails to increase them on the wrong sam-Figure 3: Description of open-set TTA. While previ-ous studies assume covariate shifts (i.e., Cityscapes to
+BDD-100K), they fail to address the semantic shifts (i.e., guardrails only shown in BDD-100K). This paper addresses both closed-set and open-set test-time adaptation. ples. While previous studies [58, 46] resorted to finding an adequate confidence value or loss value to prevent error ac-cumulation, the process of determining it is cumbersome, and utilizing such a static threshold shows limited perfor-mance. We train TENT [57] with different thresholds for the analysis: (a) without thresholding, (b) selecting sam-ples with confidence value higher or equal to 0.91, (c) se-lecting samples with loss values smaller than the entropy threshold proposed in EATA [46], and (d) selecting sam-ples that achieve higher confidence value with the adapta-tion model θa compared to that with the original model θo.
+As shown, using the confidence difference between θo and
+θa for selecting correct samples outperforms utilizing the static thresholds. While b) and c) show significantly high recall values (i.e., selecting actual correct samples well), it rather indicates that they simply select most of the samples and fail to filter out noisy samples considering the substan-tially low precision values (i.e., low ratio of correct samples among the selected ones).
+The intuition behind using the confidence difference is as follows. Although entropy minimization enforces the model to increase the confidence value on the predicted la-bel of an individual sample, the individual confidence value may rise or fall, influenced by the signals that originated from numerous other predictions (i.e., wisdom of crowds).
+To be more specific, the noisy signals that do not align with such ‘wisdom of crowds’, commonly found in the cor-rect signals, fail to raise the individual confidence scores of wrong samples, even with the supervision from entropy minimization to increase them. By using such an obser-vation, we select samples that achieve higher confidence value using θa compared to that using θo. Since we reflect the knowledge state of the model on each individual sam-ple, our selection is implicitly a dynamic thresholding strat-egy, which outperforms the previously-used static strate-gies. Our simple yet effective sample selection method is widely applicable to existing TTA methods and improves their performances on both image classification and seman-tic segmentation. 1We used the best confidence value p after grid search of p ∈
+{0.5, 0.8, 0.9, 0.95, 0.99.}
+Figure 4: As adaptation proceeds, the number of samples with decreased confidence values increases (purple graph).
+Additionally, among those samples, the ratio of wrongly predicted samples also increases (green graph). ti indicates the ith round during the long-term adaptation.
+Our contributions are summarized as follows:
+• We propose a novel sample selection method that fil-ters out noisy samples using the confidence difference between θa and θo based on the finding that noisy samples, both closed-set wrong samples, and open-set samples, generally show decreased confidence values on the originally predicted label.
+• This is the first paper to address open-set test-time adaptation, adapting to a target domain including test samples of unknown classes, which has not been ex-plored in existing TTA studies despite its importance and practicality.
+• Our proposed method can be applied to various test-time adaptation methods and improves their perfor-mances on both image classification using CIFAR-10/100-C and TinyImageNet-C (e.g., 49.38% reduced error rates with TENT in open-set TTA), and semantic segmentation (e.g., 11.69% gain in mIoU with TENT) using real-world datasets including BDD-100K and
+Mapillary. 2. Wisdom of Crowds in Entropy Minimization 2.1. Problem Setup
+During the test-time adaptation, models adapt to a target domain with N number of test samples in the test set DT ,
+{xi, }N i=1 ∈ DT , without target labels provided. Given a pretrained model θo, we update θo to adapt to a novel tar-get domain, where the adapted model is then defined as θa.
+For a test sample x, we define ˜y = f (x; θo) ∈ RC and
+ˆy = f (x; θa) ∈ RC as the softmax outputs of the origi-nal model θo and the adapted model θa, respectively, where
+C denotes the number of classes. With the predicted class co = argmaxc f (x; θo) of the original model, we define the probability value on the predicted label as confidence value
+˜yco. Similarly, the confidence value of the adapted model
+θa on the label co, predicted by the original model, is de-fined as ˆyco. The main objective of test-time adaptation is to correctly predict ca = argmaxc f (x; θa) using the adapted model, especially under large data distribution shifts.
+Figure 5: Utilizing the confidence difference distinguishes between the correct samples (blue) and the wrong samples (red) better (AUROC of 89.42) than using the confidence values (AUROC of 58.29). We used the same model (i.e.,
+TENT [57] adapted for 50 rounds) for the visualization. 2.2. Motivation
+Decreased confidence values While entropy minimiza-tion enforces the model to increase the confidence value of its originally predicted label, we empirically found that wrong samples mostly show decreased values (i.e., ˆyco <
+˜yco). For the experiment, we perform test-time adaptation using TENT [57] for 50 rounds using CIFAR-10-C to sim-ulate a long-term adaptation. One round includes contin-uously changing 15 corruption types, so we repeat it 50 times without resetting the model. With ti indicating the ith round, Fig. 4 (purple graph) shows that the number of samples achieving ˆyco < ˜yco, showing decreased confi-dence values, among N number of test samples increases as adaptation proceeds even with the entropy minimization that enforces the model to increase its confidence value on the originally predicted label. In fact, the green graph in
+Fig. 4 shows that the ratio of wrong samples among the samples with decreased confidence values also increases as adaptation proceeds. The main reason for such an observa-tion is due to the ‘wisdom of crowds’, the signals learned from numerous other samples influencing the confidence level of individual samples. Specifically, although the in-dividual signal from each sample compels the model to in-crease the confidence value of its own predicted label, this effect may be canceled out if other dominant signals show different patterns.
+Wisdom of crowds from correct samples We empir-ically found that models generally learn the wisdom of crowds from the correct samples. Fig. 5 demonstrates such a point with the histogram of 1) confidence values and 2) confidence difference, ˆyco − ˜yco, using TENT [57] adapted for 50 rounds. We observe that a substantial number of the samples achieving ˆyco − ˜yco ≥ 0 are correct samples (blue).
+To be more specific, utilizing the confidence difference for distinguishing correct samples from wrong samples (red) achieves an AUROC of 89.42, which outperforms utilizing the confidence value of the adaptation model, achieving an
+AUROC of 58.29.
+Such an observation discloses two findings. First, since samples achieving ˆyco ≥ ˜yco are mostly correct ones, the
+Figure 6: Overall procedure of our sample selection. We forward the mini-batch of n test images, {xi}n i=1, to the original model θo and the adaptation model θa. Then, we compare the probability values ˆyco and ˜yco and select the samples achieving
+ˆyco ≥ ˜yco. Finally, we apply the entropy minimization only to the selected samples. dominant signals necessary for increasing the confidence values (i.e., wisdom of crowds) are originated from the cor-rect samples. Second, ˆyco − ˜yco is an adequate metric to distinguish between correct and wrong samples.
+Misaligned wrong signals We further empirically ana-lyze why signals from wrong samples fail to increase the confidence values of the original model. The main rea-son is that signals originated from wrong samples misalign with the ‘wisdom of crowds’ obtained from the correct sam-ples. For the analysis, we compute the cosine similarity of gradients between two samples with the same predicted la-bel in Fig. 7. For a given predicted label i (column), we compute sj,i, the cosine similarity of gradients obtained be-tween samples of ground truth label j (row) and those of predicted label i as, sj,i = 1
+M1M2
+M1(cid:88)
+M2(cid:88) k=1 l=1 gj,i k · gi,i l k ∥∥gi,i
+∥gj,i l ∥
+, l ̸= k if j = i, (1) where gj,i indicates the gradient vector of kth sample k among M1 number of samples with the ground truth label j and the predicted label i, gi,i indicates the gradient vector of l lth sample among M2 number of samples with the ground truth label i and the predicted label i (i.e., correct samples), and i, j ∈ C. In other words, given a certain predicted label, we compare the gradients of the correct samples and those of the samples with the same predicted label either correct
+Figure 7: Cosine similarity of gradients between samples with the same predicted label. We observe that wrong sig-nals (i.e., off-diagonal elements) misalign with the correct signals (i.e., diagonal elements) that dominate the wisdom of crowds. or wrong. Thus, the diagonal elements are the results ob-tained by comparing the gradients between correct samples and the off-diagonal elements are obtained by comparing the gradients between correct samples and the wrong sam-ples with the same predicted label. We add the description of how the cosine similarity of each pair is computed on the right side of Fig. 7.
+Given a certain column in Fig. 7, all entropy minimiza-tion losses enforce the model to increase the probability value of the same predicted label. However, we found that the signals (i.e., gradients) may differ depending on the ac-tual ground truth labels. Specifically, the correct samples show high cosine similarity of gradients (diagonal elements, e.g., s2,2) compared to the ones with wrong samples (off-diagonal elements, e.g., s0,2). Since Fig. 5 shows that the correct signals dominate the wisdom of crowds required for increasing the confidence value of the originally predicted label, signals that are different from these dominant signals can be suppressed and do not raise confidence values.
+We want to clarify that the wisdom of crowds does not guarantee a model to utilize the correct signals only. Even with the wisdom of crowds, the model supervises itself with wrong predictions if the noisy losses are not filtered out.
+Such self-training with wrong knowledge significantly de-teriorates the TTA performance of models, especially dur-ing the long-term adaptation [25]. In fact, such an issue has been widely studied in fields beyond TTA, known as the confirmation bias [63, 2, 56, 35, 34]. To address such an is-sue in TTA, we propose a sample selection method to filter out noisy samples by using the wisdom of crowds. 2.3. Proposed Method
+As shown in Fig. 6, we propose a simple yet effective sample selection method using the confidence difference between ˜yco and ˆyco. Our sample selection criterion is for-mulated as
+Φ(ˆyco, ˜yco) = 1 (ˆyco ≥ ˜yco) , (2) where Φ(·) is our sample selection criterion and 1(·) is the indicator function. Our total objective function using en-tropy minimization is formulated as
+Lmain(x; θa) = Φ(ˆyco, ˜yco) · H( ˆyi) − λmaxH(y). (3)
+Method
+Source [61]
+BN Adapt [43]
+GCE [64]
+Conjugate [14]
+ENT
++ Ours
+TENT [57]
++ Ours
+EATA [46]
++ Ours
+SWR [9]
++ Ours
+CIFAR-10-C
+CIFAR-100-C
+TinyImageNet-C
+Average
+Closed
+Open
+Closed
+Open
+Closed
+Open
+Closed
+Open 18.27 14.49 43.76 49.57 87.06 17.33 (-69.73) 45.84 14.10 (-31.74) 29.78 14.07 (-15.71) 10.21 10.12 (-0.09) 18.27 15.73 87.94 92.25 89.26 23.98 (-65.28) 85.22 15.77 (-69.45) 82.05 15.65 (-66.40) 90.55 72.58 (-17.97) 46.75 39.26 44.45 98.97 56.35 37.69 (-18.66) 42.34 38.62 (-3.72) 49.31 38.44 (-10.87) 35.78 35.64 (-0.14) 46.75 42.67 88.69 98.79 98.76 40.48 (-58.28) 85.22 42.57 (-42.65) 98.75 42.47 (-56.28) 73.05 45.68 (-27.37) 76.71 61.90 97.25 99.38 99.43 58.93 (-40.50) 98.10 60.87 (-37.23) 59.82 59.80 (-0.02) 62.39 55.15 (-7.24) 76.71 63.00 99.00 99.46 99.50 64.01 (-35.49) 99.16 63.13 (-36.03) 63.47 62.08 (-1.39) 76.13 61.91 (-14.22) 47.24 38.55 61.82 82.64 80.95 37.98 (-42.97) 62.09 37.86 (-24.23) 46.30 37.44 (-8.86) 36.13 33.64 (-2.49) 47.24 40.47 91.88 96.83 95.84 42.82 (-53.02) 89.87 40.49 (-49.38) 81.42 40.07 (-41.35) 79.91 60.06 (-19.85)
+Table 1: Error rates of image classification after 50 rounds of adaptation (i.e., long-term test-time adaptation). We note the performance gain by reduced error rates.
+Method
+Source [61]
+BN Adapt [43]
+GCE [64]
+Conjugate [14]
+ENT
++ Ours
+TENT [57]
++ Ours
+EATA [46]
++ Ours
+SWR [9]
++ Ours
+CIFAR-10-C
+CIFAR-100-C
+TinyImageNet-C
+Average
+Closed
+Open
+Closed
+Open
+Closed
+Open
+Closed
+Open 18.27 14.49 12.81 12.84 16.30 13.41 (-2.89) 12.56 12.39 (-0.17) 12.39 12.35 (-0.04) 10.76 10.74 (-0.02) 18.27 15.73 25.70 24.96 47.54 16.93 (-30.61) 27.80 14.94 (-12.86) 25.52 14.92 (-10.60) 29.32 27.52 (-1.80) 46.75 39.26 35.83 36.67 38.74 37.55 (-1.19) 36.04 36.18 (+0.14) 36.39 36.25 (-0.14) 34.21 34.23 (+0.02) 46.75 42.67 45.78 81.19 58.16 42.60 (-15.56) 45.26 39.62 (-5.64) 54.22 39.58 (-14.64) 44.79 41.52 (-3.27) 76.71 61.90 62.84 82.83 79.69 63.89 (-15.80) 68.53 59.90 (-8.63) 59.02 59.30 (+0.28) 60.34 58.50 (-1.84) 76.71 63.00 71.41 92.66 91.74 69.01 (-22.73) 80.93 63.31 (-17.62) 61.72 62.11 (+0.39) 65.18 62.94 (-2.24) 47.24 38.55 37.16 44.11 44.91 38.28 (-6.63) 39.04 36.16 (-2.88) 35.93 35.97 (+0.04) 35.10 34.49 (-0.61) 47.24 40.47 47.63 66.27 65.81 42.85 (-22.96) 51.33 39.29 (-12.04) 47.15 38.87 (-8.28) 46.43 44.00 (-2.43)
+Table 2: Error rates of image classification after 1 round of adaptation (i.e., short-term test-time adaptation). We note the performance gain by reduced error rates.
+N ΣC k=1pk log pk, y = 1
+H(p) = ΣC k=1 ˆyi, and λmax is the scalar value for balancing the two loss values. Note that
+H(y) has been widely used in previous studies [9, 39, 29, 38, 3, 5] to prevent the model from making imbalanced pre-dictions towards a certain class.
+Recent studies require the pre-deployment stage that ob-tains the necessary information needed for each method by using the samples from the source data before the adapta-tion phase [9, 46, 39]. However, we want to emphasize that our method does not require such a pre-deployment stage as well as those samples from the source distribution.
+Due to such an advantage, our method can be easily applied to existing TTA methods without additional preparations.
+Through extensive experiments, we demonstrate the wide applicability of our method to existing TTA methods. 3. Experiments 3.1. Experimental Setup
+Datasets For the image classification task, we use the widely used corruption benchmark datasets: CIFAR-10/100-C and TinyImageNet-C. We apply 15 different types of corruptions (e.g., gaussian noise) to CIFAR-10/100 [30] and TinyImageNet [31]. Pretrained models are trained on the clean train set and adapted to the corrupted test set. For the open-set setting, we use SVHN [44] for CIFAR-10/100-C, and ImageNet-O [20] for TinyImagenet-C, where we ap-ply the same corruption type as the original test sets. We term the datasets as SVHN-C and ImageNet-O-C, respec-tively. We apply the identical corruption type in order to construct open-set samples that are drawn from the same domain shift but with unknown classes. For the seman-tic segmentation task under continually changing domains, we use a model pretrained on GTAV [50], and evaluate it with Cityscapes [10], BDD-100K [60], and Mapillary [45].
+For semantic segmentation with a fixed target domain with multiple rounds, we use the Cityscapes for the source dis-tribution and BDD-100K [60], GTAV [50], Mapillary [45], and SYNTHIA [51] for the target distributions. Note that the semantic segmentation task inherently includes open-set classes in the test set (e.g., traffic cones in BDD100K not shown during training with Cityscapes).
+Evaluation settings Following the recent TTA studies, we evaluate TTA models under continuously changing do-mains without resetting the model after each domain [58, 39, 46]. For the closed-set and open-set continual long-term TTA in the image classification, we perform adaptation for 50 rounds to simulate a long-term TTA with continu-Time
+Method t −−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−→
+Cityscapes
+BDD-100K
+Mapillary
+Source [6]
+BN Adapt [43]
+TTN [39]
+TENT [57]
++ Ours
+SWR [9]
++ Ours 34.74 40.77 46.28 46.73 46.76 (+0.03) 46.17 46.65 (+0.48) 16.15 25.21 28.07 29.59 30.55 (+0.96) 10.70 32.28 (+21.58) 36.97 39.10 45.46 35.69 43.42 (+7.73) 1.28 45.09 (+43.81)
+Average 29.29 35.03 39.94 37.34 40.24 (+2.90) 19.38 41.34 (+21.96) (a) Average mIoU after the adaptation of each domain. (b) mIoU changes during adaptation2.
+Table 3: Semantic segmentation performance (mIoU) on continuously-changing target domains with 1 round of adaptation.
+We evaluate with DeepLabV3Plus-ResNet-50 [6] pretrained on GTAV dataset.
+Method
+Source [6]
+BN Adapt [43]
+TTN [39]
+TENT [57]
++ Ours
+SWR [9]
++ Ours
+BDD-100K
+Mapillary
+GTAV
+SYNTHIA
+Average
+Round 1
+Round 10
+Round 1
+Round 10
+Round 1
+Round 10
+Round 1
+Round 10
+Round 1
+Round 10 43.50 43.60 48.43 48.90 48.90 49.39 49.88 (+0.49) 43.50 43.60 48.43 47.57 48.88 (+1.31) 49.68 50.57 (+0.89) 54.37 47.66 57.28 57.94 57.94 59.33 58.79 (-0.54) 54.37 47.66 57.28 53.36 56.49 (+3.13) 59.70 58.89 (-0.81) 44.55 43.22 46.71 48.14 48.28 (+0.14) 47.82 49.17 (+1.35) 44.55 43.22 46.71 17.91 47.98 (+30.07) 48.13 49.27 (+1.14) 22.78 25.72 26.41 26.88 26.90 (+0.02) 28.40 27.75 (-0.65) 22.78 25.72 26.41 13.36 25.62 (+12.26) 1.18 27.82 (+26.64) 41.30 40.05 44.71 45.47 45.51 (+0.04) 46.24 46.40 (+0.16) 41.30 40.05 44.71 33.05 44.74 (+11.69) 39.67 46.64 (+6.97)
+Table 4: Semantic segmentation performance (mIoU) on a fixed target domain with 10 rounds of adaptation. We use
+DeepLabV3Plus-ResNet-50 [6] pretrained on Cityscapes dataset. ously changing domains. We report both TTA performances after 1 round (i.e., short-term TTA) and 50 rounds (i.e., long-term TTA). Note that we evaluate predictions made during online model adaptation, not after visiting the en-tire test set, strictly following the established TTA settings.
+For the open-set TTA, we construct the mini-batch that in-cludes an equal number of closed-set samples (e.g., CIFAR-10-C, shot noise) and open-set samples (e.g., SVHN-C, shot noise). Although included in the mini-batch, we ex-clude open-set samples from the evaluation and only eval-uate models with closed-set samples. To the best of our knowledge, our work is the first paper to conduct experi-ments with the open-set TTA. We report the error rates and mean intersection of union (mIoU) for image classification and semantic segmentation, respectively.
+Baselines We mainly compare our method with previous methods addressing noisy labels [64] or improving pseudo-labeling performances in TTA [14, 46]. Note that ENT de-notes updating all parameters while TENT [57] only up-dates affine parameters of the batch normalization layers, both utilizing the entropy minimization loss function. Gray-shaded digits indicate the performance gain by applying our method to each baseline model, and bold digits indicate the better performance between the two methods.
+Implementation details For the image classification, we use the learning rate of 1e-3 and 1e-4 for models updating only affine parameters (TENT [57], EATA [46], GCE [64],
+Conjugate [14]) and all parameters (ENT, SWR [9]), re-spectively. We use the batch size of 200 and Adam opti-mizer [28] for all experiments. For experiments conducting small batch sizes in Table 8, we use the learning rate of 1e-4 and update models after 200 steps, following TTN [39]. For the semantic segmentation, we use the learning rate of 1e-6 and batch size of 2 following TTN. Regarding using TTN in semantic segmentation, we update the test batch statis-tics in an online manner to further improve the segmenta-tion performance for all experiments. Further details on our experimental setup are included in our supplementary. 3.2. Results
+Image classification As shown in Table 1, existing TTA models show a large performance degradation during the long-term adaptation. This is mainly due to the confirma-tion bias, caused by the unsupervised losses that inevitably include noisy losses. We significantly improve the long-term performance of the existing four different TTA models in both closed-set and open-set TTA. For example, we im-prove the error rate of TENT [57] by an average of 24.23% and 49.38% in the closed-set and open-set settings, respec-tively. Note that we do not use prior knowledge of whether the target distribution includes open-set samples or not. Ad-ditionally, Table 2 shows that our method also generally im-proves the short-term TTA performances.
+While previous studies focused on improving the perfor-mance of closed-set TTA until now, our results show that they suffer from a large performance drop when adapted with open-set classes included. We believe that this is a practical setting since we can not guarantee that samples from the target distributions are always drawn from the 2Note that the performance variation of the source model in Cityscapes is due to the order of data samples (e.g., challenging ones in the later stage), not due to the adaptation.
+Method
+MSP [19]
+Max Logit [18]
+Energy [40]
+Ours
+CIFAR-10 / SVHN-C
+CIFAR-100 / SVHN-C
+AUROC↑ 51.87 54.68 54.68 88.24
+FPR@TPR95↓ AUROC↑ 92.39 90.31 90.30 40.34 60.69 64.88 64.87 83.76
+FPR@TPR95↓ 87.96 85.45 85.46 64.86
+Method
+MSP [19]
+Max Logit [18]
+Energy [40]
+Ours
+CIFAR-10 / SVHN-C
+CIFAR-100 / SVHN-C
+AUROC↑ 50.83 56.25 56.26 83.50
+FPR@TPR95↓ AUROC↑ 93.64 90.65 90.63 54.46 56.14 62.76 62.79 82.17
+FPR@TPR95↓ 90.34 87.35 87.27 73.16 (a) Negative samples including closed-set wrong samples. (b) Negative samples excluding closed-set wrong samples.
+Table 5: Utilizing the confidence difference for thresholding in open-set test time adaptation. We use TENT [57] adapted to each target domain including open-set classes (SVHN-C) for 50 rounds.
+Method
+ENT
+SWR [9]
+TENT [57]
+EATA [46]
+TENT [57] + Ours
+CIFAR-10-C
+Error Rate (%) Error Rate (%) Memory (MB) Time (ms)
+CIFAR-10/100-C
+CIFAR-100-C 88.16 50.38 65.53 55.92 14.94 77.56 54.42 63.78 74.03 40.60 1147 1155 556 559 565 22.98 47.97 18.38 37.04 26.62
+Table 6: Comparisons on error rates (%), memory (MB), and time (ms). For the time, we report the average time after 5000 trials on NVIDIA RTX A5000. classes learned during the training stage. Such results in-dicate that improving the TTA performance with open-set classes is yet to be explored in the future.
+Semantic segmentation Table 3 shows the semantic seg-mentation performance with continuously changing do-mains. We evaluated a model pretrained on GTAV [50] with real-domain datasets (Cityscapes [10], BDD-100K [60], and Mapillary [45]) in order to simulate the situation where real-world target datasets are not available with only syn-thetic datasets provided. We observe that the performance gain by applying our method increases as the adaptation proceeds. For example, SWR [9] (Table 3b - red) suffers from a large performance drop with the last target domain,
+Mapillary (1.28 mIoU), while ours (Table 3b - blue) shows a stable level of performance (45.09 mIoU). Regarding Ta-ble 3b, we evaluate models after certain steps and show the average mIoU up to then. While the model without adapta-tion (i.e., source) does not suffer from the error accumula-tion, it fails to bring performance gain. On the other hand, our method not only brings performance gain but also cir-cumvents error accumulation by filtering the noisy losses.
+Table 4 also reports the semantic segmentation perfor-mance with a fixed target domain over multiple rounds of adaptation. We observe that applying our method improves the performance of TENT [57] and SWR [9] by an average of 11.69 mIoU and 6.97 mIoU, respectively, after 10 rounds.
+As aforementioned, performing test-time adaptation in se-mantic segmentation needs to address not only the wrong predictions but also the inherently included open-set classes in the target distribution. Our method again improves TTA performance by effectively discarding such noisy pixels.
+We believe such a filtering mechanism is especially im-portant in safety-critical applications in two aspects. First, it prevents the performance drop caused by learning with noisy losses. Second, when confronted with unknown ob-jects, we could alarm a device immediately, which could be the starting point for it to take a different action (e.g., autonomous vehicles swerving directions to avoid running into wild animals unexpectedly shown on roads) [23]. 4. Further Analysis 4.1. Utilizing Confidence Difference as Thresholds
+We show that the confidence difference is an adequate metric to differentiate between correct samples and noisy samples, given that a pretrained model is adapting to a novel domain. For the evaluation, we train TENT [57] and com-pare utilizing confidence difference as the thresholding met-ric with existing prediction-based out-of-distribution (OoD) methods [19, 18, 40]. By setting the correct samples as the positive samples, we analyze two different negative sam-ples: negative samples 1) including closed-set wrong sam-ples and 2) excluding closed-set wrong samples. The for-mer case shows how well a given metric differentiates be-tween correct samples and noisy samples, including both closed-set and open-set samples. The latter case evaluates how well a given metric distinguishes between the correct samples and open-set samples only. Table 5 shows that using confidence difference outperforms the existing OoD metrics in both cases.
+In addition to the superior perfor-mance, another advantage of using the confidence differ-ence is that we can filter the noisy samples immediately, while the existing OoD metrics need the entire test samples in order to choose the threshold with the best AUROC score.
+Such a result indicates that confidence difference can also be widely used to distinguish out-of-distribution samples in future studies with adapted models. 4.2. Comparisons on Resource Costs
+Along with the TTA performances, Table 6 compares the memory usage and the time consumption of the baseline models and our method applied to TENT [57]. For the TTA performance, we average the long-term adaptation perfor-mance of closed-set and open-set TTA for each dataset. For memory usage, we use the official code of TinyTL [4] to calculate both the model parameters and the intermediate activation size, following the previous studies [22, 59, 55].
+The time indicates the amount of time consumed for the for-ward process and the backpropagation. Since we utilize the outputs of θo, our method accompanies an additional for-Method
+ResNet50 [17]
+WDR28 [61]
+Closed
+Open
+Closed
+Open
+Method
+ResNet50 [17]
+WDR28 [61]
+Closed
+Open
+Closed
+Open
+Source
+BN Adapt [43]
+TENT [57]
++ Ours
+SWR [9]
++ Ours 48.80 16.01 61.69 15.28 (-46.41) 16.19 16.08 (-0.11) 48.80 16.89 83.62 16.99 (-66.63) 88.53 71.83 (-16.70) 43.52 20.43 56.00 20.16 (-35.84) 17.94 15.35 (-2.59) 43.52 23.61 77.72 23.70 (-54.02) 90.15 83.76 (-6.39)
+Source
+BN Adapt [43]
+TENT [57]
++ Ours
+SWR [9]
++ Ours 48.80 16.01 14.03 13.82 (-0.21) 13.81 13.80 (-0.01) 48.80 16.89 22.76 16.36 (-6.40) 45.58 43.35 (-2.23) 43.52 20.43 18.23 18.32 (+0.09) 16.62 15.73 (-0.89) 43.52 23.61 32.74 23.40 (-9.34) 83.08 75.89 (-7.19) (a) Long-term adaptation (b) Short-term adaptation
+Table 7: Error rates of image classification on CIFAR-10-C using diverse architectures.
+Method
+Source
+TENT [57]
++ Ours 0.005 76.71 99.51 64.14
+Learning rate 0.0005 0.001 76.71 89.91 60.04 76.71 75.02 59.59 0.0001 76.71 63.83 58.76
+Std.↓ 0 15.79 2.40
+Method
+Source
+TENT [57]
++ Ours 64 76.71 67.54 60.32
+Batch size 16 32 76.71 72.62 62.14 76.71 81.21 65.88 8 76.71 94.75 73.83
+Std.↓ 0 11.90 5.99 (a) Robustness to learning rates (b) Robustness to batch sizes
+Table 8: Error rates of image classification on TinyImageNet-C with diverse learning rates and batch sizes. Std. abbreviation of the standard deviation. is the ward process. However, as shown, such an additional for-ward process is negligible compared to the state-of-the-art models. For example, our method applied to TENT brings a significant performance gain with only half the memory and time compared to SWR [9]. Further details on resource costs, along with the results on semantic segmentation, are included in our supplementary. 4.3. Applicability on Various Models
+Since our method focuses on improving the pseudo-labeling quality of entropy minimization, it does not rely on model architectures. Table 7 shows that applying our method consistently outperforms the baseline models with
+ResNet50 [17] and WideResNet28 [61] that were used in previous TTA studies [9, 39]. Such results demonstrate that our method is widely applicable to various architectures. 4.4. Robustness to Hyper-parameters
+In real-world applications, we may not know an adequate learning rate before encountering test samples or may not use an optimal batch size due to memory constraints.
+In such a case, we need an approach with a stable performance regardless of such hyper-parameters. Table 8 shows that our method is more robust to such hyper-parameters compared to TENT [57], which is highly dependent on them. Such results demonstrate the scalability of our method when we do not know the optimal hyper-parameters. 5.

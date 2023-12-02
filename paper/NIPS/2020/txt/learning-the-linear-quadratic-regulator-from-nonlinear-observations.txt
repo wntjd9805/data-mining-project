@@ -1,0 +1,1451 @@
+Abstract
+We introduce a new problem setting for continuous control called the LQR with
+Rich Observations, or RichLQR. In our setting, the environment is summarized by a low-dimensional continuous latent state with linear dynamics and quadratic costs, but the agent operates on high-dimensional, nonlinear observations such as images from a camera. To enable sample-efﬁcient learning, we assume the learner has access to a class of decoder functions (e.g., neural networks) that is ﬂexible enough to capture the mapping from observations to latent states. We introduce a new algorithm, RichID, which learns a near-optimal policy for the RichLQR with sample complexity scaling only with the dimension of the latent state space and the capacity of the decoder function class. RichID is oracle-efﬁcient and accesses the decoder class only through calls to a least-squares regression oracle. Our results constitute the ﬁrst provable sample complexity guarantee for continuous control with an unknown nonlinearity in the system model. 1
+
+Introduction
+In reinforcement learning and control, an agent must learn to minimize its overall cost in a unknown dynamic environment that responds to its actions. In recent years, the ﬁeld has developed a com-prehensive understanding of the non-asymptotic sample complexity of linear control, where the dynamics of the environment are determined by a noisy linear system of equations. While studying linear models has led to a number of new theoretical insights, most practical control tasks are nonlin-ear. In this paper, we develop efﬁcient algorithms with provable sample complexity guarantees for nonlinear control with rich, ﬂexible function approximation.
+For some control applications, the dynamics themselves are truly nonlinear, but another case— which is particularly relevant to real-world systems—is where there are (unknown-before-learning) latent linear dynamics which are identiﬁable through a nonlinear observation process. For example, cameras watching a robot may capture enough information to control its actuators, but the optimal control law is unlikely to be a simple linear function of the pixels. More broadly, with the decrease in costs of sensing hardware, it is now common to instrument complex control tasks with high-throughput measurement apparatus such as cameras, lidar, contact sensors, or other alternatives. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+These measurements constitute rich observations which often capture relevant information about the system state. However, deriving a control policy from these complex, high-dimensional sources remains a signiﬁcant challenge in both theory and practice.
+The RichLQR setting. We propose a learning-theoretic framework for rich observation continuous control in which the environment is summarized by a low dimensional continuous latent state (such as joint angles), while the agent operates on high-dimensional observations (such as images from a camera). While this setup is more general, we focus our technical developments on perhaps the simplest instantiation: the rich observation linear quadratic regulator (RichLQR). The RichLQR posits that latent states evolve according to noisy linear equations and that each observation can be associated with a latent state by an unknown nonlinear mapping.
+We assume that every possible high-dimensional observation of the system corresponds to a unique latent system state, a property we term decodability. This assumption is natural in applications where the observations contain signiﬁcantly more information than needed to control the system. However, decoding the latent state may require a highly nonlinear mapping, in which case linear control on the raw observations will perform poorly. Our aim is to learn such a mapping from data and use it for optimal control in the latent space. 1.1 LQR with Rich Observations
+RichLQR is a continuous control problem described by the following dynamics: xt 1
+Axt
+But wt, yt q xt
+. (1)
++
+=
+Rdu selected by the learner, and zero-mean i.i.d. process noise wt
+Starting from x0, the system state xt a control input ut learner does not directly observe the state, and instead sees an observation yt
+∈
+.1 Here dy observation distribution q while yt might represent an image of the robot in a scene. Given a policy ⇡t control inputs ut based on past and current observations, we measure performance as
+Rdx evolves as a linear combination of the previous state,
++
+Rdx . The
+Rdy drawn from the dx; xt might represent the state of a robot’s joints,
+∈ that selects y0, . . . , yt
+∈ (⋅ ￿ (⋅ ￿ xt
+￿
++
+∼
+)
+)
+∈
+JT
+⇡
+E⇡ 1
+T
+T x t Qxt
+￿ 1 t
++
+￿
+= y0, . . . , yt
+. (
+) (2) u t Rut
+￿
+, where Q, R the system’s dynamics (1) evolve under ut (
+) ∶=
+￿
+⇡t 0 are quadratic state and control cost matrices and E⇡ denotes the expectation when
+￿
+￿ (
+)
+)
+)
+￿
++ x x
+∶= (⋅ ￿
+A, B 0 is known, but the state cost matrix Q and the observation distribution q
+= are unknown to
+In our model, the dynamics matrices the learner. We assume that the control cost matrix R 0 is unknown (so as not to tie the cost matrices to the system representation). We also assume the ( instantaneous costs ct t Rut, are revealed on each trajectory at time t (this facilitates u t Qxt learning Q, but not A or B). The learner’s goal is to PAC-learn an "-optimal policy: given access to
+￿
+￿
+⇡ n trajectories from the dynamics (1), produce a policy were known and the state xt is the optimal inﬁnite-horizon policy. If the dynamics matrices
+∞) ≤
+∞ were directly observed, the RichLQR would reduce to the classical LQR problem [18], and we could
+) − compute an optimal policy for (2) using dynamic programming. Indeed, the optimal policy has the form ⇡ is the optimal inﬁnite-horizon state-feedback matrix given by the
+Discrete Algebraic Riccati Equation (Eq. (A.1) in Appendix A.2). To facilitate the use of optimal control tools in our nonlinear observation model, we make the following assumption, which asserts the state xt can be uniquely recovered from the observation yt.
+Assumption 1 (Perfect decodability). There exists a decoder function f f
+⇡ such that JT
+A, B
+Rdx such that xt, where K
+", where ⇡ x for all y supp q (̂
+)
+Rdy
+∞(
+) =
+JT xt
+K
+.2
+̂ x
+⇡
+￿
+∞
+∞ y ( (
+∈
+) =
+￿(
+While a perfect decoder f is guaranteed to exist under Assumption 1 (and thus the optimal LQR (⋅ ￿ policy can be executed from observations), f is not known to the learner in advance. Instead, we assume that the learner has access to a class of functions F (e.g., neural networks) that is rich enough to express the perfect decoder. Our statistical rates depend on the capacity of this class.
+)
+￿
+￿
+￿ ∶
+→ 1Our results do not depend on dy, and in fact do not even require that y belongs to a vector space. 2We remark that f is typically referred to as an encoder rather than a decoder in the autoencoding literature.
+￿ 2
+Assumption 2 (Realizability). The learner’s decoder class F contains the true decoder f
+.
+While these assumptions—especially decodability—may seem strong at ﬁrst glance, we show that without strong assumptions on the observation distribution, the problem quickly becomes statistically intractable. Consider the following variant of the model (1):
+￿ xt 1
+Axt
+But wt, yt 1 f xt
+"t, (3)
+=
++
++ 0. In the absence of the noise "t, the where "t is an independent output noise variable with E
++ system (3) is a special case of (1) for which f is the true decoder, but in general the noise breaks perfect decodability. Unfortunately, our ﬁrst theorem shows that in general, output noise can lead to exponential sample complexity for learning nonlinear decoders, even under very benign conditions.
+Theorem (informal). Consider the dynamics (3) with dx 0 there exists an noise. For every " 2 such that any algorithm requires ⌦ with du 1 and unit Gaussian and realizable function class F trajectories to learn an "-optimal decoder. dy
+-Lipschitz decoder f
+"t
+=
+) +
+] =
+T
+=
+=
+=
+"
+[ 1
+"
+−
+￿ 1 3 2
+F
+=
+￿
+−
+￿ (
+>
+O(
+)
+A full statement and proof for this lower bound is deferred to Appendix D for space.
+￿
+￿ = 2
+￿
+￿
+￿ (
+)
+Our Algorithm: RichID. Our main contribution is a new algorithmic principle, Rich Iterative De-coding, or RichID, which solves the RichLQR problem with sample complexity scaling polynomially in the latent dimension dx and the decoder class capacity ln
+. We analyze an algorithm based on this principle called RichID-CE (“RichID with Certainty Equivalence”), which solves the RichLQR by learning an off-policy estimator for the decoder, using the off-policy decoder to approximately recover
+￿
+, and then using these estimates to iteratively learn a sequence of on-policy the dynamics decoders along the trajectory of a near-optimal policy. Our main theorem is as follows.
+Theorem 1 (Main theorem). Under appropriate regularity conditions on the system parameters and noise process (Assumptions 1-8), RichID-CE learns an "-optimal policy for horizon T using trajectories, where C is a problem-dependent constant.3
+C
+A, B
+F du dx
+F (
+)
+￿ 16T 4 ln
+"6
+)
+￿
+￿ (
++
+⋅
+F
+Theorem 1 shows that it is possible to learn the RichLQR with complexity polynomial in the latent dimension and decoder class capacity ln
+, and independent of the observation space. To our knowledge, this is the ﬁrst polynomial-in-dimension sample complexity guarantee for continuous control with an unknown system nonlinearity and general function classes. The main challenge we overcome in attaining Theorem 1 is trajectory mismatch; a learned decoder ˆf which accurately approximates the true decoder f on another.
+Our algorithm addresses this issue using a carefully designed iterative decoding procedure to learn a sequence of decoders on-policy.We present our main theorem for ﬁnite classes F for simplicity, but this quantity arises only through standard generalization bounds for least squares, and can trivially be replaced by learning-theoretic complexity measures such as Rademacher complexity (in fact, local
+Rademacher complexity). For example, if F has pseudodimension d, one can replace ln with well on one trajectory may signiﬁcantly deviate from f
+F
+￿
+￿
+￿
+￿ d
+.
+)
+Theorem 1 requires relatively strong assumptions on the dynamical system—in particular, we require
+̃O( that the system matrix A is stable, and that the process noise is Gaussian. Nonetheless, we believe that our results represent an important ﬁrst step toward developing provable and practical sample-efﬁcient algorithms for continuous control beyond the linear setting, and we are excited to see technical improvements addressing these issues in future research.
+￿
+￿ 1.2 Technical Preliminaries
+In the interest of brevity, we present an abridged discussion of technical preliminaries; all omitted formal deﬁnitions, further assumptions, and additional notation are deferred to Appendix A. The main assumptions used by RichID are as follows.
+Assumption 3 (Gaussian initial state and process noise). The initial state satisﬁes x0 and process noise is i.i.d. wt
+Assumption 4 (Controllability). For each k assume that 0, ⌃0 0.
+. Here, ⌃0, ⌃w are unknown to the learner, with ⌃w
+)
+∼ N ( kdu . We
+Rdx
+Ak
+￿
+N.
+× is controllable, meaning that 1B has full column rank for some 
+−
+] ∈
+C 3See Theorem 1a in Appendix J for the full theorem statement. 1, deﬁne 0, ⌃w
+∼ N (
+A, B
+∶= [
+. . .
+B
+≥
+)
+ k
+￿
+￿
+￿
+, (
+)
+￿ ∈
+C 3
+Note that Assumption 4 imposes the constraint du
+Assumption 5 (Growth Condition). There exists L all y
+Assumption 6 (Stability). A is stable; that is, ⇢ and f
+F .
+A
+￿ ≥
+≥
+∈ Y
+∈ dx, which we use to simplify expressions. 1 such that
+L max 1, y y f f for 1, where ⇢
+￿ (
+)￿} denotes the spectral radius.
+)￿ ≤
+{
+￿
+￿( ( (⋅)
+) <
+Our algorithms and analysis make heavy use of the Gaussian process noise assumption, which we use to calculate closed-form expressions for certain conditional expectations that arise under the dynamics model (1). We view relaxing this assumption as an important direction for future work. Controllability is somewhat more standard [24], and the growth condition ensures predictions do not behave too erratically. Stability ensures the state remains bounded without an initial stabilizing controller. While assuming access to an initial stabilizing controller is fairly standard in the recent literature on linear control, this issue is more subtle in our nonlinear observation setting. These assumptions can be relaxed somewhat; see Appendix B.4. We make the stability assumption quantitative via the notion of
+“strong stability” (Appendix A). Finally, we assume access to bounds on various system parameters.
+Assumption 7. We assume that the learner has access to parameter upper bounds   1, 1, ↵
+ 
+-strongly stable,
+￿ ≥
+.4
+, and P and (III)  
+￿ ∈ (
+)
+We use logarithmic factors except for ln
+  x
+↵
+,  1 w , ⌃0, K
+￿)
+￿
+− 1
+∞
+, L, and  
+, and all min x x if f g for all
+−
+) is a sufﬁciently small constant.
+)
++ 1,   1
+,
+ˇ
+. We also write f
+−
+−
+￿
+￿
+￿)
+￿ 1,  min (
+
+)
+− is an upper bound on the operator norms of A, B, Q, R, ⌃w, ⌃ ( to suppress polynomial factors in ↵
+N such that (I)  and ln 1 1
+,  
+  1
+, L (
+￿
+O￿(⋅)
+, where c
+, (II) A and
+F
+,↵
+￿ are both
+∞)
+ 
+, and  (
+,  cg (C poly
+￿ ≥
+BK 0, 1
+) ≤
+O(
+A
+−
+
+≥
+=
+ 
+∞ 1 ( (
+)
+∈
+
+￿
+￿ 1
+￿
+￿) 2 An Algorithm for LQR with Rich Observations
+∈ X
+￿( (C
+))
+−
+￿
+−
+￿
+−
+= (
+Algorithm 1 RichID-CE 1: Inputs:
+" (suboptimality), T (horizon), F (decoder class), dx, du (latent dimensions), (system parameter upper bounds), R (control cost).
+,,↵
+,  2: Parameters: // see Appendix J for values.
+￿
+￿
+￿ nid, nop // sample size for Phase/Phase II and Phase III, respectively.
+0 // burn-in time index. rid, rop // radius for sets Hid and Hop.
+ 2 // exploration variance.
+¯b // clipping parameter for decoders.
+←
+Aid, nid, 0,, r id
+GETCOARSEDECODER 3: Phase I // learn a coarse decoder (see Section 2.1) 4: Set ˆfid 5: Phase II // learn system’s dynamics and cost (see Section 2.2) (
+. // Algorithm 4 6: Set
+SYSID 7: Phase III // compute optimal policy (see Section 2.3 and Appendix H) (
+Bid, 8: Set 9: Return:
+←
+) ←
+COMPUTEPOLICY
+⇡.
+Qid, R, nop,,  2, T, ¯b, rop
+)
+ˆfid, nid, 0,
+. // Algorithm 3
+⌃w,id,
+⌃w,id, ( ̂
+⇡
+Bid,
+Aid, ( ̂
+Qid
+̂
+̂
+̂
+̂
+̂
+̂
+̂
+)
+)
+. // Algorithm 5
+We now present our main algorithm, RichID-CE (Algorithm 1), which attains a polynomial sample complexity guarantee for the RichLQR.
+̂
+Algorithm overview. Algorithm 1 consists of three phases. In Phase I (Algorithm 3), we roll in with Gaussian control inputs and learn a good decoder under this roll-in distribution by solving a certain regression problem involving our decoder class F . In Phase II (Algorithm 4), we leverage this decoder to learn a model for the system dynamics (up to a similarity transform). Due to linearity of the dynamics, this model is valid on any trajectory. Moreover, we can synthesize a
+. controller
+̂
+K so that the controller ut
+, and thus near-optimal for
+Kxt is optimal for
+A, B ( ̂
+A,
+A,
+B
+B
+) 4Here, P
+̂ ( ̂ solves the DARE ((DARE) in Appendix A.2), and K
+= ̂
+∞
+∞ 4
+̂ is the optimal inﬁnite horizon controller.
+) (
+)  
+To actually implement this feedback controller, we still need a good decoder for the state. Unfortu-nately, our decoder from Phase I may be inaccurate along the optimal (or near-optimal) trajectory.
+Thus, in Phase III (Algorithm 5) we inductively solve a sequence of regression problems—one for
+, such that for each t, ˆft each time t f t. We do this by rolling in with under the roll-in distribution induced by playing
+￿
+) this near-optimal policy until t, but rolling out with purely Gaussian inputs. The former ensures that the decoder is accurate along the desired trajectory. The latter ensures that the regression at time t is essentially “independent” of approximation errors incurred by steps 0, . . . , t 1, avoiding an accumulation of errors which would otherwise compound exponentially in the horizon T . 0, . . . , T —to learn a sequence of state decoders for s (
+<
+K ˆfs
+ˆft ys
+̂
+=
+≈ (
+)
+In what follows, we walk through each phase in detail and explain the motivation, the technical assumptions required, and the key performance guarantees.
+− 2.1 Phase I: Learning a Coarse Decoder 2 ln
+−
+￿)
+  ( 1 ln
+−
+￿) i i
+−
+1 , c
+1 , y (
+) (
+) 0, Idu
+In Phase I (Algorithm 3), we gather 2nid trajectories by selecting independent standard Gaussian for each 0 inputs ut
+, where we recall that  is an upper-bound on the controllability index 
+, and where 0 is a “burn-in” time used to ensure mixing to a near-stationary in (9), ensuring ˆfid is accurate at both time 1 and
++
+)
+≤ distribution (this is useful for learning
+￿ 1). 0 is given by:
+1
+0
+) 84 5
+∶=
+A, B
+∼ N ( 103 nid
+↵4 (4) dx
+1
+0
+≤
+  1 1 t
+.
++
+) ( u i 0 (
+, . . . ,
+∶= ￿( u i 0 , c (
+) i 0 , y (
+)
+￿
+￿ i 1 denote the ith trajectory gathered in this fashion.
+Let
+1
+We now show that for the state distribution induced the control inputs above, the true decoder f can
+) (
++ be recovered up to a linear transformation by solving a regression problem whose goal is to predict a
+￿ sequence of control inputs from the observations at time 1. Deﬁne v
+. Our key lemma (Lemma G.3) shows that dy , h
+0 , . . . , u
+￿ i
+￿
+1
+) (
+∶= (
+, y
+￿
+)
+)￿￿
+1
+￿
+, y u
+− y ( (
+) (
+)
+− 1
+⋅ (5) y1
+
+A recall that
+∶= [
+C 1B
+−
+
+￿
+= [
+C
+. . .
+A
+R
+; and ⌃1
+B
+∈
+∀ 1B
+. . .
+]
+￿
+−
+⌃1
+￿
+B
+∶=
+A1 ⌃0
+]
+￿ y
+A1 ⌃0
+￿(
+) ∶= and deﬁne v
+E
+A1
+￿
+[ (
+1
+￿
+)
+At
+A1
+⌃
+￿ 1 1
+1 f
+−
+⌃w y
+1 t
+= 0 At
+] = C
+−
+=
++ ∑ 1
+⌃w (
+BB
+￿(
++
+At 1
+.
+BB
+)
+At 1
+. where we
+￿
+)(
+−
+￿
+) 0 t
+This lemma relies on perfect decodability and the fact that v and x1 are jointly Gaussian. In
+￿
+= belongs to the class particular, by verifying
++
+, the expression (5) ensures that h
+￿
+)
+￿
+)
+)(
++ ( (
+−
+−
+￿ op dx ,
+Rdu
+√
+Hid
+￿
+≤ main step of Phase I solves the well-speciﬁed regression problem:
+×
+M f
+M op f
+￿ (that is, we can take rid
+￿
+∶=
+⌃
+￿
+F , M
+￿C 1
+1
+−
+∶= ￿ (⋅)￿
+∈
+∈
+ˆhid
+￿ arg min
+Hid h
+￿ nid
+≤ h
+￿￿
+√ y i
+1 (
+) i v 2. (
+)
+√
+￿
+=
+). The (6)
+∈
+∈ (
+￿
+) −
+Phase I is computationally efﬁcient whenever we have a regression oracle for the induced function
+￿ class Hid. For many function classes of interest, such as linear functions and neural networks, solving regression over this class is no harder than regression over the original decoder class F , so we believe this is a reasonably practical assumption. For nid sufﬁciently large, a standard analysis for least squares shows that the regressor ˆhid has low prediction error relative to h in (5). However, this representation is overparameterized and takes values in Rdx even though the true state lies in only dx dimensions. For the second part of Phase I, we perform principle component analysis to reduce the dimension to dx. Speciﬁcally, we compute a dimension-reduced decoder via y (7)
+R dx is an arbitrary orthonormal basis for the top dx eigenvectors of the empirical where
+) ∈
+⋅ i 2nid nid. This approach exploits that the output y second moment matrix
+×
+1 i nid
+∈ of the Bayes regressor h
+—being a linear function of the dx-dimensional system state—lies in a (
+)
+= dx-dimensional subspace. Having reviewed the two components of Phase I, we can now state the main guarantee for this phase. In light of (5), the result essentially follows from standard tools for least-squares regression with a well-speciﬁed model, plus an analysis for PCA with errors in variables.
+) ∶= ̂ ( i
+ˆhid y
+1 (
+)
+Rdu
+ˆhid
+ˆhid
+￿
+)
+ˆfid dx ,
+Vid
+∑
+￿ id
+￿
+̂
+V y ( ( (
+)
+￿
++
+￿ 1 1 i
+￿
+= 5      
+Theorem 2 (Guarantee for Phase I). If nid least 1
+⌦ 3 , there exists an invertible matrix Sid
+￿( du
+∈ dxdu
+Rdx
+F dx such that (
+× ln
+￿
+F ln
+−
+= 2
+ˆfid
+E y1
+Sidf y1 and for which  min
+￿ (
+Sid
+) −
+￿(
+ min,id
+)￿
+ min
+≤ O￿￿ 1
+ (
+ 
+￿ 4 2
+￿ +
+↵2 ( 2.2 Phase II: System Identiﬁcation
+) ≥
+∶= (C
+)(
+−
+￿)(
+￿ dudx
+, then with probability at
+￿ + dudx nid
+) 1 and
+−
+￿)
+)) ln3 nid
+ 
+, (
+Sid
+￿ op
+)
+￿
+ max,id
+￿
+￿
+≤
+.
+√
+￿
+∶=
+In Phase II, we use the decoder from Phase I to learn the system dynamics, state cost, and process noise covariance up to the basis induced by the transformation Sid. Our targets are:
+Aid
+SidAS
+SidB, ⌃w,id
+Sid⌃wS 1 id , Bid
+−
+The key technique we use is to pretend that the decoder’s output ˆfid
+∶= perform regressions which mimic the dynamics in (1):
+∶=
+∶= id, Qid
+￿
+S id QS
+−￿ 1 id .
+− (8) y1 is the true state x1 , then
+∶= 3nid
+ˆfid
+Aid,
+Bid arg min
+A,B i
+̂ ( ̂
+⌃w,id
+) ∈ 1 nid i
+̂
+= 3nid (
+) 2nid
+￿ 1 (
+=
+ˆfid 1 2nid
+￿
++ i y
+1
+) (
++
+￿ 1 ( y 1 i
+1 (
+)
++
+Aid ˆfid (
+) − y
+A ˆfid y i
+1 (
+)
+Bu
+) 2, ( i
+1 (
+) and (
+Bidu
+) − i
+1 (
+) i
+1 (
+)
+￿ 2, where v
+⊗
+)
+) − ̂ (
+) − ̂ (9) (10) 2
+⊗ vv
+.
+￿
+∶=
+Similarly, we recover the state cost Q by ﬁtting a quadratic function to observed costs via
++
+=
+Qid arg min
+Q i u i
+1 (
+)
+Ru i
+1 (
+)
+ˆfid y i
+1 (
+)
+Q ˆfid y i
+1 (
+) 2
+, (11)
+∈
+Qid
+̃ and then setting eignvalues to zero. This is the only place where the algorithm uses the cost oracle.
++
+Since Theorem 2 ensures that ˆfid all nearly-well-speciﬁed, and we have the following guarantee.
+− ( as the ﬁnal estimator, where
+￿+ is not far from Sidx1 , the regression problems (9)–(11) are ( truncates non-positive
+̃ y1 (⋅)+
+=
+Qid
+= ￿
+)￿
+̂
+̃
+− 1 2 (
+￿
+)
+￿
+) i
+1 (
+) 3nid c 1 2nid
+￿
+￿ 1
++
+Q id 2
+￿
+Theorem 3 (Guarantee for Phase II). If nid then with probability at least 1 (
+)
+⌦ d2 xdu 11  over Phases I and II,
+=
+Qid
+Qid
+￿￿ op op ln
+F dudx max 1,  min
+ (
+￿
+￿ +
+⌃w,id
+)
+⌃w,id op
+{
+"id, (C 4
+,
+−
+)
+}￿ (12)
+Aid;
+Bid
+Aid; Bid
+− where "id
+￿[ ̂ n 1 id
+− 2
+̂ ln2 nid
+] − [
+ 
+￿
+￿
+) dxdu
+]￿
+∨ ￿ ̂ ln
+F
+− dudx
+￿
+∨ ￿̂
+.
+−
+￿
+≤
+≤ O￿￿
+To simplify presentation, we assume going forward that Sid (at the cost of increasing parameters such as   the “id” subscript on the estimators
+Sid
+Bid, and so forth to reﬂect this.6 by a factor of
+￿ + and ↵
+Aid,
+)￿
+= ( (
+￿
+￿
+￿
+￿
+Idx , which is without loss of generality op),5 and drop
+S op 1 id
+−
+￿
+￿
+∨ ￿
+￿ 2.3 Phase III: Decoding Observations Along the Optimal Path
+̂
+̂
+A,
+Given the estimates optimal controller matrix ( ̂ the policy ut
+Q
+B, from Theorem 3, we can use certainty equivalence to synthesize an
+K for the estimated dynamics. As long as "id in (12) is sufﬁciently small,
+̂
+̂
+Kxt is stabilizing and near optimal.
+)
+̂
+= ̂
+To (approximately) implement this policy from rich observations, it remains to accurately estimate the latent state. The decoder learned in Phase I does not sufﬁce; it only ensures low error on trajectories generated with random Gaussian inputs, and not on the trajectory induced by the near-optimal policy.
+Indeed, while it is tempting to imagine that the initial decoder ˆf might generalize across different trajectories, this is not the case in unless we place strong structural assumptions on F . 5The controller SidK 6We make this reasoning precise in the proof of Theorem 1. attains the same performance on
+Aid, Bid
+∞ ( as K on
+A, B
+∞
+) (
+) 6  
+(
+)
+̂
+K ˆf⌧ y0
+; here, nop
+= ̂ (
+K is near optimal, the suboptimality JT
+Instead, we iteratively learn a sequence of decoders ˆft—one per timestep t 1, . . . , T . Assuming
+K ˆft
+JT y0 of the policy ⇡
+K is
+= (note that the regret does not take into account controlled by the sum 1 E⇡
+∞)
+̂ ( ( 1, the decoder ˆft has low prediction error step 0). Thus, to ensure low regret, we ensure that, for all t
+￿
+K. This motivates on the distribution induced by running ⇡ with previous decoders 1 the following iterative decoding procedure, executed for each time step t
+≤ t and 1, . . . , T :
+⇡ yt (
+) −
+)￿
+) ∶= ̂
+) −
+￿(
+ˆf⌧ y0 y0
+ˆft
+∑
+T t
+⇡
+≈
+≥
+∞ f
+) ( (
+=
+< 2
+⌧ t t t
+∶
+∶
+∶
+≤
+Step 1. Collect 2nop trajectories by executing the randomized control input u⌧
+= 0,  2Idu
+, where ⌫⌧
+⌧
+⌧ t for 0
+ 2 t, and u⌧
+⌫⌧ , for t 1 are algorithm parameters to be speciﬁed later.
+≤
++
+Step 2. Obtain a residual decoder ˆht satisfying (13) by solving regressions (21) and (22) using a
+∼ N (
+=
+≤
+<
+<
+)
+∈
+⌧
+∶
+⌫⌧ ,
+N and
+) + 1 1
++
++ ( yt yt wt
+) ≈
+) −
+But
+Axt. 1 from ˆht and ˆft using the update equation (14). regression oracle.
+Step 3. Form a state decoder ˆft
+Forming the decoder ˆf1 requires additional regression steps (described in Appendix B.3) which account for the uncertainty in the initial state x0. At each subsequent time t, the most important part of the procedure above is Step 2, which aims to produce a regressor ˆht such that
+Aˆht
+ˆht xt (13)
+As we shall see, enforcing accuracy on the increments xt
+Axt allows us to set up regression prob-+
+= ( lems which do not depend on, and thus do not propagate forward, the errors in ˆft. In contrast, a naive
+−
+ˆft
+K
+B regression—say, arg minf E
+—could compound decoding errors exponentially in t.
+̂
+Luckily, the increments in (13) are sufﬁcient for recovery of the state by unfolding a recursion; this 0 be an algorithm parameter. Given a regressor ˆht satisfying (13) and the comprises Step 3. Let ¯b current decoder ˆft, we form next state decoder ˆft
+>
+˜ft (14) 1 1 1 where we set ˜f0 0. By clipping ˜ft, we ensure states remain bounded, which simpliﬁes the
++
++
++ (⋅) ∶=
+) ∶= ￿ ( analysis. Crucially, by building our decoders this way,we ensure that the decoding error grows
+≡ at most linearly in t—as opposed to exponentially—as long as the system is stable (i.e. ⇢ 1).
+)
+It remains to describe how to obtain a regressor ˆht satisfying (13). To this end, we use the added
+Gaussian noise ⌫t to set up the regression.
+I
+ˆf0
+{￿
+)￿ + ̂
+) − ̂ (⋅)￿ ≤
+∶
++
+ˆf⌧ 1 via
+) − (
+B⌫t
++ yt
+) −
+) <
+ˆht
+ˆht (⋅) y0 y0
+ˆft
+ˆft
+˜ft
+˜ft yt yt yt
+￿￿
+A
+A
+A
+A
+¯b
++
+−
+≡
+} f ( ( (
+) (
+￿ ( ( (
+)
+￿
++ 1
++
++
++
++ 1 2 1 1 1
+;
+,
+⋅
+⋅ t t
+∶ 2⌃w
+−
+E
+⌫t 1, one can compute
+− wt
+)
+M1
+Warm-up: Invertible B. As a warm-up, suppose that B is invertible. Then, for the matrix
+M1
+BB
+B
+  1
+￿
++
+E
+B⌫t
++ (∗) uses the fact that conditioning on y0
+=
++
+￿
+⌫t y0 (
+∶= t
+The identity
+∶
+] to perfect decodability. We then use that the conditional distribution of ⌫t
+⌫t wt
+Since conditional expectations minimize the square loss, learning a residual regressor ˆht which approximately minimizes
+. (15) 1, due t
+∶
+̂
+)) 1 is equivalent to
+∶
++
++
+∶
+B⌫t due to the linear dynamics Eq. (1). t 1 is equivalent to conditioning on x0 1, which is in turn equivalent to ⌫t
+[
+￿ xt, xt
+] (∗) (∗∗)
+=
+K ˆft
+B⌫t
+Axt
+M1
+− x0
+) = wt y0 xt
+B
+−
++
++ ( ( (
+[
++
++
++ 1
+￿
+￿
+￿
+￿ t t
+∶
+E
+⌫t
+M1 h yt 1
+Ah yt
+B
+K ˆft y0 t 2 (16)
+∶ 1
++ ( yt yt
+ˆht
+) −
+) − since M1
+￿￿
+−
+ˆht
+M1
+Aˆht ( 1 approximately satisfying (13):
+￿ ( (
++
+Aˆht
+K ˆft
+B
+B
+) − (
+For invertible B, the matrix M1 is invertible, and so from (17), our state decoder ˆht 1 indeed satisﬁes
+∶
++
+̂
+) −
+)) (13): ˆht
+Axt. We emphasize that regressing to purely Gaussian inputs ⌫t is instrumental in ensuring the conditional expectation equality in (15) holds. The noise variance  2 trades off between the conditioning of the regression, and the excess suboptimality caused by noise injection; we choose it so that the ﬁnal suboptimality is
+))￿
+Axt ( (
+Aˆht
+̂ xt
+K ˆft xt (
++ yt
+Axt
+)) ≈
+)) ≈ (17)
+M1
+M1 yt (
+) −
+) −
+) ≈ y0
++ y0 yt xt yt
+̂
+−
+−
+−
+−
++ 1 ( ( ( ( ( (
+) (
+✏
+￿
++
++
++
++
++
++
++ 1 1 1 1 1 1 1 1
+.
+,
+. t t
+∶ h produces a decoder ˆht
+O￿(
+) 7
+)) =∶
+￿
+) yt
+−
+￿ ￿ ￿(
+K ˆft
+B y0 t
+.
+￿
+)
+￿
+] (19) 2 k
+]
+ 
+ k i k
+￿ 0 Ai
+, let Mk
+Extension to general controllable systems. For non-invertible B, we aggregate more regressions. 1⌃w 1, where we recall
+For k k from Assump-k tion 4. Generalizing (15), we show (Lemma I.7 in Appendix H) that the outputs and the
+￿
+−
+−
+= t , . . . , ⌫
+Gaussian perturbation vector ⌫t
+⌫ generated according to Step 1 above
+∈ [
+) (
++ t t satisfy, for all k
+￿
+￿
+￿
++
+−
+) 1B ˆft
+Ak
+−
+M
+∶= C
+,
+−
+Mk
+∶= ( xt
+Akxt
+￿
+) 1 t, yt (18) t,k
+￿
+Ai
+∈ [ k t
+∑ 1 y0 y0 y0 y⌧
+⌫t (C
+E
+ 
+
+C
+C
+] 1 (
+)
+−
++
+− k k k k k 1 1
+. and and
+M2A
+∶ t t
+∶
+∶
+Deﬁning concatentations   t,1, . . . , 
+ 
++
+] = (
+[
+￿ t stacking the conditional expectations gives:
+￿
+￿
++
+−
++
+∶
+− t,
+￿
+MA
+∶
++
+) ( 1
+￿
+− ( y0 t
+ y0 t 1
+∶= (
+B⌫t wt
+)
+M ∶= [ yt f 1
+￿(
+Af
+E
+  t
+￿
+∶
++
++
++ f
++
+̂ ( 1
+))
+￿(
+￿(
+￿(
+￿(
+) −
+) −
+[ yt
+∶ yt
++
+)￿
+Af
+Hence, with inﬁnite samples (and knowledge of B), we are able to recover the residual quantity
+] = M(
+) = M(
+) −
+. Again, the Gaussian inputs enable the conditional expectations (18) and (19). The crucial insight for the stacked regression is that by rolling in and switching to pure
+Gaussian noise only after time t, we maintain Gaussianity, while still yielding decoders that are valid
+M( on-trajectory up to time t. To ensure that we accurately recover the increment f
+, we require the overdetermined matrix
+ 2 denote the value
+￿( as a function of  2, and let of
+) (20)
+M lim 0
+  be the (normalized) limiting matrix as noise tends to zero, which is an intrinsic problem parameter.
+M ∶=
+→ satisﬁes   to be invertible. To facilitate this, let
+Assumption 8. The limiting matrix
+) −
+Af
+ 2
+￿(
+M
+M
+M yt yt
+)) 0.
+ 2 (
++ 1
+∶
+￿ 2
+ 1 min
+￿
+￿
+This assumption is central to the analysis, and we believe it is reasonable: we are guaranteed that it holds if the system is controllable and either A or B has full column rank—see Appendix B.5.
+M) > (M
+M
+M ∶=
+To approximate the conditional expectations (18), (19) from ﬁnite samples, we deﬁne another expanded function class
+Hop
+M f f
+F , M dx
+R
+M op  3
+, dx ,
+×
+Mk and
+￿}
+B. Here, the subscript “op” subscript on Hop abbreviates “on-policy”. and use and
+Next, given a state decoder ˆft for time t and k to denote plugin estimates of (⋅)￿ (
+)
+, we deﬁne and
+￿ (￿
+￿M
+∶= {
+M
+
+Mk
+̂
+)
+∈
+∈
+, respectively, constructed from
+￿
+≤
+ t,k h, y0 t, yt k
+Mk h yt k
+Akh
+∈ [ yt
+]
+Ak 1
+B
+K ˆft y0 t for h
+Hop.
+− 2nop gathered in Step 1 above, we obtain ˆht by
+) − ̂
+)￿
+̂
+̂ (
+∈
+∶ ( i 1
+̂ i i
++
+) − ̂
+⌧ , ⌫
+With this and the 2nop trajectories
+￿
+⌧ solving the following two-step regression:
+) (
+) (
+) ∶= ￿ y ( (
++
+∶
+ˆht,k arg min h
+Hop
+∈ 2nop
+∈
+ˆht arg min h
+Hop i
+∈ where
+ t
+∈ y0 t nop
+￿
+=
+ 1
++
+￿ ￿M ⋅ ￿
+ t,1
+{( nop
+ t,k h, y
+≤
+≤
+)} i t , y 0 (
+) (
+A
+∶ h y 1 i
+￿
+= h
+￿̂ i y 1 t (
+)
++ (
+ˆht,1, y0 i t
+)
++
+⌫ t (
+∶
+K
+) −
+B i k t
+) (
++ i t (
+)
+) − ̂ t, yt 1
+⋅ (
+, . . . ,
+) − ̂
+ t,
+̂ (
+⋅
+ˆht,, y0
+∶ t, yt
+)￿ − ̂
+ ( 2
+, 1 k
+
+, k
+−
+ˆft
+￿ y i t 0 (
+)
+∀
+∈ [
+ t 2
+,
+
+] y i t 0
+) (
++ 1
+∶
+R
+)￿
+
+du 2.
+￿ (
++
+)
+A
+̂ (21) (22) (23)
+￿
+)
+∶
++ (
+̂
+) ∶= [̂
+We see that the ﬁrst regression approximates (18), while the second approximates (19). We can now ( state the guarantee for Phase III.
+Theorem 4. Suppose "2 id
+ˇ and  2
+ 
+. If we set ¯b2 0, 1 ln
+, we are guaranteed that for any  
+￿  3
+T  
+￿
+=
+, rop 1 op
+− nop d2 x du dx
+￿ +
+F ln
+⇥
+̂ n
+≤
+ˇ e
+) (
+∈
++
++
+∶
+∶
+,
+,
+)
+T 32
+∈ ( dx
+￿
+] du
+, with probability at least 1
+))
++
+  nop ln
+− O(
+.
+￿(( d2 x ( ln5
+= 4
+F
+O(( 2 yt
+) (24)
+O(
+= max
+T t 1
+M)
+ˆft y0 t f
+￿
+)
+￿
+]
+) 2
+ 
+M 4
+−
+￿
+≤
+≤
+￿ (
+∶
+) −
+￿(
+)￿
+￿ ≤ O￿￿
+⋅ (
++
+)
+⋅
+To obtain Theorem 1, we combine Theorem 3 and Theorem 4, then appeal to Theorem 7 (Appendix F), which bounds the policy suboptimailty in terms of regression errors. Finally, we set  
+" so that the suboptimality due to adding the Gaussian noise
+T is low. See Appendix J for details.
+⌫t 0 t (
++
+￿ nop
+￿) (
+￿
+)
+￿
+E
+⇡
+̂
+≤
+≤
+) ( 8
+∝
+3 Discussion
+We introduced RichID, a new algorithm for sample-efﬁcient continuous control with rich observations.
+We hope that our work will serve as a starting point for further research into sample-efﬁcient continuous control with nonlinear observations, and we are excited to develop the techniques we have presented further, both in theory and practice. To this end, we list a few interesting directions and open questions for future work.
+• While our results constitute the ﬁrst polynomial sample complexity guarantee for the RichLQR, the sample complexity can certainly be improved. An important problem is to characterize the fundamental limits of learning in the RichLQR and design algorithms to achieve these limits, which may require new techniques. Of more practical importance, however, is to remove various technical assumptions used by RichID. We believe the most important assumptions to remove are (I) the assumption that the open-loop system is stable (Assumption 6), which is rarely satisﬁed in practice; and (II) the assumption that process noise is Gaussian, which is currently used in a rather strong sense to characterize the Bayes optimal solutions to the regression problems solved in RichID.
+• RichID-CE is a model-based reinforcement learning algorithm. We are excited at the prospect of expanding the family of algorithms for RichLQR to include provable model-free and direct policy search-based algorithms. It may also be interesting to develop algorithms with guarantees for more challenging variants of the RichLQR, including regret rather than PAC-RL, and learning from a single trajectory rather than multiple episodes.
+• Can we extend our guarantees to more rich classes of latent dynamical systems? For example, in practice, rather than assuming the latent system is linear, it is common to assume that it is locally linear, and apply techniques such as iterative LQR [44].

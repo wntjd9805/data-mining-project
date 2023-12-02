@@ -1,0 +1,235 @@
+Abstract
+Building reliable object detectors that can detect out-of-distribution (OOD) objects is critical yet underex-plored. One of the key challenges is that models lack supervision signals from unknown data, producing over-conﬁdent predictions on OOD objects. We propose a new unknown-aware object detection framework through
+Spatial-Temporal Unknown Distillation (STUD), which dis-tills unknown objects from videos in the wild and mean-ingfully regularizes the model’s decision boundary. STUD
+ﬁrst identiﬁes the unknown candidate object proposals in the spatial dimension, and then aggregates the candi-dates across multiple video frames to form a diverse set of unknown objects near the decision boundary. Along-side, we employ an energy-based uncertainty regular-ization loss, which contrastively shapes the uncertainty space between the in-distribution and distilled unknown ob-jects. STUD establishes the state-of-the-art performance on OOD detection tasks for object detection, reducing the
+FPR95 score by over 10% compared to the previous best method. Code is available at https://github.com/ deeplearning-wisc/stud. 1.
+
+Introduction
+Object detection models have achieved remarkable suc-cess in known contexts for which they are trained. Yet, they often struggle with out-of-distribution (OOD) data— samples from unknown classes that the network has not been exposed to during training, and therefore should not be predicted by the model in testing. Teaching the object detec-tors to be aware of unknown objects is critical for building a reliable vision system, especially in safety-critical applica-tions like autonomous driving [8] and medical analysis [2].
+While much research progress is made in OOD detec-tion for classiﬁcation models [17, 20, 29, 31, 33, 36, 59], the problem remains underexplored in the context of object de-tection. Unlike image-level OOD detection, detecting un-car 100% car 100% pedestrian 85% pedestrian 98% (a) Overconfident Predictions (b) Unknown objects in videos
+Figure 1. (a) Vanilla object detectors can predict OOD objects (e.g., deer) as an ID class (e.g., pedestrian) with high conﬁdence. (b) Unknown objects (in bounding boxes) naturally exist in the video datasets, such as billboards, trafﬁc cones, overbridges, street lights, etc. Image is taken from the BDD100K dataset [67]. knowns for object detection requires a ﬁner-grained under-standing of the complex scenes. In practice, an image can be OOD in speciﬁc regions while being in-distribution (ID) elsewhere. Taking autonomous driving as an example, we observe that an object detection model trained to recog-nize ID objects (e.g., cars, pedestrians) can produce a high-conﬁdence prediction for an unseen object such as a deer; see Figure 1(a). This happens when our object detector min-imizes its training error without explicitly accounting for the uncertainty that could appear outside the training cate-gories. Unfortunately, the plethora of ways that unknown objects can emerge are innumerable in an open world. It is arguably expensive to annotate a large number of OOD ob-jects in complex scenes—in addition to the already costly process of ID data collection.
+In this paper, we propose a new unknown-aware object detection framework through Spatial-Temporal Unknown
+Distillation (STUD), which distills unknown objects from videos in the wild and meaningfully regularizes the model’s decision boundary. Video data naturally captures the open-world environment that the model operates in, and encap-sulates a mixture of both known and unknown objects; see
+Figure 1(b). For example, buildings and trees (OOD) may appear in the driving video, though they are not labeled ex-plicitly for training an object detector for cars and pedes-trians (ID). Our approach draws an analogy to the concept of distillation in chemistry, which refers to the “process of
+separating the substances from a mixture” [46]. While clas-sic object detection models primarily use the labeled known objects for training, we attempt to capitalize on the un-known ones for model regularization by jointly optimizing object detection and OOD detection performance.
+Concretely, our framework consists of two components, tackling challenges of (1) distilling diverse unknown ob-jects from videos, and (2) regularizing object detector with the distilled unknown objects. To address the ﬁrst problem, we introduce a new spatial-temporal unknown distillation approach, which automatically constructs diverse unknown objects (Section 3.1). In the spatial dimension, for each ID object in a frame, we identify the unknown object candi-dates in the reference frames based on an OOD measure-ment. We then distill the unknown object by linearly com-bining the selected objects in the feature space, weighted by the dissimilarity measurement. The distilled unknown object therefore captures a more diverse distribution over multiple objects than using single ones.
+In the temporal dimension, we propose aggregating unknown objects from multiple video frames, which captures additional diversity of unknowns in the temporal dimension.
+Leveraging the distilled unknown objects, we further employ an unknown-aware training objective (Section 3.2).
+Unlike vanilla object detection, we train the object detector with an uncertainty regularization branch. Our regulariza-tion facilitates learning a more conservative decision bound-ary between ID and OOD objects, which helps ﬂag unseen
+OOD objects during inference. To achieve this, the regular-ization contrastively shapes the uncertainty surface, which produces larger probabilistic scores for ID objects and vice versa, enabling effective OOD detection in testing. Our key contributions are summarized as follows:
+• We propose a new framework STUD, addressing a chal-lenging yet underexplored problem of unknown-aware object detection. To the best of our knowledge, we are the ﬁrst to exploit the rich information from videos to en-able OOD identiﬁcation for the object detection models.
+• STUD effectively regularizes object detectors by distill-ing diverse unknown objects in both spatial and tem-poral dimensions without costly human annotations of
+OOD objects. Moreover, we show that STUD is more advantageous than synthesizing unknowns in the high-dimensional pixel space (e.g., using GAN [30]) or using negative proposals as unknowns [23].
+• We extensively evaluate the proposed STUD on large-scale BDD100K [67] and Youtube-VIS datasets [66].
+STUD obtains state-of-the-art results, outperforming the best baseline by a large margin (10.88% in FPR95 on
+BDD100K) while preserving the accuracy of object de-tection on ID data. 2. Problem Setup
+We start by formulating the OOD detection problem for the object detection task. Most previous formulations of
+OOD detection treat entire images as anomalies, which can lead to ambiguity shown in Figure 1(a). In particular, natural images are not monolithic entities but instead are composed of numerous objects and components. Knowing which regions of an image are anomalous allows for the safe handling of unfamiliar objects. Compared to image-level OOD detection, object-level OOD detection is more relevant in realistic perception systems, yet also more chal-lenging as it requires reasoning OOD uncertainty at the ﬁne-grained object level. We design reliable object detectors that are aware of unknown OOD objects in testing. That is, an object detector trained on the ID categories (e.g., cars, trucks) can identify test-time objects (e.g., deer) that do not belong to the training categories and refrain from making a conﬁdent prediction on them.
+Setup. We denote the input and label space by X = Rd and Y = {1, 2, ..., K}, respectively. Let x ∈ X be the input image, b ∈ R4 be the bounding box coordinates associated with objects in the image, and y ∈ Y be the semantic label of the object. An object detection model is trained on ID data D = {(xi, bi, yi)}M i=1 drawn from an unknown joint distribution P. We use neural networks with parameters
+θ to model the bounding box regression pθ(b|x) and the classiﬁcation pθ(y|x, b).
+OOD detection for object detection. The OOD detec-tion can be formulated as a binary classiﬁcation problem, distinguishing between the in vs. out-of-distribution ob-jects. Let PX denote the marginal probability distribution on X . Given a test input x∗ ∼ PX , as well as an object b∗ predicted by the object detector, the goal is to predict pθ(g|x∗, b∗). We use g = 1 to indicate a detected object being ID, and g = 0 being OOD, with semantics outside the support of Y. 3. Unknown-Aware Object Detection
+Our unknown-aware object detection framework trains an object detector in tandem with the OOD uncertainty reg-ularization branch. Both share the feature extractor and the prediction head and are jointly trained from scratch (see
+Figure 2). Our framework encompasses two novel com-ponents, which address: (1) how to distill diverse unknown objects in the spatial and temporal dimensions (Section 3.1), and (2) how to leverage the unknown objects for effective model regularization (Section 3.2). 3.1. Spatial-Temporal Unknown Distillation
+Our approach STUD distills unknown objects guided by the rich spatial-temporal information in videos, without ex-Test Input
+Backbone
+Object Features (cid:2278)(cid:2914)(cid:2915)(cid:2930)
+Training Input
+… (cid:1872)(cid:2868)
+Key Frame (cid:1872)(cid:2870) (cid:1872)(cid:3021) (cid:1872)(cid:2869)
+Reference Frames
+Proposal 
+Generator
+…
+Dissimilarity 
+Measurement
+Encoder
+Dissimilarity
+Matrix
+Encoded Object
+Features (cid:1872)(cid:2868) (cid:1872)(cid:2869) (cid:1872)(cid:2870)
+… (cid:1872)(cid:3021) (cid:3021)
+Concat
+…
+…
+Regression
+Prediction Head car 100%
+OOD car 100%
+Classification
+Logistic 
+Regression
+Uncertainty
+Score
+Unknown Distillation
+…… (cid:2278)(cid:2931)(cid:2924)(cid:2913)(cid:2915)(cid:2928)(cid:2930)(cid:2911)(cid:2919)(cid:2924)(cid:2930)(cid:2935) y t i s n e
+D
+Negative Energy Score
+Training Flow
+Test Flow
+Energy Filtering
+Figure 2. Overview of the proposed unknown-aware object detection framework STUD. For an ID object from the key frame encoded as ˆh(x0, bi), we perform energy ﬁltering to identify the unknown object candidates in the reference frames. We then distill the unknown object ˆoi by linearly combining the unknown objects in the feature space, weighted by the dissimilarity score si,j. The distilled unknowns, along with the ID objects, are used to train the uncertainty regularization branch (Luncertainty). Luncertainty contrastively shapes the uncertainty surface, which produces a larger score for ID objects and vice versa. During testing, we use the output of the logistic regression for OOD detection. ⊗ denotes the operation in Equation (3) and 1 ≤ k ≤ T is the index of the reference frames. plicit supervision signals of unknown objects. Video data naturally encapsulates a mixture of both known and un-known objects. While classic object detection models pri-marily use the labeled known objects for training, we at-tempt to capitalize on the unknown ones for model regular-ization. For this reason, we term our approach unknown dis-tillation—extracting unknown objects w.r.t the known ob-jects. Notably, our distillation process for object detection is performed at the object level, in contrast to constructing the image-level outliers [18]. That is, for every ID object in a given frame, we construct a corresponding OOD counter-part. The distilled unknowns will be used for model regu-larization (Section 3.2).
+While intuition is straightforward, challenges arise in constructing unknown objects in an unsupervised manner.
+The plethora of ways that unknown objects can emerge are innumerable in high-dimensional space. Taking the ID ob-ject car as an example (c.f. Figure 3), the objects such as billboards, trees, buildings, etc. can all be considered as un-knowns w.r.t the car. This undesirably increases the sample complexity and demands a diverse collection of unknown objects to be observed. We tackle the challenge through distilling diverse unknown objects by leveraging the rich in-formation in the spatial and temporal dimensions of videos.
+Spatial unknown distillation.
+In the spatial dimension, for each ID object in a given frame, we create the un-known counterpart through a linear combination of the ob-ject features from the reference frames, weighted by the dissimilarity measurement. Utilizing multiple objects cap-tures a more diverse distribution of unknowns than using single ones. STUD operates on the feature outputs from the proposal generator to calculate dissimilarity. Speciﬁ-cally, we consider a pair of frames x0, x1 at timestamps t0 and t1, designated key frame and reference frame, respec-tively. For an object (x, b), we denote its feature repre-0.22 0.09 0.13 0.15 0.17 0.17 0.07 (cid:1872)(cid:2868) (cid:1872)(cid:2869)
+Figure 3. The dissimilarity measurement. For each ID object at timestamp t0 (in blue), we discover the objects in the reference frame that are dissimilar to it (in green), which are more likely to contain OOD objects for model regularization. The red numbers show the dissimilarity after normalization (Equation (2)). sentation as h(x, b) ∈ Rm, where m is the feature dimen-sion. We collect a set of object features {h(x0, bi)}N0 i=1 and
+{h(x1, bj)}N1 j=1 with the objectiveness score above a thresh-old. We adopt a dissimilarity measurement using the L2 distance between two features: (cid:2) (cid:2) (cid:2)ˆh(x0, bi) − ˆh(x1, bj) (cid:2) (cid:2) (cid:2) si,j = 2 2
+, (1) where ˆh(x0, bi) and ˆh(x1, bj) are encoded feature vec-tors obtained by a small network using the object features h(x, b) as input. In our experiments, the encoder consists of two convolutional layers with kernel size of 3 × 3 and an average pooling layer. The larger si,j is, the more dissim-ilar the object features are. The dissimilarity measurement results are illustrated in Figure 3. The OOD objects in the reference frame, such as street lights and billboards, have a more signiﬁcant dissimilarity.
+Lastly, we perform a weighted average of the object fea-tures from frame x1. Using multiple objects captures a di-verse distribution of unknowns. The weights α are deﬁned as the normalized exponential of the dissimilarity scores:
+ˆoi =
+N1(cid:3) j=1
+αi,jh(x1, bj), αi,j = (cid:4)N1 esi,j k=1 esi,k
+, (2)
+where ˆoi is the distilled unknown object (in the feature space), corresponding to the i-th object at frame x0.
+Temporal unknown distillation. Our spatial unknown distillation mechanism operates on a single reference frame, which can be extended to multiple video frames to capture additional diversity of unknowns in the temporal dimen-sion. For example, consider a video of a car driving on the highway, the more frames we observe, the more unknown objects can be observed, such as trees, buildings, and rocks.
+Given a frame x0 at timestamp t0, we propose distilling the unknown objects from multiple frames x1, ..., xT . We randomly sample T frames within a range [t0 − R, t0 + R].
+As a special case, T = 1 reduces to the previous pair-frame setting. To distill spatial-temporal unknown objects, we concatenate the object feature vectors from T frames, and then measure their dissimilarity w.r.t the objects in frame x0 by Equation (1). For the i-th object in frame x0, the unknown counterpart is deﬁned as follows:
+ˆoi =
+N(cid:3) j=1
+αi,jh(x, bj), x ∈ {x1, ..., xT }, (3) where αi,j denotes the normalized dissimilarity scores de-(cid:4)T
+ﬁned in Equation 2. N = k=1 Nk is the total number of objects across T reference frames. The temporal aggrega-tion mechanism allows searching through multiple frames for meaningful and diverse unknown discovery.
+Later in Section 4.3, we provide comprehensive ablation studies on the frame sampling range R and the number of selected frames T , and show the beneﬁts of temporal aggre-gation for improved OOD detection.
+Unknown candidate object selection. A critical step in unknown distillation is to ﬁlter unknowns in the reference frame x1 that may be ID objects or simple background.
+Without selection, the model may be confused to sepa-rate the distilled unknown objects from the ID objects or quickly memorize the simple OOD pattern during training.
+To prevent this, we pre-ﬁlter the proposals based on the en-ergy score, and then use the selected ones for the spatial-temporal unknown distillation. It is shown that the energy score is an effective indicator of OOD data in image classi-ﬁcation [36]. To calculate the energy score for object detec-tion network, we feed the object features {h(x1, bj)}N1 j=1 to the prediction head and follow the deﬁnition:
+E(x1, bj) = − log
+K(cid:3) expfk(h(x1,bj );wpred), (4) k=1 where fk (h(x1, bj); wpred) is the logit output of the k-way classiﬁcation branch. A higher energy indicates more
+OOD-ness and vice versa. Then, we select objects with mild energy scores, i.e., those in a speciﬁc percentile p% ≤
+Rank(E(x1, bj))/N1 ≤ q% among all objects. In case of multiple frames x1, x2, ..., xT , the object selection is per-formed on each individual frame before temporal aggrega-(cid:11)(cid:68)(cid:12) (cid:11)(cid:69)(cid:12)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)
+Figure 4. (a) Uncertainty regularization loss during training. (b)
+The negative energy score distribution for both the ID and the dis-tilled unknown objects after training. tion. Ablation study on the effect of the energy ﬁltering and the selection percentile are provided in Section 4.3. 3.2. Unknown-Aware Training Objective
+Leveraging the distilled unknown objects from Sec-tion 3.1, we now introduce our training objective for unknown-aware object detection. Our key idea is to per-form object detection task while regularizing the model to produce a low uncertainty score for ID objects, and a high uncertainty score for the unknown ones. The overall objec-tive function is deﬁned as:
+L = Ldet + β · Luncertainty, (5) where β is the scaling weight when combining the detection loss Ldet and the uncertainty regularization loss Luncertainty.
+Next we describe the details of Luncertainty.
+Uncertainty regularization. Following Du et al. [8], we employ a loss function that contrastively shapes the uncer-tainty surface, amplifying the separability between known
+ID objects and unknown OOD objects. To measure the un-certainty, we use the energy score in Equation (4), which is derived from the output of the classiﬁcation branch. Here we calculate the energy score E(x, b) for the ID objects and the distilled unknown object features E(ˆo). The uncertainty score is then passed into a logistic regression classiﬁer with weight coefﬁcient θu, which predicts high probability for
+ID object (x, b) and low probability for the unknown ones
+ˆo. The regularization loss is calculated as:
+Luncertainty = Eˆo∼O (cid:2)
+− log (cid:2)
+E(x,b)∼D
+− log (cid:3) 1 1 + exp−θu·E(ˆo) exp−θu·E(x,b) 1 + exp−θu·E(x,b)
++ (cid:3)
+, (6) where O contains all the unknown object features (c.f. Sec-tion 3.1).
+In Figure 4(a), we show the uncertainty reg-ularization loss Luncertainty over the course of training on
+Youtube-VIS dataset [66]. Upon convergence, Figure 4(b) shows the energy score distribution for both the ID and dis-tilled unknown objects. This demonstrates that STUD con-verges properly and is able to separate the distilled unknown objects and the ID objects.
+Algorithm 1 STUD: Spatial-Temporal Unknown Distilla-tion for OOD detection
+Input: ID data D = {(xi, bi, yi)}M i=1, randomly initial-ized object detector with parameter θ, energy ﬁltering per-centile [p%, q%], sampling range R, the number of refer-ence frames T , and weight for uncertainty regularization β.
+Output: Object detector with parameter θ∗, and OOD de-tector G. while train do 1. Select unknown objects in the reference frames with mild energy scores as deﬁned by Equation (4). 2. Calculate the dissimilarity (using Equation (2)) be-tween an object in the key frame w.r.t selected objects in the reference frames. 3. Distill the unknown objects by Equation (3). 4. Calculate the uncertainty regularization loss by Equa-tion (6), update the parameter θ based on the total loss in Equation (5). end while eval do 1. Calculate the uncertainty score by Equation (7). 2. Perform thresholding comparison by Equation (8). end
+Compared to Ldet for the vanilla object detector, our loss intends to facilitate learning a more conservative decision boundary between ID and OOD objects, which helps ﬂag unseen OOD objects in testing. We proceed by describing the test-time OOD detection procedure.
+Test-time OOD detection. During inference, we use the output of the logistic regression uncertainty branch for
+OOD detection. In particular, given a test input x∗, the ob-ject detector produces a box prediction b∗. The uncertainty score for the predicted object (x∗, b∗) is given by: pθ(g | x∗, b∗) = exp−θu·E(x∗,b∗) 1 + exp−θu·E(x∗,b∗) . (7)
+For OOD detection, we use the common thresholding mechanism to distinguish between ID and OOD objects: (cid:5)
+G(x∗, b∗) = 1 0 if pθ(g | x∗, b∗) ≥ γ, if pθ(g | x∗, b∗) < γ. (8)
+The threshold γ is typically chosen so that a high fraction of ID data (e.g., 95%) is correctly classiﬁed. For objects that are classiﬁed as ID, one can obtain the bounding box and class prediction using the prediction head as usual. Our approach STUD is summarized in Algorithm 1. 4. Experiments
+In this section, we provide empirical evidence to show the effectiveness of STUD on two large-scale video datasets (Section 4.1). We show that STUD outperforms other com-monly used OOD detection baselines on detecting OOD data in Section 4.2. Ablation studies of STUD and quali-tative analysis are presented in Sections 4.3 and 4.4. 4.1. Benchmark Construction
+Datasets. We use two large-scale video datasets as ID data:
+BDD100K [67] and Youtube-Video Instance Segmentation (Youtube-VIS) 2021 [66]. For both tasks, we evalu-ate on two OOD datasets containing diverse visual cate-gories: MS-COCO [34] and nuImages [1]. We perform careful deduplication to ensure there is no semantic over-lap between the ID and OOD data. Extensive details on the datasets are described in the appendix.
+Implementation details. We adopt Faster R-CNN [53] as the base object detector. We use Detectron2 library [11] and train with the backbone of ResNet-50 [15] and the default hyperparameters. We set the weight β for Luncertainty to be 0.05 for BDD100K and 0.02 for Youtube-VIS dataset. For both datasets, we use T = 3 frames and set the sampling range R = 9. We set the energy ﬁltering percentile to be 40% − 60% among all proposals. Ablation studies on dif-ferent hyperparameters are detailed in Section 4.3.
+Metrics. For evaluating the OOD detection performance, we report: (1) the false positive rate (FPR95) of OOD sam-ples when the true positive rate of ID samples is at 95%; (2) the area under the receiver operating characteristic curve (AUROC). For evaluating the object detection performance on the ID task, we report the common metric of mAP. 4.2. Comparison with Baselines
+STUD establishes SOTA performance.
+In Table 1, we compare STUD with competitive OOD detection methods in literature, where STUD signiﬁcantly outperforms baselines on both datasets. For a fair comparison, all the methods use the same ID training data, trained with the same num-ber of epochs. Our comprehensive baselines include Max-imum Softmax Probability [17], ODIN [33], Mahalanobis distance [31], Generalized ODIN [20], energy score [36],
+Gram matrices [54], and a latest method CSI [59]. These baselines rely on the classiﬁcation output or backbone fea-ture, and therefore can be seamlessly evaluated on the object detection model.
+The results show that STUD can outperform these base-lines by a considerable margin because the majority of base-lines rely on object detection models trained on ID data only, without being regularized by unknown objects. Such a training scheme is prone to produce overconﬁdent pre-dictions on OOD data (Figure 1) while STUD incorporates unknown objects to regularize the model more effectively.
+We also compare with GAN-based approach for synthe-sizing outliers in the pixel space [30], where STUD effec-tively improves the OOD detection performance (FPR95) by 15.77% on BDD100K (COCO as OOD) and 17.66% on
+In-distribution D
+Method
+FPR95 ↓
+AUROC ↑ mAP (ID)↑ Cost (h)
+BDD100K
+Youtube-VIS
+MSP [17]
+ODIN [33]
+Mahalanobis [31]
+Gram matrices [54]
+Energy score [36]
+Generalized ODIN [20]
+CSI [59]
+GAN-synthesis [30]
+STUD (ours)
+MSP [17]
+ODIN [33]
+Mahalanobis [31]
+Gram matrices [54]
+Energy score [36]
+Generalized ODIN [20]
+CSI [59]
+GAN-synthesis [30]
+STUD (ours) 90.11 / 93.98 80.32 / 87.75 63.06 / 79.02 68.78 / 82.60 78.36 / 86.02 75.99 / 92.15 69.38 / 80.06 67.95 / 88.53 52.18±2.2 / 77.57±3.0
+OOD: MS-COCO / nuImages 66.32 / 59.21 68.49 / 66.51 79.95 / 68.94 66.13 / 71.56 73.75 / 67.08 78.63 / 67.23 80.85 / 72.59 78.33 / 66.50 85.67±0.6 / 75.67±0.7 90.17 / 94.52 87.17 / 97.69 85.60 / 95.65 88.68 / 93.20 91.77 / 91.78 83.90 / 93.18 80.21 / 84.85 84.57 / 94.59 79.82±0.2 / 76.93±0.4 70.26 / 54.59 71.46 / 57.46 72.16 / 62.02 61.96 / 60.04 70.58 / 59.05 71.33 / 62.16 73.89 / 68.84 71.59 / 64.43 75.55±0.3 / 71.48±0.6 31.0 31.0 31.0 31.0 31.0 30.9 29.8 30.1 30.5±0.2 24.8 24.8 24.8 24.8 24.8 24.3 23.3 24.4 24.5±0.3 9.1 9.1 9.1 9.1 9.1 10.5 15.3 14.6 10.1 9.2 9.2 9.2 9.2 9.2 10.5 15.7 15.0 10.2
+Table 1. Main results. Comparison with competitive out-of-distribution detection methods. All baseline methods are based on a model trained on ID data only using ResNet-50 as the backbone. ↑ indicates larger values are better, and ↓ indicates smaller values are better. All values are percentages. Bold numbers are superior results. We report standard deviations estimated across three runs. The training time is reported in the “cost” column on four NVIDIA GeForce RTX 2080Ti GPUs.
+Method (cid:3)Farthest object (cid:3)Random object (cid:3)Object with mild energy (cid:3)Negative proposal [23]
+♣GAN [30]
+♣Mixup [70] (cid:3)Gaussian noise
+STUD (ours)
+AUROC ↑
+COCO / nuImages as OOD 83.04 / 71.38 79.61 / 70.42 83.60 / 71.24 80.94 / 72.92 78.33 / 66.50 81.76 / 70.17 83.64 / 71.50 85.67 / 75.67 mAP ↑ 30.2 30.3 30.3 30.0 30.1 27.6 30.3 30.5
+Table 2. Ablation on different unknown distillation approaches (on backbone of ResNet-50, COCO / nuImages are the OOD data).
+Youtube-VIS (nuImages as OOD). Moreover, we show in
+Table 1 that STUD achieves stronger OOD detection perfor-mance while preserving a high object detection accuracy on
+ID data (measured by mAP). This is in contrast with CSI, which displays signiﬁcant degradation, with mAP decreas-ing by 1.2% on Youtube-VIS. Details of reproducing base-lines are in the Appendix Section D. 4.3. Ablation Studies
+This section provides comprehensive ablation studies to understand the efﬁcacy of STUD. For consistency, all ablations are conducted on the BDD100K dataset, using
+ResNet-50 as the backbone. We refer readers to Appendix
+Section E for more ablations on using a different backbone architecture.
+Ablation on different unknown distillation approaches.
+We compare STUD with three types of unknown distilla-tion approaches, i.e., (I(cid:3)) using independent objects without spatial-temporal aggregation, (II♣) synthesizing unknowns in the pixel space, and (III(cid:3)) using noise as unknowns.
+• For type I, we utilize objects from the reference frame without aggregating multiple objects across spatial and temporal dimensions—a key difference from STUD. The unknown objects can be constructed by: using the ob-ject in the reference frame that has the largest dissimi-larity, using random objects, using the negative object as in [23], and using objects with mild energy scores (per-centile 40% − 60%) in the reference frame.
+• For type II, we consider GAN-based [30] and mixup-based [70] methods. For [30], the classiﬁcation outputs of the objects in the synthesized images are forced to be closer to a uniform distribution. For mixup, we use a beta distribution of Beta(1), and interpolate ID objects in the pixel space for the reference frames.
+• For type III, we add ﬁxed Gaussian noise to the ID ob-jects to create unknown object features.
+The results are summarized in Table 2, where STUD out-performs alternative approaches. Exploiting objects with-out spatial-temporal distillation ((cid:8)) is less effective than
+STUD, because the generated unknowns either lack diver-sity (e.g., using object with the biggest dissimilarity or mild energy) or are too simple to effectively regularize the deci-sion boundary between ID and OOD (e.g., using negative or random objects). Synthesizing unknowns in the pixel space (♣) is either unstable (GAN) or harmful for the object de-tection performance (mixup). Lastly, Gaussian noise as un-knowns is relatively simple and does not outperform STUD.
+Ablation on candidate object selection. Table 3 investi-gates the importance of ﬁltering unknown objects based on
+(cid:27)(cid:24)(cid:17)(cid:25)(cid:26) (cid:27)(cid:24)(cid:17)(cid:22)(cid:23) (cid:27)(cid:23)(cid:17)(cid:26)(cid:19) (cid:27)(cid:23)(cid:17)(cid:21)(cid:25) (cid:27)(cid:23)(cid:17)(cid:23)(cid:20) (cid:26)(cid:24)(cid:17)(cid:25)(cid:20)(cid:3) (cid:3) (cid:3) (cid:3) (cid:3) (cid:26)(cid:24)(cid:17)(cid:25)(cid:26) (cid:26)(cid:24)(cid:17)(cid:25)(cid:23) (cid:26)(cid:23)(cid:17)(cid:27)(cid:26) (cid:26)(cid:23)(cid:17)(cid:23)(cid:21) (cid:27)(cid:22)(cid:17)(cid:22)(cid:23) (cid:26)(cid:22)(cid:17)(cid:27)(cid:28) (cid:53) (cid:1)(cid:28) (cid:27)(cid:24)(cid:17)(cid:25)(cid:26) (cid:27)(cid:21)(cid:17)(cid:26)(cid:20) (cid:53) (cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:3)(cid:1)(cid:28) (cid:26)(cid:24)(cid:17)(cid:21)(cid:28) (cid:26)(cid:24)(cid:17)(cid:25)(cid:26) (cid:26)(cid:22)(cid:17)(cid:21)(cid:25) (cid:26)(cid:21)(cid:17)(cid:25)(cid:26) (cid:27)(cid:19)(cid:17)(cid:22)(cid:24) (cid:26)(cid:20)(cid:17)(cid:27)(cid:19) (cid:27)(cid:19)(cid:17)(cid:23)(cid:22) (cid:27)(cid:20)(cid:17)(cid:23)(cid:20) (cid:27)(cid:19)(cid:17)(cid:27)(cid:20) (cid:26)(cid:19)(cid:17)(cid:20)(cid:19) (cid:894)(cid:258)(cid:895) (cid:1)(cid:53) (cid:894)(cid:271)(cid:895) (cid:3)(cid:53) (cid:1) (cid:1) (cid:894)(cid:272)(cid:895) (cid:55) (cid:894)(cid:282)(cid:895) (cid:55)
+Figure 5. (a)-(b) Ablation study on the sampling range R. We vary the range from 3 to inﬁnity. Metrics are AUROC. We set T = 3. (c)-(d)
+Ablation study on the number of reference frames T during unknown distillation. We ﬁx the sampling range as R = 9.
+Variants
+FPR95 ↓
+AUROC ↑ mAP ↑ w/o unknown ﬁltering w/ ratio 0%-20% w/ ratio 20%-40% w/ ratio 40%-60% w/ ratio 60%-80% w/ ratio 80%-100%
+COCO / nuImages as OOD 82.87 / 72.29 62.23 / 83.54 83.66 / 74.86 61.41 / 82.33 85.43 / 74.09 57.73 / 82.13 85.67 / 75.67 52.18 / 77.57 83.47 / 73.44 62.29 / 85.12 82.46 / 72.50 65.86 / 88.47 30.6 30.2 30.3 30.5 30.2 30.3
+β
+FPR95 ↓
+AUROC ↑ mAP ↑
+COCO / nuImages as OOD 83.49 / 70.70 63.52 / 86.18 84.03 / 72.09 59.52 / 84.01 85.67 / 75.67 52.18 / 77.57 84.59 / 72.60 57.37 / 85.53 84.18 / 71.21 55.03 / 84.43 0.03 0.04 0.05 0.06 0.07 30.4 30.3 30.5 30.2 30.2
+Table 3. Ablation study on the energy ﬁltering module. Here we set T = 3 and R = 9.
+Table 4. Ablation study on the weight β for the uncertainty regu-larization loss. In this case, we set T = 3 and R = 9. the energy score. We contrast performance by either remov-ing the ﬁltering, or using different ﬁltering percentile (c.f.
+Section 3.1). Using the objects with a mild energy score in the reference frames performs the best. This strategy dis-tills unknown objects with a proper difﬁculty level, which is effective during contrastive uncertainty regularization.
+Ablation on the frame sampling range R. Recall our spatial-temporal unknown distillation requires concatena-tion of objects from T reference frames. We ablate the ef-fect of randomly selecting T frames within different tempo-ral horizons w.r.t the key frame, modulated by the sampling range R. The results with varying R are shown in Figure 5 (a)-(b) with T = 3. We observe that OOD detection bene-ﬁts from using the reference frames that are mildly close to the key frame. The trend is consistent for both COCO and nuImages OOD datasets. A larger sampling range translates into more dissimilar scenes, resulting in relatively easier un-knowns to be distilled. When R becomes inﬁnity, STUD randomly samples frames from the entire video, where the distilled unknowns are much less effective with AUROC signiﬁcantly degrades (from 85.67% to 80.35% on COCO).
+Ablation on the number of reference frames T . We contrast performance under different number of reference frames T and report the OOD detection results in Figure 5 (c)-(d). This ablation shows that STUD indeed beneﬁts from aggregating objects from multiple frames across the temporal dimension. For example, the model trained on
+BDD100K with T = 3 achieves an AUROC improvement of 5.24% (COCO as OOD) compared to T = 1. This high-lights the importance of temporal distillation with multiple frames. However, a larger T hurts the OOD detection per-formance. We hypothesize this is because many redundant object features are used during unknown distillation.
+Ablation on the uncertainty regularization weight β.
+Table 4 reports the OOD detection results as we vary the weight β for Luncertainty. The model is evaluated on both
+COCO and nuImages datasets as OOD. The results suggest that a mild weight is desirable. In most cases, STUD out-performs the baseline OOD detection methods in Table 1 in terms of AUROC.
+Ablation on the uncertainty loss. We perform ablation on three alternatives for Luncertainty: (1) using the squared hinge loss [36], (2) classifying the unknowns as an addi-tional K + 1 class in the classiﬁcation branch and (3) re-moving the weight θu in Luncertainty. The comparison is sum-marized in Table 5. Compared to the hinge loss, our logistic loss improves the AUROC by 11.35% (COCO as OOD). In addition, classifying the distilled unknowns as an additional class increases the difﬁculty of object classiﬁcation, which does not outperform either. Moreover, the learnable weight
+θu modulates the slope of the logistic function, which al-lows learning a sharper binary decision boundary for op-timal ID-OOD separation. This ablation demonstrates the superiority of the uncertainty loss employed by STUD.
+Luncertainty
+STUD w/o θu
+Hinge loss [36]
+K+1 class
+STUD (ours)
+FPR95 ↓
+AUROC ↑
+COCO / nuImages as OOD 83.15 / 69.67 64.06 / 85.31 74.32 / 62.59 74.73 / 90.70 59.40 / 56.25 84.34 / 93.63 85.67 / 75.67 52.18 / 77.57 mAP ↑ 30.1 30.2 30.8 30.5
+Table 5. Ablation study on the uncertainty regularization loss.
+bus 90% car 66%
+OOD pedestrian 59% train 90% pedestrian 63% truck 75% pedestrian 77% car 51% pedestrian 82% pedestrian 64% pedestrian 81% pedestrian 69% pedestrian 73% pedestrian 33%
+Bicycle 79%
+OOD
+OOD
+OOD pedestrian 52%
+OOD
+OOD
+OOD pedestrian 33%
+OOD
+OOD
+OOD
+OOD
+OOD
+OOD pedestrian 47% train 71% truck 83%
+OOD truck 62% car 71% rider 41% train 67% pedestrian 50%
+OOD
+OOD
+OOD
+OOD
+OOD
+Figure 6. Visualization of detected objects on the OOD images (from MS-COCO and nuImages) by a vanilla Faster-RCNN (top) and STUD (bottom). The ID is BDD100K dataset. Blue: OOD objects classiﬁed as one of the ID classes. Green: OOD objects detected by STUD, which reduce false positives among detected objects. Additional visualization is shown in Appendix Section G. 4.4. Qualitative analysis
+Here we further present qualitative analysis on the instance-level OOD detection results. In Figure 6, we visu-alize the predictions on several OOD images, using object detection models trained without distilled unknown objects (top) and with STUD (bottom). The ID data is BDD100K.
+STUD performs better in identifying OOD objects (in green) than a vanilla object detector and reduces false positives among detected objects. Moreover, the conﬁdence score of the false-positive objects of STUD is lower than that of the vanilla model (e.g., rocks in the 3rd column). 5.

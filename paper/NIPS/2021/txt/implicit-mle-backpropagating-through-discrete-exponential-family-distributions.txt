@@ -1,0 +1,349 @@
+Abstract
+Combining discrete probability distributions and combinatorial optimization prob-lems with neural network components has numerous applications but poses several challenges. We propose Implicit Maximum Likelihood Estimation (I-MLE), a framework for end-to-end learning of models combining discrete exponential fam-ily distributions and differentiable neural components. I-MLE is widely applicable as it only requires the ability to compute the most probable states and does not rely on smooth relaxations. The framework encompasses several approaches such as perturbation-based implicit differentiation and recent methods to differentiate through black-box combinatorial solvers. We introduce a novel class of noise distributions for approximating marginals via perturb-and-MAP. Moreover, we show that I-MLE simpliﬁes to maximum likelihood estimation when used in some recently studied learning settings that involve combinatorial solvers. Experiments on several datasets suggest that I-MLE is competitive with and often outperforms existing approaches which rely on problem-speciﬁc relaxations. 1
+
+Introduction
+While deep neural networks excel at perceptual tasks, they tend to generalize poorly whenever the problem at hand requires some level of symbolic manipulation or reasoning, or exhibit some (known) algorithmic structure. Logic, relations, and explanations, as well as decision processes, frequently
+ﬁnd natural abstractions in discrete structures, ill-captured by the continuous mappings of standard neural nets. Several application domains, ranging from relational and explainable ML to discrete decision-making [Miši´c and Perakis, 2020], could beneﬁt from general-purpose learning algorithms whose inductive biases are more amenable to integrating symbolic and neural computation. Motivated by these considerations, there is a growing interest in end-to-end learnable models incorporating discrete components that allow, e.g., to sample from discrete latent distributions [Jang et al., 2017,
+Paulus et al., 2020] or solve combinatorial optimization problems [Poganˇci´c et al., 2019, Mandi et al., 2020]. Discrete energy-based models (EBMs) [LeCun et al., 2006] and discrete world models [Hafner et al., 2020] are additional examples of neural network based models that require the ability to backpropagate through discrete probability distributions.
+For complex discrete distributions, it is intractable to compute the exact gradients of the expected loss. For combinatorial optimization problems, the loss is discontinuous, and the gradients are zero almost everywhere. The standard approach revolves around problem-speciﬁc smooth relaxations, which allow one to fall back to (stochastic) backpropagation. These strategies, however, require tailor-made relaxations, presuppose access to the constraints and are, therefore, not always feasible nor tractable for large state spaces. Moreover, reverting to discrete outputs at test time may cause unexpected behavior. In other situations, discrete outputs are required at training time because one has to make one of a number of discrete choices, such as accessing discrete memory or deciding on an action in a game. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+With this paper, we take a step towards the vision of general-purpose algorithms for hybrid learn-ing systems. Speciﬁcally, we consider settings where the discrete component(s), embedded in a larger computational graph, are discrete random variables from the constrained exponential family1.
+Grounded in concepts from Maximum Likelihood Estimation (MLE) and perturbation-based implicit differentiation, we propose Implicit Maximum Likelihood Estimation (I-MLE). To approximate the gradients of the discrete distributions’ parameters, I-MLE computes, at each update step, a target distribution q that depends on the loss incurred from the discrete output in the forward pass. In the backward pass, we approximate maximum likelihood gradients by treating q as the empirical distribution. We propose ways to derive target distributions and introduce a novel family of noise per-turbations well-suited for approximating marginals via perturb-and-MAP. I-MLE is general-purpose as it only requires the ability to compute most probable states and not faithful samples or probabilistic inference. In summary, we make the following contributions: 1. We propose implicit maximum likelihood estimation (I-MLE) as a framework for computing gradients with respect to the parameters of discrete exponential family distributions; 2. We show that this framework is useful for backpropagating gradients through both discrete probability distributions and discrete combinatorial optimization problems; 3. I-MLE requires two ingredients: a family of target distribution q and a method to sample from complex discrete distributions. We propose two families of target distributions and a family of noise-distributions for Gumbel-max (perturb-and-MAP) based sampling. 4. We show that I-MLE simpliﬁes to explicit maximum-likelihood learning when used in some recently studied learning settings involving combinatorial optimization solvers. 5. Extensive experimental results suggest that I-MLE is ﬂexible and competitive compared to the straight-through and relaxation-based estimators.
+Instances of the I-MLE framework can be easily integrated into modern deep learning pipelines, allowing one to readily utilize several types of discrete layers with minimal effort. We provide implementations and Python notebooks at https://github.com/nec-research/tf-imle 2 Problem Statement and Motivation
+We consider models described by the equations z
+∼ and y
+θ = hv(x), p(z; θ), y = fu(z), (1) where x
+∈ Y
+∈ X and target outputs, hv :
+Z → Y are smooth parameterized maps, and p(z; θ) is a discrete probability distribution. denote feature inputs
+Θ and fu :
+X →
+Figure 1: Illustration of the addressed learning prob-lem. z is the discrete (latent) structure.
+Given a set of examples
+ω = (v, u) of (1) by ﬁnding approximate solutions of minω
+L is typically deﬁned as: ( ˆxj, ˆyj)
+{
+=
+D
+N j=1, we are concerned with learning the parameters
+} j L( ˆxj, ˆyj; ω)/N . The training error (cid:80)
+L( ˆx, ˆy; ω) = E
+ˆz∼p(z; ˆθ) [(cid:96)(fu( ˆz), ˆy)] with
+ˆθ = hv( ˆx), (2)
+Y × Y →
+R+ is a point-wise loss function. Fig. 1 illustrates the setting. For example, an where (cid:96) : interesting instance of (1) and (2) arises in learning to explain user reviews [Chen et al., 2018] where the task is to infer a target sentiment score (e.g. w.r.t. the quality of a product) from a review while also providing a concise explanation of the predicted score by selecting a subset of exactly k words (cf. Example 2). In Section 6, we present experiments precisely in this setting. As anticipated in the introduction, we restrict the discussion to instances in which p(z; θ) belongs to the (constrained) discrete exponential family, which we now formally introduce.
+Let Z be a vector of discrete random variables over a state space that satisfy a given set of linear constraints.2 Let θ and let be the set of states
+Rm be a real-valued parameter vector.
+C ⊆ Z
+Θ
+Z
+∈
+⊆ 1This includes integer linear programs via a natural link that we outline in Example 3. 2For the sake of simplicity we assume Z ⊆ {0, 1}m. The set C is the integral polytope spanned by the given, problem-speciﬁc, linear constraints. 2
+The probability mass function (PMF) of a discrete constrained exponential family r.v. is: p(z; θ) = (cid:26) exp ( z, θ (cid:104) 0
+/τ (cid:105)
+−
+A(θ))
+, if z
+∈ C otherwise. (3) (cid:105) (cid:105)
+·(cid:105) z, θ
+, (cid:104)· z, θ z∈C exp ( (cid:104) is the inner product and τ the temperature, which, if not mentioned otherwise, is assumed
+Here,
+/τ )(cid:1). We call to be 1. A(θ) is the log-partition function deﬁned as A(θ) = log (cid:0)(cid:80) the weight of the state z. The marginals (expected value, mean) of the r.v.s Z are deﬁned z, θ (cid:104) as µ(θ) := E ˆz∼p(z;θ)[ ˆz]. Finally, the most probable or Maximum A-Posteriori (MAP) states are deﬁned as MAP(θ) := arg maxz∈C (cid:104)
+. The family of probability distributions we deﬁne here (cid:105) captures a broad range of settings and subsumes probability distributions such as positive Markov random ﬁelds and statistical relational formalisms [Wainwright and Jordan, 2008, Raedt et al., 2016].
+We now discuss some examples which we will use in the experiments. Crucially, in Example 3 we establish the link between the constrained exponential family and integer linear programming (ILP) identifying the ILP cost coefﬁcients with the distribution’s parameters θ.
+Example 1 (Categorical Variables). An m-way (one-hot) categorical variable corresponds to p(z; θ) = exp ( z, 1 (cid:105) (cid:104) m i=1, where ei is the i-th vector of the canonical base, the parameters of the above
+As
+} distribution coincide with the weights, which are often called logits in this context. The marginals
+µ coincide with the PMF and can be expressed through a closed-form smooth function of θ: the softmax. This facilitates a natural relaxation that involves using µ(θ) in place of z [Jang et al., 2017].
+The convenient properties of the categorical distribution, however, quickly disappear even for slightly more complex distributions, as the following example shows.
+Example 2 (k-subset Selection). Assume we want to sample binary m-dimensional vectors with k ones. This amounts to replacing the constraint in Example 1 by the constraint
+= 1, where 1 is a vector of ones.
+A(θ)), subject to the constraint z, θ (cid:104)
+= k. (cid:105) − ei
+=
+C
+{ z, 1 (cid:105) (cid:104) k
+≤ (cid:1) = O(mk) weights (if k
+Here, a closed-form expression for the marginals does not exist: sampling from this distribution requires computing the (cid:0)m m/2). Computing MAP states instead takes time linear in m.
+Example 3 (Integer Linear Programs). Consider the combinatorial optimization problem given by
+Rm is a
+, where the integer linear program arg minz∈C(cid:104) vector of cost coefﬁcients, and let z∗(c) be the set of its solutions. We can associate to the ILP the family (indexed by τ > 0) of probability distributions p(z; θ) from (3), with the ILP polytope and θ = c. Then, for every τ > 0, the solutions of the ILP correspond to the MAP states:
+−
+MAP(θ) = arg maxz∈C(cid:104)
+→
+Many problems of practical interest can be expressed as ILPs, such as ﬁnding shortest paths, planning and scheduling problems, and inference in propositional logic. is an integral polytope and c
+= z∗(c) and for τ 0 one has that Pr(Z
+C z∗(c)) z, θ z, c
+→ 1.
+∈
+∈
+C (cid:105) (cid:105) 3 The Implicit Maximum Likelihood Estimator
+In this section, we develop and motivate a family of general-purpose gradient estimators for Eq. (2) p(z; hv( ˆx)). The that respect the structure of y(cid:96)(y, ˆy)] with y = fu( ˆz), which gradient of L w.r.t. u is given by may be estimated by drawing one or more samples from p. Regarding uL( ˆx, ˆy; ω) = E ˆz[∂ufu( ˆz)(cid:124) be a training example and ˆz
+. 3 Let ( ˆx, ˆy) vL, one has
+∈ D
+∇
+∇
+∼
+C vL( ˆx, ˆy; ω) = ∂vhv( ˆx)(cid:124)
+∇
+θL( ˆx, ˆy; ω),
+∇ (4)
+∇
+∇
+θL. A standard approach is to employ the score function where the major challenge is to compute estimator (SFE) which typically suffers from high variance. Whenever a pathwise derivative estimator (PDE) is available it is usually the preferred choice [Schulman et al., 2015]. In our setting, however, the PDE is not readily applicable since z is discrete and, therefore, every (exact) reparameterization path would be discontinuous. Various authors developed (biased) adaptations of the PDE for discrete r.v.s (see Section 5). These involve either smooth approximations of p(z; θ) or approximations of the derivative of the reparameterization map. Our proposal departs from these two routes and instead involves the formulation of an implicit maximum likelihood estimation problem. In a nutshell, I-MLE 3The derivations are adaptable to other types of losses deﬁned over the outputs of Eq. (1). 3
+(6)
+] (cid:105) as
+Algorithm 1 Instance of I-MLE with perturbation-based implicit differentiation. function FORWARDPASS(θ)
+∼
+ρ((cid:15))
+// Sample from the noise distribution ρ((cid:15)) (cid:15)
+// Compute a MAP state of perturbed θ
+ˆz = MAP(θ + (cid:15)) save θ, (cid:15), and ˆz for the backward pass return ˆz function BACKWARDPASS( z(cid:96)(fu(z), ˆy), λ)
+∇
+λ load θ, (cid:15), and ˆz from the forward pass
+// Compute target distribution parameters
+θ(cid:48) = θ z(cid:96)(fu(z), ˆy)
+// Single sample I-MLE gradient estimate (cid:98)
+L
+∇ return (cid:98)
+∇ ( ˆθ, ˆθ(cid:48)) = ˆz
+MAP(θ(cid:48) + (cid:15))
+− ( ˆθ, ˆθ(cid:48))
+∇
+−
+L
+θ
+θ is a (biased) estimator that replaces objective and (cid:98)
+∇ is an estimator of the gradient.
+θL in Eq. (4) with (cid:98)
+∇
+∇
+, where
+θ
+L
+L is an implicitly deﬁned MLE
+We now focus on deriving the (implicit) MLE objective construct an exponential family distribution q(z; θ(cid:48)) that, ideally, is such that
+E ˆz∼p(z;θ) [(cid:96)(fu( ˆz), ˆy)] .
+E ˆz∼q(z;θ(cid:48)) [(cid:96)(fu( ˆz), ˆy)] (5)
+≤
+We will call q the target distribution. The idea is that, by making p more similar to q we can as the MLE objective4 (iteratively) reduce the model loss L( ˆx, ˆy; ω). To this purpose, we deﬁne between the model distribution p with parameters θ and the target distribution q with parameters θ(cid:48):
+. Let us assume we can, for any given ˆy,
+L
+L (θ, θ(cid:48)) :=
+L
+−
+E ˆz∼q(z;θ(cid:48))[log p( ˆz; θ)] = E ˆz∼q(z;θ(cid:48))[A(θ)
+ˆz, θ
+− (cid:104)
+Now, exploiting the fact that
+θA(θ) = µ(θ), we can compute the gradient of
+E ˆz∼q(z;θ(cid:48))[ ˆz] = µ(θ)
+µ(θ(cid:48)), (θ, θ(cid:48)) = µ(θ)
+∇
+L (7) that is , the difference between the marginals of the current distribution p and the marginals of the target distribution q, also equivalent to the gradient of the KL divergence between p and q.
+∇
+−
+−
+L
+θ
+We will not use Eq. (7) directly, as computing the marginals is, in general, a #P-hard problem and scales poorly with the dimensionality m. MAP states are typically less expensive to compute (e.g. see Example 2) and are often used directly to approximate µ(θ)5 or to compute perturb-and-ρ((cid:15)) is an appropriate noise
+MAP approximations, where µ(θ) distribution with domain Rm. In this work we follow – and explore in more detail in Section 3.2 – the latter approach (also referred to as the Gumbel-max trick [cf. Papandreou and Yuille, 2011]), a strategy that retains most of the computational advantages of the pure MAP approximation but may be less crude. Henceforth, we only assume access to an algorithm to compute MAP states (such as a standard ILP solver in the case of Example 3) and rephrase Eq. (1) as
+E(cid:15)∼ρ((cid:15)) MAP(θ + (cid:15)) where (cid:15)
+∼
+≈
+θ = hv(x), z = MAP(θ + (cid:15)) with (cid:15) p((cid:15)), y = fu(z).
+∼
+With Eq. (8) in place, the general expression for the I-MLE estimator is (cid:98)
+∇
+∂vhv( ˆx)(cid:124) (θ, θ(cid:48)) with θ = hv( ˆx) where, for S
+N+:
+θ (8) vL(x, y; ω) =
+∈ (θ, θ(cid:48)) =
+θ (cid:98)
+∇
+L
+[MAP(θ + (cid:15)i)
+−
+MAP(θ(cid:48) + (cid:15)i)], with (cid:15)i
+ρ((cid:15)) for i 1, . . . , S
+∈ {
+.
+}
+∼ (9) (cid:98)
+∇
+L 1
+S
+S (cid:88) i=1 1, 1]m and when
+If the states of both the distributions p and q are binary vectors, (cid:98)
+∇ m. In the following, we discuss the problem of constructing families
+S = 1 (cid:98)
+}
+∇ of target distributions q. We will also analyze under what assumptions the inequality of Eq. (5) holds. (θ, θ(cid:48)) (θ, θ(cid:48)) 1, 0, 1
+∈ {−
+[
+−
+L
+L
+∈
+θ
+θ 3.1 Target Distributions via Perturbation-based Implicit Differentiation
+The efﬁcacy of the I-MLE estimator hinges on a proper choice of q, a hyperparameter of our framework. In this section we derive and motivate a class of general-purpose target distributions, rooted in perturbation-based implicit differentiation (PID): q(z; θ(cid:48)) = p(z; θ
+λ
+∇
+− z(cid:96)(fu(z), ˆy)) with z = MAP(θ + (cid:15)) and (cid:15)
+ρ((cid:15)),
+∼ (10) 4We expand on this in Appendix A where we also review the classic MLE setup [Murphy, 2012, Ch. 9]. 5This is known as the perceptron learning rule in standard MLE. 4
+∇
+∇
+µL = ∂µfu(µ)(cid:124) where θ = hv( ˆx), ( ˆx, ˆy) perturbation intensity.
+∈ D is a data point, and λ > 0 is a hyperparameter that controls the
+To motivate Eq. (10), consider the setting where the inputs to f are the marginals of p(z; θ) (rather than discrete perturb-and-MAP samples as in Eq. (8)), that is, y = fu(µ(θ)) with θ = hv( ˆx), and redeﬁne the training error L of Eq. (2) accordingly. A seminal result by Domke [2010] shows that, in this case, we can obtain
+θL by perturbation-based differentiation as:
+θL( ˆx, ˆy; ω) = lim
+λ→0 (cid:26) 1
+λ
+[µ(θ)
+µ (θ
+λ
+∇
+−
+− (cid:27)
+µL( ˆx, ˆy; ω))]
+, (11)
+∇
+∇ y(cid:96)(y, ˆy). The expression inside the limit may be interpreted as the where gradient of an implicit MLE objective (see Eq. (7)) between the distribution p with (current) parame-ters θ and p with parameters perturbed in the negative direction of the downstream gradient
+µL.
+Now, we can adapt (11) to our setting of Eq. (8) by resorting to the straight-through estimator (STE) assumption [Bengio et al., 2013]. Here, the STE assumption translates into reparameterizing z as a function of µ and approximating ∂µz zL and we approximate
+Eq. (11) as:
+µL = ∂µz(cid:124)
+I. Then,
+≈ ∇ zL
+∇
+∇
+∇
+≈
+θL( ˆx, ˆy; ω)
+∇ 1
+λ
+≈
+[µ(θ)
+µ (θ
+λ
+∇
+−
+− zL( ˆx, ˆy; ω))] = 1
+λ ∇
+θ (θ, θ
+L
+λ
+∇
+− zL( ˆx, ˆy; ω)), (12) for some λ > 0. From Eq. (12) we derive (10) by taking a single sample estimator of zL (with perturb-and-MAP sampling) and by incorporating the constant 1/λ into a global learning rate. I-MLE with PID target distributions may be seen as a way to generalize the STE to more complex zL to backpropagate directly, I-MLE uses them to distributions. Instead of using the gradients construct a target distribution q. With that, it deﬁnes an implicit maximum likelihood objective, whose gradient (estimator) propagates the supervisory signal upstream, critically, taking the constraints into account. When using Eq. (10) with ρ((cid:15)) = δ0((cid:15))6, the I-MLE estimator also recovers a recently proposed gradient estimation rule to differentiate through black-box combinatorial optimization problems [Poganˇci´c et al., 2019]. I-MLE uniﬁes existing gradient estimation rules in one framework.
+Algorithm 1 shows the pseudo-code of the algorithm implementing Eq. (9) for S = 1, using the PID target distribution of Eq. (10). The simplicity of the code also demonstrates that instances of I-MLE can easily be implemented as a layer.
+∇
+∇
+We will resume the discussion about target distributions in Section 4, where we analyze more closely the setup of Example 3. Next, we focus on the perturb-and-MAP strategies and derive a class of noise distributions that is particularly apt to the settings we consider in this work. 3.2 A Novel Family of Perturb-and-MAP Noise Distributions
+When p is a complex high-dimensional distribution, obtaining Monte Carlo estimates of the gradient in Eq. (7) requires approximate sampling. In this paper, we rely on perturbation-based sampling, also known as perturb and MAP [Papandreou and Yuille, 2011]. In this Section we propose a novel way to design tailored noise perturbations. While the proposed family of noise distributions works with
+I-MLE, the results of this section are of independent interest and can also be used in other (relaxed) perturb-and-MAP based gradient estimators [e.g. Paulus et al., 2020]. First, we start by revisiting a classic result by Papandreou and Yuille [2011] which theoretically motivates the perturb-and-MAP approach (also known as the Gumbel-max trick), which we generalize here to consider also the temperature parameter τ .
+Proposition 1. Let p(z; θ) be a discrete exponential family distribution with integer polytope temperature τ , and let z, θ (cid:104) z, ˜θ that, for all z
+= (cid:105) (cid:104) we have that Pr(MAP( ˜θ) = z) = p(z; θ). and
+. Moreover, let ˜θ be such
++ (cid:15)(z) with each (cid:15)(z) sampled i.i.d. from Gumbel(0, τ ). Then be the unnormalized weight of each z z, θ
+∈ C
+∈ C (cid:105) (cid:104)
+C (cid:105)
+,
+All proofs can be found in Appendix B. The proposition states that if we can perturb the weights with independent Gumbel(0, τ ) noise, then obtaining MAP states from the z, θ (cid:104) perturbed model is equivalent to sampling from p(z; θ) at temperature7 τ . For complex exponential of each z
+∈ C (cid:105) 6δ0 is the Dirac delta centered around 0 – this is equivalent to approximating the marginals with MAP. 7Note that the temperature here is different to the temperature of the Gumbel softmax trick [Jang et al., 2017] which scales both the sum of the logits and the samples from Gumbel(0, 1). 5
+z, θ (cid:104) for each state z is at least as expensive as computing distributions, perturbing the weights the marginals exactly. Hence, one usually resorts to local perturbations of each [θ]i (the i-th entry of the vector θ) with Gumbel noise. Fortunately, we can prove that, for a large class of distributions, it is
+N+, a Gumbel possible to design more suitable local perturbations. First, we show that, for any κ distribution can be written as a ﬁnite sum of κ i.i.d. (implicitly deﬁned) random variables.
+Lemma 1. Let X
+N+. Deﬁne the Sum-of-Gamma distribution as
+Gumbel(0, τ ) and let κ
+∈ C
+∈ (cid:105)
+∼
+∈ (cid:40) s (cid:88)
+{ i=1
+τ
+κ
+SoG(κ, τ, s) :=
+Gamma(1/κ, κ/i) (cid:41) log(s)
+,
+} − (13) where s
+SoG(κ, τ ) := lims→∞ SoG(κ, τ, s). Then we have that X
+∈
+N+ and Gamma(α, β) is the Gamma distribution with shape α and scale β, and let (cid:80)κ j=1 (cid:15)j, with (cid:15)j
+SoG(κ, τ ).
+∼
+∼ (cid:105) (cid:104) (cid:104)
+C
+∀
+∈
+=
+∼ has
+∈ C
+∈ C z, θ
+∈ C then z, θ (cid:104) z, ˜θ (cid:105)
+Based on Lemma 1, we can show that for exponential family distributions where every z exactly k non-zero entries we can design perturbations of
+Theorem 1. Let p(z; θ) be a discrete exponential family distribution with integer polytope temperature τ . Assume that if z z, 1 (cid:105) (cid:104) perturbation obtained by [ ˜θ]j = [θ]j + (cid:15)j with (cid:15)j have that
+SoG(k, τ ) from Eq. (13). Then,
+= k for some constant k
+∼
+Gumbel(0, τ ).
++ (cid:15)(z), with (cid:15)(z) and
+N+. Let ˜θ be the we z following a Gumbel distribution. (cid:105)
+Many problems such as k-subset selection, travel-ing salesman, spanning tree, and graph matching strictly satisfy the assumption of Theorem 1. We can, however, also apply the strategy in cases
+Z, 1 where the variance of is small (e.g. short-(cid:105) (cid:104) est weighted path). The Sum-of-Gamma pertur-bations provide a more ﬁne-grained approach to noise perturbations. For τ = κ = 1, we ob-tain the standard Gumbel perturbations. In con-trast to the standard Gumbel(0, 1) noise, the pro-posed local Sum-of-Gamma perturbations result in weights’ perturbations that follow the Gum-bel distribution. Fig. 2 shows histograms of 10k samples, where each sample is either the sum of 5 samples from Gumbel(0, 1) (the standard approach) or the sum of k = 5 samples from
+SoG(5, 1, 10) = 1 log(10)
+. While we still cannot sample faithfully 5
+} from p(z; θ) as the perturbations are not independent, we can counteract the problem of partially dependent perturbations by increasing the temperature τ and, therefore, the variance of the noise distribution. We explore and verify the importance of tuning τ empirically. In the appendix, we also show that the inﬁnite series from Lemma 1 can be well approximated by a ﬁnite sum using convergence results for the Euler-Mascheroni series [Mortici, 2010].
+Figure 2: Histograms for 10k samples where each sample is (left) the sum of 5 (cid:15)j ∼ Gumbel(0, 1) or (right) the sum of 5 (cid:15)j ∼ SoG(5, 1, 10).
+Gamma(1/5, 5/i) i=1{ (cid:80)10
+− 4 Target Distributions for Combinatorial Optimization Problems
+In this section, we explore the setting where the discrete computational component arises from a combinatorial optimization (CO) problem, speciﬁcally an integer linear program (ILP). Many authors have recently considered the setup where the CO component occupies the last layer of the model deﬁned by Eq. (1) (where fu is the identity) and the supervision is available in terms of examples of either optimal solutions [e.g. Poganˇci´c et al., 2019] or optimal cost coefﬁcients (conditioned on the inputs) [e.g. Elmachtoub and Grigas, 2020]. We have seen in Example 3 that we can naturally associate to each ILP a probability distribution (see Eq. (3)) with θ given by the negative cost coefﬁcients c of the ILP and 0 is equivalent to taking the MAP in the forward pass. Furthermore, in Section 3.1 we showed that the I-MLE framework subsumes a recently propose method by Poganˇci´c et al. [2019]. Here, instead, we show that, for a certain choice of the target distribution, I-MLE estimates the gradient of an explicit maximum likelihood learning loss where the data distribution is ascribed to either (examples of) optimal solutions or optimal cost coefﬁcients.
+Let q(z; θ(cid:48)) be the distribution p(z; θ(cid:48)), with parameters if [
+∇ otherwise. the integral polytope. Letting τ zL]i = 0
+[θ(cid:48)]i := zL]i (14)
+→
+L
+C (cid:26) [θ]i
+[
+−
+∇ 6
+N j=1 where ˆyj and the loss
+In the ﬁrst CO setting, we observe training data
+D (cid:96) measures a distance between a discrete ˆzj p(z; θj) with θj = hv( ˆx) and a given optimal solution of the ILP ˆyj. An example is the Hamming loss (cid:96)H [Poganˇci´c et al., 2019] deﬁned as (cid:96)H (z, y) = z
+Fact 1. If one uses (cid:96)H , then I-MLE with the target distribution of Eq. (14) and ρ((cid:15)) = δ0 is equivalent to the perceptron-rule estimator of the MLE objective between p(z; hv( ˆxj)) and ˆyj. denotes the Hadamard (or entry-wise) product. ( ˆxj, ˆyj)
+} z), where y) + y
+∈ C (1 (1
+=
+∼
+−
+−
+◦
+◦
+{
+◦
+It follows that the method by Poganˇci´c et al. [2019] returns, for a large enough λ, the maximum-likelihood gradients (scaled by 1/λ) approximated by the perceptron rule. The proofs are given in
+Appendix B.
+=
+N j=1, where ˆcj is the optimal cost
+In the second CO setting, we observe training data
+} conditioned on input ˆxj. Here, various authors [e.g. Elmachtoub and Grigas, 2020, Mandi et al., 2020, Mandi and Guns, 2020] use as point-wise loss the regret (cid:96)R(θ, c) = c(cid:62) (z(θ)
+ˆz∗(c)) where
+− 0, that is, a MAP state) and z(θ) is a state sampled from p(z; θ) (possibly with temperature τ
+ˆz∗(c)
+Fact 2. If one uses (cid:96)R then I-MLE with the target distribution of Eq. (14) is equivalent to the perturb-and-MAP estimator of the MLE objective between p(z; hv( ˆxj)) and p(z; z∗(c) is an optimal state for c. ( ˆxj, ˆcj)
+{
+ˆcj).
+→
+D
+∈
+−
+This last result also implies that when using the target distribution q from (14) in conjunction with the regret, I-MLE performs maximum-likelihood learning minimizing the KL divergence between the current distribution and the distribution whose parameters are the optimal cost.
+Moreover, both facts imply that, when sampling from the MAP states of the distribution q deﬁned by
+E ˆz∼p(z;θ) [(cid:96)(( ˆz, ˆy)],
+Eq. (14), we have that (cid:96)( ˆz, ˆy) = 0 for ˆz meaning that the inequality of Eq. (5) is satisﬁed for τ
+MAP(θ(cid:48)). Therefore, (cid:96)( ˆz, ˆy) = 0 0.
+≤
+∈
+→ 5

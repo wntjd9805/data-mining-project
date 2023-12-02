@@ -1,0 +1,468 @@
+Abstract
+In comparison to the interpretation of classiﬁcation models, the explanation of sequence generation models is also an important problem, however it has seen little attention. In this work, we study model-agnostic explanations of a representative text generation task – dialogue response generation. Dialog response generation is challenging with its open-ended sentences and multiple acceptable responses.
+To gain insights into the reasoning process of a generation model, we propose a new method, local explanation of response generation (LERG), that regards the explanations as the mutual interaction of segments in input and output sentences.
+LERG views the sequence prediction as uncertainty estimation of a human response and then creates explanations by perturbing the input and calculating the certainty change over the human response. We show that LERG adheres to desired properties of explanation for text generation, including unbiased approximation, consistency, and cause identiﬁcation. Empirically, our results show that our method consistently improves other widely used methods on proposed automatic- and human- evaluation metrics for this new task by 4.4-12.8%. Our analysis demonstrates that LERG can extract both explicit and implicit relations between input and output segments. 1 1
+
+Introduction
+As we use machine learning models in daily tasks, such as medical diagnostics [6, 19], speech assistants [31] etc., being able to trust the predictions being made has become increasingly important.
+To understand the underlying reasoning process of complex machine learning models a sub-ﬁeld of explainable artiﬁcial intelligence (XAI) [2, 17, 36] called local explanations, has seen promising results [35]. Local explanation methods [27, 39] often approximate an underlying black box model by ﬁtting an interpretable proxy, such as a linear model or tree, around the neighborhood of individual predictions. These methods have the advantage of being model-agnostic and locally interpretable.
+Traditionally, off-the-shelf local explanation frameworks, such as the Shapley value in game the-ory [38] and the learning-based Local Interpretable Model-agnostic Explanation (LIME) [35] have been shown to work well on classiﬁcation tasks with a small number of classes. In particular, there has been work on image classiﬁcation [35], sentiment analysis [8], and evidence selection for question an-swering [32]. However, to the best of our knowledge, there has been less work studying explanations over models with sequential output and large class sizes at each time step. An attempt by [1] aims at explaining machine translation by aligning the sentences in source and target languages. Nonetheless, unlike translation, where it is possible to ﬁnd almost all word alignments of the input and output sentences, many text generation tasks are not alignment-based. We further explore explanations over sequences that contain implicit and indirect relations between the input and output utterances. 1Our code is available at https://github.com/Pascalson/LERG. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+In this paper, we study explanations over a set of representative conditional text generation models – dialogue response generation models [45, 55]. These models typically aim to produce an engaging and informative [3, 24] response to an input message. The open-ended sentences and multiple acceptable responses in dialogues pose two major challenges: (1) an exponentially large output space and (2) the implicit relations between the input and output texts. For example, the open-ended prompt
+“How are you today?” could lead to multiple responses depending on the users’ emotion, situation, social skills, expressions, etc. A simple answer such as “Good. Thank you for asking.” does not have an explicit alignment to words in the input prompt. Even though this alignment does not exist, it is clear that “good” is the key response to “how are you”. To ﬁnd such crucial corresponding parts in a dialogue, we propose to extract explanations that can answer the question: “Which parts of the response are inﬂuenced the most by parts of the prompt?”
+To obtain such explanations, we introduce LERG, a novel yet simple method that extracts the sorted importance scores of every input-output segment pair from a dialogue response generation model.
+We view this sequence prediction as the uncertainty estimation of one human response and ﬁnd a linear proxy that simulates the certainty caused from one input segment to an output segment.
+We further derive two optimization variations of LERG. One is learning-based [35] and another is the derived optimal similar to Shapley value [38]. To theoretically verify LERG, we propose that an ideal explanation of text generation should adhere to three properties: unbiased approximation, intra-response consistency, and causal cause identiﬁcation. To the best of our knowledge, our work is the ﬁrst to explore explanation over dialog response generation while maintaining all three properties.
+To verify if the explanations are both faithful (the explanation is fully dependent on the model being explained) [2] and interpretable (the explanation is understandable by humans) [14], we conduct comprehensive automatic evaluations and user study. We evaluate the necessity and sufﬁciency of the extracted explanation to the generation model by evaluating the perplexity change of removing salient input segments (necessity) and evaluating the perplexity of only salient segments remaining (sufﬁciency). In our user study, we present annotators with only the most salient parts in an input and ask them to select the most appropriate response from a set of candidates. Empirically, our proposed method consistently outperforms baselines on both automatic metrics and human evaluation.
+Our key contributions are:
+• We propose a novel local explanation method for dialogue response generation (LERG).
+• We propose a uniﬁed formulation that generalizes local explanation methods towards se-quence generation and show that our method adheres to the desired properties for explaining conditional text generation.
+• We build a systematic framework to evaluate explanations of response generation including automatic metrics and user study. 2 Local Explanation
+Local explanation methods aim to explain predictions of an arbitrary model by interpreting the neighborhood of individual predictions [35]. It can be viewed as training a proxy that adds the contributions of input features to a model’s predictions [27]. More formally, given an example with input features x = x) (the classiﬁer is parameterized by θ), we denote the contribution from each input feature xi as
+RM . Two popular
+φi ∈ local explanation methods are the learning-based Local Interpretable Model-agnostic Explanations (LIME) [35] and the game theory-based Shapley value [38].
+M i=1, the corresponding prediction y with probability f (x) = Pθ(Y = y
+R and denote the concatenation of all contributions as φ = [φ1, ..., φM ]T xi}
+∈
+{
+|
+LIME interprets a complex classiﬁer f based on locally approximating a linear classiﬁer around a given prediction f (x). The optimization of the explanation model that LIME uses adheres to:
+ξ(x) = arg min
+ϕ
+[L(f, ϕ, πx) + Ω(ϕ)] , (1)
+D(x, ˜x)2/σ2) taking D(x, ˜x) as a distance where we sample a perturbed input ˜x from πx(˜x) = exp( function and σ as the width. Ω is the model complexity of the proxy ϕ. The objective of ξ(x) is to
+ﬁnd the simplest ϕ that can approximate the behavior of f around x. When using a linear classiﬁer
+− 2
+dialog input text
+G output input text positive dialog input text
+G output intent negative intent (a) Controllable dialogue models (b) Explanation of classiﬁer (c) Our concept
+Figure 1: The motivation of local explanation for dialogue response generation. (c) = (a)+(b).
+φ as the ϕ to minimize Ω(ϕ) [35], we can formulate the objective function as:
+φ = arg min
+φ
+E˜x
+∼
+πx (Pθ(Y = y
+˜x)
+|
+−
+φT z)2 , (2)
+M is a simpliﬁed feature vector of ˜x by a mapping function h such that z = where z 0, 1
+�
+∈ {
+}
+M h(x, ˜x) = (xi ∈ i=1. The optimization means to minimize the classiﬁcation error in the
+{ neighborhood of x sampled from πx. Therefore, using LIME, we can ﬁnd an interpretable linear model that approximates any complex classiﬁer’s behavior around an example x.
+˜x)
+}
+M i=1 as M independent players who cooperate to xi}
+Shapley value achieve a beneﬁt in a game [38]. The Shapley value computes how much each player xi contributes to the total received beneﬁt: takes the input features x =
+{
+ϕi(x) =
+˜x
+!( x
+|
+|
+|
+˜x
+| − |
+! x
+|
+| 1)!
+| − x
+�˜x
+\{
+⊆ xi}
+[Pθ(Y = y
+˜x
+|
+) xi}
+−
+∪ {
+Pθ(Y = y
+˜x)] .
+| (3)
+To reduce the computational cost, instead of computing all combinations, we can ﬁnd surrogates φi proportional to ϕi and rewrite the above equation as an expectation over x sampled from P (˜x): x
+|
+|
+| − 1 1)(| x
+|−
+˜x
+|
+| where P (˜x) = into argmin: (
+| x
+|−
+φi = | x
+ϕi = E˜x 1
+P (˜x)[Pθ(Y = y
+∼
+˜x
+|
+) xi}
+−
+∪ {
+Pθ(Y = y
+˜x)],
+| i ,
+∀ (4) is the perturb function.2 We can also transform the above formulation 1
+)
+φi = arg min
+φi
+E˜x
+∼
+P (˜x)([Pθ(Y = y
+˜x
+|
+) xi}
+−
+∪ {
+Pθ(Y = y
+˜x)]
+|
+−
+φi)2 . (5) 3 Local Explanation for Dialogue Response Generation
+We aim to explain a model’s response prediction to a dialogue history one at a time and call it the local explanation of dialogue response generation. We focus on the local explanation for a more
+ﬁne-grained understanding of the model’s behavior. 3.1 Task Deﬁnition
+As depicted in Figure 1, we draw inspiration from the notions of controllable dialogue generation models (Figure 1a) and local explanation in sentiment analysis (Figure 1b). The ﬁrst one uses a concept in predeﬁned classes as the relation between input text and the response; the latter ﬁnds the features that correspond to positive or negative sentiment. We propose to ﬁnd parts within the input and output texts that are related by an underlying intent (Figure 1c).
+We ﬁrst deﬁne the notations for dialogue response generation, which aims to predict a response y = y1y2...yN given an input message x = x1x2...xM . xi is the i-th token in sentence x with length M and yj is the j-th token in sentence y with length N . To solve this task, a typical sequence-to-sequence model f parameterized by θ produces a sequence of probability masses x, y<N )> [45]. The probability of y given x can then be com-<Pθ(y1| puted as the product of the sequence Pθ(y x, y1), ..., Pθ(yN | x), Pθ(y2| x, y<N ). 2
+P (˜x) = 1 x
+|− afﬁrms that the P (˜x) is a valid probability mass function.
+|−
+˜x
+|
+| xi} xi}
+\{
+\{ 1)
+⊆
+⊆
+˜x x
+˜x x (
+|
+�
+�
+� x)Pθ(y2| x) = Pθ(y1|
+|
+= 1 1/ x (
+|−
+| x 1
+| x, y1)...Pθ(yN |
+/ x x 1 1
+|
+|
+|−
+˜x
+|
+|
+˜x 1)
+|
+�
+|
+�
+�
+�
+�
+|−
+˜x
+|
+|
+= ( ( x x
+|
+|
+|−
+|− 1) 1) = 1. This
+� 3
+N where each column
+To explain the prediction, we then deﬁne a new explanation model Φ
+RM linearly approximates single sequential prediction at the j-th time step in text generation.
+Φj ∈
+To learn the optimal Φ, we sample perturbed inputs ˜x from a distribution centered on the original inputs x through a probability density function ˜x = π(x). Finally, we optimize Φ by ensuring u(ΦT g(˜x) whenever z is a simpliﬁed embedding of ˜x by a mapping function z = h(x, ˜x), where we deﬁne g as the gain function of the target generative model f , u as a transform function of
+Φ and z and L as the loss function. Note that z can be a vector or a matrix and g(
+) can return a scalar or a vector depending on the used method. Therefore, we unify the local explanations (LIME and Shapley value) under dialogue response generation as:
+RM
+), u( j z)
+≈
+∈
+×
+·
+·
+Deﬁnition 1: A Uniﬁed Formulation of Local Explanation for Dialogue Response Generation
+Φj = arg min
+Φj
+L(g(yj|
+˜x, y<j), u(ΦT j h(˜x))), for j = 1, 2, ..., N . (6)
+The proofs of uniﬁcation into Equation 6 can be found in Appendix A. However, direct adaptation of LIME and Shapley value to dialogue response generation fails to consider the complexity of text generation and the diversity of generated examples. We develop disciplines to alleviate these problems. 3.2 Proposed Method
+Our proposed method is designed to (1) address the exponential output space and diverse responses built within the dialogue response generation task and (2) compare the importance of segments within both input and output text.
+First, considering the exponential output space and diverse responses, recent work often generates responses using sampling, such as the dominant beam search with top-k sampling [11]. The generated response is therefore only a sample from the estimated probability mass distribution over the output space. Further, the samples drawn from the distribution will inherently have built-in errors that accumulate along generation steps [34]. To avoid these errors we instead explain the estimated probability of the ground truth human responses. In this way, we are considering that the dialogue response generation model is estimating the certainty to predict the human response by Pθ(y x).
+Meanwhile, given the nature of the collected dialogue dataset, we observe only one response per sentence, and thus the mapping is deterministic. We denote the data distribution by P and the probability of observing a response y given input x in the dataset by P (y x). Since the mapping of x and y is deterministic in the dataset, we assume P (y x) = 1.
+|
+|
+|
+Second, if we directly apply prior explanation methods of classiﬁers on sequential generative models, it turns into a One-vs-Rest classiﬁcation situation for every generation step. This can cause an unfair comparison among generation steps. For example, the impact from a perturbed input on yj could end x, y<j) was large. However, the impact up being the largest just because the absolute certainty Pθ(yj| from a perturbed input on each part in the output should be how much the certainty has changed after perturbation and how much the change is compared to other parts.
+Therefore we propose to ﬁnd explanation in an input-response pair (x, y) by comparing the inter-actions between segments in (x, y). To identify the most salient interaction pair (xi, yj) (the i-th segment in x and the j-th segment in y), we anticipate that a perturbation ˜x impacts the j-th part most in y if it causes
+D(Pθ(yj|
+˜x, y<j)
+Pθ(yj| x, y<j)) > D(Pθ(yj� |
+||
+˜x, y<j� )
+Pθ(yj� |
+|| x, y<j� )),
+∀ j�
+= j , (7) where D represents a distance function measuring the difference between two probability masses.
+After ﬁnding the different part xi in x and ˜x, we then deﬁne an existing salient interaction in (x, y) is (xi, yj).
+In this work, we replace the distance function D in Equation 7 with Kullback–Leibler divergence (DKL) [20]. However, since we reduce the complexity by considering Pθ(y x) as the certainty estimation of y, we are limited to obtaining only one point in the distribution. We transfer the equation by modeling the estimated joint probability by θ of x and y. We reconsider the joint distributions j) = Pθ(x, y) such that as Pθ(˜x, y j) = 1 with πinv being the inverse function j) = 1 and q(˜x, y) = Pθ,πinv (˜x, y
+≤
+˜x,y Pθ,πinv (˜x, y
+˜x,y Pθ(˜x, y j) =
+˜x,y q(˜x, y) = j) such that
+≤
+≤
+|
+˜x,y Pθ(x, y
+�
+≤
+≤
+�
+�
+� 4
+�
+of π. Therefore,
+D(Pθ(˜x, y j)
+||
+≤
+Pθ(x, y
+≤ j)) = DKL(Pθ(˜x, y j)
+||
+≤ q(˜x, y
+≤ j)) =
+Pθ(˜x, y j) log
+≤ yj �˜x
+�
+Pθ(˜x, y
+Pθ(x, y
+. j) j)
+≤
+≤ (8)
+Moreover, since we are estimating the certainty of a response y drawn from data distribution, we know that the random variables ˜x is independently drawn from the perturbation model π. Their independent conditional probabilities are P (y x). We approximate the multiplier
+Pθ(˜x, y j|
+Pθ(x, y x). The divergence can be simpliﬁed to x) = P (˜x
+| x) = 1 and π(˜x
+| x) = π(˜x
+D(Pθ(˜x, y
+P (˜x, y x)P (y x) log
+π(˜x j)) x) log
+= E˜x j) j)
+≈
+π(
+≤
+≤
+≤
+≤
+|
+.
+| (9)
+≤
+||
+≤
+≈
+|
+∼
+·|
+|
+Pθ(˜x, y
+Pθ(x, y j) j)
+≤
+Pθ(˜x, y
+Pθ(x, y j) j)
+≤ yj �˜x
+�
+= j, we estimate each value ΦT j z in the explanation model
+To meet the inequality for all j and j�
+�
+M
+Φ being proportional to the divergence term, where z = h(x, ˜x) = (xi ∈ i=1. It turns out to be re-estimating the distinct of the chosen segment yj by normalizing over its original predicted probability.
+˜x)
+{
+}
+ΦT j z
+E˜x
+∝ x xi}
+\{
+⊆
+D(Pθ(˜x, y j)
+||
+≤
+Pθ(x, y j))
+≤
+≈
+E˜x,˜x x xi}
+\{
+⊆ log
+Pθ(˜x, y
+Pθ(x, y
+. j) j)
+≤
+≤ (10)
+We propose two variations to optimize Φ following the uniﬁed formulation deﬁned in Equation 6.
+First, since logarithm is strictly increasing, so to get the same order of Φij, we can drop off the logarithmic term in Equation 10. After reducing the non-linear factor, we use mean square error as the loss function. With the gain function g = Pθ(˜x,y
+Pθ(x,y j ) j ) , the optimization equation becomes
+≤
+≤
+Φj = arg min
+Φj
+EP (˜x)(
+Pθ(˜x, y
+Pθ(x, y j) j) −
+ΦT j z)2, j .
+∀ (11)
+≤
+≤
+We call this variation as LERG_L in Algorithm 1, since this optimization is similar to LIME but differs by the gain function being a ratio.
+To derive the second variation, we suppose an optimized Φ exists and is denoted by Φ∗, we can write that for every ˜x and its correspondent z = h(x, ˜x), (12) (13)
+We can then ﬁnd the formal representation of Φ∗ij by
+Φ∗j z = log
+Pθ(˜x, y
+Pθ(x, y
+. j) j)
+≤
+≤
+Φ∗ij = Φ∗j 1
+Φ∗j 1i=0
+−
+= Φ∗j (z + ei)
+= E˜x
+= E˜x
+\{ xi} xi}
+−
+Φ∗j z,
+˜x
+∀
+[Φ∗j (z + ei)
+˜x
+[log Pθ(yj|
+∈ x x
+∈
+− xi} x
+\{
+Φ∗j z] xi}
+, y<j) and z = h(x, ˜x)
+∪ {
+We call this variation as LERG_S in Algorithm 1, since this optimization is similar to Shapley value but differs by the gain function being the difference of logarithm. To further reduce computations, we use Monte Carlo sampling with m examples as a sampling version of Shapley value [41].
+−
+\{
+∈ log Pθ(yj|
+˜x, y<j)] 3.3 Properties
+We propose that an explanation of dialogue response generation should adhere to three properties to prove itself faithful to the generative model and understandable to humans.
+Property 1: unbiased approximation To ensure the explanation model Φ explains the beneﬁts of picking the sentence y, the summation of all elements in Φ should approximate the difference between the certainty of y given x and without x (the language modeling of y).
+Φij ≈ log P (y) . log P (y (14) x)
+−
+| j
+� i
+� 5
+�
+Algorithm 1: LOCAL EXPLANATION OF RESPONSE GENERATION
+Input: input message x = x1x2...xM , ground-truth response y = y1y2...yN
+Input: a response generation model θ to be explained
+Input: a local explanation model parameterized by Φ
+// 1st variation – LERG_L for each iteration do
+˜x, y<j) sample a batch of ˜x perturbed from π(x)
+M map ˜x to z = 0, 1 1
+{
+} compute gold probability Pθ(yj| compute perturbed probability Pθ(yj| optimize Φ to minimize loss function
+˜x( Pθ(yj | j z)2
+ΦT
+Pθ(yj |
+// 2nd variation - LERG_S
+� for each i do
+˜x,y<j ) x,y<j ) − x, y<j)
+L =
+� j sample a batch of ˜x perturbed from π(x
+Φij = 1
+, y<j)
+˜x log Pθ(yj| m return Φij, for i, j
+�
+∀ xi}
+∪ {
+˜x xi}
+) log Pθ(yj|
+˜x, y<j), for j
+∀
+\{
+−
+Property 2: consistency To ensure the explanation model Φ consistently explains different genera-tion steps j, given a distance function if
+˜x, y<j), Pθ(yj|
+D(Pθ(yj| then Φij > Φij� .
+˜x xi}
+∪{
+, y<j)) > D(Pθ(yj� |
+˜x, y<j� ), Pθ(yj� |
+˜x xi}
+∪{
+, y<j� )), j�,
+˜x
+∀
+∀ x
+∈ (15)
+\{
+, xi}
+Property 3: cause identiﬁcation To ensure that the explanation model sorts different input features by their importance to the results, if
+˜x g(yj| xi}
+∪ {
+) > g(yj|
+˜x
+), x�i}
+∀
+˜x
+∈ x xi, x�i}
+,
+\{
+∪ { (16) then Φij > Φi�j
+We prove that our proposed method adheres to all three Properties in Appendix B. Meanwhile Shapley value follows Properties 2 and 3, while LIME follows Property 3 when an optimized solution exists.
+These properties also demonstrate that our method approximates the text generation process while sorting out the important segments in both the input and output texts. This could be the reason to serve as explanations to any sequential generative model. 4 Experiments
+Explanation is notoriously hard to evaluate even for digits and sentiment classiﬁcation which are generally more intuitive than explaining response generation. For digit classiﬁcation (MNIST), explanations often mark the key curves in ﬁgures that can identify digit numbers. For sentiment analysis, explanations often mark the positive and negative words in text. Unlike them, we focus on identifying the key parts in both input messages and their responses. Our move requires an explanation include the interactions of the input and output features.
+To evaluate the deﬁned explanation, we quantify the necessity and sufﬁciency of explanations towards a model’s uncertainty of a response. We evaluate these aspects by answering the following questions.
+• necessity: How is the model inﬂuenced after removing explanations?
+• sufﬁciency: How does the model perform when only the explanations are given?
+Furthermore, we conduct a user study to judge human understandings of the explanations to gauge how trustworthy the dialog agents are. 6
+(a) P P LCR. (a) P P LCR. (b) P P LA. (b) P P LA.
+Figure 2: The explanation results of a GPT model ﬁne-tuned on
+DailyDialog.
+Figure 3: The explanation re-sults of ﬁne-tuned DialoGPT. 4.1 Dataset, Models, Methods
+We evaluate our method over chit-chat dialogues for their more complex and realistic conversations.
+We speciﬁcally select and study a popular conversational dataset called DailyDialog [25] because its dialogues are based on daily topics and have less uninformative responses.Due to the large variation of topics, open-ended nature of conversations and informative responses within this dataset, explaining dialogue response generation models trained on DailyDialog is challenging but accessible.3
+We ﬁne-tune a GPT-based language model [33, 47] and a DialoGPT [55] on DailyDialog by minimiz-ing the following loss function:
+L =
+− m
+� j
+� log Pθ(yj| x, y<j) , (17) where θ is the model’s parameter. We train until the loss converges on both models and achieve fairly low test perplexities compared to [25]: 12.35 and 11.83 respectively. The low perplexities demonstrate that the models are more likely to be rationale and therefore, evaluating explanations over these models will be more meaningful and interpretable.
+We compare our explanations LERG_L and LERG_S with attention [46], gradient [43], LIME [35] and Shapley value [42]. We use sample mean for Shapley value to avoid massive computations (Shapley for short), and drop the weights in Shapley value (Shapley-w for short) due to the intuition that not all permutations should exist in natural language [12, 21]. Our comparison is fair since all methods requiring permutation samples utilize the same amount of samples.4 4.2 Necessity: How is the model inﬂuenced after removing explanations?
+Assessing the correctness of estimated important feature relevance requires labeled features for each model and example pair, which is rarely accessible. Inspired by [2, 4] who removes the estimated salient features and observe how the performance changes, we introduce the notion necessity that extends their idea. We quantify the necessity of the estimated salient input features to the uncertainty estimation of response generation by perplexity change of removal (P P LCR), deﬁned as:
+P P LCR := exp 1 m [
+− j log Pθ(yj | xR,y<j )+ j log Pθ(yj | x,y<j )] , (18)
+� where xR is the remaining sequence after removing top-k% salient input features.
+� 3We include our experiments on personalized dialogues and abstractive summarization in Appendix E 4More experiment details are in Appendix C 7
+As shown in Figure 2a and Figure 3a5, removing larger number of input features consistently causes the monotonically increasing P P LCR. Therefore, to reduce the factor that the P P LCR is caused by, the removal ratio, we compare all methods with an additional baseline that randomly removes features. LERG_S and LERG_L both outperform their counterparts Shapley-w and LIME by 12.8% and 2.2% respectively. We further observe that Shapley-w outperforms the LERG_L. We hypothesize that this is because LERG_L and LIME do not reach an optimal state. 4.3 Sufﬁciency: How does the model perform when only the explanations are given?
+Even though necessity can test whether the selected features are crucial to the model’s prediction, it lacks to validate how possible the explanation itself can determine a response. A complete explanation is able to recover model’s prediction without the original input. We name this notion as sufﬁciency testing and formalize the idea as:
+P P LA := exp− 1 m j log Pθ(yj | xA,y<j ) ,
+� (19) where xA is the sequential concatenation of the top-k% salient input features.
+As shown in Figure 2b and Figure 3b, removing larger number of input features gets the P P LA closer to the perplexity of using all input features 12.35 and 11.83. We again adopt a random baseline to compare. LERG_S and LERG_L again outperform their counterparts Shapley-w and LIME by 5.1% and 3.4% respectively. Furthermore, we found that LERG_S is able to go lower than the original 12.35 and 11.83 perplexities. This result indicates that LERG_S is able to identify the most relevant features while avoiding features that cause more uncertainty during prediction. 4.4 User Study
+To ensure the explanation is easy-to-understand by non machine learning experts and gives users insights into the model, we resort to user study to answer the question: “If an explanation can be understood by users to respond?”
+Acc
+Method 36.15
+Random
+Attention 34.75
+Gradient 42.52
+LIME 46.37
+LERG_L 47.97
+Shapley-w 53.65
+LERG_S 56.03
+Conf 3.00 2.81 2.97 3.26 3.24 3.20 3.35
+We ask human judges to compare explanation methods. Instead of asking judges to annotate their explanation for each dialogue, to increase their agreements we present only the explanations (Top 20% features) and ask them to choose from four response candidates, where one is the ground-truth, two are randomly sampled from other dialogues, and the last one is randomly sampled from other turns in the same dialogue. Therefore the questionnaire requires human to interpret the explanations but not guess a response that has word overlap with the explanation. The higher accuracy indicates the higher quality of explanations. To conduct more valid human evaluation, we randomly sample 200 conversations with sufﬁciently long input prompt (length cause ambiguities to annotators and make human evaluation less reliable.
+We employ three workers on Amazon Mechanical Turk [7] 6 for each method of each conversation, resulting in total 600 annotations. Besides the multiple choice questions, we also ask judges to claim their conﬁdences of their choices. The details can be seen in Appendix D. The results are listed in
+Table 1. We observe that LERG_L performs slightly better than LIME in accuracy while maintaining similar annotator’s conﬁdence. LERG_S signiﬁcantly outperforms Shapley-w in both accuracy and annotators’ conﬁdence. Moreover, these results indicates that when presenting users with only 20% of the tokens they are able to achieve 56% accuracy while a random selection is around 25%.
+Table 1: Conﬁdence (1-5) with 1 denotes not conﬁdent and 5 denotes highly conﬁdent. 10). This way it ﬁlters out possibly non-explainable dialogues that can
+≥ 8
+(a) Implication: ﬁnd the "hot potato" might indicate "gasoline". (b) Sociability: ﬁnd "No" for the
+"question mark" and "thanks" for the "would like", the polite way to say "want". (c) Error analysis: related but not the best
+Figure 4: Two major categories of local explanation except word alignment and one typical error.
+The horizontal text is the input prompt and the vertical text is the response. 4.5 Qualitative Analysis
+We further analyzed the extracted explanation for each dialogue. We found that these ﬁne-grained level explanations can be split into three major categories: implication / meaning, sociability, and one-to-one word mapping. As shown in Figure 4a, the “hot potato” in response implies the phenomenon of “reduce the price of gasoline”. On the other hand, Figure 4b demonstrates that a response with sociability can sense the politeness and responds with “thanks”. We ignore word-to-word mapping here since it is intuitive and can already be successfully detected by attention models. Figure 4c shows a typical error that our explanation methods can produce. As depicted, the word “carry” is related to “bags”,“suitcases”, and “luggage”. Nonetheless a complete explanation should cluster “carry-on luggages”. The error of explanations can result from (1) the target model or (2) the explanation method. When taking the ﬁrst view, in future work, we might use explanations as an evaluation method for dialogue generation models where the correct evaluation metrics are still in debates.
+When taking the second view, we need to understand that these methods are trying to explain the model and are not absolutely correct. Hence, we should carefully analyze the explanations and use them as reference and should not fully rely on them. 5

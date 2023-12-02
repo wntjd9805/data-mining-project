@@ -1,0 +1,219 @@
+Abstract
+The importance of aggregated count data, which is calculated from the data of multiple individuals, continues to increase. Collective Graphical Model (CGM) is a probabilistic approach to the analysis of aggregated data. One of the most important operations in CGM is maximum a posteriori (MAP) inference of unob-served variables under given observations. Because the MAP inference problem for general CGMs has been shown to be NP-hard, an approach that solves an approximate problem has been proposed. However, this approach has two major drawbacks. First, the quality of the solution deteriorates when the values in the count tables are small, because the approximation becomes inaccurate. Second, since continuous relaxation is applied, the integrality constraints of the output are violated. To resolve these problems, this paper proposes a new method for MAP inference for CGMs on path graphs. Our method is based on the Difference of
+Convex Algorithm (DCA), which is a general methodology to minimize a function represented as the sum of a convex function and a concave function. In our algo-rithm, important subroutines in DCA can be efficiently calculated by minimum convex cost flow algorithms. Experiments show that the proposed method outputs higher quality solutions than the conventional approach. 1
+
+Introduction
+In recent years, the importance of aggregated count data, which is calculated from the data of multiple individuals, has been increasing [21, 27]. Although technologies for acquiring individual data such as sensors and GPS have greatly advanced, it is still very difficult to handle individual data due to privacy concerns and the difficulty of tracking individuals. However, there are many situations where data aggregated from multiple individuals can be obtained and utilized easily. For example, Mobile
+Spatial Statistics [22], which is the hourly population data of fixed-size square grids calculated from 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+cell phone network data in Japan, are available for purchase; such data is being used for disaster prevention and urban planning [20]. In traffic networks, traffic volume data at each point can be obtained more easily by sensors or cameras than the trajectories of individual cars, and the data is useful for managing traffic congestion [9, 26].
+Collective Graphical Model (CGM) [17] is a probabilistic model to describe aggregated statistics of a sample drawn from a graphical model. CGM makes it possible to conduct various practical tasks on aggregated count data, such as estimating movements from population snapshots, parameter learning of the underlying graphical model, and interpolation and denoising of count tables. Particularly, the case where the underlying graph is a path graph is important because CGMs on path graphs can treat time series data in which the states of interest follow Markov chains. In fact, most of the real-world applications of CGMs utilize CGMs on path graphs to represent the collective movement of humans and animals [2, 4, 19]. Detailed analyses of time series of collective people movements from limited observations would be useful for controlling people flow to avoid congestion and to maintain social distancing in urban spaces.
+One of the most important operations in CGM is maximum a posteriori (MAP) inference. MAP inference is the discrete (combinatorial) optimization problem of finding an assignment of unobserved variables that maximizes the posterior probability under given observations. MAP inference makes it possible to interpolate missing values of aggregated data and to estimate more detailed information that lies behind the observations. Unfortunately, MAP inference for general CGMs has been shown to be NP-hard [16] and thus is difficult to solve exactly and efficiently. Therefore, an alternative approach that solves an approximate problem, which is derived by applying Stirling’s approximation and continuous relaxation, has been proposed [16]. Subsequent studies have focused on solving this approximate problem efficiently [12, 18, 19, 23].
+However, there are inherent problems with this approach of solving the approximate problem. First, this approach tends to output a solution with a low posterior probability when the values in the count tables are small, because Stirling’s approximation, log x! ≈ x log x − x, is inaccurate when x is small. Such a situation frequently occurs when the number of values that each variable in the graphical model takes is large, or when the sample size is small. Second, since continuous relaxation is applied, the integrality constraints of count table values are violated in the output. As a result, values that should be integers (e.g., the number of people) are no longer integers, which not only reduces interpretability, but also makes the output less sparse, resulting in high memory consumption to maintain the output. It is possible to obtain integer-valued results by rounding the output, but this rounding process destroys the sum constraints among the estimated counts, e.g., the sum of the count table values at each node may not match the sample size.
+To resolve these issues, in this paper, we propose a new method for MAP inference for CGMs on path graphs. We first show that the objective function of the problem can be expressed as the sum of univariate discrete convex functions and discrete concave functions. Based on this expression, we utilize the idea of the Difference of Convex Algorithm (DCA) [6]. DCA is a framework to minimize a function expressed as the sum of a convex function and a concave function. In DCA, a solution is obtained by repeatedly minimizing a surrogate function that upper-bounds the objective function, and the objective function value decreases monotonically in each iteration. In addition, the algorithm terminates in a finite number of iterations in our case since the variables are discrete not continuous.
+The key to make the DCA-based algorithm efficient is a fast minimization algorithm for the surrogate function. Because the feasible region of our problem is limited to integer lattice points, continuous optimization methods such as the gradient descent, which are usually used in DCAs, cannot be applied to minimize our surrogate function. Instead, we utilize the special structure of path graphs; it enables us to formulate the minimization problem of the surrogate function as a combinatorial optimization problem called the minimum convex cost flow problem. Fast algorithms for the minimum convex cost flow problem are known and we can minimize the surrogate function efficiently by using these algorithms.
+The proposed method has several practical advantages. First, since the proposed method does not use Stirling’s approximation, it offers an accurate inference even when the values in the count tables are small. This makes it possible to output solutions with much higher posterior probability than the approximation-based approach. Second, because the proposed method does not apply continuous relaxation, the obtained solution is guaranteed to be integer-valued, which results in sparse and interpretable outputs. In Section 5, we show results gained from synthetic and real-world datasets; 2
+they indicate that the proposed method outputs higher quality solutions than the existing approach.
+We show that the superiority of the proposed method is much greater when the sample size is not very large or the number of states on nodes in the graphical model is large. 2 Collective Graphical Models (CGMs)
+Collective Graphical Model (CGM) is a probabilistic generative model that describes the distributions of aggregated statistics of a sample drawn from a certain graphical model [17]. Let G = (V, E) be an undirected tree graph (i.e., a connected graph with no cycles). We consider a pairwise graphical model (cid:81) over discrete random variable X := (Xu)u∈V defined by Pr(X = x) = 1 (u,v)∈E ϕuv(xu, xv),
+Z where ϕuv(xu, xv) is a local potential function on edge (u, v) and Z := (cid:80) (cid:81) (u,v)∈E ϕuv(xu, xv) is the partition function for normalization. In this paper, we assume that xu takes values on the set
+[R] for all u ∈ V , where [k] denotes the set {1, 2, . . . , k} for a positive integer k. x u = i}| and nuv(i, j) := |{m | X (m)
+We draw an ordered sample (X (1), . . . , X (M )) independently from the graphical model, where M is the sample size. Let nu := (nu(i))i∈[R] and nuv := (nuv(i, j))i,j∈[R], where nu(i) := |{m |
+X (m) u = i, X (m) v = j}|. Each entry of nu and nuv is the number of occurrences of a particular variable setting. We call (nu)u∈V node contingency table and (nuv)(u,v)∈E edge contingency table, and denote n := ((nu)u∈V , (nuv)(u,v)∈E). We assume that observations y := (yu)u∈V are generated by adding noise to the node contingency table (nu)u∈V , and the distribution of y is given by Pr(y|n) = (cid:81) i∈[R] pui(yu(i)|nu(i)), where pui is the noise distribution. An additional assumption is described below.
+Assumption 1. For u ∈ V and i ∈ [R], log pui(y|n) is a concave function in n. u∈V (cid:81)
+Assumption 1 is a quite common assumption in CGM studies [16, 19]. Commonly used noise (cid:1) and distributions such as Gaussian distribution pui(yu(i)|nu(i)) =
+Poisson distribution pui(yu(i)|nu(i)) = nu(i)yu(i)/yu(i)! · exp(−nu(i)) satisfy Assumption 1.
+The MAP inference problem for CGM is to find n that maximizes the posterior probability Pr(n|y).
+Since Pr(n|y) = Pr(n, y)/ Pr(y) from Bayes’ rule, it suffices to maximize the joint probability
+Pr(n, y) = Pr(n) · Pr(y|n). Pr(n) is called CGM distribution and calculated as follows [19]: 2πσ2 exp (cid:0) −(yu(i)−nu(i))2 1√ 2σ2 (cid:81) u∈V
+F (n) :=
+Pr(n) = F (n) · I(n ∈ LZ
+M ), (cid:81) i∈[R] (nu(i)!)νu−1 (cid:81) i,j∈[R] nuv(i, j)! (cid:12) (cid:12) M = (cid:80) (cid:12) nu(i) = (cid:80)
+M !
+ZM · (cid:110) n ∈ Z|V |R+|E|R2
+M := (u,v)∈E i∈[R]
+LZ (cid:81)
+≥0 (cid:89) (cid:89)
+· (u,v)∈E i,j∈[R]
+ϕuv(i, j)nuv(i,j), nu(i) (u ∈ V ), nuv(i, j) ((u, v) ∈ E, i ∈ [R]) (cid:111)
+. (1) (2) (3)
+Here, I(·) is the indicator function, νu is the degree of node u in G, and LZ contingency tables. Using the above notations, the MAP inference problem can be written as
+M is the set of possible j∈[R] min n∈LZ
+M
+− log F (n) − log Pr(y|n). (4) 3 CGMs on Path Graphs
+Hereafter, we focus on CGMs on path graphs, which is the main topic of this paper. Path graph Pn is an undirected graph whose vertex set is V = [N ] and edge set is E = {(t, t + 1) | t ∈ [N − 1]}. A graphical model (not CGM) on path graph is the most basic graphical model that represents a time series generated by a Markov model; that is, the current state depends only on the previous state.
+A CGM on a path graph represents the distribution of aggregated statistics when there are many individuals whose state transition is determined by a Markov model. In the rest of this paper, we use the notation nti := nt(i), ntij := nt,t+1(i, j), and ϕtij := ϕt,t+1(i, j) for simplicity. From (1)–(4), 3
+the MAP inference problem for CGMs on path graphs can be written as follows:
+N −1 (cid:88) (cid:88) ftij(ntij) +
+N −1 (cid:88) (cid:88) g(nti) +
+N (cid:88) (cid:88) t=1 i∈[R] hti(nti), i,j∈[R] t=2 nti = M (t ∈ [N ]), i∈[R] (cid:88) j∈[R] ntij = nt+1,j (t ∈ [N − 1], j ∈ [R]), ntij, nti ∈ Z≥0, min n s.t. t=1 (cid:88) i∈[R] (cid:88) i∈[R] ntij = nti (t ∈ [N − 1], i ∈ [R]), (5) where ftij(z) := log z! − z · log ϕtij, g(z) := − log z!, hti(z) := − log pti(yti|z). For the details of the derivation, please see Appendix. t 1
+N (cid:1) is determined by the graphical model p(x) = 1
+We give an example of a CGM on a path graph which models human mobility. Consider that a space is divided into R distinct areas and that M people are moving around in the space. The random variable X (m) represents the area to which person m belongs at time step t, and the time series
+X (m) = (cid:0)X (m)
+, . . . , X (m) t=1 ϕtxtxt+1. Here,
+ϕtij is the affinity between two areas i and j at time step t → t + 1. nti represents the number of people in area i at time step t, and ntij represents the number of people who moved from area i to j at time step t → t + 1. We have noisy observations yti for t ∈ [N ] and i ∈ [R], which are generated by adding noise to nti. The MAP inference problem we want to solve is to find the true number of people of each area at each time step, (nti)t∈[N ],i∈[R], and the true number of people moving between each two areas, (ntij)t∈[N −1],i,j∈[R], with the highest posterior probability given the observation (yti)t∈[N ],i∈[R]. (cid:81)N −1
+Z 4 Proposed Method 4.1 Application of DCA
+To solve problem (5), we propose utilizing the idea of the Difference of Convex Algorithm (DCA).
+Before describing our method, we review the core idea of DCA based on the description in [11].
+DCA is a general framework to solve the minimization problem minn∈D P(n) = Q(n) + R(n), where Q(n) is a convex function and R(n) is a concave function. DCA does this by using the following procedure to generate a feasible solution sequence n(1), . . . , n(s) that satisfies P(n(1)) ≥
+P(n(2)) ≥ · · · ≥ P(n(s)). First, we choose an arbitrary feasible solution n(1) ∈ D. When we already have the sequence n(1), . . . , n(s), we find a function ¯R(s)(n) that satisfies the following three conditions: (i) ¯R(s)(n(s)) = R(n(s)), (ii) ¯R(s)(n) ≥ R(n) (∀n ∈ D), (iii) ¯P (s)(n) :=
+Q(n)+ ¯R(s)(n) can be minimized efficiently on D. Because R(n) is concave, by setting ¯R(s)(n) =
+R(n(s)) + ∇R(n(s)) · (n − n(s)), which is a linear approximation of R(n) at n(s), conditions
+¯P (s)(n). (i)–(ii) hold. Using this function, we get a new feasible solution by n(s+1) = arg minn
+This can be done easily because condition (iii) holds. Then, because P(n(s+1)) ≤ ¯P (s)(n(s+1)) ≤
+¯P (s)(n(s)) = P(n(s)), we get P(n(1)) ≥ P(n(2)) ≥ · · · ≥ P(n(s)) ≥ P(n(s+1)) by induction.
+To apply the framework of DCA, the objective function must be expressed as the sum of convex and concave functions. The following proposition shows that our MAP inference problem in (5) has such a structure.
+Definition 1. A function f : Z≥0 → R ∪ {+∞} is called a discrete convex function when f (z + 2) + f (z) ≥ 2 · f (z + 1) for all z ∈ Z≥0. If −f is a discrete convex function, f is called a discrete concave function.
+Proposition 1. ftij is a discrete convex function. Under Assumption 1, hti is a discrete convex function. g is a discrete concave function. (cid:80)
+The proof is given in the Appendix. Hereafter, we set Q(n) = (cid:80)N −1 i,j∈[R] ftij(ntij) + t=1 (cid:80)N i∈[R] g(nti). Thanks to Proposition 1, we can ap-ply DCA to our problem. The following proposition provides a function ¯R(s)(n) that satisfies conditions (i) and (ii) required for DCA. i∈[R] hti(nti) and R(n) = (cid:80)N −1 (cid:80) (cid:80) t=1 t=2 4
+Figure 1: An example of the MCFP instance defined in Proposition 3 when N = 3 and R = 2.
+Proposition 2. Let ¯g(s) isfies − log(n(s) satisfies ¯R(s)(n(s)) = R(n(s)) and ¯R(s)(n) ≥ R(n). ti (z) := − log(n(s) ti ≤ − log n(s) ti + 1) ≤ α(s) ti
+· (z − n(s) ti !) + α(s) ti . Then, the function ¯R(s)(n) := (cid:80)N −1 ti ), where α(s) is a real number which sat-ti (nti) i∈[R] ¯g(s) (cid:80) t=2 ti
+Please see the Appendix for the proof. Intuitively, ¯g(s) ti is a tangent of g at nti. 4.2 Minimum Cost Flow Algorithm for the Subroutine
+The most important and difficult part to derive an efficient DCA-based algorithm is designing efficient algorithms for the problem minn∈D ¯P (s)(n) (condition (iii)). To achieve this, we show that minn∈D ¯P (s)(n) can be formulated as the Minimum Convex Cost Flow Problem (C-MCFP), which is the efficiently solvable subclass of the Minimum Cost Flow Problem (MCFP). The (non-linear)
+MCFP is a combinatorial optimization problem on a directed graph G = (V, E). Each node i ∈ V has a supply value bi ∈ Z, and each edge (i, j) ∈ E has a cost function cij : Z≥0 → R ∪ {+∞}. MCFP is the problem of finding a minimum cost flow on G that satisfies the supply constraints at all nodes.
+MCFP can be described as follows: min z∈Z|E|
+≥0 (cid:88) (i,j)∈E cij(zij) s.t. (cid:88) zij − (cid:88) zji = bi (i ∈ V). j:(i,j)∈E j:(j,i)∈E
+Note that z takes only integer values (i.e., z ∈ Z|E|). A subclass of MCFP in which all cost functions are discrete convex functions (see Definition 1) is called the C-MCFP; it is known to be efficiently solvable [1]. The following proposition shows that the subproblem minn∈D ¯P (s)(n) can be formulated as a C-MCFP.
+Proposition 3. Define the MCFP instance as follows:
+• the node set V is defined by V := {o, d} ∪ (∪t∈[N ](Ut ∪ Wt)), where Ut := (ut,i)i∈[R], Wt := (wt,i)i∈[R],
+• the edge set E consists of four types of edges, – edges (o, u1,i, 0) and (wN,i, d, 0) for i ∈ [R], – edges (ut,i, wt,i, hti(z)) for t = 1, N and i ∈ [R], – edges (ut,i, wt,i, ¯g(s) – edges (wt,i, ut+1,i, ftij(z)) for t ∈ [N − 1] and i, j ∈ [R], ti (z) + hti(z)) for t = 2, . . . , N − 1 and i ∈ [R], where (u, v, c(z)) represents a directed edge from node u to node v with cost function c(z),
+• the supply values (bi)i∈V are defined by bo = M , bd = −M , and bv = 0 for v ∈ V \ {o, d}.
+Let z∗ is an optimal solution of this MCFP instance, and define n∗ by n∗ z∗ wt,iut+1,j
+MCFP instance belongs to C-MCFP. tij :=
+. Then, n∗ is an optimal solution of the problem minn∈D ¯P (s)(n). Furthermore, the ti := z∗ and n∗ ut,iwt,i
+The proof is given in the Appendix. Figure 1 illustrates an example of the MCFP instance defined in
+Proposition 3. This MCFP can be interpreted as the problem of finding a way to push M flows from node o to node d with minimum cost. The above proposition enables us to solve the subproblem minn∈D ¯P (s)(n) efficiently by applying existing algorithms for C-MCFP. 5
+4.3 Overall View of the Proposed Method and Time Complexity Analysis
+From the above arguments, we can construct an efficient optimization algorithm, described in Al-gorithm 1, for the MAP inference problem (5).
+The algorithm is guaranteed to terminate after a finite number of iterations because P(n(s)) mono-tonically decreases and D is a finite set.
+Algorithm 1 DCA for problem (5) 1: n(1) ← 0 2: for s = 1, 2, . . . do 3: 4: 5:
+We analyze the time complexity of one iteration of the proposed method (Lines 3–5 in Algorithm 1).
+The computational bottleneck is solving C-MCFP in Line 3. There are several algorithms to solve
+C-MCFP and time complexity varies depending on which one is adopted. In this paper, we consider two typical methods, the Successive Shortest Path algorithm (SSP) and the Capacity Scaling algorithm (CS) [1]. return n(s) n(s+1) ← (n∗ defined in Proposition 3) if P(n(s)) = P(n(s+1)) then
+SSP is an algorithm that successively augments unit flow along the shortest path from a supply node (i.e. bi > 0) to a demand node (i.e. bi < 0) in the residual graph, which is an auxiliary graph calculated from the current flow. Given a C-MCFP instance with graph G = (V, E), the shortest path in the residual graph can be computed in O(|E| log |V|) time by Dijkstra’s algorithm with a binary heap, and the augmentation of the flow can be done in O(|E|) time. The augmentation is performed
+B := ((cid:80) i∈V |bi|)/2 times totally, so the total time complexity is O(B|E| log |V|). CS resembles
+SSP, but it differs in that it tries to push a large amount of flow, rather than a unit amount of flow, in a single augmentation. In CS, the number of shortest path calculations and flow augmentations can be bounded O(|E| log U ) times, where U := maxi∈V |bi|, so the total computational complexity is
+O(|E|2 log |V| log U ).
+Because |V| = O(N R), |E| = O(N R2), B = O(M ) and U = O(M ) in our problem, the time com-plexity in one iteration is O(M N R2 log(N R)) when SSP is applied and O(N 2R4 log(N R) log M ) when CS is applied. This result implies that each method has its own advantages and disadvantages:
+SSP has small time complexity for N and R, while CS has small time complexity for M . This difference is confirmed empirically in Section 5.1. 5 Experiments
+We perform experiments to evaluate the effectiveness of the proposed method using synthetic and real-world instances. All experiments are conducted on a 64-bit macOS machine with Intel Core i7
+CPUs and 16 GB of RAM. All algorithms are implemented in C++ (gcc 9.1.0 with -O3 option). 5.1 Synthetic Instances
+Settings. We solve randomly generated synthetic instances of the MAP inference problem (5) and compare the attained objective values. We fix N to 5 and vary the values of R and M . The input observation yti is independently drawn from uniform distribution on the set of integers {1, 2, . . . , 2 ·
+R ⌋}. As the noise distribution, we use Gaussian distribution pti(yti|nti) ∝ exp (cid:0) − 0.01 · (yti −
+⌊ M nti)2(cid:1). We use two types of potential functions as follows. (1) uniform. ϕtij is independently drawn 1 from uniform distribution on the set of integers {1, 2, . . . , 10}. (2) distance. We set ϕtij =
+|i−j+1| .
+This potential models the movement of individuals in one-dimensional space: the state indices i and j represent coordinates in the space, and the closer the two points are, the more likely are movements between them to occur.
+Proposed Method. To construct surrogate functions in the proposed method, we can choose ti which satisfies the condition − log(n(s) arbitrary α(s) (see Proposition 2). To investigate the influence of the choice of α(s) ti : (1)
+α(s) ti ) + log(n(s) ti = − log(n(s) ti = − 1 ti + 1). We call them Proposed (L), Proposed (M), Proposed (R), respectively. ti ≤ − log n(s) ti + 1) ≤ α(s) ti , we try three strategies to decide α(s) ti + 1)), (3) α(s) ti = − log(n(s) ti ), (2) α(s) 2 (log(n(s) ti 6
+Table 1: Attained objective functions in synthetic instances. For each setting, we generated 10 instances and average values are shown. The smallest value is highlighted for each setting. U and D mean the “uniform” and “distance” potential settings, respectively.
+M
+R
+Proposed (L)
+U Proposed (M)
+Proposed (R)
+NLBP
+Proposed (L)
+D Proposed (M)
+Proposed (R)
+NLBP 10
+-9.97e+01
+-9.81e+01
+-9.64e+01
+-7.19e+01 3.35e-01 3.35e-01 3.35e-01 3.20e+01 101 20
+-8.90e+01
+-8.90e+01
+-8.76e+01
+-7.01e+01 5.00e-01 5.00e-01 5.00e-01 4.56e+01 30
+-8.74e+01
+-8.74e+01
+-8.74e+01
+-7.01e+01 5.00e-01 5.00e-01 5.00e-01 5.28e+01 10
+-1.11e+03
+-1.11e+03
+-1.11e+03
+-1.08e+03
+-5.48e+01
+-5.43e+01
+-5.39e+01
+-1.38e+01 102 20
+-1.19e+03
+-1.19e+03
+-1.18e+03
+-9.87e+02
+-3.03e+01
+-2.91e+01
+-2.89e+01 1.77e+02 30
+-1.22e+03
+-1.22e+03
+-1.21e+03
+-9.02e+02
+-1.18e+01
+-1.14e+01
+-1.06e+01 3.25e+02 10
+-1.07e+04
+-1.07e+04
+-1.07e+04
+-1.07e+04
+-5.83e+00
+-5.82e+00
+-5.80e+00 1.20e+00 103 20
+-1.31e+04
+-1.31e+04
+-1.31e+04
+-1.30e+04
+-9.06e+02
+-9.06e+02
+-9.06e+02
+-8.02e+02 30
+-1.40e+04
+-1.40e+04
+-1.40e+04
+-1.37e+04
+-1.01e+03
+-1.01e+03
+-1.01e+03
+-5.31e+02
+Compared Method. As the compared method, we use Non-Linear Belief Propagation (NLBP) [19], which is a message-passing style algorithm to the solve approximate MAP inference problem derived by applying Stirling’s approximation and continuous relaxation. Because the output of NLBP is not integer-valued and log(z!) is defined only if z is an integer, we cannot calculate the objective function of (5) directly. To address this, we calculate it by replacing the term log(z!) by linear interpolation of log(⌊z⌋!) and log(⌈z⌉!), which is given by (⌈z⌉ − z) · log(⌊z⌋!) + (z − ⌊z⌋) · log(⌈z⌉!). Note that although there are various algorithms to solve the approximate MAP inference problem (see Section 6.1), the objective function values attained by these algorithms are the same. This is because the approximate problem is a convex optimization problem [16].
+Comparison of attained objective values. The results are shown in Table 1. We generated 10 instances for each parameter setting and determined the average of attained objective function values. Because the objective function P(n) is equal to − log Pr(n|y) + const., P(n) takes both positive and negative values, and the difference of the objective function values is essential; when
+P(n1) − P(n2) = δ, Pr(n1|y) = exp(−δ) · Pr(n2|y) holds.
+All the proposed methods consistently have smaller objective function values than the compared method. The difference tends to be large when R is large and M is small. This would be because small values appear in the contingency table more frequently when R is large and M is small, and the effect of the inaccuracy of Stirling’s approximation becomes larger. Among the three proposed methods, there was not much difference in obtained objective function values although Proposed (L) was found to consistently achieve slightly smaller objective function values than others. This indicates that the proposed method is robust with respect to the choice of hyperparameters α(s) ti .
+Characteristics of the output solution. To compare the characteristics of solutions obtained by proposed (L) and NLBP, we solve an instance with R = 20, M = 102, and uniform potential by each method. Obtained edge contingency tables n1ij are shown in Figure 2 as heat maps. We also show the edge contingency table obtained by rounding the NLBP solution to integers. We observe that the proposed method outputs sparse solutions while the solutions by NLBP are blurred and contain a lot of non-zero elements. This difference is quantified by “sparsity”, which is calculated by 1.0− (# of non-zero (> 10−2) elements)/(# of elements): sparsity of the output of proposed (L) is 77%, while the sparsity of the output of NLBP is 0%. This is caused by its application of continuous relaxation and the inaccuracy of Stirling’s approximation around 0. In the solution of
+NLBP (rounded), many near-zero values are rounded to 0, and constraints of the problem (5) are totally violated; for example, the sum of the edge contingency table values does not match the sample size. In additional experiments, we observed that the outputs of the three methods become closer as
+M increases. For more details, please see the Appendix.
+Comparison of computation time. We compare the computation time of each algorithm. As explained in Section 4.3, we can choose an arbitrary C-MCFP algorithm as the subroutine in the proposed method and the time complexity varies depending on the choice. We compare proposed (L) with SSP, proposed (L) with CS, and NLBP.
+Figure 3 shows the relationship between input size and computation time, and Figure 4 shows the relationship between running time and objective function value. These results are consistent with the complexity analysis results in Section 4.3; SSP is efficient when R is large but becomes inefficient 7
+Figure 2: Comparison of solutions yielded by proposed method (L), NLBP, and NLBP (rounded).
+We solve an instance with R = 20, M = 102 and uniform potential. The obtained edge contingency table n1ij is presented as a matrix heatmap with the maximum value of color map 3.
+Table 2: Attained objective function values and NAEs for real-world instances. For each setting, we generated 10 instances and averages are shown. The smallest value is highlighted.
+M
+R
+Obj. Val.
+NAE
+Proposed (L)
+NLBP
+NLBP (rounded)
+Proposed (L)
+NLBP
+NLBP (rounded) 100 500 1000 56
+-3.02e+02 1.30e+03
+-0.690 1.38 0.877 208 2.97e+02 3.24e+03
+-0.441 1.544 0.870 56
+-6.61e+03
+-3.46+03
+-1.002 1.241 1.079 208
+-2.62e+03 6.93e+03
+-0.829 1.438 0.907 56
+-1.70e+04
+-1.34e+04
+-1.073 1.209 1.128 208
+-9.76e+03 4.70e+03
+-0.956 1.381 0.991 when M is large, and the converse is true for CS. The results also suggest that it is important to choose the algorithm depending on the size parameter of the input. The proposed method is not much worse than the existing method in terms of computation time by choosing an appropriate C-MCFP algorithm according to the size of the input. Appropriately chosen proposed methods attain the minimum of the existing method more quickly; proposed methods take a lot of time to achieve a smaller objective function value than the minimum of the existing method. 5.2 Real-world Instances
+We conduct experiments using real-world population datasets. The datasets are generated from 8694 car trajectories collected by a car navigation application in the Greater Tokyo area, Japan 1.
+We randomly sample M (M = 100, 500, 1000) trajectories from this data and create aggregated population data of each area at fixed time intervals. The areas are decided by dividing the targeted geospatial space into fixed-size grid cells. The grid size is set to 10km × 10km (R = 8 × 7 = 56) and 5km × 5km (R = 16 × 13 = 208), and time interval is 60 minutes (N = 24). As the noise distribution, we use Gaussian distribution pti(yti|nti) ∝ exp (cid:0)−(yti − nti)2(cid:1). We construct the potential ϕtij = exp (− dist(i, j)), where dist(i, j) is the Euclidean distance between the centers of cell i and cell j in the grid space. We create 10 instances by random sampling and averaged the attained objective function values for each setting. We also evaluate the estimation accuracy of the edge contingency table (ntij)t∈[N −1],i,j∈[R]. We use normalized absolute error (NAE) as the (cid:80) evaluation metric, which is defined as value and nest tij is the estimated value of the edge contingency table. In addition to Proposed (L) and
+NLBP, we also evaluate the estimation accuracy of NLBP (rounded), which is a method that rounds the output of NLBP to integer values. Note that we do not evaluate the objective function values of
+NLBP (rounded). This is because the output of NLBP (rounded) completely violates the constraints on summation in the MAP inference problem (5) and the objective function value cannot evaluate whether the optimization problem is successfully solved or not. is the true j∈[R] ntrue tij
+, where ntrue tij j∈[R]|ntrue (cid:80) tij| tij −nest i∈[R] (cid:80) t∈[N −1] t∈[N −1] i∈[R] (cid:80) (cid:80) (cid:80) 1We use the data collected by the smartphone car navigation application of NAVITIME JAPAN Co., Ltd. (http://corporate.navitime.co.jp/en/). The data are collected with consent and appropriately anonymized. 8
+Figure 3: The computation time of each algorithm. The values are averages of 10 synthetic instances when R is fixed to 20 (left) an M is fixed to 103 (right). N is set 5 and the uniform potential is used.
+Figure 4: The relationship between running time and objective function value. The left figure shows the result of an instance of R = 20, M = 104 and uniform potential, and right figure shows that of
+R = 30, M = 103 and uniform potential.
+Table 2 shows the results. We observe that Proposed (L) consistently attain smaller objective values and NAEs than the existing method. The superiority of the proposed method increase when R is large and M is small, and this is the same trend as the results with synthetic data. The NAE of NLBP is relatively large; this is due to the fact that small values are assigned to the elements of the output that should be 0, which is the same phenomenon seen in Figure 2. The NAE values are improved to some extent by rounding, but the proposed method is still superior. 6

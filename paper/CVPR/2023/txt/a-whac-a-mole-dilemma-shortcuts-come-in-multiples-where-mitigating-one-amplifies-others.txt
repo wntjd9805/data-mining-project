@@ -1,0 +1,485 @@
+Abstract
+Machine learning models have been found to learn shortcuts—unintended decision rules that are unable to generalize—undermining models’ reliability. Previous works address this problem under the tenuous assumption that only a single shortcut exists in the training data. Real-world im-ages are rife with multiple visual cues from background to texture. Key to advancing the reliability of vision systems is understanding whether existing methods can overcome multiple shortcuts or struggle in a Whac-A-Mole game, i.e., where mitigating one shortcut amplifies reliance on others.
+To address this shortcoming, we propose two benchmarks: 1) UrbanCars, a dataset with precisely controlled spuri-ous cues, and 2) ImageNet-W, an evaluation set based on
+ImageNet for watermark, a shortcut we discovered affects nearly every modern vision model. Along with texture and background, ImageNet-W allows us to study multiple short-cuts emerging from training on natural images. We find computer vision models, including large foundation models— regardless of training set, architecture, and supervision— struggle when multiple shortcuts are present. Even methods explicitly designed to combat shortcuts struggle in a Whac-A-Mole dilemma. To tackle this challenge, we propose Last
+Layer Ensemble, a simple-yet-effective method to mitigate multiple shortcuts without Whac-A-Mole behavior. Our re-sults surface multi-shortcut mitigation as an overlooked chal-lenge critical to advancing the reliability of vision systems.
+The datasets and code are released: https://github. com/facebookresearch/Whac-A-Mole. 1.
+
+Introduction
+Machine learning often achieves good average perfor-mance by exploiting unintended cues in the data [26]. For instance, when backgrounds are spuriously correlated with objects, image classifiers learn background as a rule for ob-ject recognition [93]. This phenomenon—called “shortcut learning”—at best suggests average metrics overstate model performance and at worst renders predictions unreliable as models are prone to costly mistakes on out-of-distribution (OOD) data where the shortcut is absent. For example,
+†Work done during the internship at Meta AI. ∗Equal Contribution.
+COVID diagnosis models degraded significantly when spuri-ous visual cues (e.g., hospital tags) were removed [17].
+Most existing works design and evaluate methods under the tenuous assumption that a single shortcut is present in the data [33,61,74]. For instance, Waterbirds [74], the most widely-used dataset, only benchmarks the mitigation of the background shortcut [7,15,59]. While this is a useful simpli-fied setting, real-world images contain multiple visual cues; models learn multiple shortcuts. From ImageNet [18,82] to facial attribute classification [51] and COVID-19 chest radiographs [17], multiple shortcuts are pervasive. Whether existing methods can overcome multiple shortcuts or strug-gle in a Whac-A-Mole game—where mitigating one shortcut amplifies others—remains a critical open question.
+We directly address this limitation by proposing two datasets to study multi-shortcut learning: UrbanCars and
+ImageNet-W. In UrbanCars (Fig. 1a), we precisely inject two spurious cues—background and co-occurring object. Ur-banCars allows us to conduct controlled experiments probing multi-shortcut learning in standard training as well as short-cut mitigation methods, including those requiring shortcut labels. In ImageNet-W (IN-W) (Fig. 1b), we surface a new watermark shortcut in the popular ImageNet dataset (IN-1k). By adding a transparent watermark to IN-1k validation set images, ImageNet-W, as a new test set, reveals vision models ranging from ResNet-50 [31] to large foundation models [10] universally rely on watermark as a spurious cue for the “carton” class (cf . cardboard box in Fig. 1b). When a watermark is added, ImageNet top-1 accuracy drops by 10.7% on average across models. Some, such as ResNet-50, suffer a catastrophic 26.7% drop (from 76.1% on IN-1k to 49.4% on IN-W) (Sec. 2.2)). Along with texture [27,34] and background [93] benchmarks, ImageNet-W allows us to study multiple shortcuts emerging in natural images.
+We find that across a range of supervised/self-supervised methods, network architectures, foundation models, and shortcut mitigation methods, vision models struggle when multiple shortcuts are present. Benchmarks on UrbanCars and multiple shortcuts in ImageNet (including ImageNet-W) reveal an overlooked challenge in the shortcut learning prob-lem: multi-shortcut mitigation resembles a Whac-A-Mole game, i.e., mitigating one shortcut amplifies reliance on oth-ers. Even methods specifically designed to combat shortcuts
+(a) We construct UrbanCars, a new dataset with multiple shortcuts, facilitating the study of multi-shortcut learning under the controlled setting.
+Figure 1. Our benchmark results on both datasets reveal the overlooked Whac-A-Mole dilemma in shortcut mitigation, i.e., mitigating one shortcut (b) We discover the new watermark shortcut emerged from a natural image dataset—
+ImageNet, and create ImageNet-W test set for ImageNet. amplifies the reliance on other shortcuts
+. decrease reliance on one shortcut at the expense of amplify-ing others (Sec. 5). To tackle this open challenge, we propose
+Last Layer Ensemble (LLE) as the first endeavor to mitigate multiple shortcuts jointly without Whac-A-Mole behavior.
+LLE uses data augmentation based on only the knowledge of the shortcut type without using shortcut labels—making it scalable to large-scale datasets.
+To summarize, our contributions are (1) We create Ur-banCars, a dataset with precisely injected spurious cues, to better benchmark multi-shortcut mitigation. (2) We curate
+ImageNet-W—a new out-of-distribution (OOD) variant of
+ImageNet benchmarking a pervasive watermark shortcut we discovered— to form a more comprehensive multi-shortcut evaluation suite for ImageNet. (3) Through extensive bench-marks on UrbanCars and ImageNet shortcuts (including
+ImageNet-W), we uncover that mitigating multiple short-cuts is an overlooked and universal challenge, resembling a Whac-A-Mole game, i.e., mitigating one shortcut ampli-fies reliance on others. (4) Finally, we propose Last Layer
+Ensemble as the first endeavor for multi-shortcut mitigation without the Whac-A-Mole behavior. We hope our contri-butions advance research into the overlooked challenge of mitigating multiple shortcuts. 2. New Datasets for Multi-Shortcut Mitigation
+While most previous datasets [4,60,61,74] are based on the oversimplified single-shortcut setting, we introduce the
+UrbanCars dataset (Sec. 2.1) and the ImageNet-Watermark dataset (Sec. 2.2) to benchmark multi-shortcut mitigation. 2.1. UrbanCars Dataset
+Overview We construct the UrbanCars dataset with mul-tiple shortcuts: background (BG) and co-occurring object (CoObj). As shown in Fig. 2, each image in UrbanCars has a car at the center on a natural scene background with a co-occurring object on the right. The task is to classify the car’s body type (i.e., target) by overcoming two shortcuts in the training set, which correlate with the target label.
+Formally, we denote the dataset as a set of N tuples,
+N i=1, where each image xi is annotated with (xi, yi, bi, ci)
+}
+{
+}
+}
+{
+∈ { y) and P (c = y urban, country urban, country
+{ three labels: target label yi for the car body type, background label bi, and co-occurring object label ci. We use a shared label space for all three labels with two classes: urban and country, i.e., yi, bi, ci
+. Based on the combination of three labels, the dataset is partitioned into 23 = 8 groups, i.e., car on the
+} urban, country urban, country
+BG with the
+{
+}
+CoObj. We introduce the data distribution and construction below and include details in Appendix A.1.
+Data Distribution
+The training set of UrbanCars has two spurious correlations of BG and CoObj shortcuts, whose strengths are quantified by P (b = y y), respectively. That is, the ratio of common BG (or CoObj) given a target class. We set both to 0.95 by following the correlation strength in [74]. We assume that two shortcuts are independently correlated with the target, i.e., P (b, c
+| y) = P (b y). As shown in Fig. 2, most urban car images have the urban background (e.g., alley) and urban co-occurring object (e.g., fire plug), and vice versa for country car images. The frequency of each group in the training set is in Fig. 2. The validation and testing sets are balanced without spurious correlations, i.e., ratios are 0.5.
+Data Construction
+The UrbanCars dataset is created from several source datasets. The car objects and labels are from Stanford Cars [50], where the urban cars are formed by classes such as sedan and hatchback. The country cars are from classes such as truck and van. The backgrounds are from Places [99]. We use classes such as alley and crosswalk y)P (c
+|
+|
+|
+|
+Figure 2. Unbalanced groups in UrbanCars’s training set based on two shortcuts: background (BG) and co-occurring object (CoObj).
+Figure 3. Many carton class images in the ImageNet training set contain the watermark. Saliency maps [78] of ResNet-50 [31] show that the watermark serves as the shortcut for the carton class. to form the urban background. The country background images are from classes such as forest road and field road.
+Regarding co-occurring objects, we use LVIS [29] to obtain the urban ones (e.g., fireplug and stop sign), and country ones (e.g., cow and horse). After obtaining the source images, we paste the car and co-occurring object onto the background.
+UrbanCars Metrics We first report the In Distribu-tion Accuracy (I.D. Acc) on UrbanCars. It computes the weighted average over accuracy per group, where weights are proportional to the training set’s correlation strength (i.e., frequency in Fig. 2) by following “average accuracy” [74] to measure the performance when no group shift happens.
+To measure robustness against the group shift, previous single-shortcut benchmarks [15,59,74] use worst-group ac-curacy [74], i.e., the lowest accuracy among all groups. How-ever, this metric does not capture multi-shortcut mitigation well since it only focuses on groups where both shortcut categories are uncommon (cf . the last column in Fig. 2).
+To address this shortcoming, we introduce three new met-rics: BG Gap, CoObj Gap, and BG+CoObj Gap. BG Gap is the accuracy drop from I.D. Acc to accuracy in groups where BG is uncommon but CoObj is common (cf . 1st yel-low column in Fig. 2). Similarly, CoObj Gap computes the accuracy drop from I.D. Acc to groups where only CoObj is uncommon (cf . 2nd yellow column in Fig. 2). BG+CoObj
+Gap computes accuracy drop from I.D. Acc to groups where both BG and CoObj are uncommon (cf . red column in Fig. 2).
+The first two metrics measure the robustness against the group shift for each shortcut, and the last metric evaluates the model’s robustness when both shortcuts are absent. 2.2. ImageNet-Watermark (ImageNet-W)
+In addition to the precisely controlled spurious corre-lations in UrbanCars, we study naturally occurring short-cuts in the most popular computer vision benchmark: Im-ageNet [18]. While ImageNet lacks shortcut labels, we can evaluate models’ reliance on texture [27] and back-ground [93] shortcuts. We additionally discovered a perva-sive watermark shortcut and contribute ImageNet-Watermark (ImageNet-W or IN-W), an evaluation set to expose models’ watermark shortcut reliance. Along with texture and back-ground, this forms a comprehensive suite to evaluate reliance on the multiple naturally occurring shortcuts in ImageNet.
+Watermark Shortcut in ImageNet
+In the training set of the carton class, many images contain a watermark at the center written in Chinese characters and ImageNet-trained
+ResNet-50 [31] focuses on the watermark region to predict
+Figure 4. Carton images from LAION [75,76], a large-scale dataset with 400 million to 2 billion images used in CLIP [67] pretraining, also contain watermarks, enabling CLIP’s reliance on the water-mark shortcut in zero-shot transfer to ImageNet and ImageNet-W. the carton class (Fig. 3). Since the watermark reads carton factory names or contact person’s names of a carton factory, we conjecture that this watermark shortcut originates from the real-world spurious correlation of web images. In the validation set, none of the carton class images contain the watermark, so ResNet-50 underperforms on the carton class (48%) relative to overall accuracy (76%) across 1k classes.
+Data Construction the robustness against
+To test the watermark shortcut, we create ImageNet-Watermark (ImageNet-W or IN-W) dataset, a new out-of-distribution evaluation set of ImageNet. As shown in Tab. 1, we overlay a transparent watermark written in “捷径捷径捷径” at the center of all images from ImageNet validation set to mimic the watermark pattern in IN-1k, where “捷径” means “short-cut” in Chinese. We do this because we find that models use the watermark even when the content is not identical to the watermark in the training set of carton images, sug-gesting that it is watermark’s presence rather than its content that serves as the shortcut. We evaluate watermark in other contents and languages in Appendix A.2.
+ImageNet-W Metrics We mainly use two metrics to mea-sure watermark shortcut reliance: (1) IN-W Gap is the ac-curacy on IN-W minus the accuracy on IN-1k validation set. A smaller accuracy drop indicates less reliance on the watermark shortcut across all 1000 classes. (2) Carton Gap is the carton class accuracy increase from IN-1k to IN-W. A smaller Carton Gap indicates less reliance on the watermark shortcut for predicting the carton class.
+|
+To demonstrate that the watermark shortcut is used for (1) predicting carton, we use the following in Tab. 1:
+P (ˆy = carton), the predicted probability of carton on all
+IN-1k validation set images, (2) ∆P (ˆy = carton), the pre-dicted probability increase from IN-1k to IN-W of all 1k y = carton), the predicted classes, and (3) ∆P (ˆy = carton probability increase from IN-1k to IN-W of the carton class.
+Ubiquitous reliance on the watermark shortcut
+To study reliance on the watermark shortcut, we use ImageNet-W to benchmark a broad range of State-of-The-Art (SoTA) vision models, including standard supervised training, using different architectures [22,31,68], augmentations and regu-larizations [27,36,94,95]. We also benchmark foundation models [10] pretrained on larger datasets [28,67,75,76,81] with different pretraining supervision and transfer learning techniques [13,28,30,67,81,91]. In Tab. 1, we find a consid-erable IN-W Gap of up to -26.7 and -10.7 on average and
+Prediction: goldfish w/ Watermark: carton w/ Watermark: pencil sharpener carton
+→
+↑ method architecture (pre)training data
+IN-1k Acc
+Supervised
+MoCov3 [13] (LP)
+Style Transfer [27]
+Mixup [95]
+CutMix [94]
+Cutout [20,98]
+AugMix [36]
+Supervised
+SEER [28] (FT)
+ResNet-50 [31]
+ResNet-50
+ResNet-50
+ResNet-50
+ResNet-50
+ResNet-50
+ResNet-50
+IN-1k [18]
+IN-1k
+SIN [27]
+IN-1k
+IN-1k
+IN-1k
+IN-1k
+RG-32gf
+RG-32gf [68]
+IN-1k
+IG-1B [28]
+Supervised
+Uniform Soup [91] (FT) ViT-B/32
+ViT-B/32
+Greedy Soup [91] (FT)
+ViT-B/32 [22]
+IN-1k
+WIT [67]
+WIT
+Supervised
+CLIP [67] (zero-shot)
+CLIP (zero-shot)
+MAE [30] (FT)
+SWAG [81] (LP)
+SWAG (FT)
+CLIP (zero-shot)
+ViT-L/16
+ViT-L/14
+ViT-L/14
+ViT-H/14
+ViT-H/14
+ViT-H/14
+ViT-H/14 average
+IN-1k
+WIT
+LAION-400M [76]
+IN-1k
+IG-3.6B [81]
+IG-3.6B
+LAION-2B [75] 76.1 74.6 60.1 76.1 78.5 77.0 77.5 80.8 83.3 75.9 79.9 81.0 79.6 76.5 72.7 86.9 85.7 88.5 77.9 78.6
+↑
+P (ˆy = carton) (%)
+IN-W Gap 0.07 0.08 0.10 0.07 0.09 0.08 0.09 0.09 0.09 0.09 0.09 0.09 0.08 0.06 0.05 0.08 0.09 0.09 0.06 0.08
+-26.7
+-20.7
+-17.3
+-18.6
+-14.8
+-18.0
+-16.8
+-14.1
+-6.5
+-8.7
+-7.9
+-6.5
+-6.2
+-4.4
+-4.9
+-3.5
+-4.9
+-3.1
+-3.6
+-10.7
+∆P (ˆy = carton) (%)
++7.56
++2.94
++4.91
++3.43
++1.92
++2.93
++2.61
++3.74
++0.56
++1.20
++0.32
++0.35
++0.82
++0.01
++0.03
++0.43
++0.19
++0.35
++0.03
++1.74
+↓
+↓
+Carton Gap
++40
++44
++52
++38
++22
++32
++36
++32
++18
++34
++24
++16
++34
++12
++12
++30
++8
++18
++16
++26.7
+↓
+∆P (ˆy = carton y = carton) (%)
+|
++42.46
++44.37
++50.06
++39.78
++29.61
++38.06
++34.44
++33.43
++24.26
++34.31
++23.87
++23.87
++32.57
++1.75
++13.76
++29.59
++12.80
++20.25
++12.01
++27.96
+Table 1. Models rely on the watermark as a shortcut for the carton class. LP and FT denote linear probing and fine-tuning on ImageNet-1k, respectively. Because models exhibit drops (i.e., IN-W Gap) and an increase in accuracy and predicted probability of the carton class from IN-1k to IN-W, we conclude that various vision models suffer from the watermark shortcut (more results in Appendices E.1 and E.2).
+| a Carton Gap of up to +52 and +26.7 on average. While all models exhibit uniform (1/1000 = 0.1%) predicted probabilities for carton class (P (ˆy = carton)) on IN-1k, we observe a considerable increase in the predicted proba-bility of carton on IN-W (∆P (ˆy = carton)) and a signifi-cant predicted probability increase in carton class images (∆P (ˆy = carton y = carton)). Although compared to su-pervised ResNet-50, some models with larger architectures or extra training data can decrease reliance on the water-mark shortcut, none of them fully close the performance gaps. Interestingly, CLIP with zero-shot transfer still suf-fers from the watermark shortcut with +12 to +16 Carton
+Gap, which could be explained by many carton images in the pretraining data (e.g., LAION) also containing watermarks (cf . Fig. 4). To the best of our knowledge, this is the first real-world example of the existence of shortcut in billion-scale datasets for foundation model pretraining, which also confirms findings that data quality, not quantity [25,62], matters most to CLIP’s robustness.
+Multi-Shortcut Mitigation Metrics on ImageNet
+To measure the mitigation of multiple shortcuts, we evaluate models on multiple OOD variants of ImageNet. In this work, we study three shortcuts on ImageNet—background, texture, and watermark. The background shortcut is evaluated on
+ImageNet-9 (IN-9) [93], and we use IN-9 Gap (i.e., BG-Gap in [93]) as the evaluation metric, which is the accuracy drop from Mixed-Same to Mixed-Rand in IN-9, where a lower ac-curacy drop implies less background shortcut reliance. The texture shortcut is evaluated on Stylized ImageNet (SIN) [27] and ImageNet-R (IN-R) [34], where we use SIN Gap, top-1 accuracy drop from IN-1k to SIN, and IN-R Gap, the top-1 accuracy drop from IN-200 (i.e., a subset of IN-1k with 200 classes used in IN-R) to IN-R. 3. Benchmark Methods and Settings
+On all datasets, we first evaluate standard training that minimizes the empirical risk on the training set (i.e.,
+ERM [85]) using ResNet-50 [31] as the network architec-ture, which serves as the baseline. On ImageNet, we addi-tionally show ERM’s results with other architectures, pre-training datasets, and supervision.
+In addition to ERM, we comprehensively evaluate short-cut mitigation methods across four categories based on the level of shortcut information required (Tab. 2).
+Category 1: Standard Augmentation and Regulariza-tion Methods in this category use general data augmenta-tion or regularization without prior knowledge of the short-cut, which are commonly used to improve accuracy on IN-1k, e.g., new training recipes [86,90]. Some works [11,65] show
+Category Summary
+Shortcut Information Methods 1 2 3 4
+Standard mentation
+Regularization
+Aug-and
+Targeted Augmen-tation for Mitigat-ing Shortcuts
+None
+Types of shortcuts (w/o shortcut labels)
+Mixup [95], Cutout [20,98],
+CutMix [94], AugMix [36],
+SD [64]
+CF+F Aug [11], Style Trans-fer (TXT Aug) [27], BG
+Aug [73,93], WMK Aug
+Using
+Labels
+Shortcut
+Image-level truth shortcut label ground-gDRO [74], DI
+SUBG [39], DFR [46]
+[89],
+Inferring Pseudo
+Shortcut Labels
+Image-level shortcut label pseudo
+[61],
+LfF
+EIIL [15], DebiAN [54]
+JTT
+[59],
+Table 2. Existing methods for multi-shortcut mitigation benchmark.
+that they can also improve OOD robustness.
+Category 2: Targeted Augmentation for Mitigating
+Shortcuts Other works use data augmentation that modifies shortcut cues. We evaluate CF+F Aug [11] on UrbanCars.
+On ImageNet, we benchmark texture augmentation (TXT
+Aug) via style transfer [27] and background augmentation (BG Aug) [73,93]. To counter the watermark shortcut, we design watermark augmentation (WTM Aug) that randomly overlays the watermark onto images (cf . Appendix B.1).
+Category 3: Using Shortcut Labels
+In this category, methods use shortcut labels for mitigation, which are gen-erally used to reweight [74] or resample training data [39, 46,74]. We only benchmark methods in this category on
+UrbanCars since ImageNet does not have shortcut labels.
+Category 4: Inferring Pseudo Shortcut Labels
+Follow-ing the ideas of methods using shortcut labels, one line of works [15,54,59,61] estimates the pseudo shortcut labels when ground-truth labels are unavailable.
+Benchmark Settings We introduce the experiment set-tings here (details in Appendix B.3). On UrbanCars, we use worst-group accuracy [74] on the validation set to select the early stopping epoch and report test set results. All methods except DFR [46] use end-to-end training on UrbanCars. On
+ImageNet, following the last layer re-training [46] setting, we only train the last classification layer upon a frozen fea-ture extractor. On both datasets, we use ResNet-50 as the network architecture. On ImageNet, we also benchmark self-supervised and foundation models. 4. Our Approach
+Motivation Our multi-shortcut benchmark results (Sec. 5) show that many existing methods suffer from the Whac-A-Mole problem, motivating us to design a method to mitigate multiple shortcuts simultaneously.
+We focus on mitigating multiple known shortcuts—the number and types of shortcuts are given, but shortcut labels are not. The absence of shortcut labels makes it scalable to large datasets (e.g., ImageNet). Although mitigating un-known numbers and types of shortcuts seems more desir-able, not only do our empirical results show their under-performance, but also it is theoretically impossible to miti-gate shortcuts without any inductive biases [58].
+We follow methods that use data augmentation to mod-ify the shortcut cues (i.e., category 2). Formally, given a
+K i=1 for mitigation, we create a set set of K shortcuts
+}
+K of augmentations Saug =
+, where the aug-i=1 ∪ {I}
+} i (e.g., style transfer [27]) modifies the visual mentation cue of the shortcut si (e.g., texture). denotes the identity transformation, i.e., no augmentation applied. i
+{A si
+{
+A
+I
+Based on the augmentation set Saug, a straightforward way is to minimize the empirical risk [85] over all augmented and original images. However, different augmentations can be incompatible, leading to suboptimal results. That is, aug-Figure 5. An overview of Last Layer Ensemble (LLE). LLE trains an ensemble of the last classification layers upon a feature extractor, where each last layer is trained with images in one augmentation type. The distributional shift classifier, supervised by the aug-mentation type, is trained to predict the distributional shift and dynamically aggregates the predictions per shift during testing.
+A i could be detrimental to mitigating a different mentation
+= j. For example, mitigating the texture shortcut sj, where i shortcut via style transfer [27] augmentation unexpectedly amplifies the saliency of the watermark (Fig. 1b), leading to worse watermark mitigation results (Tab. 1).
+|
+Last Layer Ensemble
+To address this issue, we propose
+Last Layer Ensemble (LLE), a new method for mitigating multiple shortcuts simultaneously (Fig. 5). Since it is hard to use a single model to learn the invariance among incom-patible augmentations, we instead train an ensemble [21] of classification layers (i.e., last layers) on top of a shared feature extractor so that each classification layer only trains on data from a single type of augmentation that simulates one type of distributional shift d. In this way, each last layer predicts the probability of the target P (ˆy d, x).
+|
+At the same time, we train a distributional shift classifier, another classification layer on top of the feature extractor, to predict the type of augmentation that simulates the distribu-tional shift, i.e., P ( ˆd x). During testing, LLE dynamically aggregates the logits from the ensemble of the last layers based on the predicted distributional shift. E.g., when the testing image contains the texture shift, the distributional shift classifier gives higher weights for the logits from the classifier trained with texture augmentation, alleviating the impact from other classification layers trained with incom-patible augmentations. In addition, when the weights of the feature extractor are not frozen, we stop the gradient from the distributional shift classifier to the feature extractor, preventing the feature extractor from learning the shortcut in-formation. Compared to standard ensemble approaches [21] that train multiple full networks and add significant infer-ence overhead, our method uses minimal additional training parameters and has better computational efficiency.
+̸
+shortcut reliance
+CoObj Gap
+↑
+I.D. Acc BG Gap
+ERM
+Mixup
+CutMix
+Cutout
+AugMix
+SD
+CF+F Aug
+LfF
+JTT (E=1)
+EIIL (E=1)
+JTT (E=2)
+EIIL (E=2)
+DebiAN
+LLE (ours) 97.6 98.3 96.6 97.8 98.2 97.3 96.8 97.2 95.9 95.5 94.6 95.5 98.0 96.7
+-15.3
+-12.6
+-45.0 (
+-15.8 (
+-10.3
+-15.0
+×
+×
+-16.0 (
+×
+-11.6
+-8.1
+-4.2
+-23.3 (
+-21.5 (
+-14.9
+×
+×
+-2.1
+↑ 2.94 1.03
+)
+)
+-11.2
+-9.3
+-4.8
+-10.4
+-12.1 (
+-3.6 1.04
+)
++0.4 1.52 1.40
+)
+)
+-18.4 (
+-13.3 (
+-24.7 (
+-5.3
+-6.8
+-10.5
+-2.7 1.08
+)
+× 1.64 1.18 2.21
+×
+×
+×
+)
+)
+)
+BG+CoObj Gap
+-69.2
+-61.8
+-86.5
+-71.4
+-70.2
+-36.1
+-19.4
+-63.2
+-40.1
+-44.9
+-52.1
+-49.6
+-69.0
+-5.9
+Table 3. Many methods not using shortcut labels (category 1,2,4) amplify shortcut on UrbanCars.
+: increased reliance on a shortcut relative to ERM. ×2.94: 2.94 times larger than ERM. 5. Experiments
+Based on UrbanCars and ImageNet-W datasets, we show results on multi-shortcut mitigation. We first study if stan-dard supervised training (i.e., ERM) relies on multiple short-cuts (Sec. 5.1). Next, we show the multi-shortcut setting is significantly challenging: mitigating one shortcut increases reliance on other shortcuts compared to ERM. We name this phenomenon Whac-A-Mole, which is observed in many
+SoTA methods, including mitigation methods (Sec. 5.2) and self-supervised/foundation models (Sec. 5.3). Finally, we show that our Last Layer Ensemble method can reduce re-liance across multiple shortcuts more effectively (Sec. 5.4). 5.1. Standard training relies on multiple shortcuts
+On both datasets, we find that standard training (i.e.,
+ERM [85]) relies on multiple shortcuts. On UrbanCars,
+Tab. 3 shows that ERM achieves near zero in-distributional error (97.6% I.D. Acc.). However, ERM’s performance drops when group shift happens. When the background shortcut is absent, ERM’s performance drops by 15.3% in
+BG Gap. Similarly, the accuracy drops by 11.2% in CoObj
+Gap when the CoObj shortcut is absent. When neither short-cut is present, models suffer catastrophic drops of 69.2% in BG+CoObj Gap. On ImageNet, Tab. 4 shows that ERM achieves good top-1 accuracy of 76.39% on IN-1k. However, it suffers considerable drops in accuracy when watermark, texture, or background cues are altered, e.g., 30% Carton
+Gap for watermark, 56-69% for texture, and 5.19% for back-ground, suggesting that standard training on natural images from ImageNet leads to reliance on multiple shortcuts. 5.2. Results: Mitigation Methods
+Results: Standard Augmentation and Regularization (Category 1) We first show the results of methods us-Watermark (WTM)
+Texture (TXT) shortcut reliance
+↑
+ERM
+Mixup
+CutMix
+Cutout
+AugMix
+SD
+WTM Aug
+TXT Aug
+BG Aug
+LfF
+JTT
+EIIL
+DebiAN
+IN-1k
+IN-W Gap 76.39
+-25.40
+↑ 76.17 75.90 76.40 76.23 76.39 76.32 75.94 76.03 76.35 76.33 71.55 76.33
+-24.87
+-25.78 (×1.01
+-25.11
+-23.41
+-26.03 (×1.02
+-5.78
+-25.93 (×1.02
+-25.01
+-26.19 (×1.03
+-26.40 (×1.04
+-33.48 (×1.31
+-26.40 (×1.04
+)
+)
+)
+)
+)
+)
+)
+Carton Gap
++30
++34 (×1.13
++32 (×1.06
++32 (×1.06
++38 (×1.26
++30
++14
++36 (×1.20
++36 (×1.20
++36 (×1.20
++32 (×1.06
++24
++36 (×1.20
+↓
+)
+)
+)
+)
+)
+)
+)
+)
+)
+LLE (ours) 76.25
+-6.18
++10
+↑
+SIN Gap
+-69.43
+-68.18
+-69.31
+-69.39
+-68.51
+-69.42
+-69.31
+-63.99
+-68.41
+-69.34
+-69.48
+-66.04
+-69.37
+-61.00
+↑
+IN-R Gap
+-56.22
+-55.79
+-56.36
+-55.93
+-54.91
+-56.36
+-56.22
+-53.24
+-54.51
+-56.02
+-56.30
+-61.35 (×1.09
+-56.29
+)

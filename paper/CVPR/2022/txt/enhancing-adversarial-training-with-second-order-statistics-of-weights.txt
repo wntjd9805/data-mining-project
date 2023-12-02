@@ -1,0 +1,309 @@
+Abstract
+Adversarial training has been shown to be one of the most effective approaches to improve the robustness of deep neural networks. It is formalized as a min-max optimiza-tion over model weights and adversarial perturbations, where the weights can be optimized through gradient de-scent methods like SGD. In this paper, we show that treat-ing model weights as random variables allows for enhanc-ing adversarial training through Second-Order Statistics
+Optimization (S2O) with respect to the weights. By re-laxing a common (but unrealistic) assumption of previous
+PAC-Bayesian frameworks that all weights are statistically independent, we derive an improved PAC-Bayesian adver-sarial generalization bound, which suggests that optimizing second-order statistics of weights can effectively tighten the bound. In addition to this theoretical insight, we conduct an extensive set of experiments, which show that S2O not only improves the robustness and generalization of the trained neural networks when used in isolation, but also integrates easily in state-of-the-art adversarial training techniques like TRADES, AWP, MART, and AVMixup, leading to a mea-surable improvement of these techniques. The code is avail-able at https://github.com/Alexkael/S2O. 1.
+
+Introduction
+It is well known that it is simple to fool convolutional neural networks – to whom we refer as neural networks in this paper – to make incorrect predictions with high confi-dence by adding human-imperceptible perturbations to their input [27, 50, 72, 80]. Among many different approaches
+[4, 44, 57, 75, 82] to detect or reduce such adversarial exam-ples, adversarial training [45, 57] is known to be the most effective [3].
+Adversarial training is formulated as a min-max opti-mization problem, where the inner maximization is to find
+*Corresponding author the worst-case adversarial perturbations for the training in-stances, while the outer minimization is to reduce the loss induced by these adversarial perturbations. While finding the optimal solution to this min-max optimization is chal-lenging, the current wisdom is to first decompose the min-max problem into a master minimization problem and a slave maximization problem, and to then solve them via alternating optimization. Both, the minimization and the maximization, are typically solved by utilizing the gradients of the loss function L. In particular, the master minimiza-tion updates the weights according to the gradient over the weight, i.e., ∇WL.
+This paper takes a drastically different view: we believe that adversarial training can benefit from also considering a second-order statistics over weight. Our study covers both theoretical and empirical perspectives.
+Our theoretical argument is obtained through updating the PAC-Bayesian framework [22, 48], which only deals with the model generalization in its original format, by con-sidering adversarial robustness and a second order statistics over weight. Under Bayesian regime, weights are random variables, and a model is a sample drawn from an a poste-riori distribution. Our update of the framework draws from two aspects as described in Sec. 3. First, by relaxing the un-reasonable assumption that all weights are statistically inde-pendent, we introduce a second-order statistics of weights, i.e., a weight correlation matrix (or normalized covariance matrix). Second, as in [25], we consider the adversarial ro-bustness in addition to the model generalization.
+This updated framework provides a theoretical indi-cation that we may control an adversarial generalization bound during training – and thus improve both robustness and generalization of the resulting model – by monitoring some norms (e.g., singular value, spectral norm, determi-nant) of the weight correlation matrix. To enable such a control, we need methods to estimate the weight correla-tion matrix and conduct training, respectively. As described in Sec. 4 we employ two methods for the former: one is
+Figure 1. Visualization of the (PGD-20) distributions of penultimate latent representations for each label through t-SNE with trained CNN models on Fashion-MNIST. (a) natural training; (b) adversarial training (PGD-10); and (c) adversarial training (PGD-10) with S2O. a sampling method and the other a Laplace approximation method inspired by [9, 61]. For the latter, we propose a novel Second-Order Statistics Optimization (S2O) method.
+To intuitively understand why S2O can improve the ro-bustness, Fig. 1 shows that adversarial training based on
+S2O (abbreviated AT+S2O) leads to a visually improved separation between points of different classes under PGD-20 attack -– a clear sign of increased robustness.
+Through extensive experiments and comparison with the strate-of-the-art in Sec. 5, we show that S2O can not only significantly improve the robustness and generalization of the trained models by itself, but also enhance the existing adversarial training techniques further. Notably, S2O can be used in a plug-and-play manner with other adversarial training techniques, including TRADES [85], MART [78],
+AWP [81], and AVMixup [41], four state-of-the-art adver-sarial training techniques that represent different directions of the effort to improve the min-max optimization scheme.
+Importantly, we note that the enhancement from S2O only leads to a marginal increase of the training time (Sec. 5.2).
+We remark that S2O is different from other second-order adversarial training methods: e.g., [43] proposes an adver-sarial regularization through approximating the loss func-tion as a second-order Taylor series expansion, [77] im-proves robustness via Hessian matrix of the input, and [68] studies adversarial attack through Hessian of the weight ma-trix (while we focus on the weight correlation matrix). It is also different from the “weight orthogonality” in [6,49,65]: while the weight correlation matrix is a statistical property of weight matrices treated as random variables, orthogonal-ity treats weight matrices as deterministic variables. 2. Preliminaries
+Basic Notation. Let S = {s1, ..., sm} be a training set with m samples drawn from the input distribution D. As an adversarial sample s′ is slightly different from a clean sam-ple s, we let S ′ and D′ be an adversarial set and distribution for a specific model, respectively, such that ||s′ − s|| ≤ ϵ (using by default the ℓ2-norm). We omit the label y of sam-ple s, as it is clear from the context. Let W, Wl be the weight matrix, the weight matrix of the l-th layer, respec-tively. The loss function L(·) and learning function fW(·) are parameterized over W. We consider fW(·) as the n-layer neural networks with h hidden units per layer and ac-tivation functions act(·). We can now express each fW(s) as fW(s) = Wnact(Wn−1...act(W1s)...). Note that we omit bias for convenience. At the l-th layer (l = 1, . . . , n), the latent representation before and after the activation func-tion is denoted as hl = Wlal−1 and al = actl(hl), respec-tively. We use ||Wl||2 to denote the spectral norm of Wl, defined as the largest singular value of Wl, and ||Wl||F , to denote the Frobenius norm of Wl. We denote the Kro-necker product by ⊗ and the Hadamard product by ⊙.
+Margin Loss. For any margin γ > 0, we define the expected margin loss as
+Lγ,D(fW) = Ps∼D (cid:104) fW(s)[y] ≤ γ + max j̸=y (cid:105) fW(s)[j]
+, and let Lγ,S (fW) be the empirical margin loss. Note that, setting γ = 0 corresponds to the normal theoretical classi-fication loss or empirical classification loss, which will be written as LD(fW) or LS (fW). 3. Adversarial Generalization Bound
+Adversarial training is supposed to improve the robust-ness against adversarial attacks not just on training samples, but also on unseen samples. Thus, the generalization per-formance of adversarial training (namely adversarial gener-alization, also known as robust generalization) may differ from that of non-adversarial natural training.
+For natural training, PAC-Bayes [22, 48] provides an up-per bound on the generalization error with respect to the
+Kullback-Leibler divergence (KL) between the posterior distribution Q and the prior distribution P of weights. Let fW be any predictor learned from the training data and parametrized by W. We consider the distribution Q in the form of fW+U over learned weights W, and denote by u = vec(U) (vectorization of U) the multivariate random variable whose distribution may also depend on the training data. Then, for any δ, γ > 0, the following bound holds for
+the margin loss of any fW with probability 1 − δ [53, 54],
+LD(fW) ≤ Lγ,S (fW) (cid:115)
++ 4
+KL(Qvec(W)+u||P ) + ln 6m
+δ m − 1
+. (1)
+In the above expression, the KL term is evaluated, for a fixed W, with respect to the only random variable u. That is, the distribution of vec(W) + u can be obtained from u with the mean shifted by vec(W) and the same covariance matrix (and therefore the same weight correlation matrix).
+Notably, such a bound is so general that the inequality holds for any potential prior P and posterior Q. Thus, spec-ifying particular priors and posteriors does not violate the bound but only affects the tightness. Furthermore, [48, 53] present a general framework to construct the posterior for a wide variety of models, including deterministic ones, to calculate the PAC-Bayesian bound.
+Given a learning setting, it is a common practice in the literature, e.g., [25, 53, 54], to assume that the prior P to be a spherical Gaussian N (0, σ2I), and that the random variable u also follows N (0, σ2I) (there is a slight dif-ference between [25] and [54], Appendix A). Under such assumption in the adversarial setting with attack methods (e.g., FGM [27], PGM [37], WRM [69]), by letting the clean input domain be norm-bounded as ||s|| ≤ B, ∀s ∈ D, where B > 0 is a constant perturbation budget, and for any
+γ, δ > 0, any u s.t. PU(maxs ||fW+U(s) − fW(s)|| <
+γ 4 ) ≥ 1 2 [25, 54], [25] gives the following margin-based
+PAC-Bayesian adversarial generalization bound,
+LD′(fW) ≤ Lγ,S ′(fW) (cid:32)(cid:115)
++ O (B + ϵ)2n2h ln(nh)Φadv + ln m
+δ
+γ2m (cid:33)
+, (2) where Φadv depends on the attack method (and we omit the coefficient for ln m
+δ in Eq. (2)). E.g., for an FGM attack, let
+κ ≤ ||∇s′′L(fW(s′′))|| hold for every s′′ ∈ {D ∪ D′} with constant κ > 0, we have
+Φadv = n (cid:89) l=1
+||Wl||2 2 (cid:110) 1 +
+ϵ
+κ n (cid:89) (
+||Wl||2) n (cid:88) l (cid:89)
+· l=1 j=1
+||Wj||2 l=1 (cid:111)2 n (cid:88) l=1 (3)
+||Wl||2
+F
+||Wl||2 2
+.
+Details of other Φadv are given in Appendix A, and a proof is given in [25]. Note that we simplify Eq. (3) to Φadv, because our new terms of second-order statistics of weights in our bound are unrelated with it. 3.1. Second-Order Statistics in Adversarial Bound
+The assumption of a spherical Gaussian distributed u has greatly simplified the theoretical derivation of the bound in [25, 53, 54]. Based on the same assumption, [25] devel-ops an adversarial PAC-Bayesian bound by considering the impact of attack methods. However, given the complexity of neural networks, this assumption is unrealistic.
+In this work, we relax this assumption by letting u be a non-spherical Gaussian with the correlation matrix R, where R ̸= I in general, and consider the impact of R on the above adversarial bound. Specifically, we assume the correlations of weights from the same layer are not 0, whereas those from different layers are 0. Therefore, we develop the adversarial bound with the consideration of second-order statistics of weights. Before turning to the the-oretical part, we first give the definition of R.
+Definition 3.1 Given the clean sample s and the adversar-ial sample s′, let us and us′ be Gaussian distributed ran-dom vectors with each element being identically distributed as N (0, σ2) but not independent one another. Then over the entire datasets S and S ′, uS ≜ Es(us) and uS ′ ≜ Es′(us′) obey multivariate Gaussian mixture distributions, respec-tively, with corresponding correlation matrices as follows:
+RS ≜ 1
+σ2
+RS ′ ≜ 1
+σ2
+Es[Eu(usu⊺ s )],
+⊺
+Es′[Eu(us′u s′)]. (4) (5)
+To get a more general adversarial bound, it is reasonable to consider that the true correlation matrix R under adver-sarial training is over both S and S ′, rather than only over
+S ′, as most adversarial training methods may utilize both clean data and adversarial data [16, 18, 24, 33, 41, 70, 78, 85– 87]. Therefore, we assume that the true u of an adversar-ial trained model is a combination of two random variables, u = quS + (1 − q)uS ′ and R = qRS + (1 − q)RS ′, where q ∈ [0, 1] is an unknown parameter (as we are not clear how much clean data or adversarial data affects the model).
+Denote by Rl,S and Rl,S ′ the weight correlation matri-ces of l-th layer for clean and adversarial datasets, respec-tively, following Definition 3.1. In the following, for nota-tional convenience, we let
+Λl,max = max (cid:0)λmax(Rl,S ), λmax(Rl,S ′)(cid:1),
+Λl,min = min (cid:0)λmin(Rl,S ), λmin(Rl,S ′)(cid:1), (6) where λmax(·) and λmin(·) are the largest and the smallest singular value of the matrix, respectively. Note that Rl,S and Rl,S ′ are symmetric positive semi-definite matrices, thus their eigenvalues and singular values coincide.
+Next, by relaxing the spherical Gaussian assumption in
+Eq. (2) to consider the non-spherical Gaussian distributed u with the correlation matrix R, we have the following lemma, as non-spherical Gaussian u makes an obvious dif-ference during the derivation of the KL term in Eq. (1) (Ap-pendix B).
+Lemma 3.2 Let the posteriori Q be over the predictors of the form fW+U, where u is a non-spherical Gaussian with the correlation matrix R. We can get (cid:32)(cid:18) − (cid:80) l ln det Rl + ln m
+δ
+LD′ (fW) ≤ Lγ,S′ (fW) + O
+γ2m
+Ψadv(cid:0) (cid:80) l
++ 1 2 (cid:0)c1||R′ l||
+γ2m 2 + c2||R′′ l || (cid:1)(cid:1)2 (cid:19) 1 2 1 2 2 (cid:33)
+, where c1, c2 > 0 are universal constants and l l Ul)/σ2
+Ψadv = (B + ϵ)2Φadv,
+⊺
+R′ l = E(U
+= (Ih×h ⊗ 11×h)(cid:0)Rl ⊙ (1h×h ⊗ Ih×h)(cid:1)(Ih×h ⊗ 11×h)
+R′′ l = E(UlU
+= (Ih×h ⊗ 11×h)(cid:0)Rl ⊙ (Ih×h ⊗ 1h×h)(cid:1)(Ih×h ⊗ 11×h) l )/σ2
+⊺ l
+⊺
+,
+⊺
+.
+We defer the proof to Appendix B. As mentioned in Def. 3.1, Rl is a combination of Rl,S and Rl,S ′ with an un-known coefficient q. We can use the following two lemmas to refine the bound in Lem. 3.2 through the terms of Rl,S and Rl,S ′.
+Lemma 3.3 ||R′ l,max and Λ′′
+Λ′ l|| l,max, i.e., 1 2 2 and ||R′′ l || 1 2 2 can be upper bounded by 1 2 1 2
+||R′ 2 ≤ Λ′ l|| l,max = max (cid:0)||R′
+Λ′ l,max = max (cid:0)||R′′
+Λ′′ l,max, ||R′′ 2 ≤ Λ′′ l || 2 , ||R′ 2 , ||R′′ l,max, (cid:1), (cid:1). 1 l,S ′|| 2 2 1 l,S ′|| 2 2 l,S || l,S || 1 2 1 2 (7)
+Proof 3.3 According to [35], we have
+λmax(R′ l) ≤ qλmax(R′ l,S ) + (1 − q)λmax(R′ l,S′ ) ≤ (Λ′ l,max)2, and similarly λmax(R′′
+Lemma 3.4 The determinant of Rl can be lower bounded by the term of Λl,min and Λl,max, i.e., l ) ≤ (Λ′′ l,max)2. det Rl ≥ Λkl l,minΛh2−kl l,max , (8) where kl = (h2Λl,max − h2)/(Λl,max − Λl,min).
+Proof 3.4 For any vector x, we have
+⟨x, Rlx⟩ = ⟨x, (qRl,S + (1 − q)Rl,S ′)x⟩
+≥ (qλmin(Rl,S ) + (1 − q)λmin(Rl,S ′))||x||2
+≥ Λl,min||x||2. (9)
+Hence, we can get λmin(Rl) ≥ Λl,min. According to [35], we have λmax(Rl) ≤ Λl,max. Finally, with the determinant lower bound in [32], we can get Lem. 3.4 directly.
+Lems. 3.2, 3.3 and 3.4 lead to the following corollary.
+Corollary 3.5 Let u be a non-spherical Gaussian with the correlation matrix R over S and S ′. Then we get
+LD′ (fW) ≤ LS′,γ (fW) + O (cid:32)(cid:18) Ψadv(cid:0) (cid:80) l(c1Λ′ l,max + c2Λ′′
+γ2m l,max)(cid:1)2
++ ln m
+δ − (cid:80)
++ l,minΛh2−kl l,max ) l ln(Λkl
+γ2m (cid:19) 1 2 (cid:33)
+. (10)
+Remark 1 Cor. 3.5 demonstrates an updated adversarial generalization bound with consideration of non-spherical
+Gaussian u over clean and adversarial data.
+It also in-dicates that, assume other coefficients are constant, mini-l,minΛh2−kl l,max and maximizing Λkl mizing Λ′ l,max can effectively tighten the adversarial generalization bound. l,max, Λ′′ 4. Estimation and Optimization
+According to Cor. 3.5, we need to monitor and control the weight correlation matrix and some of its norms – such as the singular value, the spectral norm, and the determi-nant – during training. To this end, we need to be able to efficiently estimate weight correlation matrix and have a corresponding effective optimization scheme for training. 4.1. Estimation of the Weight Correlation Matrix
+We employ two different methods to estimate the weight correlation matrix and, through an inter-comparison be-tween their estimations, to ensure that our empirical conclu-sions are not compromised by the estimation errors. One is a sampling method, and the other is Laplace approximation of neural networks [9, 61]. Note that, though we only use
+Laplace approximation to optimize the second-order statis-tics terms (S2O) during training due to time complexity of sampling (Sec. 4.2), our empirical results in Sec. 5.1 indi-cate that S2O is applicable with both methods.
+Sampling method obtains a set of weight samples (W +
+η) by a sharpness-like method [29, 34] s.t.
+|L(fW+η) −
+L(fW)| ≤ ϵ′ (e.g., ϵ′ = 0.05 for CIFAR-10 and ϵ′ = 0.1 for CIFAR-100), where vec(η) is a 0 mean Gaussian noise.
+These samples are then used to estimate the correlation ma-trix of uS and uS ′. More details are given in Appendix C.
+Laplace approximation is an estimation method widely used in Bayesian framework to approximate posterior den-sities or posterior moments [61, 63, 74]. Technically, it ap-proximates the posterior (e.g., vec(W) + u) by a Gaussian distribution with the second-order Taylor expansion of the ln posterior around its MAP estimate. Specifically, given weights for layer l with an MAP estimate W∗ l on S (we omit the estimation on S ′ as it is the same with S), we have ln p(vec(Wl) + ul|S) ≈ ln p (cid:16) vec(W∗ l )|S (cid:17) (cid:16) vec(Wl − W∗ l ) + ul (cid:17)⊺ (cid:16)
+Es[Hl]
+− 1 2 vec(Wl − W∗ l ) + ul (cid:17)
+, (11)
+where Es[Hl] is the expectation of the Hessian matrix over input data sample s, and the Hessian matrix Hl is given by
+Hl =
+∂2L(fW(s))
+∂vec(Wl)∂vec(Wl) .
+It should be noted that, in Eq. (11), the first-order Taylor polynomial has been dropped because the gradient around the MAP estimate W∗ l is zero. Then, taking a closer look at
+Eq. (11), we find that its second line is exactly the logarithm of the probability density function of a Gaussian distributed multivariate random variable with mean W∗ l and covariance
+Σl = Es[Hl]−1, i.e., vec(Wl) + ul ∼ N (vec(W∗ l ), Σl), where Σl can be viewed as the covariance matrix of ul and learned weights Wl can be seen as the MAP estimate W∗ l .
+Laplace approximation indicates that efficiently estimat-ing Σl is achievable through the inverse of the Hessian ma-trix, because Σ−1 l,S ′ =
+Es′[Hl] as it is similar to Σ−1 l,S = Es[Hl]. Moreover,
+[9, 61] developed a Kronecker factored Laplace approxima-tion based on insights from second-order optimization of neural networks. That is, in contrast to the classical second-order methods [7, 66] with high computational costs for deep neural networks, they suggest that Hessian matrices of l-th layer can be Kronecker factored, i.e., l = Es[Hl]. Note that we omit Σ−1 (cid:125) (cid:124)
+⊗ (12)
+= Al−1 ⊗ Hl,
+⊺
+Hl = al−1a l−1 (cid:123)(cid:122) (cid:125) (cid:124)
+Al−1
+∂2ℓ(fW(s))
+∂hl∂hl (cid:123)(cid:122)
+Hl where Al−1 ∈ Rh×h is the covariance of the post-activation of the previous layer, and Hl ∈ Rh×h is the Hessian matrix of the loss with respect to the pre-activation of the current layer, and h is the number of neurons for each layer. With the assumption that Al−1 and Hl are independent [9, 61], we can approximate Es[Hl] with
+Es[Hl] = Es[Al−1 ⊗ Hl] ≈ Es[Al−1] ⊗ Es[Hl]. (13) 4.2. A Novel Optimization Scheme S2O for Training
+The adversarial training of a neural network is seen as a process of optimizing over an adversarial objective func-tion Jadv. To tighten the adversarial bound in Cor. 3.5, we add the second-order statistics penalty terms Λ′ l,max and − ln Λkl l,max to the objective function Jadv, and denote the new objective function as ˜Jadv. To reduce the complexity, we approximate ∇wl (Λ′ l,max − ln Λkl l,minΛh2−kl l,max + Λ′′ l,max, Λ′′ l,minΛh2−kl l,max ) through
+∇wl (g(Rl)) =
+∂(cid:0)||Rl,S ||2
+F + ||Rl,S ′||2
+F
+∂vec(Wl) (cid:1)
+. (14)
+Although it is impractical to find the exact relation between
+Rl and above penalty terms (e.g., perfect positive or nega-tive), they are clearly related. In particular, when Rl,S and
+Rl,S ′ have the same off-diagonal elements as rs and rs′, respectively, and rsrs′ ≥ 0, we have the following lemmas.
+Lemma 4.1 Decreasing ||Rl,S ||2 decline in |rs| and |rs′|, and further causes reduced Λ′ and Λ′′
+F and ||Rl,S ′||2
+F leads to a l,max l,max.
+Lemma 4.2 Decreasing ||Rl,S ||2 an increase in Λkl l,minΛh2−kl l,max .
+F and ||Rl,S ′||2
+F leads to
+Proofs are given in Appendix D. We also provide more gen-eral case simulations of the relationship between ||Rl,S ||2
+F ,
+||Rl,S ′||2
+F and the above penalty terms in Appendix E.
+Remark 2 Lems. 4.1, 4.2 and simulations in Appendix E indicate that we can decrease Λ′ l,max and increase l,minΛh2−kl
+Λkl l,max by decreasing ||Rl,S ||2
+F and ||Rl,S ′||2
+F . l,max, Λ′′
+It is noted that a direct optimization over Eq. (14) is also computationally prohibitive. Fortunately, Laplace ap-proximation can greatly reduce the complexity of Eq. (14).
+Specifically, according to Eq. (13) and Σl = E[Hl]−1, the following term
+∇wl−1 (g(Al−1)) =
+∂(cid:0)||Al−1,S ||2
+F + ||Al−1,S ′||2
+F (cid:1)
+,
+∂vec(Wl−1) (15) can be used to approximate ∇wl (g(Rl)), where Al−1,S is the normalization of Es[Al−1]−1, i.e., ∀ 0 < i, j ≤ h and for i, j ∈ N, (Al−1,S )[ij] = (Es[Al−1]−1)[ij] (cid:112)(Es[Al−1]−1)[ii](Es[Al−1]−1)[jj]
+. (16)
+Finally, we add the regularizer g(A) to the adversarial training objective function Jadv, obtaining the new objec-tive function ˜Jadv with
+∇w ˜Jadv = ∇wJadv + α∇wg(A). (17)
+Here, α ∈ [0, ∞) is a hyper-parameter to balance the rel-ative contributions of the second-order statistics penalty term g(A) and the original objective function Jadv (Ap-pendix F). 5. Empirical Results
+In this section, we first provide a comprehensive under-standing of our S2O training method, and then evaluate its robustness on benchmark data sets against various white-box and black-box attacks.
+Experimental Setup. We train PreAct ResNet-18 [28] for ℓ∞ and ℓ2 threat models on CIFAR-10/100 [36] and
+SVHN [52] (Tab. 1). In addition, we also train WideResNet-34-10 [83] for CIFAR-10 with an ℓ∞ threat model (Tabs. 2 and 3). We follow the settings of [60]: for the ℓ∞ threat model, ϵ = 8/255 and step size 2/255; for the ℓ2 threat model, ϵ = 128/255 and step size 15/255 for all data
+Figure 2. We train PreAct ResNet18 with AT and AT+S2O, and show the results of partial weights. (a) shows the normalized spectral norm of R′
+S′ , and the determinant of RS′ , with sampling estimation (S) and Laplace approximation (L) respectively. (b) and (c) demonstrate the absolute correlation matrix of partial weights, for AT and AT+S2O respectively.
+S′ , R′′
+Table 1. Adversarial training across data sets on PreAct ResNet18 (%).
+Threat
+Model
+ℓ∞
+ℓ2
+Method
+Clean 82.41
+AT
+AT+S2O 83.65
+AT 88.83
+AT+S2O 89.57
+CIFAR-10
+PGD-20 Time/epoch 52.77 55.11 68.83 69.42 309s 368s 292s 364s
+CIFAR-100
+PGD-20 Time/epoch 28.02 30.58 42.20 44.07 307s 371s 290s 366s
+Clean 58.02 58.45 64.21 65.32
+SVHN
+PGD-20 Time/epoch 60.91 64.83 66.76 76.19 509s 595s 477s 586s
+Clean 93.17 93.39 94.02 94.93
+Table 2. TRADES (1/λ = 6) and AWP on CIFAR-10 with ℓ∞ threat model (%).
+Method
+Clean
+TRADES 82.89
+TRADES+AWP 82.30
+TRADES+S2O 84.15
+TRADES+AWP+S2O 83.79
+ResNet18
+WideResNet
+FGSM PGD-20 58.72 59.48 60.19 60.27 53.81 56.18 55.20 57.29
+PGD-100 CW-20 AA 48.6 51.7 49.5 52.4 53.69 55.90 54.73 56.51 51.83 53.12 52.47 53.84
+Clean 83.98 84.99 85.67 86.01
+FGSM PGD-20 61.08 63.11 62.73 64.16 56.82 59.67 58.34 61.12
+PGD-100 CW-20 AA 52.7 56.2 54.1 55.9 56.53 59.42 57.69 60.46 54.54 57.41 55.36 57.93 sets. In all experiments, the training/test attacks are PGD-10/(PGD-20 and others) respectively. All models (except
+SVHN) are trained for 200 epochs using SGD with momen-tum 0.9, batch size 128, weight decay 5 × 10−4, and an ini-tial learning rate of 0.1 that is divided by 10 at the 100th and 150th epochs. For SVHN, we use the same parameters except for setting the starting learning rate to 0.01. Simple data augmentations, such as 32 × 32 random crop with 4-pixel padding and random horizontal flip, are applied. We implement each PreAct ResNet18 on single GTX 1080 Ti and each WideResnet on single NVIDIA A100.
+White-box attack. We conduct white-box attacks, in-cluding FGSM [27], PGD-20/100 [45], and CW-20 [10] (the ℓ∞ version of CW loss optimized by PGD-20), on the models trained with baseline methods and our S2O-enhanced variants.
+Black-box attack. Black-box attacks are created from the clean test data by attacking a surrogate model with an architecture that is either a copy of the defense model or a more complex model [56]. After constructing adversar-ial examples from each of the trained models, we apply
+Table 3. AVMixup and MART on CIFAR-10 with ℓ∞ threat model for WideResNet (%).
+Clean
+Method
+AVMixup 92.56
+AVMixup+S2O 93.72 83.51
+MART
+MART+S2O 83.91
+FGSM PGD-20 80.46 84.57 61.53 62.56 59.75 60.43 58.31 59.29
+PGD-100 CW-20 AA 39.7 39.3 51.2 54.1 49.51 50.49 57.55 58.33 54.53 56.16 54.33 55.14 these adversarial examples to the other models and evalu-ate the performances. The attacking methods we have used are FGSM and PGD-20.
+Auto Attack. We consider Auto Attack (AA) [13], a powerful and reliable attack, which attacks through an en-semble of different parameter-free attacks that include three white-box attacks (APGD-CE [13], APGD-DLR [13], and
+FAB [12]) and a black-box attack (Square Attack [2]).
+By default, we use the setting α = 0.3 for S2O, with the exception of α = 0.1 for AT+S2O (CIFAR-10) in Tab. 1.
+Following [85], we set epsilon=0.031and step size=0.003 for PGD and CW evaluation. And we use standard version auto attack evaluation.
+Table 4. TRADES (1/λ = 6) and AWP on CIFAR-100 with ℓ∞ threat model for WideResNet (%).
+Table 6. Sensitivity analysis on CIFAR-10 with ℓ∞ threat model for ResNet18 (%).
+Clean
+Method 60.38
+TRADES 60.43
+TRADES+LBGAT 60.27
+TRADES+AWP
+TRADES+S2O 63.40
+TRADES+AWP+S2O 64.17
+FGSM PGD-20 CW-20 AA 26.9 35.01 29.3
+-28.5 36.12 27.6 35.96 29.9 37.98 32.11 35.50 34.04 33.06 35.95 28.93 31.50 30.64 29.57 31.26
+Table 5. VGG16 and MobileNetV2 on CIFAR-10 with ℓ∞ threat model (%).
+Clean
+Method
+VGG16 AT 81.63
+VGG16 AT+S2O 82.57 81.97
+MNV2 AT
+MNV2 AT+S2O 82.48
+FGSM PGD-20 CW-20 AA 43.1 53.23 44.6 54.03 44.9 55.52 45.7 57.51 49.21 50.53 50.76 52.93 48.01 48.15 49.53 49.92 5.1. Empirical Understanding of S2O
+In this part, we explore how the second-order statistics of weights (e.g., weight correlation matrix) change when we apply S2O on it. The results in Fig. 2 indicate that S2O effectively decreases the spectral norm of R′
+S ′ and increases the determinant of RS ′. We also provide the re-sults of clean data in Appendix E.
+S ′, R′′ 5.2. Robustness Under White-Box Attacks and Auto
+Attack
+Applying S2O on vanilla adversarial training (Tab. 1).
+We employ PreAct ResNet-18 to explore the power of our proposed S2O method embedded with normal PGD-10 training (with ℓ∞ and ℓ2 threat models), across a number of data sets including CIFAR-10, CIFAR-100, and SVHN.
+Tab. 1 suggests that S2O-enhanced variants can improve both, the accuracy (over clean data) and the robust accu-racy (over PGD-20 attack), across the three datasets. For example, the accuracy on PGD-20 of the AT+S2O model is 2%-3% higher than that of the standard adversarial train-ing model with an ℓ∞ threat model on CIFAR-10. There is also an increase of 1%-1.5% in accuracy on clean data when compared to the standard adversarial training model.
+Generally, the improvement is very consistent across data sets and attacks.
+Applying S2O on TRADES and AWP (Tab. 2). We em-ploy PreAct ResNet-18 and WideResNet to explore the per-formance of our S2O method when it works with two state-of-the-art methods, TRADES and TRADES+AWP, on the
+CIFAR-10 (under an ℓ∞ threat model). The robustness of all defense models are tested against white-box FGSM,
+PGD-20, PGD-100, CW-20 attacks, and auto attack.
+Tab. 2 shows that S2O-enhanced variants perform con-sistently and significantly better than the existing ones (with only one exception). While AWP improves over TRADES,
+S2O can further enhance it. For example, the accuracy on PGD-20 of the S2O-enhanced TRADES+AWP model is 1.45% higher than that of the TRADES+AWP model on WideResNet, and the accuracy on PGD-20 of the S2O-Method
+AT
+AT+S2O (0.05)
+AT+S2O (0.1)
+AT+S2O (0.2)
+AT+S2O (0.3)
+AT+S2O (0.4)
+Clean AA PGD-20train 82.41 83.22 83.65 83.43 82.89 82.54 62.33 61.99 61.50 60.27 59.36 58.41 47.1 48.5 48.3 47.8 46.5 46.7
+PGD-20test Gap 9.56 8.17 6.39 5.68 5.12 5.49 52.77 53.82 55.11 54.59 54.24 52.92
+Table 7. Adversarial training across data sets on PreAct ResNet18 with black-box attacks under ℓ∞ threat model (%).
+Data
+CIFAR-10
+CIFAR-100
+SVHN
+FGSM PGD-20
+Method
+AT 64.32
+AT+S2O 65.63
+AT 38.55
+AT+S2O 39.68
+AT 71.77
+AT+S2O 72.20 62.63 63.87 37.36 38.60 63.76 64.31 enhanced TRADES model is 1.39% higher than that of the TRADES model on PreAct ResNet-18.
+For addi-tional experiments on CIFAR-100 in Tab. 4, compared with
+TRADES+LBGAT [14], S2O can also improve robustness under most attacks.
+Applying S2O on AVMixup and MART (Tab. 3). We employ WideResNet to study the performance of our S2O method when it works with some other state-of-the-art methods, such as AVMixup and MART, on the CIFAR-10 data set (under ℓ∞ threat model). The robustness of all de-fense models is tested against white-box FGSM, PGD-20,
+PGD-100, CW-20 attacks, and auto attack.
+Tab. 3 also shows that S2O enhanced models perform better than normal AVMixup and MART under most attacks (and clean data). Note that we mark the results of AVMixup with the color cyan under PGD-100 attack and auto attack (AA), as AVMixup (including AVMixup+S2O) is not a ro-bust method across all attacks – it performs not so well un-der PGD-100 and Auto attacks.
+Remark on our Baselines in Tabs. 1 to 4. We have checked that our baselines are close to, or slightly better than, the baselines in the recent paper [81], with which we have very similar experimental settings. We omit the stan-dard deviations of 3 runs as they are very small (< 0.40%).
+Supplement. We provide hyper-parameter (α) sensitivity analysis in Tab. 6 with PreAct ResNet-18 and CIFAR-10.
+We also apply S2O to other structures (VGG16 [67] and
+MobileNetV2 [64]) with normal adversarial training; Tab. 5 shows that S2O also works on these two structures. In ad-dition, we notice that SOAR [43] can get 56.06% accuracy on ResNet-10, CIFAR-10 under PGD-20 attack; it is inter-esting to combine S2O with SOAR in the future work. 5.3. Robustness Under Black-Box Attacks
+We also employ PreAct ResNet-18 to explore the power of our proposed S2O method embedded with normal PGD-10 training under black-box attacks (with an ℓ∞ threat
+model), across a number of data sets, including CIFAR-10/100, and SVHN. For the same data set, all black-box at-tacks are generated by the same adversarial training model.
+Tab. 7 suggests that S2O enhanced models also can get some improvements under black box attacks.
+[51], which empirically studies how label smoothing works.
+Based on these, AVMixup [41, 86] defines a virtual sample in the adversarial direction and extends the training distri-bution with soft labels via linear interpolation of the virtual sample and the clean sample. Specifically, it optimizes 6.

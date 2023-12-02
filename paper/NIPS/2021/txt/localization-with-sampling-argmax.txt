@@ -1,0 +1,154 @@
+Abstract
+Soft-argmax operation is commonly adopted in detection-based methods to localize the target position in a differentiable manner. However, training the neural network with soft-argmax makes the shape of the probability map unconstrained. Conse-quently, the model lacks pixel-wise supervision through the map during training, leading to performance degradation. In this work, we propose sampling-argmax, a differentiable training method that imposes implicit constraints to the shape of the probability map by minimizing the expectation of the localization error. To approximate the expectation, we introduce a continuous formulation of the output distribution and develop a differentiable sampling process. The expectation can be approximated by calculating the average error of all samples drawn from the output distribution. We show that sampling-argmax can seamlessly replace the conventional soft-argmax operation on various localization tasks. Comprehensive experiments demonstrate the effectiveness and ﬂexibility of the proposed method.
+Code is available at https://github.com/Jeff-sjtu/sampling-argmax. 1
+
+Introduction
+Localizing the target position from the input is a fundamental task in the ﬁeld of computer vision.
+Common approaches to localization can be divided into two categories: regression-based and detection-based. Detection-based methods show superiority over regression-based methods and demonstrate impressive performance on a wide variety of tasks [41, 34, 40, 7, 15, 9, 17, 12, 32, 18, 31].
+Probability maps (also referred to as heat maps) are predicted in detection-based methods to indicate the likelihood of the target position. The position with the highest probability is retrieved from the probability map with the argmax operation. However, the argmax operation is not differentiable and suffers from quantization error. For accurate localization and end-to-end learning, soft-argmax [4, 3] is proposed as an approximation of argmax. It has found a wide range of applications in human pose estimation [34, 21, 22, 35], facial landmark localization [9, 20, 1], stereo matching [41, 13, 2] and object keypoint estimation [31].
+Nevertheless, the mechanism of training networks with soft-argmax is rarely studied. The conven-tional training strategy is to minimize the error between the output coordinate from soft-argmax and the ground truth position. However, this strategy is deﬁcient since it only provides constraints to the expectation of the probability map, not to its shape. As shown in Figure 1, these two maps have the same mean values, but the bottom one is more concentrated. In well-calibrated probability maps, positions that locate closer to the ground truth have higher probabilities. Reliable conﬁdence scores of localization results could be provided, which is essential in unconstrained real-world applications and downstream tasks. Besides, imposing constraints on the probability map can provide supervised pixel-wise gradients and facilitate the learning process.
+Prior work [28] attempts to shape the probability map by introducing hand-crafted regularizations.
+The variance regularization encourages the variance of the probability map to get close to the pre-deﬁned variance. The Gaussian regularization forces the probability map to resemble a Gaussian distribution. We argue that these variants are overconstrained. The hand-crafted constraints are not 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+always correct in different cases. For example, the underlying shape of the probability map is not necessarily Gaussian, and the underlying variance might change as the input changes. Imposing the model to learn a ﬁxed-variance Gaussian distribution might degrade the model performance.
+In this work, we present sampling-argmax, a novel training method to obtain well-calibrated probability maps and improve the localization accuracy. To constrain the shape of the map, we replace the objective function of minimizing “the error of the expectation” with minimizing “the expectation of the error”. In this way, the network is encouraged to generate higher probabilities around the ground truth position.
+A natural way to estimate the expectation is by calculating the probability-weighted sum of the errors at all grid positions.
+However, we ﬁnd that the gradient has high variance, and the model is hard to train. To address this issue, we choose to approximate the expectation by sampling. The expectation of the error is calculated as the mean error of all samples.
+Therefore, the sampling process should be differentiable for end-to-end learning.
+Figure 1: Top: an unconstrained probability map. Bottom: a well-calibrated probability map. These two maps have different shapes but a same mean value.
+In our work, we show that the likelihood of the target position can be modelled in the continuous space with a mixture dis-tribution. Samples can be drawn from the mixture distribution by three steps: i) generate categorical weights of the mixture distribution from the probability map; ii) draw samples from sub-distributions; iii) obtain a sample by the category-weighted sum. The beneﬁt of using mixture distribution is that differentiable sampling from arbitrary continuous distributions can be resolved by differentiable sampling from categorical distributions, which is less challenging and can be addressed by off-the-shelf discrete sampling methods.
+Sampling-argmax is simple and effective. With out-of-the-box settings, it can be integrated into methods that using soft-argmax operation. To study its effectiveness, we conduct experiments on a variety of localization tasks. Quantitative results demonstrate the superiority of sampling-argmax against soft-argmax and its variants. In summary, the contributions of this work are threefold:
+We propose sampling-argmax for improving detection-based localization methods. By minimizing “the expectation of the error”, the network generates well-calibrated probability maps and obtains higher localization accuracy.
+We show the output likelihood can be formulated as a mixture distribution and develop a differentiable sampling pipeline.
+Comprehensive experiments show that sampling-argmax is effective and can be ﬂexibly generalized to different localization tasks.
+•
+•
+• 2 Preliminary
+Given a learned discrete probability map π, the value πyi indicates the probability of the predicted target appearing at yi. A direct way to localize the target is taking the position with the maximum likelihood. However, this approach is non-differentiable, and the output is discrete, which impedes end-to-end training and brings quantization errors. Soft-argmax is an elegant approximation to address these issues:
+ˆy = soft-argmax
+π
+=
+πyiyi. (1) (cid:0)
+Notice that π is a normalized distribution and the soft-argmax operation calculates the probability-weighted sum, which is equivalent to taking the expectation of the probability map π. A conventional way to train the model with the soft-argmax operation is minimizing the distance between the expectation and the ground truth: (cid:1) i (cid:88)
+= d(yt, Ey[y])
+L
+≈ d(yt,
+πyiyi), (2) where yt denotes the ground truth position and d(
+We refer to this objective function as “the error of the expectation”.
+) denotes the distance function, e.g. (cid:96)1 distance.
+·
+,
+· i (cid:88) 2
+3 Method
+The conventional detection-based method with soft-argmax only supervises the expectation of the probability map. The shape of the distribution remains unconstrained. In well-calibrated probability maps, the positions closer to the ground truth should have higher probabilities. To this end, we proposed a new objective function that optimizes “the expectation of the error” instead of “the error of the expectation”. In particular, the objective function is formulated as:
+The learned distribution tends to allocate high probabilities around the ground truth to minimize the entire loss. In this way, the shape of the probability map is implicitly constrained.
+= Ey[d(yt, y)].
+L (3)
+Discrete Distribution. The probability map π predicted by the neural network is discrete. Similar to the soft-argmax operation, the expectation of error can be approximated by calculating the probability-weighted sum of the errors at all grid positions:
+= Ey[d(yt, y)]
+L
+≈ i (cid:88)
+πyi d(yt, yi). (4)
+This approximation treats the distribution of the target position as a discrete distribution. The target only appears at the grid positions, i.e. at position yi with the probability πyi.
+However, because the underlying target lies in a continuous space, modelling the distribution as a discrete distribution is not accurate. The probability map has limited resolution due to the computation complexity. Besides, we ﬁnd the model is slow to converge by training with Equation 4. When training with Equation 4, the model only obtains 30.9 mAP on COCO Keypoint, while conventional soft-argmax obtains 64.5 mAP. For analysis, we derive the gradient from the loss function to the model parameters θ under the discrete approximation:
+∇θL
+=
+=
+∇θEy[d(yt, y)] d(yt, yi) i (cid:88)
+= Ey[d(yt, y)
+∇θπyi =
+∇θ log πy]. i (cid:88) d(yt, yi)πyi ∇θ log πyi (5)
+Notice that the form of the gradient is similar to the score function estimator (SF), which is alterna-tively called the REINFORCE estimator [36]. SF estimator is known to have very high variance and is slow to converge. Therefore, using the discrete approximation for training is not a good solution.
+This challenge prompts us to explore a better approximation to calculate the expectation of the error.
+In the following parts, we present sampling-argmax to estimate the expectation of the error by sampling. We ﬁrst develop a continuous approximation to the distribution of the target position (Section 3.1). Then we propose a differentiable sampling method (Section 3.2). 3.1 Continuous Mixture Distribution
+A differentiable process is necessary to estimate the expectation by sampling. However, since the underlying probability density functions can vary among different input images, it is challenging to draw samples from arbitrary distributions differentiably. In this work, we present a uniﬁed method by formulating the target distribution as a mixture distribution.
+Let p(y) denotes the underlying density function of the target position, which is deﬁned within the boundary of the input image, i.e. y
+[0, W ]. As illustrated in Figure 2(a), the interval [0, W ] can be divided into n subintervals. The density function can be partitioned into shapes in the subintervals.
+We could use regular shape (rectangles, triangles, Gaussian functions) in subintervals to form the entire function (as illustrated in Figure 2(b-c)).
+∈
+Formally, given a ﬁnite set of probability density functions w1, w2,
+{ as a sum: such that wi ≥
+, wn} 0 and
+· · · and weights wi = 1, the mixture density function p(y) is formulated f1(y), f2(y),
+{
+, fn(y)
+· · ·
+} n (cid:80) p(y) = wifi(y). i=1 (cid:88) 3 (6)
+Figure 2: Representing the continuous distribution as a mixture distribution. (a) The original probability density function can be viewed as the sum of n sub-functions. Each sub-function can be replaced by standard density functions with proper weights to approximate the original function. (b) Approximate the original function by replacing the sub-functions with uniform distribution. (c)
+Approximate the original function by replacing the sub-function with the triangular distribution, which is equivalent to the linear interpolation of the discrete weights.
+Here, we can leverage the discrete probability map π to represent the mixture weights, i.e. wi = πyi.
+In the context of signal processing, the original function can be perfectly reconstructed if the sample rate (the distance between two adjacent grid points) satisﬁes the Nyquist-Shannon sampling theorem.
+However, in our case, the sub-function fi(y) must be a probability density function, i.e. it has the non-negative values, and its integral over the entire space is equal to 1. Therefore, with these restrictions, the original function p(y) cannot be perfectly reconstructed. For approximation, we study three different types of standard density functions below.
+Uniform Basis. For the uniform basis, the sub-function fi(y) is a uniform distribution centred at the position yi: where c is the distance between two adjacent grid points. fi(y) = (cid:26) 1 c , 0,
+[yi − y otherwise,
+∈ c 2 , yi + c 2 ],
+Triangular Basis. For the triangular basis, the sub-function fi(y) is a triangular distribution: 1 c2 (y 1 c2 (y
+−
+−
+− 0, yi) + 1 c , yi) + 1 c , c, yi), y
+[yi − y
+[yi, yi + c), otherwise.
+∈
+∈ fi(y) =
+
+ (7) (8)
+[yi, yi+1]. Therefore, we have p(y) =
+For all y, there exist grid points yi and yi+1 that satisfy y
+ wifi(y)+wi+1fi+1(y) = wi+1−wi c , which is the linear interpolation of wi and wi+1. In other words, using triangular bases is equivalent to the linear interpolation of the discrete probability map. yi)+ wi (y
+−
+∈ c2
+Gaussian Basis. For the Gaussian basis, fi(y) is the Gaussian function: where σ denotes the standard deviation. We set σ = c by default in the experiments. fi(y) = 1
+σ√2π exp yi y ( 1 2
+−
+σ
+− (cid:16) (cid:17)
+)2
+. (9) 3.2 Differentiable Sampling
+In this part, we present how to draw a sample from the mixture distribution. We ﬁrst study the non-differentiable process and then present the differentiable approximation.
+Non-differentiable Process. As illustrated in Figure 3(a), the non-differentiable sampling process can be divided into two steps: i) determine which sub-distribution the sample comes from; ii) draw a sample from the selected sub-distribution. In the ﬁrst step, the sub-distribution can be selected by drawing a random variable from a categorical distribution. The categorical distribution is indicated 4
+Figure 3: Illustration of the sampling process. (a) The non-differentiable process: i) select a sub-distribution by categorical sampling; ii) draw samples from the selected sub-distribution. (b)
+The differentiable process: i) approximate the categorical sampled weights by Gumbel-softmax; ii) draw samples from all sub-distribution; iii) add all samples together with the sampled weights.
+Reparameterization allows gradients to ﬂow from the sample to the probability map. by the predicted probability map π. The sub-distribution fi(y) is chosen with the probability πyi.
+There are a number of methods to draw samples from the categorical distribution. Here, we introduce the Gumbel-Max trick [6, 24]: z = one_hot_maxi[gi + log πi], (10) where g1, with the value 1 in the maximum categorical column.
+· · ·
+, gn are i.i.d samples drawn from Gumbel(0, 1), and the sample z is a one-hot vector
+In the second step, sampling from the standard basis function is easy to implement. This step is independent of the predicted probability map π. Therefore, the key to differentiable sampling from the mixture distribution is to make the ﬁrst step differentiable.
+Differentiable Process. The differentiable sampling process consists of three steps. In the ﬁrst step, we adopt the Gumbel-softmax [11] operation to sample the categorical weight from the probability map. Gumbel-softmax is a continuous and differentiable approximation of the Gumbel-Max trick.
+We can obtain an (n 1)-dimensional simplex ˆπ
+∆:
+−
+∈
+ˆπi = exp ((gi + log πi)/τ ) n k=1 exp ((gk + log πk)/τ )
+, (11)
+ˆπ1, where ˆπ = and ˆπi denotes the sampled weight of the sub-distribution fi(y). As the softmax temperature τ approaches 0, the simplex ˆπ becomes one-hot, and its distribution becomes identical to the categorical distribution π.
+, ˆπn}
+· · · (cid:80)
+{
+In the second step, we draw a sample ˆyi from every sub-distribution fi(y). Note that the sampled weight is not completely one-hot. Therefore, we obtain the ﬁnal sample ˆY in the third step by adding all samples together with the sampled weight ˆπ: n
+ˆY =
+ˆπi ˆyi. (12) i (cid:88)
+This process is illustrated in Figure 3(b). With the reparameterization trick, the sample ˆY is computed as a deterministic function of the probability map π and the independent random variables. The randomness of the sampling process is transferred to the variable g1,
+, gn. We denote the sampling process as ˆY = s(π, (cid:15)), where (cid:15) = follows the multivariate Gumbel(0, 1) distribution.
+· · · g1,
+{
+· · ·
+, gn} 5
+The gradient from the expected error to the model parameters θ is derived as:
+∇θEy[d(yt, y)] =
+∇θE(cid:15)[d(yt, s(π, (cid:15)))] = E(cid:15)
+As we see, the gradient of the continuous sampling process is easy to compute via backpropagation.
+Therefore, we can relax the objective function by calculating the average error of the samples drawn from the mixture distribution. The objective function is written as: (13) (cid:20) (cid:21)
+.
+∂d
+∂s
+∂s
+∂π
+∂π
+∂θ
+= E y∼p(y)[d(yt, y)]
+L 1
+Ns
+≈ (cid:88)k=1 1
+Ns (cid:88)k=1
+Ns d(yt, ˆYk) =
+Ns d(yt, s(π, (cid:15)k)), (14) where Ns denotes the number of samples. In the testing phase, no randomness is introduced, and sampling-argmax degrades to soft-argmax.
+While the sampling process is differentiable, the sample ˆY does not follow the original mixture distribution p(y) for non-zero temperature. For small temperatures, the distribution of ˆY is close to p(y), but the variance of the gradients is large. There is a tradeoff between small temperatures and large temperatures. In our experiments, we start at a high temperature and anneal to a small temperature. 4

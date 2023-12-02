@@ -1,0 +1,136 @@
+Abstract
+While reinforcement learning algorithms can learn effective policies for complex tasks, these policies are often brittle to even minor task variations, especially when variations are not explicitly provided during training. One natural approach to this problem is to train agents with manually speciﬁed variation in the training task or environment. However, this may be infeasible in practical situations, either because making perturbations is not possible, or because it is unclear how to choose suitable perturbation strategies without sacriﬁcing performance. The key insight of this work is that learning diverse behaviors for accomplishing a task can directly lead to behavior that generalizes to varying environments, without needing to perform explicit perturbations during training. By identifying multiple solutions for the task in a single environment during training, our approach can generalize to new situations by abandoning solutions that are no longer effective and adopting those that are. We theoretically characterize a robustness set of environments that arises from our algorithm and empirically ﬁnd that our diversity-driven approach can extrapolate to various changes in the environment and task. 1
+
+Introduction
+Deep reinforcement learning (RL) algorithms have demonstrated promising results on a variety of complex tasks, such as robotic manipulation [22, 13] and strategy games [27, 38]. Yet, these reinforcement learning agents are typically trained in just one environment, leading to performant but narrowly-specialized policies — policies that are optimal under the training conditions, but brittle to even small environment variations [46]. A natural approach to resolving this issue is to simply train the agent on a distribution of environments that correspond to variations of the training environment
+[4, 9, 18, 33]. These methods assume access to a set of user-speciﬁed training environments that capture the properties of the situations that the trained agent will encounter during evaluation.
+However, this assumption places a signiﬁcant burden on the user to hand-specify all degrees of variation, or may produce poor generalization along the axes that are not varied sufﬁciently [46].
+Further, varying the environment may not even be possible in the real world.
+One way of resolving this problem is to design algorithms that can automatically construct many variants of its training environment and optimize a policy over these variants. One can do so, for example, by training an adversary to perturb the agent [32, 31]. While promising, adversarial opti-mizations can be brittle, overly pessimistic about the test distribution, and compromise performance.
+In contrast to both generalization and robustness approaches, humans do not need to practice a task under explicit perturbations in order to adapt to new situations. As a concrete example, consider the task of navigating through a forest with multiple possible paths. Traditional RL approaches may optimize for and memorize the shortest possible path, whereas a person will encounter, and remember many different paths during the learning process, including suboptimal paths that still reach the end of the forest. While a single optimal policy would fail if the shortest path becomes unavailable, a repertoire of diverse policies would be robust even when a particular path is no longer 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+successful (see Figure 1). Concretely, practicing and remembering diverse solutions to a task can naturally lead to robustness. In this work, we consider how we might encourage reinforcement learning agents to do the same – learning a breadth of solutions to a task and remembering those solutions such that they can adaptively switch to a new solution when faced with a new environment.
+The key contribution of this work is a frame-work for policy robustness by optimizing for diversity. Rather than training a single policy to be robust across a distribution over environ-ments, we learn multiple policies such that these behaviors are collectively robust to a new dis-tribution over environments. Critically, our ap-proach can be used with only a single training environment, rather than requiring access to the entire set of environments over which we wish to generalize. We theoretically characterize the set of environments over which we expect the policies learned by our method to generalize, and empirically ﬁnd that our approach can learn policies that extrapolate over a variety of aspects of the environment, while also outperforming prior standard and robust reinforcement learning methods.
+Figure 1: The key insight of our work is that struc-tured diversity-driven learning in a single training environment (left) can enable few-shot generaliza-tion to new environments (right). Our approach learns a parametrized space of diverse policies for solving the training MDP, which enables it to quickly ﬁnd solutions to new MDPs. 2 Preliminaries
+The goal in a reinforcement learning problem is to optimize cumulative discounted reward in a
+Markov decision process (MDP) M, deﬁned by the tuple (S, A, P, R, γ, µ), where S is the state space, A is the action space, P(st+1|st, at) provides the transition dynamics, R(st, at) is a reward function, γ is a discount factor, and µ is an initial state distribution. A policy π deﬁnes a distribution over actions conditioned on the state, π(at|st). Given a policy π, the probability density function of a particular trajectory τ = {si, ai}T i=1 under policy π can be factorized as follows: p(τ ) = µ(s0) · ΠT t=0π(at|st) · P(st+1|st, at). t γtR(st, at). The optimal policy π∗
+The expected discounted sum of rewards of a policy π is is given by: RM(π) = Eτ ∼π [R(τ )] =
+E (cid:80)
+M = arg maxπ RM(π).
+Latent-Conditioned Policies. In this work, we will consider policies conditioned on a latent variable.
+A latent-conditioned policy is described as π(a|s, z) and is conditioned on a latent variable z ∈ Rd.
+The latent variable z is drawn from a known distribution z ∼ p(Z). The probability of observing a trajectory τ under a latent-conditioned policy is p(τ ) = (cid:82)
+M maximizes the return, RM(π): π∗ z p(τ |z)p(z), where p(τ |z) = µ(s0) · ΠT t=0π(at|st, z) · P(st+1|st, at).
+Mutual-Information in RL. In this work, we will maximize the mutual information between trajectories and latent variables. Estimating this quantity is difﬁcult because computing marginal distributions over all possible trajectories, by integrating out z, is intractable. We can instead maximize a lower bound on the objective which consists of summing the mutual information between each state st in a trajectory τ and the latent variable z. It has been shown that a sum of the mutual information between states in τ , s1, · · · , sT , and the latent variable z lower bounds the mutual information I(τ, z) [19]. Formally, I(τ ; z) ≥ (cid:80)T
+Finally, we can lower-bound the mutual information between states and latent variables, as I(S; Z) ≥
+Ez∼p(z),s∼π(z)[log qφ(z|s)] − Ez∼p(z)[log p(z)] [7], where the posterior p(z|s) can be approximated with a learned discriminator qφ(z|s). t=1 I(st; z). 3 Problem Statement: Few-Shot Robustness
+In this paper, we aim to learn policies on a single training MDP that can generalize to perturbations of this MDP. In this section, we formalize this intuitive goal into a concrete problem statement that we call “few-shot robustness.” During training, the algorithm collects samples from the (single) training MDP, M = (S, A, P, R, γ, µ). At test time, the agent is placed in a new test MDP 2
+Figure 2: We evaluate SMERL on 3 types of environment perturbations: (a) the presence of an obstacle, (b) a force applied to one of the joints, and (c) motor failure at a subset of the joints.
+M(cid:48) = (S, A, P (cid:48), R(cid:48), γ, µ), which belongs to a test set of MDPs Stest. Each MDP in this test set has identical state and action spaces as M, but may have a different reward and transition function (see Figure 2). In Section 5, we formally deﬁne the nature of the changes from training time to test time, which are guided by practical problems of interest, such as the navigation example described in
+Section 1. In the test MDP, the agent must acquire a policy that is optimal after only a handful of trials. Concretely, we refer to this protocol as few-shot robustness, where a trained agent is provided a budget of k episodes of interaction with the test MDP and must return a policy to be evaluated in this
+MDP. The ﬁnal policy is evaluated in terms of its expected return in the test MDP M(cid:48). Our few-shot robustness protocol at test time resembles the few-shot adaptation performance metric typically used in meta-learning [10], in which a test task is sampled and the performance is measured after allowing the algorithm to adapt to the new test task in a pre-deﬁned budget of k adaptation episodes. While meta-learning algorithms assume access to a distribution of tasks during training, allowing them to beneﬁt from learning the intrinsic structure of this distribution, our setting is more challenging since the algorithm needs to learn from a single training MDP only. 4 Structured Maximum Entropy Reinforcement Learning
+In this section, we present our approach for addressing the few-shot robustness problem deﬁned in
+Section 3. We ﬁrst present a concrete optimization problem that optimizes for few-shot robustness, then discuss how to transform this objective into a tractable form, and ﬁnally present a practical algo-rithm. Our algorithm, Structured Maximum Entropy Reinforcement Learning (SMERL), optimizes the approximate objective on a single training MDP. 4.1 Optimization with Multiple Policies
+Our goal is to be able to learn policies on a single MDP that can achieve (near-)optimal return when executed on a test MDP in the set Stest. In order to maximize return on multiple possible test MDPs, we seek to learn a continuous (inﬁnite) subspace or discrete (ﬁnite) subset of policies, which we denote as ¯Π. Then, given an MDP M(cid:48) ∈ Stest, we select the policy π ∈ ¯Π that maximizes return
+R(M(cid:48)) on the test MDP. We wish to learn ¯Π such that for any possible test MDP M(cid:48) ∈ Stest, there is always an effective policy π ∈ ¯Π. Concretely, this gives rise to our formal training objective:
+Π∗ = arg max
+¯Π⊂Π (cid:20) (cid:18) min
+M(cid:48)∈Stest max
+π∈ ¯Π (cid:19)(cid:21)
+RM(cid:48)(π)
+. (1)
+Our approach for maximizing the objective in Equation 1 is based on two insights that give rise to a tractable surrogate objective amenable to gradient-based optimization. First, we represent the set ¯Π using a latent variable policy π(a|s, z). Such latent-conditioned policies can express multi-modal distributions. The latent variable can index different policies, making it possible to represent multiple behaviors with a single object. Second, we can produce diverse solutions to a task by encouraging the trajectories of different latent variables z to be distinct while still solving the task. An agent with a repertoire of such distinct latent policies can adopt a slightly sub-optimal solution if an optimal policy is no longer viable, or highly sub-optimal, in a test MDP. Concretely, we aim to maximize expected return while also producing unique trajectory distributions.
+To encourage distinct trajectories for distinct z values, we introduce a diversity-inducing objective that encourages high mutual information between p(Z), and the marginal trajectory distribution for the latent-conditioned policy π(a|s, z). We optimize this objective subject to the constraint that each policy achieves return in M that is close to the optimal return. This optimization problem is:
+θ∗ = arg max
+θ
+I(τ, z) s.t. ∀z, RM (πθ) ≥ RM(π∗
+M) − ε, (2) 3
+where πθ = πθ(·|s; z) and (cid:15) > 0. In Section 5, we show that the objective in Equation 2 can be derived as a tractable approximation to Equation 1 under some mild assumptions. The constrained optimization in Equation 2 aims at learning a space of policies, indexed by the latent variable z, such that the set ¯Π = {π(·|·, z)|z ∼ p(z)} covers the space of possible policies π(a|s) that induce near-optimal, long-term discounted return on the training MDP M. The mutual information objective
+I(τ, z) enforces diversity among policies in ¯Π, but only when these policies are close to optimal. 4.2 The SMERL Optimization Problem
+In order to tractably solve the optimization problem 2, we lower-bound the mutual information I(τ, z) by a sum of mutual information terms over individual states appearing in the trajectory τ , as discussed in Section 2. We then obtain the following surrogate, tractable optimization problem:
+θ∗ = arg max
+θ
+T (cid:88) t=1
+I(st; z) s.t. ∀z, RM (πθ) ≥ RM(π∗
+M) − ε. (3)
+Following the argument from [7], we compute an unsupervised reward function from the mutual information between states and latent variables as ˜r(s, a) = log qφ(z|s) − log p(z), where qφ(z|s) is a learned discriminator. Note that I(st; z) = H(z) − H(z|st), where H(X) is the entropy of random variable X. Since the term H(z) encourages the distribution over the latent variables to have high entropy, we ﬁx p(z) to be uniform.
+In order to satisfy the constraint in Equation 3 that (cid:80)T t=1 I(st; z) is maximized only when the latent-conditioned policy achieves return RM (πθ) ≥ RM(π∗
+M) − (cid:15), we only optimize the unsupervised reward when the environment return is within a pre-deﬁned (cid:15) distance from the optimal return. To this end, we optimize the sum of two quantities: (1) the discounted return obtained by executing a latent-conditioned policy in the MDP, RM(πθ(·|s, z)), and (2) the discounted sum of unsupervised rewards (cid:80) t γt˜rt, only if the policy’s return satisﬁes the condition speciﬁed in Equation 3. Combining these components leads to the following optimization in practice (1[·] is the indicator function, α > 0): (cid:34)
+θ∗ = arg max
+θ
+Ez∼p(z)
+RM(πθ) + α1[RM(πθ)≥RM(π∗
+M)−ε] (cid:35)
+γt˜r(st, at) (cid:88) t (4) 4.3 Practical Algorithm
+We implement SMERL using soft actor-critic (SAC) [16], but with a latent variable maximum entropy policy πθ(a|s, z). The set of latent variables is chosen to be a ﬁxed discrete set, Z, and we set p(z) to be the uniform distribution over this set. At the beginning of each episode, a latent variable z is sampled from p(z) and the policy πθ(·|·, z) is used to sample a full trajectory, with z being ﬁxed for the entire episode. The transitions obtained, as well as the latent variable z, are stored in a replay buffer. When sampling states from the replay buffer, we compute the reward to optimize with SAC according to Equation 3 from Section 4.2: rSMERL(st, at) = r(st, at) + α1RM(πθ)≥RM(π∗
+M)−ε˜r(st, at). (5)
+For all states sampled from the replay buffer, we optimize the reward obtained from the environment r. For states in trajectories which achieve near-optimal return, the agent also receives unsupervised reward ˜r, which is higher-valued when the agent visits states that are easy to discriminate, as measured by the likelihood of a discriminator qφ(z|s). The discriminator is trained to infer the latent variable z from the states visited when executing that latent-conditioned policy. In order to measure whether
+RM (πθ) ≥ RM(π∗
+M) − ε , we ﬁrst train a baseline SAC agent on the environment, and treat the maximum return achieved by the trained SAC agent as the optimal return RM(π∗
+M). The full training algorithm is described in Algorithm 1.
+Following the few-shot robustness evaluation protocol, given a budget of K episodes, each latent variable policy πθ(·|s, z) is executed in a test MDP M(cid:48) for 1 episode. The policy which achieves the maximum sampled return is returned (see Algorithm 2). 5 Analysis of Diversity-Driven Learning
+We now provide a theoretical analysis of SMERL. We show how the tractable objective shown in
+Equation 4 can be derived out of the optimization problem in Equation 1 for particular choices of 4
+Algorithm 1 SMERL: Training in training MDP M while not converged do
+Sample latent z ∼ p(z) and initial state s0 ∼ µ. for t ← 1 to steps_per_episode do
+Sample action at ∼ πθ(·|st, zt).
+Step environment: rt, st+1 ∼ P(rt, st+1|st, at).
+Compute qφ(z|st+1) with discriminator.
+Let ˜rt = log qφ(z|st+1) − log p(z).
+Compute RM(πθ) = (cid:80) for t ← 1 to steps_per_episode do t rt.
+Compute reward rSMERL according to Eq 5.
+Update θ to maximize rSMERL with SAC.
+Update φ to maximize log qφ(z|st) with SGD.
+Algorithm 2 SMERL: Few-shot robust-ness evaluation in test MDP M(cid:48)
+RMAX ← −∞
+πbest ← πθ(·|z0) for i ∈ {1, 2, ..., K} do
+Rollout policy πθ(·|zi) in MDP M(cid:48) for 1 episode and compute RM(cid:48) (πθ).
+RMAX ← max(RMAX, RM(cid:48) (πθ))
+Update πbest
+Return πbest robustness sets Stest of MDPs. Our analysis in divided into three parts. First, we deﬁne our choice of MDP robustness set. We then provide a reduction of this set over MDPs to a robustness set over policies. Finally, we show that an optimal solution of our tractable objective is indeed optimal for this policy robustness set under certain assumptions. 5.1 Robustness Sets of MDPs and Policies
+Following our problem deﬁnition in Section 2, our robustness sets will be deﬁned over MDPs M(cid:48), which correspond to versions of the training MDP M with altered reward or dynamics. For the purpose of this discussion, we limit ourselves to discrete state and action spaces. Drawing inspiration from the navigation example in Section 1, we now deﬁne our choice of robustness set, which we will later connect to the set of MDPs to which we can expect SMERL to generalize. Hence, we deﬁne the
+MDP robustness set as:
+Deﬁnition 1. Given a training MDP M and (cid:15) > 0, the MDP robustness set, SM,(cid:15), is the set of all
+MDPs M(cid:48) which satisfy two properties:
+M) − RM(π∗ (1)RM(π∗ (2) The trajectory distribution of the policy π∗
+M(cid:48)) ≤ (cid:15)
+M(cid:48) is the same on M and M(cid:48).
+Intuitively, the set SM,(cid:15) consists of all MDPs for which the optimal policy π∗
+M(cid:48) achieves a return on the training MDP that is close to the return achieved by its own optimal policy, π∗
+M. Additionally, the optimal policy of M(cid:48) must produce the same trajectory distribution in M(cid:48) as in M. These properties are motivated by practical situations, where a perturbation to a training MDP, such as an obstacle blocking an agent’s path (see Figure 1), allows different policies in the training MDP to be optimal on the test MDP. This perturbation creates a test MDP M(cid:48) whose optimal policy achieves return close to the optimal policy of M since it takes only a slightly longer path to the goal, and that path is traversed by the same policy in the original MDP M. Given this intuition, the MDP robustness set SM,(cid:15) will be the set that we use for the test set of MDPs Stest in Equation 1 in our upcoming derivation.
+While we wish to generalize to MDPs in the MDP robustness set, in our training protocol an RL agent has access to only a single training MDP. It is not possible directly optimize over the set of test MDPs, and SMERL instead optimizes over policies in the training MDP. In order to analyze the connection between the policies learned by SMERL and robustness to test MDPs, we consider a related robustness set, deﬁned in terms of sub-optimal policies on the training MDP:
+Deﬁnition 2. Given a training MDP M and (cid:15) > 0, the policy robustness set, Sπ∗
+M,(cid:15) is deﬁned as
+Sπ∗
+M,(cid:15) = {π | RM(π∗
+M) − RM(π) ≤ (cid:15) and π is a deterministic policy }.
+The policy robustness set consists of all policies which achieve return close to the optimal return of the training MDP. Since the optimal policies of the MDP robustness set also satisfy this condition, intuitively, Sπ∗
+M,(cid:15) encompasses the optimal policies for MDPs from SM,(cid:15).
+Next, we formalize this intuition, and in Sec. 5.3 show how this convenient relationship can replace the optimization over SM,(cid:15) in Eq. 1 with an optimization over policies, as performed by SMERL. 5.2 Connecting MDP Robustness Sets with Policy Robustness Sets
+Every policy in Sπ∗
+Sπ∗
+M,(cid:15) is optimal for some MDP in SM,(cid:15). Thus, if an agent can learn all policies in
+M,(cid:15), then we can guarantee the ability to perform optimally in each and every possible MDP that 5
+can be encountered at test time. In order to formally prove this intuition, we provide a set of two containment results. Proofs from this section can be found in Appendix A.
+Proposition 1. For each MDP M(cid:48) in the MDP robustness set SM,(cid:15), π∗ robustness set Sπ∗
+Proposition 2. Given an MDP M and each policy π in the policy robustness set Sπ∗ an MDP M(cid:48) = (S, A, ¯P, ¯R, γ, µ) such that M(cid:48) ∈ SM,(cid:15) and π = π∗
+M(cid:48) exists in the policy
+M,(cid:15), there exists
+M,(cid:15).
+M(cid:48).
+We next use this connection between Sπ∗ our formal training objective (Equation 1).
+M,(cid:15) an SM,(cid:15) to verify that SMERL indeed ﬁnds a solution to 5.3 Optimizing the Robustness Objective
+Now that we have shown that any policy in Sπ∗
+M,(cid:15) is optimal in some MDP in SM,(cid:15), we now show how this relation can be utilized to simplify the objective in Equation 1. Finally, we show that this simpliﬁcation naturally leads to the trajectory-centric mutual information objective. We ﬁrst introduce a modiﬁed training objective below in Equation 6, and then show in Proposition 3 that under some mild conditions, the solution obtained by optimizing Equation 6 matches the solution obtained by solving Equation 1:
+Π∗ = arg max
+¯Π⊂Π min
+ˆπ∈Sπ∗
+M
+[max
+π∈ ¯Π
+,(cid:15)
+Eτ ∼ˆπ log p(τ |π)]. (6)
+Proposition 3. The solution to the objective in Equation 1 is the same as the solution to the objective in Equation 6 when Stest = SM,(cid:15).
+Finally, we now show that the set of policies obtained by optimizing Equation 6 is the same as the set of solutions obtained by the SMERL mutual information objective (Equation 2).
+Proposition 4. [Informal] With usual notation and for a sufﬁciently large number of latent variables, the set of policies Π∗ that result from solving the optimization problem in Equation 6 is equivalent to the set of policies πθ∗,z that result from solving the optimization problem in Equation 2.
+A more formal theorem statement and its proof are in Appendix A. Propositions 3 and 4 connect the solutions to the optimization problems in Equation 1 and Equation 2, for a speciﬁc instantiation of Stest.
+Our results in this section suggest that the general paradigm of diversity-driven learning is effective for robustness when the test MDPs satisfy certain properties. In Section 7, we will empirically measure SMERL’s robustness when optimizing the SMERL objective on practical problems where the test perturbations satisfy these conditions. 6

@@ -1,0 +1,249 @@
+Abstract
+Reliable evaluation of adversarial defenses is a challenging task, currently limited to an expert who manually crafts attacks that exploit the defenses inner workings or approaches based on an ensemble of ﬁxed attacks, none of which may be effective for the speciﬁc defense at hand. Our key observation is that adaptive attacks are composed of reusable building blocks that can be formalized in a search space and used to automatically discover attacks for unknown defenses. We evaluated our approach on 24 adversarial defenses and show that it outperforms
+AutoAttack (Croce & Hein, 2020b), the current state-of-the-art tool for reliable evaluation of adversarial defenses: our tool discovered signiﬁcantly stronger attacks by producing 3.0%-50.8% additional adversarial examples for 10 models, while obtaining attacks with slightly stronger or similar strength for the remaining models. 1
+
+Introduction
+The issue of adversarial attacks (Szegedy et al., 2014; Goodfellow et al., 2015), i.e., crafting small in-put perturbations that lead to mispredictions, is an important problem with a large body of recent work.
+Unfortunately, reliable evaluation of proposed defenses is an elusive and challenging task: many de-fenses seem to initially be effective, only to be circumvented later by new attacks designed speciﬁcally with that defense in mind (Carlini & Wagner, 2017; Athalye et al., 2018; Tramer et al., 2020).
+To address this challenge, two recent works approach the problem from different perspectives. Tramer et al. (2020) outlines an approach for manually crafting adaptive attacks that exploit the weak points of each defense. Here, a domain expert starts with an existing attack, such as PGD (Madry et al., 2018) (denoted as • in Figure 1), and adapts it based on knowledge of the defense’s inner workings.
+Common modiﬁcations include: (i) tuning attack parameters (e.g., number of steps), (ii) replacing network components to simplify the attack (e.g., removing randomization or non-differentiable components), and (iii) replacing the loss function optimized by the attack. This approach was demonstrated to be effective in breaking all of the considered 13 defenses. However, a downside is that it requires substantial manual effort and is limited by the domain knowledge of the expert – for instance, each of the 13 defenses came with an adaptive attack which was insufﬁcient, in retrospect.
+At the same time, Croce & Hein (2020b) proposed to assess adversarial robustness using an ensemble of four attacks illustrated in Figure 1 (b) – APGDCE with cross-entropy loss (Croce & Hein, 2020b),
+APGDDLR with difference in logit ratio loss, FAB (Croce & Hein, 2020a), and SQR (Andriushchenko et al., 2020). While these do not require manual effort and have been shown to improve the robustness 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+(a) Handcrafted adaptive attacks
+Tramer et al. (2020)
++modiﬁed loss (cid:46) k-WTA ensemble diversity (cid:46)
+•
+NES
+↑ n
+◦
++BPDA
++weighted loss
+◦
+◦ ◦ (cid:46)
+EMPIR optimize params
+•
+B&B
+•
+PGD (b) Ensemble of ﬁxed attacks
+Croce & Hein (2020b) (c) Adaptive attack search (Our Work)
+•
+SQR
+•
+APGDDLR
+•
+APGDCE
+•
+FAB (cid:46)
+•
+APGD
+•
+C&W
+•
+NES
+•
+FGSM
+•
+PGD (cid:46) k-WTA
+•
+DeepFool
+•
+SQR
+•
+FAB (cid:46)
+EMPIR manual step (cid:46) (cid:46) best adaptive attack
+• ﬁxed attack
+Figure 1: High-level illustration and comparison of recent works and ours. Adaptive attacks (a) rely on a human expert to manually adapt an existing attack to exploit the weak points of each defense.
+AutoAttack (b) evaluates defenses using an ensemble of diverse attacks. Our work (c) deﬁnes a search space of adaptive attacks (denoted as
+) and performs search steps automatically. (cid:46) search space search step estimate for many defenses, the approach is inherently limited by the fact that the attacks are ﬁxed apriori without any knowledge of the given defense at hand. This is visualized in Figure 1 (b) where even though the attacks are designed to be diverse, they cover only a small part of the entire space.
+This work: towards automated discovery of adaptive attacks We present a new method that helps automating the process of crafting adaptive attacks, combining the best of both prior approaches; the ability to evaluate defenses automatically while producing attacks tuned for the given defense.
+Our work is based on the key observation that we can identify common techniques used to build existing adaptive attacks and extract them as reusable building blocks in a common framework. Then, given a new model with an unseen defense, we can discover an effective attack by searching over suitable combinations of these building blocks. To identify reusable techniques, we analyze existing adaptive attacks and organize their components into three groups:
+• Attack algorithm and parameters: a library of diverse attack techniques (e.g., APGD, FAB, C&W (Car-lini & Wagner, 2017), NES (Wierstra et al., 2008)), together with backbone speciﬁc and generic parameters (e.g., input randomization, number of steps, if/how to use EOT (Athalye et al., 2018)).
+• Network transformations: producing an easier to attack surrogate model using techniques including variants of BPDA (Athalye et al., 2018) to break gradient obfuscation, and layer removal (Tramer et al., 2020) to eliminate obfuscation layers such as redundant softmax operator.
+• Loss functions: that specify different ways of deﬁning the attack’s loss function.
+These components collectively formalize an attack search space induced by their different combina-tions. We also present an algorithm that effectively navigates the search space so to discover an attack.
+In this way, domain experts are left with the creative task of designing new attacks and growing the framework by adding missing attack components, while the tool is responsible for automating many of the tedious and time-consuming trial-and-error steps that domain experts perform manually today.
+That is, we can automate some part of the process of ﬁnding adaptive attacks, but not necessarily the full process. This is natural as ﬁnding truly new attacks is a highly creative process that is currently out of reach for fully automated techniques.
+We implemented our approach in a tool called Adaptive AutoAttack (A3) and evaluated it on 24 diverse adversarial defenses. Our results demonstrate that A3 discovers adaptive attacks that outper-form AutoAttack (Croce & Hein, 2020b), the current state-of-the-art tool for reliable evaluation of adversarial defenses: A3 ﬁnds attacks that are signiﬁcantly stronger, producing 3.0%-50.8% additional adversarial examples for 10 models, while obtaining attacks with stronger or simialr strength for the remaining models. Our tool A3 and scripts for reproducing the experiments are available online at: https://github.com/eth-sri/adaptive-auto-attack 2 Automated Discovery of Adaptive Attacks i=1 to denote a training dataset where x ∈ X is a natural input (e.g., an image)
+We use D = {(xi, yi)}N and y is the corresponding label. An adversarial example is a perturbed input x(cid:48), such that: (i) it 2
+satisﬁes an attack criterion c, e.g., a K-class classiﬁcation model f : X → RK predicts a wrong label, and (ii) the distance d(x(cid:48), x) between the adversarial input x(cid:48) and the natural input x is below a threshold (cid:15) under a distance metric d (e.g., an Lp norm). Formally, this can be written as: capability goal (criterion)
+ADVERSARIAL
+ATTACK d(x(cid:48), x) ≤ (cid:15) such that c(f, x(cid:48), x)
+For example, instantiating this with the L∞ norm and misclassiﬁcation criterion corresponds to:
+MISCLASSIFICATION
+L∞ ATTACK (cid:107)x(cid:48) − x(cid:107)∞ ≤ (cid:15) s.t.
+ˆf (x(cid:48)) (cid:54)= ˆf (x) where ˆf returns the prediction arg maxk=1:K fk(·) of the model f .
+Problem Statement Given a model f equipped with an unknown set of defenses and a dataset
+D = {(xi, yi)}N i=1, our goal is to ﬁnd an adaptive adversarial attack a ∈ A that is best at generating adversarial samples x(cid:48) according to the attack criterion c and the attack capability d(x(cid:48), x) ≤ (cid:15): max a∈A, d(x(cid:48),x)≤(cid:15)
+E(x,y)∼D c(f, x(cid:48), x) where x(cid:48) = a(x, f ) (1)
+Here, A denotes the search space of all possible attacks, where the goal of each attack a : X × (X →
+RK) → X is to generate an adversarial sample x(cid:48) = a(x, f ) for a given input x and model f .
+For example, solving this optimization problem with respect to the L∞ misclassiﬁcation criterion corresponds to optimizing the number of adversarial examples misclassiﬁed by the model.
+In our work, we consider an implementation-knowledge adversary, who has full access to the model’s implementation at inference time (e.g., the model’s computational graph). We chose this threat model as it matches our problem setting – given an unseen model implementation, we want to automatically
+ﬁnd an adaptive attack that exploits its weak points but without the need of a domain expert. We note that this threat model is weaker than a perfect-knowledge adversary (Biggio et al., 2013), which assumes a domain expert that also has knowledge about the training dataset and algorithm, as this information is difﬁcult, or even not possible, to recover from the model’s implementation only.
+Key Challenges To solve the optimization problem from Eq. 1, we address two key challenges:
+• Deﬁning a suitable attacks search space A such that it is expressible enough to cover a range of existing adaptive attacks.
+• Searching over the space A efﬁciently such that a strong attack is found within a reasonable time.
+Next, we formalize the attack space in Section 3 and then describe our search algorithm in Section 4. 3 Adaptive Attacks Search Space
+We deﬁne the adaptive attack search space by analyzing existing adaptive attacks and identifying common techniques used to break adversarial defenses. Formally, the adaptive attack search space is given by A : S × T, where S consists of sequences of backbone attacks along with their loss functions, selected from a space of loss functions L, and T consists of network transformations. Semantically, given an input x and a model f , the goal of adaptive attack (s, t) ∈ S × T is to return an adversarial example x(cid:48) by computing s(x, t(f )) = x(cid:48). That is, it ﬁrst transforms the model f by applying the transformation t(f ) = f (cid:48), and then executes the attack s on the surrogate model f (cid:48). Note that the surrogate model is used only to compute the candidate adversarial example, not to evaluate it. That is, we generate an adversarial example x(cid:48) for f (cid:48), and then check whether it is also adversarial for f .
+Since x(cid:48) may be adversarial for f (cid:48), but not for f , the adaptive attack must maximize the transferability of the generated candidate adversarial samples.
+Attack Algorithm & Parameters (S) The attack search space consists of a sequence of adversarial attacks. We formalize the search space with the grammar: 3
+(Attack Search Space)
+S ::=
+S; S | randomize S | EOT S, n | repeat S, n | try S for n | Attack with params with loss ∈ L
+• S; S: composes two attacks, which are executed independently and return the ﬁrst adversarial sample in the deﬁned order. That is, given input x, the attack s1; s2 returns s1(x) if s1(x) is an adversarial example, and otherwise it returns s2(x).
+• randomize S: enables the attack’s randomized components, which correspond to random seed and/or selecting a starting point within d(x(cid:48), x) ≤ (cid:15), uniformly at random.
+• EOT S, n: uses expectation over transformation, a technique designed to compute gradients for models with randomized components (Athalye et al., 2018).
+• repeat S, n: repeats the attack n times (useful only if randomization is enabled).
+• try S for n: executes the attack with a time budget of n seconds.
+• Attack with params with loss ∈ L: is a backbone attack Attack executed with param-eters params and loss function loss. In our evaluation, we use FGSM (Goodfellow et al., 2015), PGD, DeepFool (Moosavi-Dezfooli et al., 2016), C&W, NES, APGD, FAB and SQR. We provide full list of the attack parameters, including their ranges and priors in Appendix B.
+Note, that we include variety of backbone attacks, including those that were already superseeded by stronger attacks. This is done for two key reasons. First, weaker attacks can be surprisingly effective in some cases and avoid the detector because of their weakness (see defense C24 in our evaluation).
+Second, we are not using any prior when designing the space search. In particular, whenever a new attack is designed it can simply be added to the search space. Then, the goal of the search algorithm is to be powerful enough to perform the search efﬁciently. In other words, the aim is to avoid making any assumptions of what is useful or not and let the search algorithm learn this instead.
+Network Transformations (T) A common approach that aims to improve the robustness of neural networks against adversarial attacks is to incorporate an explicit defense mechanism in the neural architecture. These defenses often obfuscate gradients to render iterative-optimization methods ineffective (Athalye et al., 2018). However, these defenses can be successfully circumvented by (i) choosing a suitable attack algorithm, such as score and decision-based attacks (included in S), or (ii) by changing the neural architecture (deﬁned next).
+At a high level, the network transformation search space T takes as input a model f and transforms it to another model f (cid:48), which is easier to attack. To achieve this, the network f can be expressed as a directed acyclic graph, including both the forward and backward computations, where each vertex denotes an operator (e.g., convolution, residual blocks, etc.), and edges correspond to data dependencies. In our work, we include two types of network transformations:
+Layer Removal, which removes an operator from the graph. Each operator can be removed if its input and output dimensions are the same, regardless of its functionality.
+Backward Pass Differentiable Approximation (BPDA) (Athalye et al., 2018), which replaces the backward version of an operator with a differentiable approximation of the function. In our search space we include three different function approximations: (i) an identity function, (ii) a convolution layer with kernel size 1, and (iii) a two-layer convolutional layer with ReLU activation in between.
+The weights in the latter two cases are learned through approximating the forward function.
+Loss Function (L) Selecting the right objective function to optimize is an important design decision for creating strong adaptive attacks. Indeed, the recent work of Tramer et al. (2020) uses 9 different objective functions to break 13 defenses, showing the importance of this step. We formalize the space of possible loss functions using the following grammar: (Loss Function Search Space)
+L ::=
+Z ::=
+Loss ::= targeted Loss, n with Z | untargeted Loss with Z | targeted Loss, n - untargeted Loss with Z logits | probs
+CrossEntropy | HingeLoss | L1 | DLR | LogitMatching 4
+Targeted vs Untargeted. The loss can be either untargeted, where the goal is to change the classiﬁcation to any other label f (x(cid:48)) (cid:54)= f (x), or targeted, where the goal is to predict a concrete label f (x(cid:48)) = l.
+Even though the untargeted loss is less restrictive, it is not always easier to optimize in practice, and replacing it with a targeted attack might perform better. When using targeted Loss, n, the attack will consider the top n classes with the highest probability as the targets.
+Loss Formulation. The concrete loss formulation includes loss functions used in existing adaptive attacks, as well as the recently proposed difference in logit ratio loss (Croce & Hein, 2020b). We provide a formal deﬁnition of the loss functions used in our work in Appendix B.
+Logits vs. Probabilities. In our search space, loss functions can be instantiated both with logits as well as with probabilities. Note that some loss functions are speciﬁcally designed for one of the two options, such as C&W (Carlini & Wagner, 2017) or DLR (Croce & Hein, 2020b). While such knowledge can be used to reduce the search space, it is not necessary as long as the search algorithm is powerful enough to recognize that such a combination leads to poor results.
+Loss Replacement. Because the key idea behind many of the defenses is ﬁnding a property that helps differentiate between adversarial and natural images, one can also deﬁne the optimization objective in the same way. These feature-level attacks (Sabour et al., 2016) avoid the need to directly optimize the complex objective deﬁned by the adversarial defense and have been effective at circumventing them. As an example, the logit matching loss minimizes the difference of logits between adversarial sample x(cid:48) and a natural sample of the target class x (selected at random from the dataset). Instead of logits, the same idea can also be applied to other statistics, such as internal representations computed by a pre-trained model or KL-divergence between label probabilities. 4 Search Algorithm
+We now describe our search algorithm that optimizes the problem statement from Eq. 1. Since we do not have access to the underlying distribution, we approximate Eq. 1 using the dataset D as follows: score(f, a, D) = 1
+|D| (cid:80)|D| i=1 −λla + maxd(x(cid:48),x)≤(cid:15) c(f, a(x, f ), x) (2) where a ∈ A is an attack, la ∈ R+ denotes untargeted cross-entropy loss of a on the input, and
+λ ∈ R is a hyperparameter. The intuition behind −λ · la is that it acts as a tie-breaker in case the criterion c alone is not enough to differentiate between multiple attacks. While this is unlikely to happen when evaluating on large datasets, it is quite common when using only a small number of samples. Obtaining good estimates in such cases is especially important for achieving scalability since performing the search directly on the full dataset would be prohibitively slow.
+Search Algorithm We present our search algorithm in Algorithm 1. We start by searching through the space of network transformations t ∈ T to ﬁnd a suitable surrogate model (line 1). This is achieved by taking the default attack ∆ (in our implementation, we set ∆ to APGDCE), and then evaluating all locations where BPDA can be used, and subsequently evaluating all layers that can be removed.
+Even though this step is exhaustive, it takes only a fraction of the runtime in our experiments, and no further optimization was necessary.
+Next, we search through the space of attacks S. As this search space is enormous, we employ three techniques to improve scalability and attack quality. First, to generate a sequence of m attacks, we perform a greedy search (lines 3-16). That is, in each step, we ﬁnd an attack with the best score on the samples not circumvented by any of the previous attacks (line 4). Second, we use a parameter estimator model M to select the suitable parameters (line 7). In our work, we use Tree of Parzen
+Estimators (Bergstra et al., 2011), but the concrete implementation can vary. Once the parameters are selected, they are evaluated using the score function (line 8), the result is stored in the trial history H (line 9), and the estimator is updated (line 10). Third, because evaluating the adversarial attacks can be expensive, and the dataset D is typically large, we employ successive halving technique (Karnin et al., 2013; Jamieson & Talwalkar, 2016). Concretely, instead of evaluating all the trials on the full dataset, we start by evaluating them only on a subset of samples Dsample (line 5). Then, we improve the score estimates by iteratively increasing the dataset size (line 13), re-evaluating the scores (line 14), and retaining a quarter of the trials with the best score (line 15). We repeat this process to ﬁnd a single best attack from H, which is then added to the sequence of attacks S (line 16). 5
+Algorithm 1: A search algorithm that given a model f with unknown defense, discovers an adaptive attack from the attack search space A with the best score. def AdaptiveAttackSearch
+Input: dataset D, model f , attack search space A = S × T, number of trials k, initial dataset size n, attack sequence length m, criterion function c, initial parameter estimator model M , default attack ∆ ∈ S
+D ← D \ {x | x ∈ D ∧ c(f, a[S,t](x, f ), x)}
+H ← ∅; Dsample ← sample(D, n) for i ← 1 : k do
+Output: adaptive attack from a[s,t] ∈ A = S × T achieving the highest score on D t ← arg maxt∈T score(f, a[∆,t], D)
+S ← ⊥ for j ← 1 : m do (cid:46) Find surrogate model t using default attack ∆ (cid:46) Initialize attack to be no attack, which returns the input image (cid:46) Run m iterations to get sequence of m attacks (cid:46) Remove non-robust samples (cid:46) Initial dataset with n samples (cid:46) Select candidate adaptive attacks
+θ(cid:48) ← arg maxθ∈S P (θ | M ) (cid:46) Best unseen parameters according to the model M q ← score(f, a[θ(cid:48),t], Dsample)
+H ← H ∪ {(θ(cid:48), q)}
+M ← update model M with (θ(cid:48), q)
+H ← keep |H|/4 attacks with the best score while |H| > 1 and Dsample (cid:54)= D do (cid:46) Successive halving (SHA)
+Dsample ← Dsample ∪ sample(D \ Dsample, |Dsample|) (cid:46) Double the dataset size
+H ← {(θ, score(f, a[θ,t], Dsample)) | (θ, q) ∈ H}(cid:46) Re-evaluate on larger dataset
+H ← keep |H|/4 attacks with the best score
+S ← S; best attack in H return a[S,t] 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17
+Time Budget and Worst-case Search Time We set a time budget on the attacks, measured in seconds per sample per attack, to restrict resource-expensive attacks and allow the tradeoff between computation time and attack strength. If an attack exceeds the time limit in line 8, the evaluation terminates, and the score is set to be −∞. We analyzed the worst-case search time to be 4/3× the allowed attack runtime in our experiments, which means the search overhead is both controllable and reasonable in practice. The derivation is shown in Appendix A. 5 Evaluation
+We evaluate A3 on 24 models with diverse defenses and compare the results to AutoAttack (Croce
+& Hein, 2020b) and to several existing handcrafted attacks. AutoAttack is a state-of-the-art tool designed for reliable evaluation of adversarial defenses that improved the originally reported results for many existing defenses by up to 10%. Our key result is that A3 ﬁnds stronger or similar attacks than AutoAttack for virtually all defenses:
+• In 10 cases, the attacks found by A3 are signiﬁcantly stronger than AutoAttack, resulting in 3.0% to 50.8% additional adversarial examples.
+• In the other 14 cases, A3’s attacks are typically 2x faster while enjoying similar attack quality.
+Model Selection We selected 24 models and divided them into three blocks A, B, C as listed in
+Table 1. Block A contains diverse defenses with (cid:15) = 4/255. Block B contains selected top models from RobustBench (Croce et al., 2020). Block C contains diverse defenses with (cid:15) = 8/255.
+The A3 tool The implementation of A3 is based on PyTorch (Paszke et al., 2019), the implementa-tions of FGSM, PGD, NES, and DeepFool are based on FoolBox (Rauber et al., 2017) version 3.0.0,
+C&W is based on ART (Nicolae et al., 2018) version 1.3.0, and the attacks APGD, FAB, and SQR are from (Croce & Hein, 2020b). We use AutoAttack’s rand version if a defense has a randomization component, and otherwise we use its standard version. To allow for a fair comparison, we extended
+AutoAttack with backward pass differential approximation (BPDA), so we can run it on defenses with non-differentiable components; without this, all gradient-based attacks would fail. We instantiate 6
+Table 1: Comparison of AutoAttack (AA) and our approach (A3) on 24 defenses. Further details of each defense, discovered adaptive attacks and conﬁdence intervals are included in Appendix D and H.
+CIFAR-10, l∞, (cid:15) = 4/255
+A1
+A2†
+A3†
+Madry et al. (2018)
+Buckman et al. (2018)
+Das et al. (2017) + Lee et al. (2018)
+Metzen et al. (2017)
+A4
+Guo et al. (2018)
+A5
+A6†
+Pang et al. (2019)
+Papernot et al. (2015)
+A7
+Xiao et al. (2020)
+A8
+Xiao et al. (2020)ADV
+A9
+A9’ Xiao et al. (2020)ADV
+CIFAR-10, l∞, (cid:15) = 8/255
+B10∗ Gowal et al. (2021)
+B11∗ Wu et al. (2020)RTS
+B12∗ Zhang et al. (2021)
+B13∗ Carmon et al. (2019)
+B14∗ Sehwag et al. (2020)
+CIFAR-10, l∞, (cid:15) = 8/255
+Robust Accuracy (1 - Rerr)
+A3
+AA
+∆ 44.78 2.29 0.59 6.17 22.30 4.14 2.85 19.82 64.91 64.91 62.80 60.04 59.64 59.53 57.14 44.69 1.96 0.11 3.04 12.14 3.94 2.71 11.11 63.56 17.70 62.79 60.01 59.56 59.51 57.16
+-0.09
+-0.33
+-0.48
+-3.13
+-10.16
+-0.20
+-0.14
+-8.71
+-1.35
+-47.21
+-0.01
+-0.03
+-0.08
+-0.02 0.02
+Runtime (min)
+AA 25 9 6 21 19 28 4 49 157 157 818 706 604 638 671
+A3 20 7 2 13 17 24 4 22 100 2,280 226 255 261 282 429
+Speed-up 1.25× 1.29× 3.00× 1.62× 1.12× 1.17× 1.00× 2.23× 1.57× 0.07× 3.62× 2.77× 2.31× 2.26× 1.56×
+C15∗ Stutz et al. (2020)
+C15’ Stutz et al. (2020)
+C16∗ Zhang & Wang (2019)
+C17 Grathwohl et al. (2020)
+C18 Xiao et al. (2020)ADV
+C19 Wang et al. (2019)
+C20† B11 + Defense in A3
+C21† C17 + Defense in A3
+C22
+C23
+C24 Hu et al. (2019) 108 205 302 114 146 372 210 79 462 374 56
+∗model available from the authors, †model with non-differentiable components.
+B12 uses (cid:15) = 0.031. C15 uses (cid:15) = 0.03. A9’ uses time budget Tc = 30. C15’ uses m = 8.
+-38.10
+-50.77 0.37 0.01
+-3.09
+-0.03
+-0.68
+-10.03
+-7.54
+-8.84
+-3.18 77.64 77.64 36.74 5.15 5.40 50.84 60.72 15.27 49.53 22.29 6.25 39.54 26.87 37.11 5.16 2.31 50.81 60.04 5.24 41.99 13.45 3.07 0.94× 0.49× 1.26× 0.94× 0.65× 1.97× 2.96× 3.30× 0.55× 0.30× 1.96×
+B11 + Random Rotation
+C17 + Random Rotation 101 101 381 107 95 734 621 261 255 114 110
+Search
+A3 88 116 40 80 99 237 84 189 179 1,548 761 690 565 575 691 296 659 726 749 828 755 585 746 900 1,023 502
+Algorithm 1 by setting: the attack sequence length m = 3, the number of trials k = 64, the initial dataset size n = 100, and we use a time budget of 0.5 to 3 seconds per sample depending on the model size. All of the experiments are performed using a single RTX 2080 Ti GPU.
+Evaluation Metric Following Stutz et al. (2020), we use the robust test error (Rerr) metric to combine the evaluation of defenses with and without detectors. We include details in Appendix C. In our evaluation, A3 produces consistent results on the same model across independent runs with the standard deviation σ < 0.2 (computed across 3 runs). The details are included in Appendix H.
+Comparison to AutoAttack Our main results, summarized in Table 1, show the robust accuracy (lower is better) and runtime of both AutoAttack (AA) and A3 over the 24 defenses. For example, for A8 our tool ﬁnds an attack that leads to lower robust accuracy (11.1% for A3 vs. 19.8% for AA) and is more than twice as fast (22 min for A3 vs. 49 min for AA). Overall, A3 signiﬁcantly improves upon AA or provides similar but faster attacks.
+We note that the attacks from AA are included in our search space (although without the knowledge of their best parameters and sequence), and so it is expected that A3 performs at least as well as AA, provided sufﬁcient exploration time. Importantly, A3 often ﬁnds better attacks: for 10 defenses, A3 reduces the robust accuracy by 3% to 50% compared to AA. Next, we discuss the results in more detail. 7
+Defenses based on Adversarial Training. Models in block B are selected from RobustBench (Croce et al., 2020), and they are based on various extensions of adversarial training, such as using ad-ditional unlabelled data for training, extensive hyperparameter tuning, instance weighting or loss regularization. The results show that the robustness reported by AA is already very high and using A3 leads to only marginal improvement. However, because our tool also optimizes for the runtime, A3 does achieve signiﬁcant speed-ups, ranging from 1.5× to 3.6×. The reasons behind the marginal robustness improvement of A3 are two-fold. First, it shows that A3 is limited by the attack techniques search space, as the attack found are all variations of APGD. Second, the models B10 - B14 aim to improve the adversarial training procedure rather than developing a new defence. This is in contrast to models that do design various types of new defences (included in blocks A and C), evaluating which typically requires discovering a new adaptive attack. For these new defences, evaluation is much more difﬁcult and this is where our approach also improves the most.
+Obfuscation Defenses. Defenses A3, A8, A9, C18, C20, and C21 are based on gradient obfuscation.
+A3 discovers stronger attacks that reduce the robust accuracy for all defenses by up to 47.21%. Here, removing the obfuscated defenses in A3, C20, and C21 provides better gradient estimation for the attacks. Further, the use of more suitable loss functions strengthens the discovered attacks and improves the evaluation results for A8 and C18.
+Randomized Defenses. For the randomized input defenses A8, C22, and C23, A3 discovers attacks that, compared to AA’s rand version, further reduce robustness by 8.71%, 7.54%, and 8.84%, respectively.
+This is achieved by using stronger yet more costly parameter settings, attacks with different backbones (APGD, PGD) and 7 different loss functions (as listed in Appendix D).
+Detector based Defenses. For C15, A4, and C24 defended with detectors, A3 improves over AA by reducing the robustness by 50.77%, 3.13%, and 3.18%, respectively. This is because none of the attacks discovered by A3 are included in AA. Namely, A3 found SQRDLR and APGDHinge for C15, untargeted FAB for A4 (FAB in AA is targeted), and PGDL1 for C24.
+Generalization of A3 Given a new defense, the main strength of our approach is that it directly beneﬁts from all existing techniques included in the search space. Here, we compare our approach to three handcrafted adaptive attacks not included in the search space.
+As a ﬁrst example, C15 (Stutz et al., 2020) proposes an adaptive attack PGD-Conf with backtracking that leads to robust accuracy of 36.9%, which can be improved to 31.6% by combining PGD-Conf with blackbox attacks. A3 ﬁnds APGDHinge and Z = probs. This combination is interesting since the hinge loss maximizing the difference between the top two predictions, in fact, reﬂects the PGD-Conf objective function. Further, similarly to the manually crafted attack by C15, a different blackbox attack included in our search space, SQRDLR, is found to complement the strength of APGD. When using a sequence of three attacks, we achieve 39.54% robust accuracy. We can decrease the robust accuracy even further by increasing the number of attacks to eight – the robust accuracy drops to 26.87%, which is a stronger result than the one reported in the original paper. In this case, our search space and the search algorithm are powerful enough to not only replicate the main ideas of Stutz et al. (2020) but also to improve its evaluation when allowing for a larger attack budget. Note that this improvement is possible even without including the backtracking used by PGD-Conf as a building block in our search space. In comparison, the robust accuracy reported by AA is only 77.64%.
+As a second example, C18 is known to be susceptible to NES which achieves 0.16% robust accuracy (Tramer et al., 2020). To assess the quality of our approach, we remove NES from our search space and instead try to discover an adaptive attack using the remaining building blocks. In this case, our search space was expressive enough to ﬁnd an alternative attack that achieves 2.31% robust accuracy.
+As a third example, to break C24, Tramer et al. (2020) designed an adaptive attack that linearly interpolates between the original and the adversarial samples using PGD. This technique breaks the defense and achieves 0% robust accuracy. In comparison, we ﬁnd PGDL1, which achieves 3.07% robust accuracy. In this case, the fact that PGDL1 is a relatively weak attack is an advantage – it successfully bypasses the detector by not generating overconﬁdent predictions.
+A3 Interpretability As illustrated above, it is possible to manually analyze the discovered attacks in order to understand how they break the defense mechanism. Further, we can also gain insights from the patterns of attacks searched across all the models (shown in Appendix D, Table 6). For example, it turns out that (cid:96)CE is not as frequent as (cid:96)DLR or (cid:96)hinge. This fact challenges the common 8
+practice of using (cid:96)CE as the default loss when evaluating robustness. In addition, using (cid:96)CE during adversarial training can make models resilient to (cid:96)CE, loss, but not necessarily to other losses.
+A3 Scalability To assess A3’s scalability, we perform two ablation studies: (i) increase the search space by 4× (by adding 8 random attacks, their corresponding parameters, and 4 dummy losses), and (ii) keep the search space size unchanged but reduce the search runtime by half. In (i), we observed a marginal performance decrease when using the same runtime, and we can reach the same attack strength when the runtime budget is increased by 1.5×. In (ii), even when we reduce the runtime by half, we can still ﬁnd attacks that are only slightly worse (≤ 0.4). This shows that a budget version of the search can provide a strong robustness evaluation. We include detailed results in Appendix E.
+Ablation Studies Similar to existing handcrafted adaptive attacks, all three components included in the search space were important for generating strong adaptive attacks for a variety of defenses.
+Here we brieﬂy discuss their importance while including the full experiment results in Appendix F.
+Attack & Parameters. We demonstrate the importance of parameters by comparing PGD, C&W, DF, and
+FGSM with default library parameters to the best conﬁguration found when available parameters are included in the search space. The attacks found by A3 are on average 5.5% stronger than the best attack among the four attacks on A models.
+Loss Formulation. To evaluate the effect of modeling different loss functions, we remove them from the search space and keep only the original loss function deﬁned for each attack. The search score drops by 3% on average for A models without the loss formulation.
+Network Processing. In C21, the main reason for achieving 10% decrease in robust accuracy is the removal of the gradient obfuscated defense Reverse
+Sigmoid. We provide a more detailed ablation in
+Table 2, which shows the effect of different BPDA instantiations included in our search space. For
+A2, since the non-differentiable layer is non-linear thermometer encoding, it is better to use a function with non-linear activation to approximate it. For A3,
+C20, C21, the defense is image JPEG compression and identity network is the best algorithm since the networks can overﬁt when training on limited data. 6

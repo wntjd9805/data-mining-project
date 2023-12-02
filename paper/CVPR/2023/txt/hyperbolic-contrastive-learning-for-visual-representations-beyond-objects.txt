@@ -1,0 +1,302 @@
+Abstract
+Although self-/un-supervised methods have led to rapid progress in visual representation learning, these methods generally treat objects and scenes using the same lens. In this paper, we focus on learning representations for objects and scenes that preserve the structure among them. Motivated by the observation that visually similar objects are close in the representation space, we argue that the scenes and objects should instead follow a hierarchical structure based on their compositionality. To exploit such a structure, we propose a contrastive learning framework where a Euclidean loss is used to learn object representations and a hyperbolic loss is used to encourage representations of scenes to lie close to representations of their constituent objects in a hyperbolic space. This novel hyperbolic objective encourages the scene-object hypernymy among the representations by optimizing the magnitude of their norms. We show that when pretrain-ing on the COCO and OpenImages datasets, the hyperbolic loss improves downstream performance of several baselines across multiple datasets and tasks, including image classiﬁ-cation, object detection, and semantic segmentation. We also show that the properties of the learned representations allow us to solve various vision tasks that involve the interaction between scenes and objects in a zero-shot fashion.
+Figure 1. Illustration of the representation space learned by our models. Object images of the same class tend to gather near the center around similar directions, while the scene images are far away in these directions with larger norms. 1.
+
+Introduction
+Our visual world is diverse and structured. Imagine taking a close-up of a box of cereal in the morning. If we zoom out slightly, we may see different nearby objects such as a pitcher of milk, a cup of hot coffee, today’s newspaper, or reading glasses. Zooming out further, we will probably recognize that these items are placed on a dining table with the kitchen as background rather than inside a bathroom. Such scene-object structure is diverse, yet not completely random. In this paper, we aim at learning visual representations of both the cereal box (objects) and the entire dining table (scenes) in
+⇤Equal Contribution. The order is decided randomly. the same space while preserving such hierarchical structures.
+Un-/self-supervised learning has become a standard method to learn visual representations [7, 12, 24, 26, 27, 51].
+Although these methods attain superior performance over supervised pretraining on object-centric datasets such as Im-ageNet [6], inferior results are observed on images depicting multiple objects such as OpenImages or COCO [68]. Several methods have been proposed to mitigate this issue, but all fo-cus either on learning improved object representations [1,68] or dense pixel representations [39, 64, 69], instead of explic-itly modeling representations for scene images. The object representations learned by these methods present a natural topology [67]. That is, the objects from visually similar
+classes lie close to each other in the representation space.
+However, it is not clear how the representations of scene images should ﬁt into that topology. Directly applying exist-ing contrastive learning results in a sub-optimal topology of scenes and objects as well as unsatisfactory performance, as we will show in the experiments. To this end, we argue that a hierarchical structure can be naturally adopted. Consider-ing that the same class of objects can be placed in different scenes, we construct a hierarchical structure to describe such relationships, where the root nodes are the visually similar objects, and the scene images consisting of them are placed as the descendants. We call this structure the object-centric scene hierarchy.
+The intermediate modeling difﬁculty induced by this structure is the combinatorial explosion. A ﬁnite number of objects leads to exponentially many different possible scenes.
+Consequently, Euclidean space may require an arbitrarily large number of dimensions to faithfully embed these scenes, whereas it is known that any inﬁnite trees can be embedded without distortion in a 2D hyperbolic space [25]. Therefore, we propose to employ a hyperbolic objective to regularize the scene representations. To learn representations of scenes, in the general setting of contrastive learning, we sample co-occurring scene-object pairs as positive pairs, and objects that are not part of that scene as negative samples, and use these pairs to compute an auxiliary hyperbolic contrastive objective. Our model is trained to reduce the distance be-tween positive pairs and push away the negative pairs in a hyperbolic space.
+Contrastive learning usually has objectives deﬁned on a hypersphere [12, 27]. By discarding the norm information, these models circumvent the shortcut of minimizing losses through tuning the norms and obtain better downstream per-formance. However, the norm of the representation can also be used to encode useful representational structure. In hy-perbolic space, the magnitude of a vector often plays the role of modeling the hypernymy of the hierarchical struc-ture [45, 53, 59]. When projecting the representations to the hyperbolic space, the norm information is preserved and used to determine the Riemannian distance, which eventually affects the loss. Since hyperbolic space is diffeomorphic and conformal to Euclidean space, our hyperbolic contrastive loss is differentiable and complementary to the original con-trastive objective.
+When training simultaneously with the original con-trastive objective for objects and our proposed hyperbolic contrastive objective for scenes, the resulting representation space exhibits a desired hierarchical structure while leaving the object clustering topology intact as shown in Figure 1.
+We demonstrate the effectiveness of the hyperbolic objective under several frameworks on multiple downstream tasks. We also show that the properties of the representations allow us to perform various vision tasks in a zero-shot way, from label uncertainty quantiﬁcation to out-of-context object detection.
+Our contributions are summarized below: 1. We propose a hyperbolic contrastive loss that regular-izes scene representations so that they follow an object-centric hierarchy, with positive and negative pairs sam-pled from the hierarchy. 2. We demonstrate that our learned representations trans-fer better than representations learned using vanilla contrastive loss on a variety of downstream tasks, in-cluding object detection, semantic segmentation, and linear classiﬁcation. 3. We show that the magnitude of representation norms effectively reﬂect the scene-objective hypernymy. 2. Method
+In this section, we elaborate upon our approach to learn-ing visual representations of object and scene images. We start by describing the hierarchical structure between objects and scenes that we wish to enforce in the learned representa-tion space. 2.1. Object-Centric Scene Hierarchy
+From simple object co-occurrence statistics [19, 41] to
+ﬁner object relationships [30, 32], using hierarchical relation-ships between objects and scenes to understand images is not new. Previous studies primarily work on an image-level hierarchy by dividing an image into its lower-level elements recursively: a scene contains multiple objects, an object has different parts, and each part may consist of even lower-level features [14, 29, 48]. While this is intuitive, it describes a hierarchical structure contained in the individual images.
+Instead, we study the structure presented among different images. Our goal is to learn a representation space for im-ages of both objects and scenes across the entire dataset.
+To this end, we argue that it is more natural to consider an object-centric hierarchy.
+It is known that when training an image classiﬁer, the objects from visually similar classes often lie close to each other in the representation space [67], which has become the cornerstone of contrastive learning. Motivated by this observation, we believe that the representation of each scene image should also be close to the object clusters it consists of. However, modeling scenes requires a much larger vol-ume due to the exponential number of possible compositions of objects. Another way to think about the object-centric hierarchy is through the generality and speciﬁcity as often discussed in the language literature [42, 45]. An object con-cept is general when standing alone in the visual world, and it will become speciﬁc when a certain context is given. For example, “a desk” is thought to be a more general concept than “a desk in a classroom with a boy sitting on it”.
+{
+=
+· · ·
+· · · s1, s2,
+Oi =
+, oni i }
+Therefore, we propose to study an object-centric hierar-chy across the entire dataset. Formally, given a set of images i , o2 o1 i ,
+, sn} are the ob-,
+{
+S ject bounding boxes contained in the image si. We deﬁne i , r2 r1 i ,
+Ri = to be partial the regions of scene
+{ areas of the image si that contain multiple objects such that rj
+[kok i 2O i and object k is in the region j. i =
+We deﬁne the object-centric hierarchy T = (V, E) to be that V =
+R1 [· · ·[R n and
+, where
+R
+S[O[R
+V , e = (u, v) is an edge of
+=
+O1 [· · ·[O n. For u, v
+O
+T if u
+✓
+✓ are always put as the leaf nodes. u. Note that the natural scene images i , where ok
+, rmi i } v or v
+· · ·
+= 2
+S 2.2. Representation Learning beyond Objects
+To describe our proposed model based on this hierarchy, we begin with a brief review of hyperbolic space and its prop-erties used in our model. For comprehensive introductions to Riemannian geometry and hyperbolic space, we refer the readers to [16, 34]. 2.2.1 Hyperbolic Space
+A hyperbolic space (Hm, g) is a complete, connected Rie-mannian manifold with constant negative sectional curva-ture. These special manifolds are all isometric to each other with the isometries deﬁned as O+(m, 1). Among these isometries, there are ﬁve common models that pre-vious studies often work on [5]. In this paper, we choose the Poincaré ball Dn := as our ba-2 sic model [21, 45, 59], where r > 0 is the radius of the ball. The Poincaré ball is coupled with a Riemannian met-4
+Dn and gE is the ric gD(p) = 2/r2)2 gE, where p canonical metric of the Euclidean space. For p, q
+D, the
+Riemannian distance on the Poincaré ball induced by its metric gD is deﬁned as follows: 2 < r2 k
+Rn
+|k
+ k 2 2
+  p p (1 p k dD(p, q) = 2r tanh  1 k  q k p
+  r
+,
+◆
+✓ (1)
+  where is the Möbius addition and it is clearly differen-tiable. In addition, the Poincaré ball can be viewed as a natural counterpart of the hypersphere as it allows all di-rections, unlike the other models such as the halfspace or hemisphere models that have constraints on the directions.
+The hyperbolic space is globally differomorphic to the Eu-clidean space, which is stated in the theorem below:
+Theorem 1. (Cartan–Hadamard). For every point p 2
+Hn the exponential map expp : TpHn
+Hn is a smooth covering map. Since Hn is simply connected, it is diffeomorphic to Rn.
+Rn
+!
+⇡
+Speciﬁcally, for p
+Dn and v
+TpDn
+⇡ 2 exponential map of the Poincaré ball expp : TpDn 2
+Rn, the
+Dn is
+! deﬁned as expp(v) := p tanh
+ 
+✓ r2
+✓ r v k k p
+  k rv v k k ◆ 2 k
+◆
+, (2)
+The exponential map gives us a way to map the output of a network, which is in the Euclidean space, to the Poincaré
+In practice, to avoid numerical issues, we clip the ball. maximal norm of v with r
+" before the projection, where
+"> 0. During the backpropagation, we perform RSGD [4] 1. Intuitively, this forces by scaling the gradients by gD(p)  the optimizer to take a smaller step when p is closer to the boundary. The scaling factor is lower bounded by ("2).
+  2
+The immediate consequence of the negative curvature is
+Hm, there are no conjugate points that for any point p along any geodesic starting from p. Therefore, the volume grows exponentially faster in hyperbolic space than in Eu-clidean space. Such a property makes it suitable to embed the hierarchical structure that has constant branching factors and exponential number of nodes. This is formally stated in the theorem below:
+O
+Theorem 2. [25] Given a Poincaré ball Dn with an arbi-trary dimension n
+, pm 2
+Dn, there exists a ﬁnite weighted tree (T, dT ) and an embed-ding f : T 2 and any set of points p1,
+Dn such that for all i, j,
+· · ·
+ 
+! 1 (xi) , f   dT f   1 (xj)
+  dD (xi, xj)
+=
+O (log(1+p2) log(m))
+ 
+ 
+ 
+ 
+ 
+Intuitively, the theorem states that any tree can be em-  bedded into a Poincaré disk (n = 2) with low distortion.
+On the contrary, it is known that the Euclidean space with unbounded number of dimensions is not able to achieve such a low distortion [36]. One useful intuition [53] to help un-derstand the advantage of the hyperbolic space is given two q points p, q k
+Dn s.t. p k
+, k
+= 2 k dD(p, q)
+! dD(p, 0) + dD(0, q), as
+= p k k q k k ! r (3)
+This property basically reﬂects the fact that the shortest path in a tree is the path through the earliest common ancestor, and it is reproduced in the Poincaré when points are both close to the boundary. 2.2.2 Hyperbolic Contrastive Learning
+Given the theoretical beneﬁts of the hyperbolic space stated above, we propose a contrastive learning framework as shown in Figure 2. We adopt two losses to learn the object and scene representations. First, to learn object representa-tions, we use the standard normalized temperature-scaled cross-entropy loss, which operates on the hypersphere in
+Euclidean space. As shown in the top branch of Figure 2, we crop two views of a jittered and slightly expanded object region as the positive pairs and feed into the base and mo-mentum encoders to calculate the object representations. We  
+Figure 2. Our Hyperbolic Contrastive Learning (HCL) framework has two branches: given a scene image, two object regions are cropped to learn the object representations with a loss deﬁned in the Euclidean space focusing on the representation directions. A scene region as well as a contained object region are used to learn the scene representations with a loss deﬁned in the hyperbolic space that affects the representation norms. denote the output after the normalization to be z1 euc.
+We follow MoCo [27] and leverage a memory bank to store the negative representations zn euc, which are the features z2 euc from the previous batches. Note that our framework can be readily extended to other contrastive learning models. The
+Euclidean loss for each image is then calculated as: euc and z2
+Leuc =
+  log exp (z1 euc · z1 exp euc · z2 euc/⌧ ) +
+  z2 euc/⌧ n exp (z1
+  euc ·
+, zn euc/⌧ ) where ⌧ is a temperature parameter.
+P
+| 2 62
+E v
+{ (u, v)
+While the loss above aims to learn object representations, we propose a hyperbolic contrastive objective to learn the representations for scene images. We sample positive region pairs u and v from object-centric scene hierarchy T such that (u, v)
+E. In other words, as shown in the bottom branch of Figure 2, the objects contained in one region are required to be a subset of the objects in the other. We sample the negative samples of u to be
+Nu =
+. However,
+} building and sampling exhaustively from the entire hierarchy explicitly is tricky. In practice, given an image s, we always sample u to be an 2R[{ object that occurs in u, and
+Nu to be the other objects that are not in u.
+The pair of scene and object images are fed into the base and momentum encoders that share the weights with the Euclidean branch. However, instead of normalizing the output of the encoders, we use the exponential map deﬁned in the equation 2 to project these features in the Euclidean space to the Poincaré ball, which are denoted as z1 hyp and z2 hyp. Further, we replace the inner product in the cross-entropy loss with the negative hyperbolic distance as deﬁned to be a scene region, v 2O
+} s in equation 1. We calculate the hyperbolic contrastive loss as follows:
+Lhyp =
+  log exp hyp,z2 dD(z1
+⌧ hyp) exp dD(z1 hyp,z2
+⌧ hyp)
+⇣
+ 
++ n exp dD(z1 hyp,zn
+⌧ hyp)
+⌘
+ 
+⇣
+,
+⌘
+⌘
+P
+ 
+⇣
+When minimizing the distances of all the positive pairs, with the intuition from equation 3, it would be beneﬁcial to put the nodes near the root, i.e. objects, close to the center to achieve an overall lower loss. The overall loss function of our model is as follows:
+=
+Leuc +   where   is a scaling parameter to control the trade-off be-tween hyperbolic and Euclidean losses.
+Lhyp,
+L 3. Experiments 3.1. Implementation Details
+Pre-training phase. We pre-train on three datasets: 1.7
+COCO [35], the full OpenImages labelled dataset [33](
+⇠ 212k) [44]. million samples) and a subset of OpenImages (
+All these datasets are multi-object datasets; OpenImages contains 12 objects on average per image and COCO con-tains 6 objects on average. We experiment with both the ground truth bounding box (GT) and using selective search (SS) [61] to produce object bounding boxes in an unsuper-vised fashion, following previous work [68]. As the goal of this paper is not to present another state-of-the-art self-supervised learning method, we implement our sampling
+⇠
+APb APb 50 APb 75 APm APm 50 APm 75 42.1 43.4 44.5
+MoCo-v2 pre-trained on COCO: 38.5 58.1
+Baseline
+Lhyp 39.7 60.1
+HCL w/o
+HCL CC 40.6 61.1
+Dense-CL pre-trained on COCO: 39.6 59.3
+Baseline
+Lhyp 41.3 61.5
+HCL w/o
+HCL 42.5 62.5
+ORL pre-trained on COCO: 40.3 60.2
+Baseline
+HCL 41.4 61.4
+Dense-CL pre-trained on OpenImages:
+Baseline
+HCL w/o
+HCL 38.2 58.9
+Lhyp 41.1 61.5 42.1 62.6 42.6 44.4 45.5 43.3 44.7 45.8 44.4 45.5 34.8 36.0 37.0 35.7 37.5 38.5 36.3 37.3 34.8 37.2 38.3 55.3 57.3 58.3 56.5 59.5 60.6 57.3 58.5 55.3 58.3 59.4 37.3 38.8 39.7 38.4 40.4 41.4 38.9 40.0 37.8 39.7 40.6
+Table 1. Comparison with state-of-the-art methods. This table shows object detection (columns 1-3) and semantic segmentation (columns 4-6) results on COCO using MoCo-v2, Dense-CL and
+ORL by pre-training on COCO and OpenImages using unsuper-vised object bounding boxes generated by the selective search. The
+ﬁrst row in each sub-table shows the results using random crops on
+Lhyp to 0, pre-training datasets. The second and third rows set HCL/ which means we are pre-training baseline methods on just proposal boxes. Our model consistently improves both object detection and semantic segmentation tasks across multiple contrastive learning baselines by pre-training on both COCO (800 epochs) and the full
+OpenImages dataset (75 epochs, last 3 rows). procedure and hyperbolic loss on top of three popular con-trastive learning methods: MoCo-v2 [13], Dense-CL [64], and ORL [68]. Dense-CL is a contrastive learning framework which extracts dense features from scene images and gener-ally achieves better object detection results than MoCo-v2.
+ORL is a pipeline that learns improved object representa-tions from scene images. We also consider HCL without the
+Lhyp. This approach, which we denote as hyperbolic loss
+“HCL w/o
+Lhyp”, adopts the same cropping strategy as HCL but applies only a standard contrastive loss. We show that adding the hyperbolic loss improves results under various settings. More details on the datasets as well as training setups can be found in Appendix A.
+Downstream tasks. We evaluate our pre-trained models on image classiﬁcation, object-detection and semantic segmen-tation. For classiﬁcation, we show linear evaluation (lineval) accuracy with MoCo-v2, i.e. we freeze the backbone and only train the ﬁnal linear layer. We test on VOC [18],
+ImageNet-100 [58] and ImageNet-1k [15] datasets. For object detection and semantic segmentation, we show re-sults with all 3 baselines on the COCO datasets using Mask
+R-CNN, following [13]. We closely follow the common
+Pre-train Bbox VOC IN-100 IN-1k
+MoCo-v2
+HCL w/o
+HCL w/o
+HCL
+HCL
+Lhyp
+Lhyp
+COCO
+COCO
+COCO
+COCO
+COCO
+-64.79 64.84 51.17
+SS 73.13 73.84 54.21
+GT 75.55 76.22 54.52
+SS 74.19 75.16 55.03
+GT 76.51 76.74 55.63
+MoCo-v2
+HCL w/o
+HCL w/o
+HCL
+HCL
+OpenImages
+-69.95 72.80 54.12
+Lhyp OpenImages SS 71.82 75.33 56.58
+Lhyp OpenImages GT 73.79 77.36 57.57
+OpenImages SS 74.31 78.14 58.12
+OpenImages GT 75.40 79.08 58.51
+Table 2. Classiﬁcation results with linear evaluation. The ﬁrst row shows the results using random crops on pre-training datasets.
+In the last two rows we use our hyperbolic loss and we see improved performance by using both Ground Truth (GT) boxes and Selective
+Search (SS) boxes. HCL improves scene-level classiﬁcation on the
+VOC dataset, and object-level classiﬁcation on ImageNet-100 and
+ImageNet-1k datasets. protocols listed in Detectron2 [66]. 3.2. Main Results
+Object detection and semantic segmentation. Table 1 reports the object detection and semantic segmentation re-sults by pre-training on COCO and full OpenImages dataset (last 3 rows) by using selective search boxes. HCL shows consistent improvements over the baselines on COCO ob-ject detection and COCO semantic segmentation. Although
+Dense-CL and ORL improve the object-level downstream performance over MoCo-v2 through improved object rep-resentations or dense pixel representations, they still lack the direct modeling of scene images. We show that learning representations for scene images in hyperbolic space is ben-eﬁcial to object-level downstream performance. Note that pre-training Dense-CL on ImageNet for 200 epochs gives 40.3 mAP [64], while pre-trainng on OpenImages for only 75 epochs with our method gives 42.1 mAP. This shows the importance of efﬁcient pre-training on datasets like OpenIm-ages.
+Image classiﬁcation. As shown in Table 2, HCL improves image classiﬁcation on both scene-level (VOC) and object-level (ImageNet) datasets. When pretraining on OpenImages,
+HCL improves ImageNet lineval accuracy by 0.94% points and VOC lineval classiﬁcation accuracy by 1.61 mAP. We observe similar improvements when pretraining on COCO.
+HCL improves accuracy whether we use ground truth object bounding boxes or boxes generated by selective search. In general, we observe a larger improvement of using HCL on
+OpenImages than COCO, which supports our hypothesis that HCL provides larger improvements on datasets with
+labels. For each class of the ImageNet training set, we use a pre-trained OpenImages model and rank the images according to their norms. The extreme images of some classes are shown in Figure 4 and also in the Appendix.
+Images with smaller norms tend to capture a single object, while those with larger norms are likely to depict a scene.
+To quantitatively evaluate this property, we report the
+NDCG metric on the ranked images as shown in Table 3.
+NDCG assesses how often the scene images are ranked at the top. As a baseline, we rank the images based on the entropy of the class probability predicted by a classiﬁer, which is a widely adopted indicator of label uncertainty [11, 47]. We use both MoCo-v2 and supervised ResNet-50 as the classiﬁer.
+As shown in Table 3, using norms with HCL achieves similar rank quality as using entropy with the supervised ResNet-50 on the ImageNet-ReaL dataset. In addition, when combining two ranks using simple ensemble methods such as Borda count, the score is further improved to 0.717. This shows that the entropy and the norm provide complimentary signals regarding the existence of multiple labels. For example, the entropy indicator can be affected by the bias of the model and the norm indicator can be wrong on the images with multiple objects from the same class.
+Compared to supervised indicators of label uncertainty,
+HCL has the additional advantage that it is dataset-agnostic and can be applied to new data without further training.
+To demonstrate this beneﬁt, we report the same metric on the COCO validation, where we also have the number of labels for each image. Our method achieves much better
+NDCG scores than the supervised ResNet-50 as shown in
+Table 3. This ﬁnding can be potentially useful to guide label reassessment, or provide an extra signal for model training. 3.3.2 Out-of-Context Detection
+Our hyperbolic loss
+Lhyp encourages the model to capture the similarity between the object and scene. We apply the result-ing representations to detect out-of-context objects, which can be useful in designing data augmentation for object de-tection [17]. We are especially interested in out-of-context images with conﬂicting backgrounds. To this end, we use the out-of-context images proposed in the SUN09 dataset [14].
+We ﬁrst compute the representations of each object and entire scene image with that object masked out. We then calculate the hyperbolic distance between the representations mapped to the Poincaré ball. Some example images from this dataset as well as the distance of each contained object are shown in
+Figure 5. We ﬁnd that the out-of-context objects generally have a large distance, i.e. smaller similarity, to the overall scene image. To quantify this ﬁnding, we compute the mAP of the object ranking on each image and obtain 0.61 for HCL.
+As a comparison, the MoCo similarity gives mAP = 0.52 and the random ranking gives mAP = 0.44.
+Figure 3. Average representation norms of images with different number of labels in ImageNet-ReaL.
+Method
+Indicator
+Datasets
+IN-Real COCO
+MoCo
+Entropy
+Supervised Entropy
+HCL
+Ensemble 0.633 0.671
+Norm 0.655
+Entropy+Norm 0.717 0.791 0.793 0.839 0.823
+Table 3. NDCG scores of the image rankings based on the different indicators and models, and evaluated by the number of labels per image. more objects per image. 3.3. Properties of Models Trained with HCL
+The visual representations learned by HCL have several useful properties.
+In this section, we evaluate the repre-sentation norm as an measure of the label uncertainty for image classiﬁcation datasets, and evaluate the object-scene similarity in terms of out-of-context detection. 3.3.1 Label Uncertainty Quantiﬁcation
+ImageNet [15] is an image classiﬁcation dataset consist-ing of object-centered images, each of which has a single label. As the performance on this dataset has gradually saturated, the original labels have been scrutinized more carefully [3, 52, 55, 60, 62]. Prevailing labeling issues in the validation set have been recently identiﬁed, including labeling errors, multi-label images with only a single label provided, and so on. Although [3] provides reassessed labels for the entire validation set, relabeling the entire training set may be infeasible.
+Our learned representations provide a potential automatic way to identify images with multiple labels from datasets like
+ImageNet. Speciﬁcally, we ﬁrst show in Figure 3 that there is a strong correlation between the representation norms and the number of labels per image according to the reassessed
+Figure 4. Images from ImageNet training set. The 5 images on the left have the smallest representation norms among all the images from the same class, and the 5 on the right have the largest norms.
+Figure 5. Out-of-context images from the SUN09 dataset. The bounding box of each object and its hyperbolic distance to the scene are shown. Regular objects are in blue and out-of-context objects are in purple. Note that the out-of-context objects tend to have large distances. 4. Main Ablation Studies
+In this section, we report the results of several important ablation studies with respect to HCL. All the models are trained on the subset of the OpenImages dataset and linearly evaluated on the ImageNet-100 dataset. The top-1 accuracy is reported.
+Similarity measure and the center of the scene-object hi-erarchy. We propose to use the negative hyperbolic distance as the similarity measure of the scene-object pairs. As an al-ternative, one can use cosine similarity on the hypersphere as the measure as in the original contrastive objective. However, this would attempt to maximize the similarity between a sin-gle object and multiple objects. It is likely that these objects belong to different classes, and hence this strategy impairs the quality of the representation. As shown in Table 4, re-placing the negative hyperbolic distance with the Euclidean similarity impairs downstream performance. The resulting model performs even worse than the baseline without loss function on the scene-object pairs, demonstrating the neces-sity of using hyperbolic distance. We also validate our choice of an object-centric hierarchy by comparing its performance with that of a scene-centric hierarchy [48, 49] generated by sampling the negative pairs as objects and unpaired scenes.
+This scene-centric hierarchy leads to substantially lower ac-curacy (Table 4).
+Trade-off between the Euclidean and hyperbolic losses.
+We adopt the Euclidean loss to learn object-object similarity and the hyperbolic loss to learn object-scene similarity. A hyperparameter   controls the trade-off between them. As shown in Table 5, we ﬁnd that a smaller   = 0.01 leads to marginal improvement. However, we also observe that larger  s can lead to unstable and even stalled training. With careful inspection, we ﬁnd that in the early stage of the training, the gradient provided by the hyperbolic loss can be inaccurate but strong, which pushes the representations to be
+Distance
+Center
+IN-100 Accuracy
+--Hyperbolic
+Scene
+Hyperbolic Object
+Scene
+Euclidean 77.36 79.08 76.96 76.68
+  0.01 0.1 0.2 0.5
+IN-100 Accuracy
+Optimizer
+ 
+IN-100 Accuracy 77.70 79.08 78.64 0
+RSGD
+RSGD
+SGD
+SGD 0.1 0.5 0.1 0.5 79.08 0 70.16 74.18
+Table 4. Similarity measure and hierarchy center.
+Table 5. Losses trade-off.
+Table 6. RSGD versus SGD optimizers. close to the boundary. As a result, since Riemannian SGD divides gradients by the distance to the boundary, updates become small and training ceases to make progress.
+Optimizer. Given the observation above, we ask whether
+RSGD is necessary for practical usage. We replace the
+RSGD optimizer with SGD. To avoid numerical issues when the representations are too close to the boundary, we increase 1. This allows a larger   to be used as
+" from 1e  opposed to the RSGD. However, SGD always yields inferior performance compared to RSGD. 5 to 1e  5.

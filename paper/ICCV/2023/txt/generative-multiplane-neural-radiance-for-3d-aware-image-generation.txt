@@ -1,0 +1,162 @@
+Abstract
+We present a method to efficiently generate 3D-aware high-resolution images that are view-consistent across mul-tiple target views. The proposed multiplane neural radi-ance model, named GMNR, consists of a novel α-guided view-dependent representation (α-VdR) module for learn-ing view-dependent information. The α-VdR module, facil-iated by an α-guided pixel sampling technique, computes the view-dependent representation efficiently by learning viewing direction and position coefficients. Moreover, we propose a view-consistency loss to enforce photometric similarity across multiple views. The GMNR model can generate 3D-aware high-resolution images that are view-consistent across multiple camera poses, while maintaining the computational efficiency in terms of both training and inference time. Experiments on three datasets demonstrate the effectiveness of the proposed modules, leading to favor-able results in terms of both generation quality and infer-ence time, compared to existing approaches. Our GMNR model generates 3D-aware images of 1024 × 1024 pix-els with 17.6 FPS on a single V100. Code : https:
+//github.com/VIROBO-15/GMNR 1.
+
+Introduction
+The advances in generative adversarial networks (GANs)
+[21] have resulted in significant progress in the task of high-resolution photorealistic 2D image generation [27, 28, 30].
+The problem of generating 3D-aware images that render an object in different target views has received increasing inter-est in the recent years. Learning such 3D-aware image gen-eration is challenging due to the absence of 3D geometry supervision or multi-view inputs during training. Further-more, the synthesized 3D-aware images are desired to be of high-resolution, generated at extrapolated views (i.e., large non-frontal views) and consistent across camera views.
+In the absence of 3D supervision, existing 3D-aware im-(cid:0) amandeep.kumar@mbzuai.ac.ae age generation approaches [8, 13] typically rely on learn-ing the 3D geometric constraints by using either implicit
+[47, 42, 23, 43] or explicit [35, 51] 3D-aware inductive bi-ases and a rendering engine. While implicit representations, e.g., neural radiance fields [40] (NeRF), possess the merits of better handling complex scenes along with memory ef-ficiency, their slow querying and sampling generally nega-tively affects the training duration, inference time as well as the 3D-aware generation of high-resolution images. On the other hand, explicit representations, e.g., voxel grid [48], are typically fast but have large memory footprint lead-ing to scaling issues at higher resolutions. These issues are recently addressed [65] by utilizing multiplane images (MPI) as an explicit representation to transfer the knowl-edge learned by a 2D GAN to 3D-awareness. In this way, existing 2D GANs, e.g., StyleGAN [28], can be extended to obtain the alpha maps conditioned on the plane’s depth, followed by conditioning the discriminator on a target pose for training the image synthesis model.
+While the aforementioned scheme of avoiding a volu-metric rendering of pixels enables efficient training and in-ference, it may lead to inaccurate rendering of object shapes at extrapolated views due to fewer multiplanes during train-ing. Moreover, inconsistent artifacts across different views can occur since such a scheme optimizes the warping from canonical pose to a single target pose. A straightforward way to overcome this issue is to increase the resolution in the disparity space, i.e., more planes. This can likely help in reducing these artifacts resulting in improved rendering at extrapolated viewing angles. However, this will result in significantly increasing the training time as well as memory overhead. In this work, we show how to collectively ad-dress the above issues without any significant degradation of training and inference speed.
+Contributions: We propose an efficient approach named
+Generative Multiplane Neural Radiance (GMNR), that learns to synthesize 3D-aware and view-consistent high-resolution images across difference camera poses. To this end, we introduce a novel α-guided view-dependent repre-sentation module (α-VdR) that enables the generator to bet-Figure 1. Generated examples using our proposed 3D-aware view-consistent GMNR approach. For each example, we show the generated canonical view along with the rendered images at two different target poses. Our GMNR efficiently synthesizes 3D-aware high-resolution (512 × 512 in row 2; 1024 × 1024 in rows 1 and 3) scenes with detailed geometry along with consistent rendering across multiple views at a speed of 17.6 frames per second (1024 × 1024 pixels) on a single Tesla V100 GPU. ter learn view-dependent information during training. Our
+α-VdR employs a linear combination of learnable image-specific viewing direction and image-agnostic position co-efficients along with an α-guided pixel sampling technique to compute the view-dependent representation efficiently.
+The proposed sampling technique ensures that a balanced set of valid pixel locations from each multiplane is consid-ered when computing the view-dependent representation, resulting in 3D-aware high-resolution images with dimin-ished artifacts in the target poses. Moreover, we employ a view-consistency loss for enforcing photometric similarity across multiple rendered views. Consequently, our GMNR generates 3D-aware high-resolution images that are view consistent across different camera poses while maintaining the computational efficiency at inference.
+Extensive qualitative and quantitative experiments are conducted on three datasets: FFHQ [29], AFHQv2-Cats
+[11] and MetFaces [26]. Our GMNR performs favorably against existing works published in literature. When gen-erating images of 1024×1024 pixels on FFHQ dataset,
+GMNR outperforms the best existing approach [65] by re-ducing the FID from 7.50 to 6.58, while operating at a com-parable inference speed of 17.6 frames per second (FPS) on a single tesla V100. Fig. 1 shows 3D-aware high-resolution generated scenes from our GMNR exhibiting detailed ge-ometry and consistent rendering across multiple views. 2. Preliminaries
+Problem Statement: In this work, the goal is to learn a 2D
+GAN for generating 3D-aware high-resolution images that are view-consistent, such that the generated images identi-cally encapsulate the synthesized objects at different target camera poses pt. Here, multiplane images are generated to capture the 3D information and are then utilized to ren-der a view-consistent 2D image at a target camera pose pt.
+The multiplane images consist of a set of L fronto-parallel planes i ∈ {1, · · · , L}, each of size H × H × 4, i.e., each plane i comprises an RGB image Ci ∈ RH×H×3 and an alpha map αi ∈ [0, 1]H×H×1. The distance between the camera and a plane i is denoted by depth di ∈ R. Next, we describe our baseline framework for generating view-consistent 3D-aware high-resolution images.
+2.1. Baseline Framework
+Our baseline model is motivated by the recent multi-plane image generation method, GMPI [65], since it fo-cuses on computationally efficient generation of 3D-aware images. GMPI extends the StyleGANv2 [30] network with a branch for obtaining alpha maps and a differentiable ren-derer for generating 3D images at different target camera poses. Moreover, the base GMPI framework reuses the same color-texture across all planes, in turn reducing the task of StyleGANv2 generator fG(·) to synthesizing a sin-gle RGB image C and the corresponding per-plane alpha maps αi, given by
+M ≜ {C, {α1, · · · , αL}} = fG(z, {d1, · · · , dL}), (1) where z denotes the latent vector input to fG(·). For gener-ating the alpha maps at a resolution r ∈ {4, 8, · · · }, a single convolutional layer f r
+T oAlpha is first used to generate the ˆαr i from intermediate feature representations F r
+αi, given by
+ˆαr i = f r
+F r
+αi
+=
+T oAlpha(F r
+αi
+F r − µ(F r)
+σ(F r)
+),
++ fEmb(di, e), (2) (3) where σ(F r), µ(F r) ∈ Rdimr denote the standard devia-tion and mean of the feature F r ∈ Rr×r×dimr . The plane specific embedding fEmb(di, e) is computed using the style embedding e and depth di of plane i, similar to Style-GANv2. Note that F r
+αi is specific to each plane, while f r
+T oAlpha is shared across all planes. Finally, the alpha maps
+αr i at different resolutions r are accumulated through an up-sampling operation that is consistent with the StyleGANv2 design. With this formulation, GMPI introduces a branch to generate alpha maps conditioned on the plane depths di by utilizing the intermediate feature representations and condi-tions the discriminator on the camera poses to make the 2D
+StyleGANv2 3D-aware [65].
+Our baseline framework extends the existing 2D Style-GANv2 to make it 3D-aware using implict and explicit rep-resentations. Moreover, by first generating multiplane im-ages at canonical view and then warping them to target poses, it avoids a volumetric rendering leading to an effi-cient training and inference. However, the baseline model does not effectively render object images at extrapolated views, likely due to fewer multiplanes employed to over-come memory issues during training. Furthermore, since the baseline optimizes by warping from canonical view to a single random target pose, it leads to inconsistent artifacts across multiple views (see Fig. 2). Next, we present our approach that collectively address the above issues without any significant change in training and inference time.
+Figure 2. Example generated images using the baseline approach depicting the frontal (canonical) and target views. Here, the base-line model is trained on FFHQ (rows 1) and AFHQv2-Cats (row 2). While being effective in synthesizing frontal views (col. 1), the baseline struggles when generating the target views and intro-duces artifacts during the rendering (col. 2 and 3). In these cases, the generated images depict repeated textures (highlighted as blue box) due to the same RGB content in each plane and layered ar-tifacts (highlighted as green box) due to fewer planes employed during training. For more examples, see supplementary material. 3. Proposed Approach
+Overall Architecture: Fig. 3 presents the overview of our proposed GMNR framework. Within our GMNR, the
+RGBα generator adapts a conventional 2D generator by integrating an α-branch with StyleGANv2, yielding a set of fronto-parallel alpha maps {αi}L i=1, as in the base-line. The focus of our design is the introduction of an α-guided view-dependent representation (α-VdR) that learns image-specific view-dependent information and modifies the RGB values at the different planes according to the view-dependent directions, which is crucial for rendering images with diminished artifacts in target poses. The α-VdR module learns a view-dependent pixel representation using a linear combination of coefficients obtained from two MLPs by efficiently sampling pixel positions through an α-guided pixel sampling technique. This enables the
+α-VdR module to learn modeling the image-specific view-dependent 3D characteristics. Moreover, we employ a view-consistency loss to enforce photometric consistency across different views of the rendered images. Consequently, 3D-aware view-consistent images of high-resolution at target poses are synthesized by the RGBα generator together with the α-VdR module and renderer at inference. 3.1. α-guided View-dependent Representation
+As discussed earlier, the baseline model renders 3D im-ages using an MPI representation without explicitly utiliz-ing the view-dependent information during training, which image genera-is desired for 3D-aware view-consistent
+Figure 3. Overall architecture of our GMNR for generating 3D-aware and view-consistent images at high-resolution. Our GMNR takes a latent vector z ∈ Rdz and outputs an RGB image at a target view. GMNR comprises an RGBα generator, an α-guided view-dependent representation (α-VdR) module, a differentiable renderer and a pose-conditioned discriminator. The RGBα generator synthesizes the
+RGB image and the alpha maps {αi}L i=1 corresponding to the canonical pose. The generated RGB image that is warped to a target pose p1 is then input along with the style-code w to the α-VdR module (Sec. 3.1). The α-VdR module learns a view-dependent pixel representation using a linear combination of coefficients (image-agnostic {gn}N n=1) computed from the
+α-guided sampling positions (x, y, di), viewing direction vp1 and style-code w using two MLP networks Tθ(·) and Mϕ(·), respectively.
+Here, the α-guided pixel sampling aids in efficiently sampling the pixel positions for computing the view-dependent representation. As a result, α-VdR module learns to model the image-specific view-dependent 3D characteristics. Moreover, a view-consistency loss Lvc (Sec. 3.2) is employed for enhancing the photometric consistency across different views of the rendered images. Consequently, the RGBα generator along with the α-VdR module and renderer synthesize 3D-aware view-consistent images at target poses during inference. n=1 and image-specific {hn(w)}N tion. To learn view-dependent information, we introduce an α-guided view-dependent representation module (α-VdR) that comprises two separate MLP networks Tθ(·) and
+Mϕ(·). We consider a pixel to be a discrete sample of a radi-ance function R(q, v) with q, v ∈ R3 as the pixel coordinate and the target viewing direction. Motivated by [31, 32], we note that R(q, v) can be approximated by a sum of prod-ucts gn · hn. Here, gn and hn are computed using two MLP networks Tθ(·) and Mϕ(·) with inputs q and v, respectively.
+Given the pixel location q = (x, y, di) for a plane depth di (i ∈ {1, · · · , L}), the MLP Tθ(·) predicts the image-agnostic position coefficients {gq
+N }. Similarly, to enable image-specific view-dependent modeling, the nor-malized viewing direction v = (vx, vy, vz) is utilized along with the style-code w generated by the mapping network of the StyleGANv2 in the RGBα generator. To this end, v and w are concatenated and input to the MLP Mϕ(·), which outputs image-specific viewing direction coefficients
+N (w)}. The color representation sq(v) of a
+{hv pixel q for a target viewing direction v is computed using 1(w), · · · , hv 1, · · · , gq sq(v) = gq 0 +
+N (cid:88) n=1 n · hv gq n(w). (4)
+Note that g0 is computed by performing a homography warping operation on the RGB image generated at canon-ical pose to the target camera pose p1.
+α-guided Pixel Sampling: Sampling all the pixels for color representation learning (Eq. 4) to generate high-resolution images is cost-prohibitive, since it is infeasible to compute the view-dependent representation sq(v) of all the pixels q in an MPI. To alleviate this issue, we introduce a new sampling technique with the aid of the generated alpha maps {αi}L i=1, which reduces the volume of points that are required for sampling while retaining the fine details for co-efficient learning. To this end, we compute a weight matrix
+Ai ∈ RH×H corresponding to the plane i, given by
+Ai = αp1 i
+· i−1 (cid:89) (1 − αp1 j ), j=1 (5) where αp1 i denotes αi warped to target pose p1. A pixel location (x, y, di) is a candidate for sampling if the corre-sponding weight is greater than 0, i.e., if Ai(x, y) > 0.
+Note that Eq. 5 ensures that a pixel location (x, y, di) is not considered during sampling if either αp1 i (x, y) = 0 or if
+αp1 j (x, y) = 1 for any j < i. Furthermore, among the can-didate locations (x, y, di), a per-plane random sampling is performed to select only a certain percentage of the candi-date locations in a plane i. This balanced sampling strat-Figure 4. (a) Visualization of view-dependent information inte-grated by α-VdR module (first row) at various poses of two exam-ple generated images (second row) (b) Qualitative comparison be-tween baseline GMPI and our GMNR. Repeated texture artifacts at extrapolated views are seen in the baseline due to novel regions being rendered as duplicates of visible areas. These repeated tex-ture artifacts are reduced at extrapolated views of GMNR due to the modification of RGB values at different planes by our α-VdR module, e.g., ear, nose, eyes in the zoomed-in crops. egy guided by alpha maps ensures that every plane i is ad-equately represented during the color representation com-putation (Eq. 4), thereby leading to effective learning of view-dependent information. This technique of per-plane
+α-guided sampling mitigates the issue of under-sampling of valid pixels in nearby planes, which can arise if sampling is performed by considering pixels together across all planes.
+As such, our α-VdR module outputs a view-dependent
+RGB image C p1 (v) at a target pose p1 and incorporates 3D-awareness during image generation. Fig. 4(a) shows the view-dependent information integrated by α-VdR module when rendering objects at different views.
+As discussed earlier, the standard view-independent MPI used in GMPI utilizes the same RGB (generated) image for all the planes resulting in repeated textures at extrap-olated views due to novel regions being rendered as du-plicates of visible areas (see nose and ear crops of base-line in Fig. 4(b)). To address this issue, the proposed α-guided view-dependent representation (α-VdR) module in our GMNR modifies the RGB values at different planes ac-cording to the viewing direction (Eq. 4), thereby reducing the artifacts (bottom row in Fig 4(b)) without requiring ad-ditional multi-planes. Furthermore, Fig. 5 shows the im-pact of α-VdR module on generated examples from FFHQ and AFHQv2-Cats. Compared to the baseline, our approach with α-VdR module synthesizes high-resolution images at target views with diminished artifacts.
+Baseline
+Our Approach
+Figure 5. Synthesized rendered RGB image at a target view (left), its corresponding canonical view (center) along with the mesh (right) for the baseline and our GMNR, respectively. Compared to the baseline, our GMNR better renders the target objects at large non-frontal views due to learning the view-dependent information through the α-VdR module. Stretched eyes can be observed in the case of baseline generated image (row 1, col. 1), while such an artifact is mitigated by our approach (row 1, col. 4). 3.2. View-consistency Loss
+To achieve a better photometric consistency across mul-tiple views, we employ an image-level optimization loss.
+Let Ip1 and Ip2 denote the images rendered at target poses p1 and p2. Note that only Ip1 is generated by integrating the view-dependent information from α-VdR module, while
+Ip2 is rendered directly from the RGBα generator output, as shown in Fig. 3. We first warp Ip2 to target pose p1 to obtain the warped image Iψ. The warping is performed by utilizing the accumulated depth of the alpha maps. Afterwards, we employ the image-level optimization loss that enhances the view-consistency between the primary image Ip1 and the warped image Iψ in order to satisfy the geometry require-ments between views. Similar to the image reconstruction problem [20, 67], we formulate the image-level optimiza-tion loss as a combination of SSIM [58] and ℓ1 [64], given by
+Lvc =
+δ 2 (1 − SSIM (Ip1 , Iψ)) + (1 − δ)||Ip1 − Iψ||1. (6) 3.3. Training and Inference
+Training: Our GMNR framework is trained using a pose conditioned discriminator D, which compares the fake im-ages generated by the RGBα generator and real training images Igt. The overall loss formulation, utilizing a non-saturating GAN loss with R1 penalties [37] and the view-consistency loss Lvc is given by
+L =EIpt ,pt[f (log Q(Ipt, pt))] + EIgt,pt[f (log Q(Igt, pt))] (7)
++η|∇Igt log P (y = real|Igt, pt)|2] + λLvc, where Q(I, pt) = P (y = real|I, pt) denotes the proba-bility that image I from a camera pose pt is real, f (x) =
+− log(1 + exp(−x)) and η = 10.0.
+Inference: During inference, we use the RGBα generator to synthesize RGB image C and alpha maps αi. The α-VdR module takes the semantic information w generated by the StyleGANv2 along with target viewing direction vt as inputs, and computes an image-specific view-dependent representation C pt(vt) ∈ RH×W ×3×L (based on Eq. 4).
+This C pt(vt) together with αi are used to obtain multiplane images, which are then input to the MPI renderer. The ren-derer warps them to the target pose pt followed by alpha composition for combining the planes to obtain the desired 3D-aware and view-consistent image Ipt. Note that while the image-specific coefficients {hn(w)} in Eq. 4 are com-puted once for an image, the image-agnostic coefficients
+{gq n} are computed only once, leading to minimal compu-tational overhead during inference. 4. Experiments
+Datasets: The proposed GMNR is evaluated on three datasets: FFHQ, AFHQv2 and MetFaces. The FFHQ [29] dataset comprises 70, 000 high-quality images of real peo-ple’s faces at 1024 × 1024 resolution captured from various angles. The AFHQv2-Cats [11, 27] dataset has 5, 065 im-ages (512 × 512 size) of cat faces at various angles. The
+MetFaces [26] dataset consists of 1, 336 high-quality face images extracted from the Metropolitan Museum of Art’s collection. While an off-the-shelf pose estimator [14] is employed to compute a face’s pose required for the pose conditioning for FFHQ and MetFaces, a cat face landmark predictor [3] along with OpenCV [1] perspective-n-point technique are used to compute the pose for AFHQv2-Cats images. Furthermore, horizontal flips are used as augmen-tation for AFHQv2-Cats and MetFaces.
+Evaluation Metrics: In this work, five metrics are em-ployed for quantitatively comparing the generated image quality, as in [65]. The Frechet Inception Distance (FID)
+[25] and Kernel Inception Distance (KID) [5] are computed between 50K generated images rendered at different ran-dom poses and (a) 50K real images for FFHQ; (b) 5, 065 real images with flip augmentation for AFHQv2-Cats. The multi-view facial identity consistency (ID) is computed by first generating 1, 024 MPI representations and then em-ploying the mean Arcface [12] cosine similarity score be-tween pairs of rendered views at random poses for the same face. The depth accuracy (Depth) is measured as the
+MSE between the rendered depth and the pseudo ground-truth depth obtained from a pre-trained face reconstruction model [14] on the face mask area. Similarly, the 3D pose accuracy (Pose) is computed by comparing the pose input used for rendering and the yaw, pitch and roll predicted by [14] for the rendered image. 4.1. Implementation Details
+Within our GMNR, the MLP Tθ(·) comprises 4 fully-connected (FC) layers with hidden size of 384, while Mϕ(·) has 3 FC layers with hidden size 64. Here, Leaky-ReLU activation is used in both MLPs. We add sinusoidal posi-tional encodings to the pixel location and the viewing di-rection inputs, as in [40]. While the batch size is set to 32 for AFHQv2-Cats, it equals 64, 32 and 16 for FFHQ256,
+FFHQ512 and FFHQ1024, respectively. We set δ in Lvc loss to 0.85 and λ to 0.5. For α-guided pixel sampling, 6% of valid pixels are sampled from each plane for FFHQ (2562, 5122 sizes) and AFHQv2-Cats, while it is 4% for
+Metfaces and FFHQ (1024 × 1024). The learning rate for training our GMNR is set to 2 × 10−3. As in [65], we use 32 planes during training and 96 for inference in all exper-iments. Near and far depth of the MPI are set as 0.95/1.12 (FFHQ and Metfaces), 2.55/2.8 (AFHQv2-Cats). Depth normalization is performed as in [65]. Our model is trained using 8 Tesla V100 GPUs using PyTorch-1.9 [45]. In our framework, we refer to the Lth plane as the background plane of the MPI representation. To color the background plane, we use the leftmost and rightmost 5% pixels of the synthesized image C as the left and right boundaries, re-spectively. The RGB values of the remaining pixels in the background plane are linearly interpolated between the left and right boundaries. For generating the mesh cubes, we use the marching cube algorithm [37] implemented in PyM-Cubes [2] and utilize a smoothing function to have the better visualization. 4.2. Experimental Results 4.2.1 Baseline Comparison
+We first present a quantitative and qualitative comparison of our GMNR approach with the baseline GMPI on both
+FFHQ and AFHQv2-Cats datasets. Tab. 1 shows the com-parison in terms of FID, KID, ID, Depth, Pose metrics and training time. As in the baseline GMPI [65], the compari-son is presented at three different resolutions: 256 × 256, 512 × 512 and 1024 × 1024. Compared to the baseline, our
+GMNR achieves consistent improvement in performance on all metrics, without any significant degradation in the train-ing time and inference speed. In the case of 5122 resolu-tion, the baseline obtains FID scores of 8.29 and 7.79 on
+FFHQ and AFHQv2-Cats datasets, respectively. In compar-ison, our GMNR achieves favorable performance with FID scores of 6.81 and 6.01, respectively. Similarly, GMNR obtains improved performance by reducing the Depth er-Table 1. Comparisons between the baseline and our GMNR on FFHQ and AFHQv2-Cats. We also report the training time when utilizing 8
+Tesla V100 GPUs. Our GMNR achieves consistent improvement in performance on all metrics and different resolutions, compared to the baseline. Furthermore, this improvement in performance over the baseline is achieved without any significant degradation in the training time and the inference speed of the model.
+Method
+FFHQ
+AFHQv2-Cats
+F ID↓ KID ↓ ID↑ Depth↓ P ose↓ Train Time↓ Infer Speed↑ F ID↓ KID ↓ 2562 Baseline 11.4
+Ours: GMNR 9.20 8.29
+Ours: GMNR 6.81 7.50
+Ours: GMNR 6.58 5122 Baseline 10242 Baseline 0.738 0.720 0.454 0.370 0.407 0.351 0.700 0.730 0.740 0.760 0.750 0.769 0.53 0.39 0.46 0.40 0.54 0.43 0.0040 0.0032 0.0060 0.0052 0.0070 0.0064 3h 3h 33m 5h 5h 42m 11h 12h 328 FPS 313 FPS 83.5 FPS 78.9 FPS 19.4 FPS 17.6 FPS n/a n/a 7.79 6.01 n/a n/a n/a n/a 0.474 0.450 n/a n/a
+Table 2. Effect of progressively integrating our proposed contribu-tions into the baseline on FFHQ dataset with 5122 resolution. The introduction of the proposed α-VdR (Sec. 3.1) into the baseline results in a consistent improvement in performance on all metrics.
+The results are further improved when integrating the proposed view-consistency loss Lvc (Sec. 3.2).
+Method
+F ID↓ KID ↓ ID↑ Depth↓ P ose↓
+Baseline
+Baseline + α-VdR
+Baseline + α-VdR + Lvc 8.29 7.01 6.81 0.454 0.740 0.457 0.0060 0.381 0.751 0.412 0.0054 0.370 0.760 0.400 0.0052 ror from 0.46 to 0.40 and KID from 0.454 to 0.370 on the
+FFHQ dataset, compared to the baseline. 4.2.2 Ablation Study
+Tab. 2 shows the impact of progressively introducing each of our contributions into the baseline on the FFHQ dataset at 5122 resolution. When integrating the proposed α-VdR (Sec. 3.1) into the baseline framework, we observe a con-sistent improvement in results highlighting the importance of learning view-dependent information during training to render images with diminished artifacts in target poses. No-tably, the FID scores reduce from 8.29 to 7.01, and the
+KID scores from 0.454 to 0.370. The results are further improved by the introduction of the view-consistency loss
+Lvc (Sec. 3.2), leading to a consistent gain on all met-rics. Our final approach (row 3) that generates 3D-aware view-consistent images achieves an absolute improvement of 1.48 in terms of FID score over the baseline.
+We further conduct an experiment to ablate the pixel sampling rate in our proposed plane-specific sampling within the α-VdR of our GMNR. Here, we ablate the rate from 1% to 6%, since 6% is the maximum rate that can be accommodated during our GMNR training under the same batch size setting as the baseline. We observe the results to consistently improve when increasing the sampling rate (1%: 8.32, 3%: 7.53, 6%: 6.81 in terms of FID score). As a next step, we also compare our plane-specific sampling with random sampling across planes at the optimal sampling rate (6%). The random sampling scheme obtains FID and KID scores of 7.68 and 0.39. In comparison, our plane-specific sampling-based GMNR improves the results, achieving FID and KID scores of 6.81 and 0.37, respectively.
+Similarly, to see the effect of λ, we set it to a high value (λ=20) for Lvc which improves the ID score to 0.732 at the cost of FID 9.70 for 256 × 256 resolution, leading to sub-optimal generation. Furthermore, we observe that setting p2 = 0 throughout the experiment for the view-consistency loss leads to the sub-optimal FID of 9.63 for 256 × 256 resolution. 4.2.3 Comparison with Existing Approaches
+Here, we present the comparison of our GMNR with exist-ing works published in literature. Tab. 3 presents the com-parison on FFHQ and AFHQv2-Cats datasets. The results are reported with 256 × 256, 512 × 512 and 1024 × 1024 images. Both the GMPI and our GMNR approach utilize 96 planes during the test time and do not employ any trunca-tion tricks [6, 28]. Among existing works, the recent GMPI obtains comparable performance to other methods in liter-ature with faster training, when evaluating on 2562 resolu-tion images. For instance, the training time of GMPI for 2562 resolution is 3 hours (using 8 Tesla V100 GPUs), ex-cluding the StyleGANv2 pre-training time [65]. Compared to the GMPI training duration (including both StyleGANv2 pre-training and GMPI training), other existing methods in-cluding EG3D, GRAM, and StyleNeRF require a longer training time. Moreover, GMPI demonstrates the ability to generate high-resolution images of 1024 × 1024 reso-lutions, where most other existing works struggle to gen-erate. When comparing with GMPI approach, our GMNR achieves consistently improved performance on all metrics at different resolutions, without any significant degradation in training time as well as operating at a comparable infer-ence speed. For the high-resolution of 1024 × 1024, our
+GMNR achieves FID score of 6.58 on the FFHQ dataset, performing favorably against existing published works in the literature while operating at an inference speed of 17.6
+FPS on a single Tesla V100. Fig. 6 presents a compari-Table 3. Comparisons with existing approaches. Here, both GMPI and our approach use 96 planes during inference and without applying any truncation tricks [6, 28]. Further, the KID score is reported in KID×100. In case the corresponding work does not report the results, we denote it as ‘-’. We report the results of GIRAFFE, pi-GAN and LiftedGAN from the EG3D paper. Results reported on the entire AFHQv2 dataset instead of cats only are denoted by ‘*’. For 256×256 and 1024×1024 resolutions, no results are reported on AFHQv2-Cats for both GMPI and our GMNR since the corresponding pre-trained StyleGANv2 checkpoints are unavailable. Compared to the recent GMPI, our GMNR achieves consistent improvement in performance, while running at comparable inference speed (FPS). Particularly, GMNR better generates high-resolution (1024 × 1024) images where most existing works struggle to operate demonstrating its flexibility. Further,
+GMNR achieves consistent improvement on all metrics and significantly reduces the FID from 7.50 to 6.58 on FFHQ, compared to GMPI.
+Method
+Infer Speed↑
+FFHQ
+AFHQv2-Cats
+F ID↓ KID ↓ ID↑ Depth↓ P ose↓
+F ID↓ KID ↓
+GIRAFFE [42] pi-GAN 1282 [9]
+LiftedGAN [49]
+GRAM [13]
+StyleSDF [43]
+StyleNeRF [23]
+CIPS-3D [66]
+EG3D [8]
+GMPI [65]
+Ours: GMNR
+EG3D [8]
+StyleNeRF [23]
+GMPI [65]
+Ours: GMNR
+CIPS-3D [66]
+StyleNeRF [23]
+GMPI [65]
+Ours: GMNR 2562 5122 10242 250 1.63 25 180
+-16
+-36 328 313 35 14 83.5 78.9
+-11 19.4 17.6 31.5 29.9 29.8 29.8 11.5 8.00 6.97 4.80 11.4 9.20 4.70 7.80 8.29 6.81 12.3 8.10 7.50 6.58 1.992 3.573
+-1.160 0.265 0.370 0.287 0.149 0.738 0.720 0.132 0.220 0.454 0.370 0.774 0.240 0.407 0.351 0.64 0.67 0.58
+----0.76 0.70 0.73 0.77
+-0.74 0.76
+--0.75 0.76 0.94 0.44 0.40
+----0.31 0.53 0.39 0.39
+-0.46 0.40
+--0.54 0.43 0.0890 0.0210 0.0230
+----0.0050 0.0040 0.0032 0.0050
+-0.0060 0.0052
+--0.0070 0.0064 16.1 16.0
+--12.8∗ 14.0∗
+-3.88 n/a n/a 2.77 13.2∗ 7.79 6.01
+--n/a n/a 2.723 1.492
+--0.447∗ 0.350∗
+-0.091 n/a n/a 0.041 0.360∗ 0.474 0.450
+--n/a n/a son of StyleNeRF[23] and GMPI[65] with GMNR in terms of high-resolution generated image quality at various target views. We show six sets of images that are generated at high-resolution (1024 × 1024) for each method. For each set, we show a generated face at a canonical view in the cen-ter as well as the four non-frontal views at different angles.
+Additional results are presented in supplementary. 5.

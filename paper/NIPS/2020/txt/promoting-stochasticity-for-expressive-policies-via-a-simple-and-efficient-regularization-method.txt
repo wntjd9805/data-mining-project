@@ -1,0 +1,398 @@
+Abstract
+Many recent reinforcement learning (RL) methods learn stochastic policies with entropy regularization for exploration and robustness. However, in continuous action spaces, integrating entropy regularization with expressive policies is chal-lenging and usually requires complex inference procedures. To tackle this problem, we propose a novel regularization method that is compatible with a broad range of expressive policy architectures. An appealing feature is that, the estimation of our regularization terms is simple and efﬁcient even when the policy distributions are unknown. We show that our approach can effectively promote the exploration in continuous action spaces. Based on our regularization, we propose an off-policy actor-critic algorithm. Experiments demonstrate that the proposed algorithm outperforms state-of-the-art regularized RL methods in continuous control tasks. 1
+
+Introduction
+Reinforcement learning (RL) algorithms have achieved remarkable success, notably in video games [32, 31, 21] and robotic control [26, 33, 19]. However, traditional approaches to solving
+RL problems—that is, maximizing the cumulative rewards—often lead to deterministic policies
+[42], which are undesirable in many practical scenarios compared to their stochastic counterparts
+[54, 17, 33, 15, 10, 19, 20, 52, 7]. For example, stochastic policies are often better initializers for new tasks [17, 16] and are more robust in unexpected situations [17, 20, 52] than deterministic policies.
+In order to learn stochastic policies, many methods draw on the entropy-regularized RL framework
+[34, 17, 19, 18, 25, 7, 36], which augments the standard RL objective (cumulative rewards) with an entropy term. Commonly used entropy terms for regularization include Shannon entropy [17, 19, 18, 51] and Tsallis entropy [25, 24, 7]. The former can improve both sample efﬁciency and stability
+[19, 20], while the latter can ﬁnd a stochastic policy close to the optimal policy of the standard RL
+[52, 7]. However, in continuous control tasks, many entropy-regularized methods [20, 25] express policies by Gaussian distributions, which can hardly represent complex behaviors [17, 45, 28].
+To tackle this problem, recent methods use expressive policy representations instead[17, 18, 51, 28].
+Soft Q-learning [17] parameterizes the policies by a sampling network to capture multi-modal behaviors. Haarnoja et al. [18] proposed to use latent space policies to learn hierarchical policies.
+However, these methods often requires complex training procedures [45, 19]. Soft Q-learning [17] trains the sampling network by Stein variational gradient descent [27], which involves complicated variational inference [19, 45]. Training latent space policies [18] requires calculating the probability density with normalizing ﬂows [38, 9], which leads to an expensive computational cost.
+To address this challenge, we propose a novel sample based regularization (SBR) method, which is simple, efﬁcient, and compatible with a broad range of expressive policy representations. The
+∗Corresponding author 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+major novelty of SBR is that, it promotes stochasticity by encouraging sampled actions away from each other, which does not require calculating the probability density. Based on SBR, we propose an off-policy algorithm, namely, actor-critic with generalized energy distance (ACED). Experiments on six MuJoCo benchmarks show that ACED achieves stable performance improvement compared with the state-of-the-art regularized RL algorithm. Moreover, we evaluate ACED with several policy architectures [11, 38, 45] and empirically show that it can effectively improve the performance. We provide all proofs in the supplementary material. 2 Preliminaries
+, P, r, γ), where
+∆ be a stationary policy, where ∆ is a set of some Borel probability measures on
+Notation: We consider an inﬁnite-horizon discounted Markov decision process (MDP) with a
+Rm is a continuous action space. An MDP is deﬁned by a tuple (
+,
+A
+S
+Rn is a compact action space that contains more than one action, continuous state space,
+A ⊂
+) represents the probability density function that is corresponding to the
+[0,
+P :
+∞
+S × A × S → (0, 1) is a discount factor. transition probability, r :
+Let π :
+.
+S →
+A
+∆ measures the probability of actions at state s. For convenience, we overload the
+That is, π(
+·| notation and let π( s) also denote the corresponding probability density function (PDF) without ambiguity. Let Π denote the set of all possible policies. Equations and inequalities between functions are pointwise. For example, we say v
+. Maximum and supremum
+≤ of a function are also pointwise. For instance, v∗ = supπ∈Π vπ means v∗(s) = supπ∈Π vπ(s) for any s
+. Given a (random) vector x, [x]i denotes its ith element. Given a distribution q and an arbitrary random vector X that obeys q, [q]i stands for the distribution of [X]i.
+[Rmin, Rmax] is a reward function, γ v(cid:48)(s) for any s v(cid:48) if v(s)
+S × A →
+S ⊂
+∈ S
+∈ S s)
+≤
+∈
+∈
+·|
+Regularized RL: Regularized RL adds a regularization term to the standard RL objective (expected discounted return). That is, the regularized RL aims to solve the following problem (cid:34) ∞ (cid:88) (cid:35)
+π∗
+α (cid:44) arg max
+π∈Π
+Eπ
+γt (r(st, at) + α (π( st)))
+,
+F
+·| t=0
+R is a regularization term and α where regularized state-action value function Q and state value function V by
+: ∆
+→
+≥
+F 0 is a hyperparameter. We can deﬁne the
+Qπ
+α(s, a) (cid:44) Eπ (cid:34) ∞ (cid:88) t=0
+γt (r(st, at) + αγ (π(
+F st+1)))
+·| (cid:35) s0 = s, a0 = a
+, (cid:12) (cid:12) (cid:12) (cid:12) (cid:12)
+α (s) (cid:44) Ea∼π(·|s) [Qπ
+V π
+α(s, a)] + α (π( s)).
+F
+·| (cid:44) supπ∈Π Qπ
+The optimal Q-value function is defeind by Q∗
+α . When α = 0,
+α the regularized RL is essentially equivalent to the standard RL. In this condition, we omit the α in our notation. For example, Q∗ denotes the optimal state-action value function in standard RL. (cid:44) supπ∈Π V π
+α and V ∗
+α (1) (2) 3 From Entropy Regularization to Sample-Based Regularization
+In this section, we focus on the regularization for control tasks, whose action spaces are continuous.
+First, we discuss a limitation of entropy regularization in Section 3.1. Then, we propose a sample-based regularization to alleviate the limitation in Section 3.2. Finally, We provide several instances of our regularization in Section 3.3, and then discuss their properties in Section 3.4 and Section 3.5. 3.1 Limitations of Entropy Regularization
+Entropy-regularized RL often faces a dilemma between simple policy architectures, whose represen-tational power is limited, and complex training procedures, whose costs are expensive.
+Existing entropy regularizers take a general form of Ea∼π(·|s) [f (π(a s))] [52]. For example, Shannon
+| entropy is given by Ea∼π(·|s) [log π(a s)]. Most entropy-regularized algorithms [20, 25] estimate this
+| kind of regularization terms by empirical average. This estimation method requires simple probability density functions for efﬁcient calculation. Therefore, popular entropy-regularized methods [20, 25] often represent policies by simple distributions, such as Gaussians. However, recent work has 2
+shown several disadvantages of simple policy representations, such as inefﬁcient exploration [8], convergence to sub-optimal solutions [48] and lack of ability to capture multiple goals [17].
+Some entropy-regularized methods use sophisticated policy architectures for strong representation power. However, they often require complex inferences to optimize policy [17] or inefﬁcient calculations to estimate entropy terms [45]. For example, normalizing ﬂow policies [51] requires a serial procedure to calculate the probability density, which brings a non-negligible extra cost.
+Moreover, there are plenty of policy architectures that are hardly compatible with entropy-regularized
+RL, such as Dirac mixtures, whose (generalized) PDF is a convex combination of Dirac delta functions.
+Improving the compatibility of regularized RL with various policy architectures can promote future research on policy architectures and potentially improve the performance of regularized RL. 3.2 Sample-Based Regularization (SBR)
+To alleviate the limitation described in Section 3.1, we propose sample based regularization (SBR), which does not require the PDFs to estimate regularization terms. SBR takes the following form: s)) (cid:44) Ea∼π(·|s) [f (a)] + Ea,a(cid:48)∼π(·|s) [g(a, a(cid:48))] , (π(
+F
+·|
+R and g : (3)
+R are bounded continuous functions. We can estimate the where both f : regularization term simply and efﬁciently by an unbiased estimator
+A × A →
+A → (π(
+ˆ
+F s)) =
+·|
+
+f (ai) + 1
+N
+N (cid:88) i=1 1
+N 1
+−
+N (cid:88) j=1,j(cid:54)=i
+ g(ai, aj)
+ , (4) where N is the number of samples and ai
+{
+N i=1 are sampled from π(
+·|
+} s).
+According to the equation 3, our regularization consists of two parts. In the ﬁrst part, the function f deﬁnes an extra state-independent reward, which can represent the tendency to explore according to a priori knowledge. In the second part, the function g models the mutual effect between performed actions. We can promote stochasticity by encouraging selected actions away from each other.
+Therefore, g(a, a(cid:48)) should be positively correlated to the distance between a and a(cid:48).
+In order to make our regularizers analyzable in continuous action spaces, we make two assumptions.
+Assumption 1. The set ∆ is weakly closed. That is, if (qi)∞
+Assumption 2. The function Qπ
+) is L-Lipschitz for all s
+· i=1 weakly converges to q, then q
+Π. and π
+α(s,
+∈ S
+∆.
+∈
+∈
+Assumption 1 usually holds in practice, e.g., when ∆ is the set of all Dirac delta distributions.
+Assumption 2 is commonly-used in literature [37, 22] for the smoothness of the Q-value function.
+Under these two assumptions, we show the optimality condition in our regularized RL framework.
+Theorem 1. Under Assumption 1 and 2, the optimal policy π∗
+α must exist, and for any state it satisﬁes (5) s) = arg max
+Ea∼q [Q∗
+α(s, a)] + α (q).
+π∗
+α(
+·| q∈∆
+F 3.3
+Instances of Sample-Based Regularization
+∆, their generalized energy distance dφ is deﬁned by
+In this part, we ﬁrst introduce generalized energy distance (GED) and then propose two instances of
+SBR by using GED. GED is commonly used to test the equality of two distributions [39, 44]. Given two probability measures q, p
+∈ 2)(cid:3) (cid:2)φ(
+φ(q, p) (cid:44) 2Ex∼q,y∼p 2 d2 (6) x (cid:107) (cid:107)
+R is nonnegative and its derivative φ(cid:48) is completely monotone [3]. That where the function φ : R is, φ(z) 0 hold for all z > 0 and nonnegative integers n. Previous work
+[3] has shown that dφ is a distance metric on ∆ and provided some instances of function φ (see Table
+φ(q, p) (cid:44) (cid:80)n
+φ([q]i, [p]i). We can show that ˜dφ 1). Based on GED, we can further deﬁne ˜d2 is also a distance metric on a speciﬁc space ∆ (see Theorem 2).
+→ 1)nφ(n+1)(z) (cid:2)φ( y (cid:107)
+φ by ˜d2
+Ey,y(cid:48)∼p
+Ex,x(cid:48)∼q 2)(cid:3) 2 (cid:107) i=1 d2 0 and ( (cid:2)φ( 2)(cid:3) x (cid:107) x(cid:48) y(cid:48)
+−
+−
+−
+−
+−
+≥
+−
+≥ (cid:107) y 2
+Theorem 2. Assume that any distribution q
+∈ a metric on the set of probability measures ∆.
+∆ is a product of its margin distributions. Then ˜dφ is 3
+Table 1: Several examples of function φ.
+Function φ
+φ(z) = zκ
+φ(z) = z z+κ
+Condition 0 < κ < 1 0 < κ
+Function φ
+Condition
+φ(z) = log(1 + κz)
+φ(z) = 1 e−κz
+− 0 < κ 0 < κ
+Table 2: Instances of sample-based regularization. We omit the constant term in we omit the constant term Ea,a(cid:48)∼u[φ( a (cid:107) 2 2)] when using
+F d2
+φ(q, u). (q) = a(cid:48)
+−
+−
+F (cid:107) (q). For example, (q) d2
+φ(q, u)
+˜d2
+φ(q, u)
+F
+−
+− f (a) g(a, a(cid:48)) 2Ea(cid:48)∼u 2 (cid:80)n i=1
+−
+− (cid:2)φ( a (cid:107)
+Ea(cid:48)∼u 2)(cid:3) a(cid:48) 2
+− (cid:107) (cid:16) (cid:104) ([a]i −
+φ
+φ( a (cid:107)
+−
+[a(cid:48)]i)2(cid:17)(cid:105) (cid:80)n i=1 φ a(cid:48) 2 2) (cid:107) (cid:16) ([a]i −
+[a(cid:48)]i)2(cid:17)
+Note that the Shannon entropy of a distribution q can be regarded as the KL divergence of the uniform distribution u from the distribution q (added by an constant). Inspired by this fact, we deﬁne two regularization terms via d2(q, u), where d can be dφ or ˜dφ. Then, the regularization term takes the form of SBR (see Table 2). In practice, the ﬁrst regularization d2
+φ requires sampling from a uniform distribution to approximate f , which leads to a large estimation variance. In the contrast, we can solve the closed-form expression of the function f when using ˜d2
+φ, which helps to reduce variance. 3.4 Theoretical Results
+We provide our theoretical results for dφ in this subsection while similar results for ˜dφ can be found in Appendix A. First, we show that we can control the stochasticity of the optimal policies by tuning
+α and provide a sufﬁcient condition that ensures the optimal policies to be stochastic.
+Theorem 3. Assume that the optimal policy π∗ belongs to the set of probability measures ∆. If we use the regularizer 0 and the uniform distribution d2
+φ(q, u), then we
+α exists for all α (q) =
+≥ dφ
+−→
+·| s) have π∗ u for all states when α
+α(
+Theorem 4. Suppose the action space measures on function φ such that limz→0+ 2α√zφ(cid:48)(z) > L, then π∗
+α(
+·|
+.
+→ ∞
+A
+. Under Assumption 2, if we use the regularizer is convex and the set ∆ contains all Borel probability d2
+φ(q, u) and choose (q) =
+− s) will never be a Dirac delta distribution.
+A
+F
+F
+−
+Theorem 3 states that GED-based regularizers can bring active exploration when α is large enough.
+We illustrate Theorem 3 in Figure 1. Theorem 4 shows that we can ensure the stochasticity of the optimal policies by choosing proper function φ, e.g., φ(z) = zκ with 0 < κ < 0.5.
+Finally, we compare the performance of π∗
+Theorem 5. Assume that the optimal policy π∗
+If we use the regularizer
+α exists and the action space satisﬁes diam(
+α and π∗ in the original MDP.
+)
+A
+U .
+≤ (q) =
+F
+V ∗
+− d2
+φ(q, u), then we have 2α (cid:0)φ(U 2)
+φ(0)(cid:1)
+− 1
+γ
+−
+−
+V π∗
+α
+V ∗.
+≤ (7)
+≤
+Theorem 5 proposes a bound on the performance gap between the policy π∗ shows that the gap depends on ∆ = φ(U 2) away from each other better, it may lead to worse performance of π∗
+α.
+α and the policy π∗. It
+φ(0). Therefore, though larger ∆ can encourage actions
+− 3.5 Discussion on Regularization Terms
+We discuss the properties of SBR intuitively and provide some empirical results in continuous-armed bandit tasks. In this part, we consider an additional regularizer that is based on Gini mean difference (GMD) [53]. This regularizer is given by
+], and thus it is essentially the
+| second part of GED-based regularizer when φ(z) = z0.5. Our discussion includes three parts. (q) (cid:44) Ea,a(cid:48)∼q [
+| a(cid:48)
+−
+F a 4
+(a) GED: φ(z) = z0.25 (b) GED: φ(z) = z0.5 (c) GMD (d) GED: φ(z) = z0.25
+−
+Figure 1: Learned policy distributions in continuous-armed bandit tasks. The action space is a closed interval [ 1, 1]. Figures (a), (b) and (d) correspond to GED-based regularization and ﬁgure (c) to regularization that is based on Gini mean difference (GMD) [53]. The dashed lines represent reward functions, and the solid lines denote the PDFs of learned policy distributions. When using
+GED-based regularization, the exploration becomes more active as α increases. However, when using
+GMD-based regularization, the performed actions gather near the boundary. Moreover, The subﬁgure (d) shows that GED-based regularization helps to capture multiple modes of near-optimal behaviors.
+Promoting stochasticity We compare different instances of SBR under different α (see Figure 1).
+The GED-based regularization can effectively promote the stochasticity of learned policies while the
+GMD-based regularization does not perform well. Indeed, the GMD-based regularizer is the second part of the GED-based regularizer when φ(z) = z0.5. These results demonstrate that the ﬁrst part of our regularizer (3) is signiﬁcant for exploration. Compared with Figure 1a and 1b, using φ = z0.25 performs better than φ(z) = z0.5 in avoiding central tendency. A potential reason is that the value of
+φ(z) = z0.25 increases faster than the value of φ(z) = z0.5 as z increases near the point z = 0.
+Learning multimodal behaviors Consider a bandit task that takes optimal actions at 0.7 and suboptimal action at 0. We illustrate the optimal policy with GED-based regularizer in Figure 1d.
+The result shows GED-based regularizer helps to capture multiple near-optimal behaviors. We further provide an experiment in a 2D multi-goal environment to show this property (see Appendix C).
+±
+Incorporating geometric information Entropy regularizers mainly take account of the probability density but ignore the geometric information—how close two performed actions might be—to some extent [4]. In contrast, GED-based regularizers attach importance to the geometric information since their second parts encourage large distances between performed actions. We note that the geometric
+= [0, 10], information is important in exploration. For example, considering the action space the entropy of the uniform distribution over [0, 1] equals to that of the uniform distribution over (cid:83)10 0.1, i], while in practice we prefer to choose the latter as the exploration policy.
+A i=1[i
+− 4 Algorithm
+In this section, we propose the actor critic with generalized energy distance (ACED), an off-policy RL algorithm that uses a GED-based regularizer. We show the pseudo code in Algo-rithm 1. We use neural networks to represent the regularized Q-function Qψ and the policy
+πθ, where ψ and θ are the parameters. We update these parameters by Adam [23]. We also use the target Q-value network Q ¯ψ whose parameters ¯ψ is updated in a moving average fashion [26]. As with SAC [19], we use the clipped double Q-learning [12] and the auto-matic tuning for the hyperparameter α [20]. st, at)
+·|
+∼ st, at, r(st, at), st+1
+D ← D ∪ {
+}
+←
+D ← ∅
+← for each environment step do st)
+π(
+·|
+P ( at
+∼ st+1
+Algorithm 1 ACED
+Input: ψ1, ψ2, θ 1: ¯ψ1
+ψ1, ¯ψ2
+ψ2, 2: for each iteration do 3: 4: 5: 6: 7: 8: 9: 10: 11: 12: 13: 14: end for
+Output: ψ1, ψ2, θ
+ψi
+−
+←
+θ
+βπ
+θ
+−
+∇
+←
+α
+βα
+α
+←
+∇
+−
+¯ψi
+τ ψi + (1
+← end for
+βQ end for for each training step do
+ψi
+∇
+Jπ(θ)
+Jα(α)
+−
+JQ(ψi) for i = 1, 2
+τ ) ¯ψi for i = 1, 2
+˜d2
+In this work, we use the regularizer
+φ(q, u).
+The reason is that we can calculate the explicit d2
+φ(q, u) may require an expression of the function f by integral, while using the regularizer approximation of the function f . We detail our candidates for function φ and policy representation in
+Appendix B. In Section 5.1, we show that using φ(z) = z0.25 with a simple Dirac mixture policy can achieve state-of-the-art performance in the continuous control benchmarks.
+−
+− 5
+Given Q ¯ψ, πθ and α, we train Qψ by minimizing the regularized Bellman residual
+JQ(ψ) = ED (cid:20) 1 2 (cid:0)r(st, at) + γV ¯ψ(st+1)
+Qψ(st)(cid:1)2(cid:21)
+,
+− (8)
+D denotes the replay pool, the expectation ED is actually the empirical average and the value where function V ¯ψ is implicitly parameterized through the target Q-function parameters via Equation (2).
+We apply the reparameterization trick to train πθ. Given Qθ and α, we maximize the objective
+Jπ(θ) = ED (cid:2)Ea∼πθ(·|s) [Qψ(st, at)] + α (πθ(
+F st))(cid:3) .
+·| (9)
+We apply a gradient-based method to automatically tune the hyperparameter α similarly to SAC [20].
+That is, given the current policy πθ, we tune α by minimizing the objective
+Jα(α) = αED [ (10)
+F where T is the target value of the regularization term. That is, we adjust the hyperparameter α to make ED [ st))] approximately equal to the target value T in expectation.
+We use a minibatch to calculate the estiamted gradient ˆ
+Jπ(θ) and ˆ
+Jα(α), and use the
+∇
+∇
+Equation (4) to estimate the regularization term and its gradient. We note that the extra time cost of multiple sampling is negligible (shown in Table 4) since this procedure can be easily parallelized.
+JQ(ψ), ˆ
+∇ st))
+T ] , (π( (π(
+−
+F
+·|
+·|
+There are three differences between ACED and SAC: 1) ACED is compatible with a broader range of policy architectures compared with SAC; 2) ACED uses GED-based regularizers while SAC uses entropy regularizers; 3) ACED does not need to calculate probability density while SAC needs to. 5 Experiments
+Our experiments have three goals: 1) to test whether ACED can achieve state-of-the-art performance; 2) to show the computational efﬁciency of ACED; 3) to analyze the effect of each component in
+ACED. More experiments can be found in Appendix C.
+In this section, we consider three GED-based regularizers, including power-0.25 (φ(z) = z0.25), power-0.5 (φ(z) = z0.5) and log (φ(z) = log z). We take into account four policy architectures, including squashed Gaussian (SG) [19], Dirac mixtures (DM), noisy networks (NN) [11] and generative models (GM) [14, 30]. For completeness, we provide details of experiments, including the implementation of different policy architectures, in the supplementary material. 5.1 Comparative Evaluation
+We compare our algorithms with state of the art on six continuous control tasks in the MuJoCo control suite [49]. Our baselines include soft actor critic algorithm (SAC) [20], the state-of-the-art regularized RL methods; twin delayed deep deterministic policy gradient algorithm (TD3) [12], the state-of-the-art method that learns a deterministic policy; and deep deterministic policy gradient (DDPG) [26], an efﬁcient off-policy algorithm. We stress that we did not tune the hyperparameters.
+We report the results in Table 3 and Figure 2. All results are reported over six random seeds. Table 3 shows that all four variants of ACED outperform SAC in terms of averaged relative performance.
+Furthermore, we ﬁnd that ACED outperforms SAC even when using the same policy architectures. We discuss the potential reasons in Appendix C. Figure 2 shows that ACED achieves stable improvement in sample efﬁciency compared to SAC. Moreover, ACED achieves the best ﬁnal performance compared with all baselines except on the Swimmer-v2 task. 5.2 Computational Efﬁciency
+We compare computational efﬁciency between ACED and SAC (see Table 4). We evaluate these two algorithms with different policy representations, including squashed Gaussian [20] and normalizing
+ﬂow (NF) [28]. To avoid the impact of implementation on computing efﬁciency, we implement SAC using the same code framework as ACED. Results show that ACED can achieve higher computational efﬁciency than SAC, especially when using a complex policy architecture (NF). The main reason is that ACED does not need to compute the probability density. Moreover, using N = 32 requires only a little extra time compared with using N = 2 because the sampling is highly parallel. 6
+Table 3: Relative performance of ACED compared to SAC. We report the best performance in 2000k-step training. The percentage corresponds to the ratio of the best score of ACED to that of
+SAC. Each variant is named with the rule "policy architecture"+"function φ". For each task, we bold the best performance and use the corresponding variant to plot the ACED curve in Figure 2. This table shows the stable performance improvement of ACED compared to SAC.
+Variant
+HCheetah Ant
+Walker2d
+Swimmer Hopper Humanoid Average
+DM+log
+SG+log
+DM+power-0.25
+SG+power-0.25
+Average 119.8% 121.2% 116.7% 108.5% 116.6% 128.6% 109.6% 125.4% 102.8% 122.2% 94.9% 135.2% 101.5% 127.8% 102.2% 76.3% 91.9% 97.5% 100.1% 91.4% 117.5% 96.3% 97.8% 123.1% 113.4% 118.7% 103.6% 123.3% 102.8% 120.6% 108.0% 110.4% 110.6% 112.0% 110.2%
+Figure 2: ACED versus SAC, TD3, DDPG on 6 Mujoco environments. The solid curves correspond to the mean and the shaded region to the standard deviation over 6 random seeds. We smooth curves uniformly for visual clarity. ACED (red curve) outperforms our baselines in most of benchmark tasks. 5.3 Ablation Study
+We ﬁrst analyze the sensitivity of ACED to the hyperparamter N . Then, we evaluate ACED with different regularizers and policy architectures. We report results for HalfCheetah-v2 in this subsection below and provide other results in Appendix C. We run each experiment with at least three seeds.
+Sample number ACED uses multiple samples to estimate the regularization term. In Figure 3a, we show the performance of ACED with different N . Results demonstrate that ACED is insensitive to the hyperparameter N . Therefore, we recommend to use N = 2 for computational efﬁciency.
+Policy architecture ACED is compatible with a broad range of policy architectures. We evaluate
+ACED with four architectures (see details in Appendix B). Also, we provide performance without regularization. Figure 3b shows that ACED can effectively improve the performance for all policy architectures. One of the main reasons is that GED-based regularization can promote the stochasticity and then bring active exploration. Therefore, GED-based regularizers are promising alternatives to entropy regularization for promoting stochasticity.
+Regularization term We evaluate ACED with four different regularizers.
+In this experiment, internal energy [43] corresponds to the second part of the regularization term power-0.25. Figure 3c shows that using regularizers log and power-0.25 achieve similar ﬁnal performance while internal energy and power-0.5 achieve relatively poor performance. These results demonstrate that the ﬁrst part of SBR is also signiﬁcant for exploration. Moreover, the results demonstrate that choosing function φ according to Theorem 4 can potentially improve exploration, since both φ(z) = log z and
+φ(z) = z0.25 satisfy that limx→0+ √xφ(cid:48)(x) = while φ(z) = z0.5 does not satisfy it.
+∞ 7
+Table 4: Comparison of computational efﬁciency between ACED and SAC in HalfCHeetah-v2 task.
+We run each experiments with one GPU (Nvidia Geforce RTX 2080Ti) and report the wall-clock time for 2000k-step training. Performance comparison for NF policies can be found in Appendix C.
+Algorithm
+Policy
+Time (h)
+ACED
+SG (N = 2)
+SG (N = 32) NF (N = 2) 9.80
+± 0.04 11.14
+± 1.25 12.27 0.80
+±
+SG 10.05
+SAC
+NF 0.05 18.75 0.03
+±
+± (a) Sample number (b) Policy architecture (c) Regularization term
+Figure 3: Learning curves in HalfCheetah-v2 task. (a) ACED is insensitive to the hyperparameter N .
+We recommend to use N = 2 to reduce computational cost. (b) We evaluate four variants of ACED with different policy architectures. All the four variants outperform SAC. Moreover, the performance improvement is signiﬁcant compared to algorithms without regularization (α = 0). (c) ACED is sensitive to the choice of regularizers. We have provided suggestions on the choice in Section 3. 6

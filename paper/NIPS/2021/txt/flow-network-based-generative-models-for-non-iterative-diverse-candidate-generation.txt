@@ -1,0 +1,229 @@
+Abstract
+This paper is about the problem of learning a stochastic policy for generating an object (like a molecular graph) from a sequence of actions, such that the probability of generating an object is proportional to a given positive reward for that object. Whereas standard return maximization tends to converge to a single return-maximizing sequence, there are cases where we would like to sample a diverse set of high-return solutions. These arise, for example, in black-box function optimization when few rounds are possible, each with large batches of queries, where the batches should be diverse, e.g., in the design of new molecules. One can also see this as a problem of approximately converting an energy function to a generative distribution. While MCMC methods can achieve that, they are expensive and generally only perform local exploration. Instead, training a generative policy amortizes the cost of search during training and yields to fast generation. Using insights from Temporal Difference learning, we propose GFlowNet, based on a view of the generative process as a ﬂow network, making it possible to handle the tricky case where different trajectories can yield the same ﬁnal state, e.g., there are many ways to sequentially add atoms to generate some molecular graph. We cast the set of trajectories as a ﬂow and convert the ﬂow consistency equations into a learning objective, akin to the casting of the Bellman equations into Temporal
+Difference methods. We prove that any global minimum of the proposed objectives yields a policy which samples from the desired distribution, and demonstrate the improved performance and diversity of GFlowNet on a simple domain where there are many modes to the reward function, and on a molecule synthesis task. 1
+
+Introduction
+The maximization of expected return R in reinforcement learning (RL) is generally achieved by putting all the probability mass of the policy π on the highest-return sequence of actions. In this paper, we study the scenario where our objective is not to generate the single highest-reward sequence of actions but rather to sample a distribution of trajectories whose probability is proportional to a given positive return or reward function. This can be useful in tasks where exploration is important, i.e., we want to sample from the leading modes of the return function. This is equivalent to the problem of turning an energy function into a corresponding generative model, where the object to be generated is obtained via a sequence of actions. By changing the temperature of the energy function (i.e., scaling it multiplicatively) or by taking the power of the return, one can control how selective the generator should be, i.e., only generate from around the highest modes at low temperature or explore more with a higher temperature.
+A motivating application for this setup is iterative black-box optimization where the learner has access to an oracle which can compute a reward for a large batch of candidates at each round, e.g., in drug-discovery applications. Diversity of the generated candidates is particularly important when the oracle is itself uncertain, e.g., it may consist of cellular assays which is a cheap proxy for clinical 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+trials, or it may consist of the result of a docking simulation (estimating how well a candidate small molecule binds to a target protein) which is a proxy for more accurate but more expensive downstream evaluations (like cellular assays or in-vivo assays in mice).
+When calling the oracle is expensive (e.g. it involves a biological experiment), a standard way (Anger-mueller et al., 2020) to apply machine learning in such exploration settings is to take the data already collected from the oracle (say a set of (x, y) pairs where x is a candidate solution an y is a scalar evaluation of x from the oracle) and train a supervised proxy f (viewed as a simulator) which predicts y from x. The function f or a variant of f which incorporates uncertainty about its value, like in
+Bayesian optimization (Srinivas et al., 2010; Negoescu et al., 2011), can then be used as a reward function R to train a generative model or a policy that will produce a batch of candidates for the next experimental assays. Searching for x which maximizes R(x) is not sufﬁcient because we would like to sample for the batch of queries a representative set of x’s with high values of R, i.e., around modes of R(x). Note that alternative ways to obtain diversity exist, e.g., with batch Bayesian optimization (Kirsch et al., 2019). An advantage of the proposed approach is that the computational cost is linear in the size of the batch (by opposition with methods which compare pairs of candidates, which is at least quadratic). With the possibility of assays of a hundred thousand candidates using synthetic biology, linear scaling would be a great advantage.
+In this paper, we thus focus on the speciﬁc machine learning problem of turning a given positive reward or return function into a generative policy which samples with a probability propor-tional to the return. In applications like the one mentioned above, we only apply the reward function after having generated a candidate, i.e., the reward is zero except in a terminal state, and the return is the terminal reward. We are in the so-called episodic setting of RL.
+The proposed approach views the probability assigned to an action given a state as the ﬂow associated with a network whose nodes are states, and outgoing edges from that node are deterministic transitions driven by an action (not to be confused with normalizing ﬂows; Rezende and Mohamed (2016)).
+The total ﬂow into the network is the sum of the rewards in the terminal states (i.e., a partition function) and can be shown to be the ﬂow at the root node (or start state). The proposed algorithm is inspired by Bellman updates and converges when the incoming and outgoing ﬂow into and out of each state match. A policy which chooses an action with probability proportional to the outgoing ﬂow corresponding to that action is proven to achieve the desired result, i.e., the probability of sampling a terminal state is proportional to its reward. In addition, we show that the resulting setup is off-policy; it converges to the above solution even if the training trajectories come from a different policy, so long as it has large enough support on the state space.
+The main contributions of this paper are as follows:
+• We propose GFlowNet, a novel generative method for unnormalized probability distributions based on ﬂow networks and local ﬂow-matching conditions: the ﬂow incoming to a state must match the outgoing ﬂow.
+• We prove crucial properties of GFlowNet, including the link between the ﬂow-matching conditions (which many training objectives can provide) and the resulting match of the generated policy with the target reward function. We also prove its ofﬂine properties and asymptotic convergence (if the training objective can be minimized). We also demonstrate that previous related work (Buesing et al., 2019) which sees the generative process like a tree would fail when there are many action sequences which can lead to the same state.
+• We demonstrate on synthetic data the usefulness of departing from seeking one mode of the return, and instead seeking to model the entire distribution and all its modes.
+• We successfully apply GFlowNet to a large scale molecule synthesis domain, with comparative experiments against PPO and MCMC methods.
+All implementations are available at https://github.com/bengioe/gflownet. 2 Approximating Flow Network generative models with a TD-like objective
+Consider a discrete set and policy π(a
+|
+X s) to sequentially build x
+∈ X with probability π(x) with
+π(x)
+R(x)
+Z
+=
+R(x) x(cid:48)∈X R(x(cid:48)) (cid:80)
+≈ (1) 2
+where R(x) > 0 is a reward for a terminal state x. This would be useful to sample novel drug-like molecules when given a reward function R that scores molecules based on their chemical properties.
+Being able to sample from the high modes of R(x) would provide diversity in the batches of generated molecules sent to assays. This is in contrast with the typical RL objective of maximizing return which we have found to often end up focusing around one or very few good molecules. In our context, R(x) is a proxy for the actual values obtained from assays, which means it can be called often and cheaply.
+R(x) is retrained or ﬁne-tuned each time we acquire new data from the assays.
+What method should one use to generate batches sampled from π(x) state space under which we would operate.
+∝
+R(x)? Let’s ﬁrst think of the
+A (s)
+⊆ A
+X ⊂ S denote the set of states and denote the set of terminal states. Let be a ﬁnite set, the
+Let
+S
+∗(s) be the set of all sequences be the set of allowed actions at state s, and let alphabet, of actions allowed after state s. To every action sequence (cid:126)a = (a1, a2, a3, ..., ah) of ai
+H corresponds a single x, i.e. the environment is deterministic so we can deﬁne a function C mapping a sequence of actions (cid:126)a to an x. If such a sequence is ‘incomplete’ we deﬁne its reward to be 0. When the correspondence between action sequences and states is bijective, a state s is uniquely described by some sequence (cid:126)a, and we can visualize the generative process as the traversal of a tree from a single root node to a leaf corresponding to the sequence of actions along the way.
+∈ A
+, h
+A
+A
+≤
+However, when this correspondence is non-injective, i.e. when multiple action sequences describe the same x, things get trickier. Instead of a tree, we get a directed acyclic graph or DAG (assuming that the sequences must be of ﬁnite length, i.e., there are no deterministic cycles), as illustrated in Figure 1.
+For example, and of interest here, molecules can be seen as graphs, which can be described in multiple orders (canonical representations such as SMILES strings also have this problem: there may be multiple descriptions for the same actual molecule). The standard approach to such a sampling problem is to use iterative MCMC methods (Xie et al., 2021; Grathwohl et al., 2021). Another option is to relax the desire to have p(x)
+R(x) and to use non-interative (sequential) RL methods (Gottipati et al., 2020), but these are at high risk of getting stuck in local maxima and of missing modes. Indeed, in our setting, the policy which maximizes the expected return (which is the expected
+ﬁnal reward) generates the sequence with the highest return (i.e., a single molecule).
+∝ 2.1 Flow Networks
+In this section we propose the Generative Flow Network framework, or GFlowNet, which enables us to learn policies such that p(x)
+R(x) when sampled. We ﬁrst discuss why existing methods are inadequate, and then show how we can use the metaphor of ﬂows, sinks and sources, to construct adequate policies. We then show that such policies can be learned via a ﬂow-matching objective.
+∝
+With existing methods in the bijective case, one can think of the sequential generation of one x as an episode in a tree-structured deterministic MDP, where all leaves x are terminal states (with reward
+R(x)) and the root is initial state s0. Interestingly, in such a case one can express the pseudo-value of a state ˜V (s) as the sum of all the rewards of the descendants of s (Buesing et al., 2019).
+R(τ )/Z, e.g. as
+In the non-injective case, these methods are inadequate. Constructing π(τ ) per Buesing et al. (2019), MaxEnt RL (Haarnoja et al., 2017), or via an autoregressive method (Nash and Durkan, 2019; Shi et al., 2021) has a particular problem as shown below: if multiple action sequences (cid:126)a (i.e. multiple trajectories τ ) lead to a ﬁnal state x, then a serious bias can be introduced in the generative probabilities. Let us denote (cid:126)a + (cid:126)b as the concatenation of the two sequences of actions (cid:126)a and (cid:126)b, and by extension s + (cid:126)b the state reached by applying the actions in (cid:126)b from state s.
+≈
+A
+∈ S
+∗
+A
+S (cid:55)→ (cid:55)→ S
+R+ associate each state s associate each allowed action sequence (cid:126)a
+Proposition 1. Let C :
+. Let ˜V : s = C((cid:126)a)
+∗ to a state (cid:126)b∈A∗(s) R(s + (cid:126)b) > 0,
+∗(s) is the set of allowed continuations from s and s +(cid:126)b denotes the resulting state, i.e., ˜V (s) where is the sum of the rewards of all the states reachable from s. Consider a policy π which starts from the state corresponding to the empty string s0 = C( an allowable
+˜V (s+b) . Denote π((cid:126)a = (a1, . . . , aN )) = (s) with probability π(a action a (cid:81)N the probability of visiting a state s with this policy.
+) and chooses from state s
+∅
+˜V (s+a)
+C(a1, . . . , ai−1)) and π(s) with s to ˜V (s) = (cid:80) s) =
+|
+∈ A
+∈ A
+∈ S
+∈ S b∈A(s) (cid:80) i=1 π(ai
+The following then obtains: (a) π(s) = (cid:80) (cid:126)ai:C((cid:126)ai)=s π((cid:126)ai).
+|
+∈ S 3
+R(x) (b) If C is bijective, then π(s) = x∈X R(x) . (c) If C is non-injective and there are n(x) distinct action sequences (cid:126)ai s.t. C((cid:126)ai) = x, then
+π(x) =
+˜V (s)
+˜V (s0) and as a special case for terminal states x, π(x) = (cid:80) (cid:80) n(x)R(x) x(cid:48) ∈X n(x(cid:48))R(x(cid:48)) .
+See Appendix A.1 for the proof. In combinatorial spaces, such as for molecules, where C is non-injective (there are many ways to construct a molecule graph), this can become exponentially bad as trajectory lengths increase. It means that larger molecules would be exponentially more likely to be sampled than smaller ones, just because of the many more paths leading to them. In this scenario, the pseudo-value ˜V is “misinterpreting” the MDP’s structure as a tree, leading to the wrong π(x).
+An alternative is to see the MDP as a ﬂow network, that is, leverage the DAG structure of the MDP, and learn a ﬂow F , rather than estimating the pseudo-value ˜V as a sum of descendant rewards, as elaborated below. We deﬁne the ﬂow network as a having a single source, the root node (or initial state) s0 with in-ﬂow Z, and one sink for each leaf (or terminal state) x with out-ﬂow R(x) > 0.
+We write T (s, a) = s(cid:48) to denote that the state-action pair (s, a) leads to state s(cid:48). Note that because
+C is not a bijection, i.e., there are many paths (action sequences) leading to some node, a node can 1, except for the root, which has no parent. have multiple parents, i.e.
+We write F (s, a) for the ﬂow between node s and node s(cid:48) = T (s, a), F (s) for the total ﬂow going through s1. This construction is illustrated in Fig. 1.
+T (s, a) = s(cid:48) (s, a)
+}| ≥
+|{
+|
+F (s0) = Z s0 root a1 a2 a3 nodes have multiple paths from the root (cid:80)
+F (s, a) = (cid:80)
+F (s3, a(cid:48)) s,a:T (s,a)=s3 a(cid:48)∈A(s3) s2 s1 a5 a2 s3 a4 a7 s4 terminal state
+Figure 1: A ﬂow network MDP. Episodes start at source s0 with ﬂow Z. Like with SMILES strings, there are no cycles. Terminal states are sinks with out-ﬂow R(s). Exemplar state s3 has parents
+. s4 is a terminal
+T (s, a) = s3 (s, a)
+{
+| sink state with R(s4) > 0 and only one parent. The goal is to estimate F (s, a) such that the ﬂow equations are satisﬁed for all states: for each node, incoming ﬂow equals outgoing ﬂow. (s1, a2), (s2, a5)
+} and allowed actions (s3) = a4, a7
+A
+=
+{
+}
+}
+{
+To satisfy ﬂow conditions, we require that for any node, the incoming ﬂow equals the outgoing ﬂow, which is the total ﬂow F (s) of node s. Boundary conditions are given by the ﬂow into the terminal nodes x, R(x). Formally, for any node s(cid:48), we must have that the in-ﬂow equals the out-ﬂow
+F (s(cid:48)) = (cid:88)
+F (s, a) s,a:T (s,a)=s(cid:48)
+F (s(cid:48)) = (cid:88)
+F (s(cid:48), a(cid:48)). (2) (3) a(cid:48)∈A(s(cid:48))
+More concisely, with R(s) = 0 for interior nodes, and write the following ﬂow consistency equations: (s) = ∅ for leaf (sink/terminal) nodes, we
+A (cid:88)
+F (s, a) = R(s(cid:48)) + (cid:88)
+F (s(cid:48), a(cid:48)). s,a:T (s,a)=s(cid:48) a(cid:48)∈A(s(cid:48)) (4) s, a (for this we needed to constrain R(x) to be positive too). with F being a ﬂow, F (s, a) > 0
+One could include in principle nodes and edges with zero ﬂow but it would make it difﬁcult to talk about the logarithm of the ﬂow, as we do below, and such states can always be excluded by the allowed set of actions for their parent states. Let us now show that such a ﬂow correctly produces
+π(x) = R(x)/Z when the above ﬂow equations are satisﬁed.
+∀ 1In some sense, F (s) and F (s, a) are close to V and Q, RL’s value and action-value functions. These effectively inform an agent taking decisions at each step of an MDP to act in a desired way. With some work, we can also show an equivalence between F (s, a) and the “real” Qˆπ of some policy ˆπ in a modiﬁed MDP (see A.2). 4
+Proposition 2. Let us deﬁne a policy π that generates trajectories starting in state s0 by sampling actions a (s) according to
+∈ A s) =
+π(a
+|
+F (s, a)
+F (s) (5) where F (s, a) > 0 is the ﬂow through allowed edge (s, a), F (s) = R(s) + (cid:80) a∈A(s) F (s, a) where
+R(s) = 0 for non-terminal nodes s and F (x) = R(x) > 0 for terminal nodes x, and the ﬂow consistency equation (cid:80) a(cid:48)∈A(s(cid:48)) F (s(cid:48), a(cid:48)) is satisﬁed. Let π(s) denote the probability of visiting state s when starting at s0 and following π( (a) π(s) = F (s)
+F (s0) (b) F (s0) = (cid:80) (c) π(x) = s,a:T (s,a)=s(cid:48) F (s, a) = R(s(cid:48)) + (cid:80)
+). Then
+·|· (cid:80) x∈X R(x)
+R(x) x(cid:48)∈X R(x(cid:48)) .
+Proof. We have π(s0) = 1 since we always start in root node s0. Note that (cid:80) x∈X π(x) = 1 because terminal states are mutually exclusive, but in the case of non-bijective C, we cannot say that (cid:80) s∈S π(s) equals 1 because the different states are not mutually exclusive in general. This notation is different from the one typically used in RL where π(s) refers to the asymptotic distribution of the
+Markov chain. Then
+π(s(cid:48)) = (cid:88) s)π(s)
+π(a
+| i.e., using Eq. 5, (a,s):T (s,a)=s(cid:48)
+π(s(cid:48)) = (cid:88) (a,s):T (s,a)=s(cid:48)
+F (s, a)
+F (s)
+π(s).
+We can now conjecture that the statement
+π(s) =
+F (s)
+F (s0) (6) (7) (8) is true and prove it by induction. This is trivially true for the root, which is our base statement, since
+π(s0) = 1. By induction, we then have that if the statement is true for parents s of s(cid:48), then
+π(s(cid:48)) = (cid:88) s,a:T (s,a)=s(cid:48)
+F (s, a)
+F (s)
+F (s)
+F (s0)
+= (cid:80) s,a:T (s,a)=s(cid:48) F (s, a)
+F (s0)
+=
+F (s(cid:48))
+F (s0) (9) which proves the statement, i.e., the ﬁrst conclusion (a) of the theorem. We can then apply it to the case of terminal states x, whose ﬂow is ﬁxed to F (x) = R(x) and obtain
+π(x) =
+R(x)
+F (s0)
+. (10)
+Noting that (cid:80)
+F (s0) = (cid:80) x∈X π(x) = 1 and summing both sides of Eq. 10 over x we thus obtain (b), i.e., x∈X R(x). Plugging this back into Eq. 10, we obtain (c), i.e., π(x) = (cid:80)
+R(x) x(cid:48) ∈X R(x(cid:48)) . s) satisﬁes our desiderata: it maps a reward function R to a generative model
+Thus our choice of π(a
+|
+R(x), whether C is bijective or non-injective (the former which generates x with probability π(x) being a special case of the latter, and we just provided a proof for the general non-injective case).
+∝ 2.2 Objective Functions for GFlowNet
+We can now leverage our RL intuitions to create a learning algorithm out of the above theoretical results. In particular, we propose to approximate the ﬂows F such that the ﬂow consistency equations are respected at convergence with enough capacity in our estimator of F , just like the Bellman equations for temporal-difference (TD) algorithms (Sutton and Barto, 2018). This could yield the following objective for a trajectory τ :
+˜
+θ(τ ) =
+L (cid:88)
+
+ (cid:88)
+Fθ(s, a) s(cid:48)∈τ (cid:54)=s0 s,a:T (s,a)=s(cid:48)
+R(s(cid:48))
+− 5
+ 2 (cid:88)
+− a(cid:48)∈A(s(cid:48))
+Fθ(s(cid:48), a(cid:48))
+
+. (11)
+One issue from a learning point of view is that the ﬂow will be very large for nodes near the root (early in the trajectory) and tiny for nodes near the leaves (late in the trajectory). In high-dimensional is exponential (e.g., in the typical number of actions to form an x), spaces where the cardinality of the F (s, a) and F (s) for early states will be exponentially larger than for later states. Since we want
+F (s, a) to be the output of a neural network, this would lead to serious numerical issues.
+X
+To avoid this problem, we deﬁne the ﬂow matching objective on a log-scale, where we match not the incoming and outgoing ﬂows but their logarithms, and we train our predictor to estimate
+F log predictions to compute the loss, yielding
+θ the square of a difference of logs: (s, a) = log F (s, a), and exponentiate-sum-log the F log
+θ
+
+
+
+θ,(cid:15)(τ ) = (cid:88)
+log
+(cid:15) + (cid:88) exp F log
+θ (s, a)
+ s(cid:48)∈τ (cid:54)=s0 s,a:T (s,a)=s(cid:48)
+
+(cid:15) + R(s(cid:48)) + (cid:88) exp F log
+θ a(cid:48)∈A(s(cid:48)) log
+−
+L
+
+ 2 (s(cid:48), a(cid:48))
+
+ (12) which gives equal gradient weighing to large and small magnitude predictions. Note that matching the logs of the ﬂows is equivalent to making the ratio of the incoming and outgoing ﬂow closer to 1.
+To give more weight to errors on large ﬂows and avoid taking the logarithm of a tiny number, we compare log((cid:15)+incoming ﬂow) with log((cid:15)+outgoing ﬂow). It does not change the global minimum, which is still when the ﬂow equations are satisﬁed, but it avoids numerical issues with taking the log of a tiny ﬂow. The hyper-parameter (cid:15) also trades-off how much pressure we put on matching large versus small ﬂows, and in our experiments is set to be close to the smallest value R can take. Since we want to discover the top modes of R, it makes sense to care more for the larger ﬂows. Many other objectives are possible for which ﬂow matching is also a global minimum.
+An interesting advantage of such objective functions is that they yield off-policy ofﬂine methods.
+The predicted ﬂows F do not depend on the policy used to sample trajectories (apart from the fact that the samples should sufﬁciently cover the space of trajectories in order to obtain generalization).
+This is formalized below, which shows that we can use any broad-support policy to sample training trajectories and still obtain the correct ﬂows and generative model, i.e., training can be off-policy.
+Proposition 3. Let trajectories τ used to train Fθ be sampled from an exploratory policy P with the same support as the optimal π deﬁned in Eq. 5 for a consistent ﬂow F ∗
+∗. A ﬂow is consistent
+θ : Fθ = F ∗, i.e., we choose a sufﬁciently rich family of if Eq. 4 is respected. Also assume that
+∃ predictors. Let θ∗ argminθEP (τ )[Lθ(τ )] a minimizer of the expected training loss. Let Lθ(τ ) have the property that when ﬂows are matched it achieves its lowest possible value. First, it can be shown that this property is satisﬁed for the loss in Eq. 12. Then
+τ
+∀
+Fθ∗ = F ∗, and Lθ∗ (τ ) = 0
+P (θ), (13)
+∈ F
+∼
+∈ i.e., a global optimum of the expected loss provides the correct ﬂows. If πθ∗ (a then we also have s) =
+| (cid:80)
+Fθ∗ (s,a) a(cid:48) ∈A(s) Fθ∗ (s,a(cid:48))
+πθ∗ (x) =
+. (14)
+R(x)
+Z
+The proof is in Appendix A.1. Note that, in RL terms, this method is akin to asynchronous dynamic programming (Sutton and Barto, 2018, §4.5), which is an off-policy off-line method which converges provided every state is visited inﬁnitely many times asymptotically. 3

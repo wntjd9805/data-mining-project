@@ -1,0 +1,149 @@
+Abstract
+Model-based reinforcement learning aims to improve the sample efficiency of policy learning by modelling the dynamics of the environment. Recently, the latent dynamics model has been further developed to enable fast planning in a compact space. It summarizes the high-dimensional experiences of an agent, which mimics the memory function of humans. Learning policies via imagination with the latent model shows great potential for solving complex tasks. However, only considering memories from the true experiences in the process of imagination could limit its advantages. Inspired by the memory prosthesis proposed by neuroscientists, we present a novel model-based reinforcement learning framework called Imagining with Derived Memory (IDM). It enables the agent to learn policy from enriched diverse imagination with prediction-reliability weight, thus improving sample efficiency and policy robustness. Experiments on various high-dimensional visual control tasks in the DMControl benchmark demonstrate that IDM outperforms previous state-of-the-art methods in terms of policy robustness and further improves the sample efficiency of the model-based method. 1
+
+Introduction
+Model-based Reinforcement Learning (MBRL) approaches benefit from the knowledge of a model, allowing them to summarize the agent’s past experiences and foresight the future outcomes in a compact latent space [1, 2, 3, 4]. Previous approaches can be generally categorized into four branches, including 1) Dyna-style algorithms, 2) sampling-based methods, 3) value expansion, and 4) backpropagation through paths. First, the Dyna-style algorithms [5] generate virtual interaction
+∗Yuzheng Zhuang is the corresponding author. Yao Mu conducted this work during the internship in Huawei
+Noah’s Ark Lab. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+data (e.g. ME-TRPO [6], MBPO [7]) to improve policy optimization. Second, the sampling-based methods, such as [8, 9, 10], choose action by planning or shooting (e.g. PlaNet [8], PETS[9]). Third, the value expansion approaches, such as [11, 12], use model-augmented rollouts to improve the estimation accuracy of cumulative returns. Finally, the methods of backpropagation through paths
+[13, 14] employ the analytic gradient of state value through the dynamic transition to learn the policy.
+For the tasks with high-dimensional sensory inputs, backpropagation through paths is more com-putationally efficient compared with conventional planning algorithms, which generated numerous rollouts for the best action sequence selection procedure. Dreamer [4], as a landmark of such methods, achieves state-of-the-art (SOTA) performance on visual control tasks. It summarizes the agent’s high-dimensional experiences into a compact latent space by the dynamic model, which is analogized to the way human memories are stored, and benefits behaviours learning by latent imaginations.
+However, recent breakthroughs based on such a method focus on optimizing the policy on imaginary trajectories with only original memory on the agent’s real experiences and leave the diversity of imagination largely unstudied, resulting in noise-sensitive policy and inefficient learning. Recently, neuroscientists demonstrated that "memory prosthesis", which transforms the brain’s activity patterns to the electrode signals to stimulate the human’s hippocampus [15, 16], could facilitate humans mem-ory augmentation via an external implant. Inspired by such insight, our idea is to improve behaviour learning by constructing a “memory prosthesis” with externally derived memory [17] that each signal corresponds to a state transition sequence, which can enrich the diversity of the imagination without any interaction with the real environments. We propose a novel model-based reinforcement learning algorithm, called Imagining from Derived Memory (IDM), which aims to improve policy robustness and sample efficiency by the enriched and reliable imagination. In order to generate diverse derived memory, transformations are performed on states of the latent trajectories, which are sampled from the experiences. The agent learns to obtain future rewards by the model-based imagination from both the derived and the original memories. The optimal policy is optimized by a novel actor-critic algorithm, where the state values optimize Bellman consistency for imagined rewards, and the policy maximizes the state values by propagating their analytic gradients back through the dynamics.
+In this paper, we aim to improve the diversity of imagination for model-based policy optimization with the derived memory. Our main contributions are listed below.
+• We design an effective memory generator that simultaneously achieves the imagination diversity as well as the relevancy between the derived memory and the real physical states, which avoids the distortion after decoding.
+• We propose a model-based policy optimization framework, unifying the analytical gradients of the imagination from both derived and original memories with learnable confidence. We also provide the upper bound of the value estimation error in the frame of IDM. This sheds light on further improvement of model-based reinforcement learning in the future.
+• Experiments on DMControl [18] tasks demonstrate that IDM outperforms existing SOTA approaches in terms of robustness to uncertainty and further improves the sample efficiency of the model-based method. Ablation experiment results verify the superiority of IDM. 2 Preliminaries 2.1 Model-based Reinforcement Learning
+Model-based reinforcement learning aims at optimizing a policy to maximize the cumulative rewards, by accessing to a (known or learned) model of the environment. We denote a time step as t, a state at t as st ∈ S, action at t as at ∈ A, reward function r(st, at), policy πφ(st) and a world model pθ to characterize the process of interacting with the environment. The goal is to find a policy parameter
+φ∗, which maximizes the long-horizon summed discounted rewards represented by a parameterized value function, vψ (st) (cid:1) with parameter ψ and the discounted factor γ.
+.
+= E (cid:0)(cid:80)∞ i=t γi−tri 2.2 World Model
+The world model characterizes the process of interaction with the environment. The recurrent stochastic state model (RSSM), which is used in PlaNet and Dreamer, is the SOTA solution for building latent dynamics [8]. RSSM can facilitate long-term predictions and enable the agent to 2
+imagine thousands of trajectories in parallel. It can represent both the historical memory and the dynamic uncertainty by using a recurrent neural network.
+Let us denote the sequence of observations as ˜o = {o0, o1, . . . , oT }, action sequence as ˜a =
+{a0, a1, . . . , aT }, rewards as ˜r = {r0, r1, . . . , rT }, and the corresponding latent states ˜z =
+{z0, z1, . . . , zT }. RSSM assumes that the latent state zt consists of zt = (st, ht), where st, ht are the probabilistic and deterministic variables respectively. RSSM consists of four key components, including (1) the representation model p(zt|zt−1, at−1, ot), which encodes observations and actions to create continuous vector-valued latent states with Markovian transitions, (2) the transition model q(zt|zt−1, at−1), which is built by a recurrent neural network, and is to predict the future latent states with historical memory and actions, (3) the observation model q(ot|zt), which is used to provide a reconstruction learning signal, and (4) The reward model q(rt|zt) predicts the rewards given to the latent states. We use p to denote distributions that generate samples in the real environment and q to denote their approximations that enable latent imagination. Specifically, the transition model allows us to predict ahead in the compact latent space without any interaction in the real environment. 3 Robust World Model for Derived Memory Generation
+Based on RSSM, diverse memory vectors could be generated intuitively by transforming the original memories while putting forward higher requirements on the world model’s robustness to the latent space noise. Because if the derived memory can not correspond to the real physical state, i.e., the reconstructed image is distorted, it could not effectively enrich the imagination but bring disturbance for policy learning. As shown in the second row in Figure 1a and Figure 1b, if we add an random noise to the latent state zt = (ht, st) , the derived latent state z′ t) in RSSM results in low-fidelity reconstructed images, which could not be mapped to the real physical states. t = (h′ t, s′ (a) Add random noise on RSSM and R2S2 (ours) in Walker-Walk (b) Add random noise on RSSM and R2S2 (ours) model in Finger-Spin
+Figure 1: Comparison of reconstruction results of the derived latent states with different world models.
+The first row is the original image inputs, the second row is the images decoded from the derived latent states by RSSM, the third row is the images decoded from the derived latent states by R2S2 model (ours). (Note that the shown results are randomly selected from test episodes, and the derived latent states are generated by adding Gaussian noise obeys N (0, 0.5) to each dimension of (ht, st)).
+To alleviate this issue, we propose a Robust Recurrent Stochastic State (R2S2) model to improve the latent model’s robustness. We add a decoding constraint to the RSSM, which improves relevancy between the derived latent states and the real physical states, thus avoiding the distortion after decoding. Denote ξh is a noise that obeys N (0, σh), h′ t is the derived hidden state which adds the noise ξh to the hidden state ht, ξs is a noise that obeys N (0, σs′), s′ t is the derive stochastic 3
+state which adds the noise ξs to st, ot is the reconstructed image from zt = (ht, st), and o′ reconstructed image from z′ t = (h′ t, s′ t). t is the
+The components of the R2S2 are optimized jointly to increase the variational lower bound [19] with a decoding constraint. The variational lower bound JM includes reconstruction terms for observations
+O and rewards J t
+J t
+D [4]. The expectation is taken under the dataset and representation model,
+R and a KL regularizer J t min JM = Ep (cid:32) (cid:88) t (cid:0)J t
+O + J t
+R + J t
+D (cid:33) (cid:1) s.t.DKL {p(o′ t|z′ t), p(ot|zt)} ≤ δ (1)
+O = log q(ot|zt) J t
+J t
+R = log q(rt|zt) J t
+D = −βDKL {p (zt|zt−1, at−1, ot) , q (zt|zt−1, at−1)} .
+As demonstrated in Figure 1, our proposed R2S2 model generates high-fidelity reconstructions, which suggests the enriched dynamic representation is capable for facilitate behaviour learning. The decoding constraint leaves a margin δ between the derived branch’s output and the original branch’s output. The constrained problem is solved by the fixed penalty method [20] where the penalty coefficient is given in the appendix A.4. As shown in the third row of Figure 1a and Figure 1b, after adding noise on the original latent state zt = (ht, st) in R2S2 model, the reconstructed images with derived latent state z′ t) are sharper than RSSM, and are demonstrated different states of motion compared to the the reconstructed images with original latent state zt = (ht, st). In summary, the decoding constraint used in the R2S2 model aims to guide the derived memory in latent space to meet a basic condition that the neighbouring latent states from real data should also follow the real physical states. t = (h′ t, s′ 4 Policy Optimization with Derived Memory
+By leveraging the R2S2 model, we propose an Imagining with Derived Memory (IDM) algorithm that aims to enable the agent to learn the policy with diverse imagination. As shown in Figure 2, the derived memory is generated by the transformation from the original memory. The agent imagines the future states and rewards with both derived and original memories. The policy is improved by the enriched imagination with prediction reliability weight under the actor-critic framework. 4.1
+Imagining with Derived Memory h) on the hidden state ht and ξs ∼ N (0, σ2
+We add several zero-mean noises ξh ∼ N (0, σ2 s′) on the stochastic state st ∼ N (µs, σ2 s ) in the original memory to extend the agent’s memory which includes diverse embedded historical information. Thus the agent could learn behaviours with the trajectories in an enlarged latent space, rather than just the agent’s real experiences. The Gaussian noise in latent space could be theoretically mapped to any type of uncertainty in image level, and this principle is extensively used in VAE and GAN. Adding Gaussian perturbations should be an intuitive way to simulate the influences in latent space caused by the uncertainty of input image, since the stochastic part of latent state st in the R2S2 model obeys Gaussian distribution, any image will be encoded to a
+Gaussian variable in latent space with R2S2 model. The latent trajectories are imagined from both original memory and the derived memory by the learned transition model. The method to generate derived memory can be summarized as Equation (2), for the i-th derived trajectory, the deriving process contains two key steps: derived memory generation and trajectory imagination.
+Derived memory generation: h), t ∼ N (ht, σ2 hi
+Trajectory imagination: t ∼ p(hi t, si hi t, si t|hi t ∼ N (µs, (σs + σs′)2) si (2) t−1, si t−1, ai t−1), t ∼ π(ai ai t|si t, hi t)
+In order to ensure the reliability of the imagination with derived memory and further mitigate the model error’s impact, we consider the reliability of the imagined trajectories by adding a trajectory evaluator. Every imagined trajectory is used with a reliability multiplier given by the evaluator. In the region where the model has reliable predict accuracy, the derived memory should be able to improve 4
+Figure 2: The overall framework of the IDM. The original memory z1 = (h1, s1) is embedded from a high-dimensional state, and the derived memory (h′ 1) is generated by the transformation from the original memory. The decoding constraint is used to avoid reconstructed distortion. Latent trajectories are imagined from both the original memory and the derived memory. Each trajectory is given a reliability weight by the evaluator. The optimal policy π∗ is learned by the enriched imagination with prediction reliability weight under the actor-critic framework. 1, s′ the policy robustness and sample efficiency significantly. We penalize the weight of the trajectories in the region with poor model prediction. The trajectory evaluator E aims to discriminate between real and overshoot sequences predicted by the model. In every iteration, we sample a number of state-action sequences generated by real interactions as real sequences Seqreal = [zτ , aτ , zτ +1]t+T
+τ =t , use the latent model to predict the overshoot trajectories from the same start points as the fake sequences Seqfake = [zt, at, ˆzt+1] ∪ [ˆzτ , aτ , ˆzτ +1]t+T
+τ =t+1. Train the evaluator to output the probability of whether a real trajectory, which is equal to maximize the following objective function
+Jeva = E(zτ ,aτ )∼D (cid:40)t+N (cid:88)
+τ =t
+[log (E (zτ , aτ , zτ +1)) + log (1 − E (ˆzτ , aτ , ˆzτ +1))] (3) (cid:41) where E(·) is approximated by the combination of the MLP and the outermost Softmax and zt = ˆzt since zt is the start point of the overshoot trajectory. 4.2 Policy Optimization
+The policy πφ(zτ ) is optimized by the imagined trajectories {zτ , aτ , rτ }t+H
+τ =t . We estimate every state’s value in the imagined trajectory to trade off the difficulty of long-horizon back-propagation and efficiency of gradient utilization. That means a single trajectory {zτ , aτ , rτ }t+H
+τ =t generates many sub-trajectories with different rollout steps. Every sub-trajectory is used to update the actor and critic with different reliability weight w(zi
+τ ) given by the trajectory evaluator and is normalized in batch.
+τ , ai
+W (zi
+τ ) = E(zi
+τ , zi
+τ +1),
+W (zi
+τ ) (cid:80)t+H
+τ =t W (zi
+τ ) where N is the batch size, Dori represents the trajectories imagined with original memory, and Dderi represents the trajectories imagined with derived memory.
+τ ∼ (Dori, Dderi) zi
+τ ) = w(zi (cid:80)N i=0 (4)
+The value model vψ (zτ ) estimates the expected imagined rewards that the action model achieves from each state zτ . In an attempt to trade off bias and variance, we calculate the target state value by 5
+TD-λ method [21] as in Dreamer, which is an exponentially-weighted average of the estimates for different k to make the estimation robust to different prediction horizons.
+Vλ (zτ )
+.
+= (1 − λ)
+H−1 (cid:88) n=1
+λn−1Vn
+N (zτ ) + λH−1VH
+N (zτ )
+Vk
+N (zτ )
+.
+= Eqφ,qψ
+γn−τ rn + γh−τ vψ (zh) (cid:33) (cid:32)h−1 (cid:88) n=τ h = min(τ + k, t + H) (5) (6) where the V K
+N estimates rewards beyond k steps with the learned value model.
+The critic is updated to regress the targets around which we stop the gradient [21]. The reliability weight is used in the critic updating, which is called weighted regression of target value. The objective for the critic vψ (zτ ), in turn, is to regress the target value (cid:32) N (cid:88) (cid:32)t+H (cid:88) i=0
+τ =t w(zi
+τ ) 2 min
+ψ
+∥vψ (cid:0)zi
+τ (cid:1) − Vλ (cid:0)zi
+τ (cid:1) ∥2 (cid:33)(cid:33) (7)
+Different from DDPG [22] and SAC [23] which only maximize immediate Q-values, we leverage gradients through transitions and update the policy by backpropagation through the value model.
+The objective of the actor with policy πφ(zτ ) is to (cid:32) N (cid:88) (cid:32)t+H (cid:88) i=0
+τ =t max
+φ (cid:33)(cid:33) w(zi
+τ )Vλ (cid:1) (cid:0)zi
+τ (8)
+Since all steps are implemented as neural networks, we analytically compute ∇φJactor by stochastic backpropagation. We use reparameterization for continuous actions and latent states, aτ = tanh (µφ (sτ ) + σφ (sτ ) ϵ) ,
+ϵ ∼ N (0, I). (9) 4.3 Theoretical analysis of IDM Framework
+We give the upper bound of the value estimation error for MBRL under the IDM framework based on [24]. Denote the policy distribution shift between the current policy π and the data-collecting policy πD as maxs DT V (π∥πD) ≤ ϵπ by the maximum total-variation distance and the model gen-eralization error as ϵm = max Es∼D [DT V (p (z′, r | z, a) ∥p′ (z′, r | z, a))], where p (z′, r | z, a) is the real state transition distribution and p′ (z′, r | z, a) is the estimated state transition distri-bution. Under the IDM framework, if the model error under the updated policy is bounded by max Ez∼(Dori,Daug) [DT V (p(z′, r | z, a)||p′(z′, r | z, a))] ≤ ϵm′ and the reweighting coefficient w(z) given by the evaluator is bounded by max {|w(z) − p(z′, r | z, a) /pθ ((z′, r | z, a)|} ≤ ϵw, then the returns estimation error upper bound is
+ηbranch [π] − η[π] ≤ 2rmax (cid:20) γk+1ϵπ (1 − γ)2 +
+γkϵπ (1 − γ)
++ k 1 − γ
+ϵ′ w (cid:21) (10) dϵw′ dϵπ w = ϵw + ϵπ where ϵ′
+. The detailed proof can be seen in the Appedix A.5. ϵw indicates how well is the IDM helps to approximate the imagined distribution p′(z′, r | z, a) to the real distribution p(z′, r | z, a). The trajectories imagined with the derived memory increase the sample diversity, while the evaluator plays the role of importance sampling by reweighting the trajectories by w(z).
+Coherent work of these two modules should effectively decrease the ϵw, thus reducing the estimation error of the value function. If the evaluator is removed, the imagined trajectories, which are unreliable, will negatively impact the policy learning. If the derived memory module is removed, the effect of importance sampling will be weakened due to the lack of sample diversity. In addition, the positive effect on sample diversity of derived memory needs to be guaranteed by the decoding constraint in the R2S2 model, which is used to ensure the relevance between the derived memory and real physical states. Corresponding experiments are in Section 5.2. 6
+Table 1: Performance comparison with image uncertainty
+IDM
+Dreamer
+DrQ 500 K 100 K 100 K 527.1 ± 166 914.9 ± 61 372.5 ± 19
+Walker-Walk 529.3 ± 43 159.2 ± 32 116.1 ± 11
+Walker-Run 841.2 ± 54 108.5 ± 37 85.6 ± 52
+Hopper-Stand 659.4 ± 136 303.3 ± 43
+Cartpole-Swingup 329.6 ± 58 598.2 ± 42 197.4 ± 69
+Cheetah-Run 505.5 ± 61 415.8 ± 54
+Finger-Spin 500 K 876.3 ± 48 464.2 ± 65 430.2 ± 128 423.2 ± 66 174.9 ± 132 401.34 ± 104 85.9 ± 22 374.9 ± 88 283.5 ± 42 100 K 122.5 ± 15 151.9 ± 23 105.2 ± 25 58.3 ± 14 65.7 ± 24 252.6 ± 38 112.6 ± 17 157.3 ± 23 145.9 ± 33 436.3 ± 27 96.3 ± 38 500 K
+Table 2: Performance comparison without external image uncertainty (under the same setting in
+Dreamer)
+IDM
+Dreamer
+DrQ 500 K 100 K 100 K 630 ± 113 959 ± 22 612 ± 164
+Walker-Walk 211 ± 162 536 ± 25 185 ± 148
+Walker-Run 819 ± 27 216 ± 73 734 ± 136 106 ± 51
+Hopper-Stand 759 ± 92 824 ± 63
+Cartpole-Swingup 594 ± 63 762 ± 27 631 ± 103 235 ± 137 570 ± 253 344 ± 67 328 ± 48
+Cheetah-Run 875 ± 89 623 ± 76
+Finger-Spin 500 K 100 K 277 ± 12 897 ± 49 161 ± 112 482 ± 68 94 ± 48 326 ± 27 341 ± 70 500 K 921 ± 45 459 ± 139 789 ± 38 868 ± 10 660 ± 96 769 ± 183 901 ± 104 938 ± 103 5 Experiments
+The IDM framework is implemented as Algorithm 1 (see Appendix A.2). We compare with both the
+SOTA of model-based methods and model-free methods. We mainly choose Dreamer as the model-based baseline to test the effectiveness of the IDM framework. As for model-free methods, DrQ [25] uses data regularized Q-learning method to learn the policy and shows a significant advantage in sample efficiency compared to CURL [26]. We choose the DrQ [25] as the model-free baseline. 5.1 Overall Performance
+Robustness to Uncertainty: In an attempt to test the agent’s ability to handle environmental uncertainty, the experiments are implemented in DMControl tasks [18] with observation uncertainty.
+Robotics may encounter observation uncertainties like the random swing of the input image caused by the robot’s motion when the camera’s fixed device is loose. We add a random rotation (−5◦, +5◦) to the input image from the Mujoco environment (also used in RAD and DrQ paper as an augmented method) to simulate the possible random swing that may be experienced by robotics. Random rotation is a representative uncertainty the agent may encounter in the real world. During the training process of RL, images are only collected horizontally from the simulator, but in the real world, the camera could be skewed in a different direction, which changes the angles that agents or objects appear in the input image. Under this setting, we test the performance of IDM together with the Dreamer and the DrQ. The image uncertainty is added only at test time, and the purpose of this experiment is to test the robustness of policies learned by different methods when encountering unknown image uncertainties. The effectiveness of the IDM framework to tackle the input uncertainty is demonstrated in Table 1 and as Figure 3.
+We also test the robustness of DrQ. Since DrQ’s input is a stack of three sequential images (3 continuous images), we implement 2 different experiments: 1) randomly rotate the 3 images by the same angle and 2) randomly rotate the 3 images by different angles. All the rotate angles are sampled from (−5◦, 5◦). The results show that under the first type of uncertainty DrQ’s performance dropped significantly and under the second type of uncertainty DrQ almost failed. As shown in Figure 4, the training curve (the orange one) of DrQ demonstrates that it learns behaviour successfully; however, its performance decreases significantly when it is tested with image uncertainty, as illustrated in the testing curve (the blue one). The reason why DrQ performs poorly under external uncertainty is that DrQ has no guarantee to resist the uncertainty out of optimality invariant image transformations proposed in their paper, which especially constrains shifting under ±4 pixels from the original image. 7
+Figure 3: IDM exceeds Dreamer and DrQ at visual control tasks that testing with image uncertainty (the image uncertainty is added only at test time).
+Our experiments show that although DrQ can effectively learn policy in training process with the given 5 random seeds, its performance on overcoming uncertainty is much worse than IDM.
+Figure 4: DrQ’s performance decreased due to the observation uncertainty (the uncertainty is performed by the same parameter for each frame in the stack).
+Sample efficiency: In order to show the sample efficiency of IDM, compared to Dreamer and DrQ
+[25], we test the performance of IDM in DMControl environments without image uncertainty with 5 random seeds. As illustrated in Table 2, IDM outperforms Dreamer and is comparable with the DrQ in environments without external uncertainty.
+Our selection of the environment in Table 1 and Table 2 follows the below principle to ensure fairness: 3 tasks in which MBRL is more competitive than MFRL and 3 tasks in which MFRL is more competitive than MBRL. The measure of competitiveness is the comparison between the final performance of Dreamer and D4PG (top model-free method) with 1e9 steps shown in Dreamer paper.
+Overall, the experimental results suggest that IDM outperforms Dreamer and DrQ in terms of robustness to uncertainty and further improves the sample efficiency of the model-based method, which proves that our proposed IDM can facilitate learning better behaviour with limited experiences. 5.2 Ablation Studies
+In IDM, there are three key components: decoding constraint, derived memory and trajectory evaluator. We implement 4 groups of ablation experiments which are tested in DMControl tasks with 8
+observation uncertainty. Note that the derived memory is based on the decoding constraint. If we keep the derived memory module without adding decoding constraint, it is theoretically invalid. (1) IDM without the evaluator(w/o EVA): In this setting, latent trajectories are imagined with derived memory but without the trajectory evaluator. Although it performs better than Dreamer in
+Walker-Walk, it has lower performance in Hopper-Stand due to lack of reliable guarantee for the derived data. (2) IDM without derived memory (w/o DM): In this setting, the constraint for RSSM and the trajectory evaluator are kept. As illustrated in Figure 5, it performs better than Dreamer but is insufficient compared with IDM. For instance, at the 100k steps of Walker-walk, its performance is 26.6% better than Dreamer, but IDM is 41.6% better than Dreamer. (3) IDM without decoding constraint and derived memory (w/o CST and DM) : In this setting, only the trajectory evaluator is kept, which is used to avoid the damage caused by the trajectory with low prediction accuracy. The experimental results show that its performance is basically similar to
+Dreamer, which means that if we only use it to reweight the latent trajectories imagined with original memory, it makes little difference. (4) Dreamer with doubled batch size: We compare IDM with Dreamer with two times of batch size than IDM (Doubled-Dreamer), as shown in Figure 5, Doubled-Dreamer shows less improvement than Dreamer, but IDM also outperforms it.
+Overall, all the components in IDM are critical, and they complement each other. The importance of different components depends on the characteristic of the environment. For example, in Walker-Walk, which is a relatively stable bipedal walking environment compared to a single-legged robot, the generated derived memory does not hugely diverge from the real states experienced by the agent.
+Therefore, as shown in Figure 5(a) the derived memory provides a major contribution. On the contrary, due to the single-legged robot’s instability, the derived memory generated by Hopper-stand usually contains poor quality states. Thus, as shown in Figure 5(c), the evaluator plays a significant role in this environment, but not in Walker. The ablation results in some difficult tasks, such as Walker-run (the agent needs to stand up first and then accelerate to run), the generated derived memory is not as helpful to improve the performance as the other environments, so does the evaluator. As shown in
+Figure 5(b), there is little difference in the results of ablation. This result also enlightens us to find a better way to construct derived memory in future work.
+Figure 5: Contribution of each component in IDM to the performance improvement. 9
+6

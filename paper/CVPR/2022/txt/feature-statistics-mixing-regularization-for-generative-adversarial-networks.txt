@@ -1,0 +1,146 @@
+Abstract
+In generative adversarial networks, improving discrimi-nators is one of the key components for generation perfor-mance. As image classifiers are biased toward texture and debiasing improves accuracy, we investigate 1) if the dis-criminators are biased, and 2) if debiasing the discrimina-tors will improve generation performance. Indeed, we find empirical evidence that the discriminators are sensitive to the style (e.g., texture and color) of images. As a remedy, we propose feature statistics mixing regularization (FSMR) that encourages the discriminator’s prediction to be invari-ant to the styles of input images. Specifically, we generate a mixed feature of an original and a reference image in the discriminator’s feature space and we apply regulariza-tion so that the prediction for the mixed feature is consis-tent with the prediction for the original image. We conduct extensive experiments to demonstrate that our regulariza-tion leads to reduced sensitivity to style and consistently improves the performance of various GAN architectures on nine datasets. In addition, adding FSMR to recently-proposed augmentation-based GAN methods further im-proves image quality. Our code is available at https:
+//github.com/naver-ai/FSMR. 1.
+
+Introduction (GANs)
+Generative adversarial networks
+[8] have achieved significant development over the past several years, enabling many computer vision and graphics appli-cations [4, 5, 13, 21, 22, 24, 29, 40]. On top of the care-fully designed architectures [3, 17, 19, 20, 28, 30, 36], GAN-specific data augmentation and regularization techniques have been keys for improvements. Regularization tech-niques [9,14–16,26,27,37,39] stabilize the training dynam-ics by penalizing steep changes in the discriminator’s output within a local region of the input. On the other hand, data augmentation techniques [18, 38] prevent the discriminator from overfitting as commonly adopted in classification do-†Corresponding author. mains. Note that both efforts aim to guide the discrimina-tor not to fixate on particular subsets of observations and to generalize over the entire data distribution.
+Texture has been shown to provide a strong hint for clas-sifiers [6,7,10]. If such a hint is sufficient enough to achieve high accuracy, the models tend not to learn the complexity of the intended task [2]. As the GAN discriminators are in-herently classifiers, we presume that they also tend to rely on textures to classify real and fake images. Accordingly, the generators would focus on synthesizing textures which are regarded as real by the biased discriminator. In this pa-per, we answer the two questions: 1) are discriminators sen-sitive to style (e.g., texture and color)? and 2) if yes, will debiasing the discriminators improve the generation perfor-mance?
+To answer the first question, we define style distance as shown in Figure 1a. An ideal discriminator would produce small style distance because the two images have the same content. As we do not have a unit of measurement, we com-pute relative distance: the style distance divided by the con-tent distance. In other words, we measure the sensitivity to style as multiples of the distance between images with dif-ferent content. Surprisingly, Figure 1b shows that all base-lines have noticeable values in relative distance.
+To answer the second question, we debias the discrim-inators and measure improvements in generative perfor-mance. A straightforward approach for debiasing is to sup-press the difference in the discriminator’s output with re-spect to the style changes of the input image. Indeed, we observe that imposing a consistency loss [37,39] on the dis-criminator between the original image and its stylized ver-sion improves the generator as mimicking contents becomes easier than mimicking style to fool the discriminator.
+However, this approach leads to other difficulties: the cri-teria for choosing style images are unclear, and stylizing all training images with various style references requires a huge computational burden and an external style dataset. To efficiently address the style bias issue, we propose feature statistics mixing regularization (FSMR) which encourages the discriminator’s prediction to be invariant to the styles of input images by mixing feature statistics within the discrim-inator. Specifically, we generate mixed features by combin-ing original and reference features in the discriminator’s in-termediate layers and impose consistency between the pre-dictions for the original and the mixed features.
+In the experiments, we show that FSMR indeed induces the discriminator to have reduced sensitivity to style (Sec-tion 4.1). We then provide thorough comparisons to demon-strate that FSMR consistently improves various GAN meth-ods on benchmark datasets (Section 4.2). Our method can be easily applied to any setting without burdensome prepa-ration. Our implementation and models will be publicly available online for the research community. Our contribu-tions can be summarized as follows:
+• To the best of our knowledge, our work is the first style bias analysis for the discriminator of GANs.
+• We define the relative distance metric to measure the sensitivity to the styles (Section 2).
+• We propose feature statistics mixing regularization (FSMR), which makes the discriminator’s prediction to be robust to style (Section 3).
+• FSMR does not use external style images and outper-forms the straightforward solution with external style images (Section 4.1).
+• FSMR improves five baselines on all standard and small datasets regarding FID and relative distance (Section 4.2, 4.3). 2. Style-bias in GANs
+Our work is motivated by the recent finding that CNNs are sensitive to style rather than content, i.e., ImageNet-trained CNNs are likely to make a style-biased decision when the style cue and content cue have conflict [7]. To quantitatively measure how sensitive a discriminator is to style, we compute style distance, content distance, and then relative distance. Afterward, we describe a straightforward baseline solution to reduce the discriminator’s distance to style. 2.1. Style distance and content distance
+We define a quantitative measure for how sensitive a dis-criminator is sensitive to style. First, given a set of training images, we utilize a style transfer method to synthesize dif-ferently stylized images of the same content. The styles are randomly chosen from WikiArt [1]. Figure 1a shows some example stylized images from AFHQ [5]. We define style distance ds between images with different styles and the same content. The content distance dc is defined vice versa: ds(c, s1, s2) (cid:125) (cid:123)(cid:122) (cid:124) style distance
+= d(T (c, s1), T (c, s2)), (1) (a) Style distance and content distance (b) Relative distance
+Figure 1. (a) The style transfer method T (c, s) transfers the style of s on the content of c. We define style distance as the output difference due to style variations. Content distance is defined vice versa. (b) Relative distance across various GAN methods. Relative distance indicates how sensitive a discriminator is to style changes (Eq. 3). See Section 2 for details. dc(s, c1, c2) (cid:124) (cid:125) (cid:123)(cid:122) content distance
+= d(T (c1, s), T (c2, s)), (2) where T (c, s) transfers the style of the reference image s
+∈ RC×H×W to the content image c ∈ RC×H×W , and d measures cosine distance in the last feature vectors of the discriminator. In practice, we use adaptive instance normal-ization (AdaIN) [12] as T . Figure 1 illustrates the process of calculating the content and style distances in Eq. (1) and
+Figure 2. Overview of feature statistics mixing regularization (Section 3.2). Within the forward pass in the discriminator, we perturb features by applying AdaIN with a different sample. In deeper layers, the perturbations are applied recursively. A scalar α ∼ Uniform(0, 1) moderates their strength. Then we enforce similarity between the original output and the perturbed one. (2).
+As we do not have a unit of measurement, we compute relative distance ρ, i.e., the style distance divided by the content distance:
+=
+ρ (cid:124)(cid:123)(cid:122)(cid:125) relative distance
+E c1,c2∈C, s1,s2∈S (cid:20) ds(c1, s1, s2) dc(s1, c1, c2) (cid:21)
+, (3) where C and S denote the training dataset and an external style dataset, respectively. The larger the ρ value, the more sensitive the discriminator is to style when classifying real and fake images. We will use the relative distance ρ for fur-ther analysis from here on. Our goal is to reduce the style distance so that the discriminators consider contents more important and produce richer gradients to the generators.
+The relative distances of ImageNet-pretrained ResNet50 and ResNet50 pretrained for classifying Stylized ImageNet
+[7] supports validity of the metric. As the relative distance of the latter is less than the former and the latter is proven to be less biased toward style, we argue that the discrimi-nators with lower relative distance are less sensitive to style (figures are deferred to Section 4.2). 2.2. Baseline: On-the-fly stylization
+A well-known technique for preventing the classifiers from being biased toward styles is to augment the images with their style-transferred versions, especially using the
+WikiArt dataset [1] as style references [7]. It works because the style transfer does not alter the semantics of the origi-nal images or the anticipated output of the network. On the other hand, in GAN training, style transfer drives the im-ages out of the original data distribution, thus it changes the anticipated output of the discriminator [18]. There are two workarounds for such a pitfall: 1) applying stochastic aug-mentations for both real and fake data [18, 38] and 2) pe-nalizing the output difference caused by the augmentation instead of feeding the augmented images to the discrimina-tor [37, 39]. As our goal is to make the discriminator less sensitive to style changes, we take the second approach as a straightforward baseline, for example, imposing consis-tency on the discriminator between the original images c and their randomly stylized images T (c, s) by
+Lconsistency = Ec,s (cid:2)(D(c) − D(T (c, s)))2(cid:3) , (4) where D((cid:5)) denotes the logit from the discriminator. How-ever, it raises other questions and difficulties: the criteria for choosing the style images are unclear, and stylizing each image on-the-fly requires additional costs and an external dataset. Another option is to prepare a stylized dataset in-stead of on-the-fly stylization but it further requires pro-hibitively large storage. To combat this, we propose an effi-cient and generally effective method, feature mixing statis-tics regularization, whose details are described in the next section. 3. Proposed method
+We first describe the traditional style transfer algo-rithm, AdaIN, as a preliminary. Then, we discuss how our proposed method, feature statistics mixing regularization (FSMR), incorporates AdaIN to induce the discriminator to be less sensitive to style. 3.1. Preliminary: AdaIN
+Instance normalization (IN) [33] performs a form of style removal by normalizing feature statistics. Adaptive in-stance normalization (AdaIN) [12] extends IN to remove the existing style from the content image and transfer a given style. Specifically, AdaIN transforms content feature maps x into feature maps whose channel-wise mean and variance are the same as those of style feature maps y:
+AdaIN(x, y) = σ(y) (cid:19) (cid:18) x − µ(x)
+σ(x)
++ µ(y), (5) where x, y ∈ RC×H×W are features obtained by a pre-trained encoder, and µ(·) and σ(·) denote their mean and standard deviation their spatial dimensions, calculated for each channel, respectively. Then, through a properly trained decoder, the transformed features become a stylized image1.
+Much work has adopted AdaIN within the generator for im-proving the generation performance [5, 13, 19, 21, 22, 24].
+On the contrary, our proposed method (FSMR) employs it within the discriminator for efficient regularization, as de-scribed below. 3.2. Feature statistics mixing regularization
+Our goal is to make the discriminator do not heavily rely on the styles of the input images, without suffering from the difficulties of the on-the-fly stylization (Section 2.2).
+Hence, we propose feature statistics mixing regularization (FSMR), which does not require any external dataset and can be efficiently implemented as per-layer operations in the discriminator. FSMR mixes the mean and standard de-viation of the intermediate feature maps in the discrimina-tor using another training sample and penalizes discrepancy between the original output and the mixed one.
+Specifically, we define feature statistics mixing (FSM) for feature maps x with respect to feature maps y to be
+AdaIN followed by linear interpolation:
+FSM(x, y) = αx + (1 − α)AdaIN(x, y), (6) 1AdaIN may denote the full stylization process but it denotes the oper-ation on the feature maps (Eq. 5) in this paper.
+Algorithm 1 FSM Pseudocode, Tensorflow-like
+# N: batch size, H: height, W: width, C: channels def FSM(x, y, eps=1e-5): x_mu, x_var = tf.nn.moments(x, axes=[1,2]) y_mu, y_var = tf.nn.moments(y, axes=[1,2])
+# normalize x_norm = (x - mu) / tf.sqrt(var + eps)
+# de-normalize x_fsm = x_norm * tf.sqrt(y_var + eps) + y_mu
+# combine alpha = tf.random.uniform(shape=[]) x_mix = alpha * x + (1 - alpha) * x_fsm return x_mix # NxHxWxC where α ∼ Uniform(0, 1) controls the intensity of feature perturbation. We suppose that varying α will let the discrim-inator learn from various strengths of regularization.
+Denoting an i-th layer of the discriminator as fi, a con-tent image as c, and a style reference image as s which is randomly chosen from the current mini-batch samples, we define the mixed feature maps ˜x and ˜y through feed-forward operations with FSM:
+˜x1 = x1 = f1(c),
+˜y1 = y1 = f1(s),
+˜xi+1 = fi+1(FSM(˜xi, ˜yi)),
+˜yi+1 = fi+1(FSM(˜yi, ˜xi)). (7)
+Then the final output logit of the mixed feed-forward pass through the discriminator with n convolutional layers be-comes:
+DFSM(c, s) = Linear(˜xn). (8)
+Given the original output D(c) and the mixed output
+DFSM(c, s), we penalize their discrepancy with a loss:
+LFSMR = Ec,s∼pdata (cid:2)(D(c) − DFSM(c, s))2(cid:3) . (9)
+Figure 2 illustrates the full diagram of FSMR. This loss is added to the adversarial loss [8] when updating the dis-criminator parameters. It regularizes the discriminator to produce consistent output under different statistics of the features varying through the layers. Our design of LFSMR is general-purpose and thereby can be combined with other methods [18, 19, 38]. As shown in Algorithm 1, FSM can be implemented with only a few lines of code. Also, we provide the Tensorflow-like pseudo-code of FSMR in Ap-pendix ??. 3.3. Visualizing the effect of FSM
+To visually inspect the effect of FSM in the discrimi-nator, we train a decoder (same architecture as the one for
+AdaIN [12]) which reconstructs the original image from the 32 × 32 feature maps of the original discriminator.
+(a) Style (b) Content (c) Stylization by AdaIN [12] (d) Visualization of FSM
+Figure 3. Visualization of the effect of FSM (Section 3.3). (a) Example style images. (b) Example content images. (c) AdaIN largely distorts fine details. (d) Reconstruction of FSMed features preserves them.
+In Figure 3, the content images go through the discrim-inator with FSM on all layers with respect to the style im-ages to produce stylized (i.e., FSMed) intermediate features.
+Then the learned decoder synthesizes the result images from the FSMed features.
+The FSMed images have similar global styles to the style images but contain semantics of the content images. It has a similar effect to AdaIN but better preserves the fine details of the content. We suggest that it is the key for the discrim-inator to be able to provide gradients toward more realistic images for the generator leading to higher quality images than the on-the-fly stylization baseline (Section 4.1). 4. Experiments
+We conduct extensive experiments on six datasets of
+CIFAR-10 [25], FFHQ [19], AFHQ [5], CelebA-HQ [17],
+LSUN Church [34], and MetFaces [18] with five GAN methods such as DCGAN [30], bCRGAN [39], StyleGAN2
+[20], DiffAugment [38], and ADA [18]. We choose the datasets and baseline methods following the recent experi-mental setups [18,38]. We use the relative distance ρ (Eq. 3),
+Fr´echet inception distance (FID) [11], and inception score (IS) [31] as evaluation metrics. When we compute FID, we use all training samples and the same number of fake sam-ples. All the baseline methods are trained using the official implementations provided by the authors. See Appendix ?? for more details. We next conduct thorough experiments to demonstrate the superiority of our method over the straight-forward solution and the baselines. 4.1. Comparison with the on-the-fly stylization
+In this section, we compare our method with the on-the-fly stylization, i.e., generating stylized images via AdaIN during training and applying consistency regularization (Section 2.2). To perform this, we collect 100 style images from WikiArt [1] and randomly sample one for stylizing each image during training. Note that, unlike the on-the-fly stylization, FSMR does not rely on external style im-ages. We conduct experiments on five benchmark datasets:
+CIFAR-10, CelebA-HQ, FFHQ, AFHQ, and LSUN Church.
+Table 1 compares effect of regularization with on-the-fly stylization and FSMR in FID. While the former improves
+FID compared to the baselines to some extent, improve-ments due to FSMR are larger in all cases. For comparison with additional networks and datasets, see Appendix ??.
+To measure the discriminator’s sensitivity to style, we compute the relative distance ρ (Eq. 3) for each method.
+Figure 4 shows the relative distance on CIFAR-10, FFHQ, and AFHQ. As one can easily expect, utilizing the stylized dataset reduces the discriminator’s sensitivity toward style.
+It is worth noting that FSMR not only consistently reduces the sensitivity but also outperforms the competitor in all cases. This is a very meaningful result because FSMR does not use any external stylized dataset but it uses only the original images during training. We also observe that the lower relative distances agree with the lower FIDs within the same environment.
+We compare the time and memory costs in Table 1.
+FSMR requires 3.0∼7.4% extra training time, but the on-the-fly method requires 17.2∼26.8% extra training time for additional feedforward passes in image stylization. In ad-dition, the on-the-fly method requires 70.0∼87.5% extra
+GPU memory to hold pretrained networks and features for image stylization, but FSMR only adds negligible (∼2%)
+GPU memory. To avoid extra costs for the on-the-fly styl-ization during training, we can prepare the stylized datasets before training (i.e., different approach but has the same ef-fect as the on-the-fly stylization). However, the one-to-many stylization in advance requires heavy computation and pro-hibitively large storage as shown in Table 2. For example, to construct the stylized dataset for 1024×1024 FFHQ with 100 style references, we need to process and store more than 7.0M (70k × 100) images (8.93TB).
+As an ablation study, we push toward harsher regular-ization: using randomly shifted feature maps instead of
+FSM. We observe that using arbitrary mean and standard deviation in AdaIN (Eq. 5) significantly hampers adversar-Figure 4. The relative distance of the discriminators on CIFAR-10, FFHQ, and AFHQ. We observe a positive correlation with FID in each case. See Appendix ?? for more results on other baselines and datasets.
+Method
+CIFAR-10
+FFHQ
+AFHQ
+CelebA-HQ LSUN Church
+Time (Hours) Memory (GB)
+Standard dataset
+Costs
+DCGAN
+DCGAN w/ on-the-fly
+DCGAN w/ FSMR bCRGAN bCRGAN w/ on-the-fly bCRGAN w/ FSMR 15.89 ±0.12 15.88 ±0.11 14.98 ±0.09 12.46 ±0.09 12.43 ±0.10 11.17 ±0.07 7.82 ±0.10 7.33 ±0.17 6.76 ±0.08 6.43 ±0.08 5.20 ±0.09 4.68 ±0.08 17.27 ±0.13 14.22 ±0.15 13.19 ±0.09 9.35 ±0.10 8.63 ±0.12 8.33 ±0.08 6.71 ±0.09 5.41 ±0.10 5.23 ±0.10 4.31 ±0.09 3.47 ±0.09 3.43 ±0.09 17.33 ±0.11 26.05 ±0.14 13.84 ±0.10 13.20 ±0.10 10.51 ±0.10 9.09 ±0.07 25.4 (1.5†) 31.5 (1.8†) 26.2 (1.6†) 26.1 (1.6†) 33.1 (1.9†) 27.7 (1.7†) 5 (4†) 8.5 (7.5†) 5.1 (4†) 5 (4†) 8.5 (7.5†) 5.1 (4†)
+Table 1. FID comparison on DCGAN variants with FSMR and the baseline on-the-fly stylization. The bold numbers indicate the best
+FID for each baseline. We report the mean FID over 3 training runs together with standard deviations and the additional costs. All image resolutions are set to 128×128 due to the backbone architecture except CIFAR-10 (32×32). Time and memory are measured in 128×128 images, and † indicates what is measured in 32 × 32 images. Time means a full training time.
+CIFAR-10
+CelebA-HQ
+FFHQ
+AFHQ
+LSUN Church
+Time 8 10 30 5 40
+Table 2. The time to create the stylized dataset for each standard dataset, measured in hours. ial training between a generator and a discriminator, i.e., the training diverges. On the other hand, FSMR using in-domain samples shows the anticipated effect. 4.2. Standard datasets
+We evaluate the effectiveness of FSMR on three bench-mark datasets, all of which have more than 10k training im-ages: CIFAR-10 (50k), FFHQ (70k), and AFHQ (16k). Ta-ble 3 (left) shows that FSMR consistently improves Style-GAN2 even with existing augmentation techniques [18,38].
+We emphasize that FSMR enhances baselines by a large gap on AFHQ, in which case the discriminator might be easily biased toward color and texture of the animals.
+Figure 5 shows the relative distances on CIFAR-10,
+FFHQ, and AFHQ for StyleGAN2 variants. FSMR reduces the relative distances in all cases and they agree with the im-provements in FID. We also provide the relative distances of ResNet50 networks pretrained on ImageNet and Stylized
+ImageNet as references in each dataset (Section 2.1). As the lower relative distances agree with the higher classification performances, the lower relative distances of the discrimi-nator agree with the higher generative performances.
+In addition, Table 4 demonstrates that applying FSMR on StyleGAN2 variants further improves both FID and IS for both unconditional and class-conditional generation on
+CIFAR-10. For qualitative results, see Figure 6 and Ap-pendix ??. 4.3. Small datasets.
+GANs are known to be notoriously difficult to train on small datasets due to limited coverage of the data manifold.
+Being able to train GANs on small datasets would lead to a variety of application domains, making a rich synthesis ex-perience for the users. We tried our method with five small datasets that consist of a limited number of training images such as MetFaces (1k), AFHQ Dog (5k), AFHQ Cat (5k).
+Method
+StyleGAN2
++ FSMR
+Standard dataset
+Small dataset
+CIFAR-10
+FFHQ
+AFHQ MetFaces AFHQ Dog AFHQ Cat AFHQ Wild 3.89 ±0.07 3.76 ±0.03 5.62 ±0.10 11.37 ±0.03 51.88 ±0.44 45.47 ±0.42 8.59 ±0.03 3.74 ±0.03 19.65 ±0.07 18.08 ±0.07
+StyleGAN2-ADA
++ FSMR 3.23 ±0.06 2.90 ±0.08 4.05 ±0.07 3.91 ±0.06 7.73 ±0.11 6.12 ±0.10 29.17 ±0.08 27.81 ±0.11 13.56 ±0.10 11.76 ±0.14
+StyleGAN2-DiffAug
++ FSMR 3.23 ±0.08 2.93 ±0.05 5.35 ±0.09 4.99 ±0.08 7.52 ±0.08 6.53 ±0.05 32.96 ±0.08 29.98 ±0.15 16.92 ±0.06 14.55 ±0.18 8.37 ±0.06 6.69 ±0.04 6.64 ±0.09 5.71 ±0.10 6.39 ±0.05 6.29 ±0.07 4.17 ±0.06 3.96 ±0.03 3.74 ±0.14 3.24 ±0.16 4.39 ±0.07 4.28 ±0.04
+Table 3. FID comparison on StyleGAN2 variants. The bold numbers indicate the best FID for each baseline. We report the mean FID over 3 training runs together with standard deviations. FSMR improves the baselines in all cases.
+Figure 5. The relative distance of the discriminators on CIFAR-10, FFHQ, and AFHQ for StyleGAN2 variants. The higher ρ value, the more sensitive the discriminator is to style when classifying real and fake. We report the reference values for the relative distances using
+ResNet50 trained on ImageNet (red line) and ResNet50 trained on Stylized ImageNet (blue line) [7]. As the lower relative distances agree with the higher classification performances, the lower relative distances of the discriminator agree with the higher generative performances.
+Method
+StyleGAN2
++ FSMR
+StyleGAN2-ADA
++ FSMR
+StyleGAN2-DiffAug
++ FSMR
+Unconditional
+Conditional
+FID ↓
+IS ↑
+FID ↓
+IS ↑ 3.89 3.76 3.23 2.90 3.23 2.93 9.36 9.58 9.47 9.68 9.63 9.81 3.52 3.35 2.76 2.63 3.10 2.87 9.77 10.05 9.98 10.03 9.84 10.02
+Table 4. FID and inception score comparison on CIFAR-10 across StyleGAN2 variants. Bold face indicates the best scores for each baseline. We report the mean scores over three training runs.
+AFHQ Wild (5k). As shown in Table 3 (right), we can ob-serve that FSMR improves FID stably for all the baseline models, even if the number of data is small. See Figure 6 and Appendix ?? for qualitative results. 5.

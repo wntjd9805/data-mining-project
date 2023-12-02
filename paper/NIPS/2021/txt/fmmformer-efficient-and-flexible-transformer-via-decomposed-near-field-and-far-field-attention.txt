@@ -1,0 +1,332 @@
+Abstract
+We propose FMMformers, a class of efﬁcient and ﬂexible transformers inspired by the celebrated fast multipole method (FMM) for accelerating interacting parti-cle simulation. FMM decomposes particle-particle interaction into near-ﬁeld and far-ﬁeld components and then performs direct and coarse-grained computation, respectively. Similarly, FMMformers decompose the attention into near-ﬁeld and far-ﬁeld attention, modeling the near-ﬁeld attention by a banded matrix and the far-ﬁeld attention by a low-rank matrix. Computing the attention matrix for FMM-formers requires linear complexity in computational time and memory footprint with respect to the sequence length. In contrast, standard transformers suffer from quadratic complexity. We analyze and validate the advantage of FMMformers over the standard transformer on the Long Range Arena and language modeling benchmarks. FMMformers can even outperform the standard transformer in terms of accuracy by a signiﬁcant margin. For instance, FMMformers achieve an average classiﬁcation accuracy of 60.74% over the ﬁve Long Range Arena tasks, which is signiﬁcantly better than the standard transformer’s average accuracy of 58.70%. 1
+
+Introduction
+Transformers [58] have achieved state-of-the-art performance in sequence processing tasks, including machine translation and language modeling [58, 2, 15, 4, 61, 16, 9]. Also, transformers can effectively transfer knowledge from a pre-trained model to tasks with limited supervision [43, 44, 16, 64, 34].
+Transformers rely on the attention mechanism and particularly self-attention as a fundamental building block for their modeling [5, 58, 27]. 1.1 Self-attention
+The self-attention mechanism is used to learn long-range dependencies while enabling parallel
+RN ×Dx of processing of the input sequence. For a given input sequence X := [x1, x2,
+, xN ](cid:62)
+· · ·
+∈
+∗Equal contribution and Co-ﬁrst author
+†Please correspond to: wangbaonj@gmail.com or chenlong@math.uci.edu 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+N feature vectors that have been encoded in a Dx-dimensional vector space, self-attention transforms
+X into an output sequence ˆV in the following two steps:
+Step 1. Project the input sequence X into three matrices via the following linear transformations
+Q = XW (cid:62)
+Q ; K = XW (cid:62)
+K ; V = XW (cid:62)
+V , where WQ, WK
+Q := [q1, qi, ki, vi for i = 1,
+· · ·
+∈
+RD×Dx , and WV
+, qN ](cid:62), K := [k1,
+· · ·
+· · ·
+Step 2. For each query vector qi for i = 1,
+RDv×Dx are the weight matrices. We denote
+, vN ](cid:62), where the vectors
+, kN ](cid:62), and V := [v1,
+∈
+, N are the query, key, and value vectors, respectively.
+· · ·
+ˆvi =
+N (cid:88) j=1 softmax (cid:16) q(cid:62)
+· · · i kj
+√D
+, N , we compute the output vector ˆvi as follows (cid:17) vj,
+ˆV = (cid:17) (cid:16) QK(cid:62)
+√D
+⇐⇒
+V := AV , (1) where the softmax function is applied to each row of the matrix (QK(cid:62))/√D.
+For long sequences, the computational time and memory footprint of transformers are dominated (N 2) to store the attention matrix A. Also, the by (1). It is evident that the memory cost is computational complexities of computing the matrix-matrix products QK(cid:62) and AV are both (N 2).
+These limitations impede the application of transformers to many important settings that involve very long sequences [33, 25, 39]. When applying self-attention for long sequence modeling, we have to limit the context window to a reasonable size to make it computationally feasible, limiting the effectiveness of learning long-range dependencies. Efﬁcient transformer models have been proposed, including leveraging sparse and low-rank attention. Many of the existing efﬁcient transformers gain computational and memory efﬁciency at the cost of signiﬁcant accuracy degradation.
+O
+O 1.2 Contribution
+Leveraging the idea of the fast multipole method (FMM) [19], we propose a class of efﬁcient, ﬂexible, and expressive transformers, namely FMMformers. At the core of FMMformers is to replace the self-attention ˆV = AV in (1) with the following matrix-matrix product
+ˆV := (D + L)V , (2)
+N and L is a low-rank matrix of rank r where D is a banded matrix with bandwidth k
+N . (cid:28)
+In practice, we normalize matrix D + L such that the sum of each row is 1; for the sake of presentation, we ignore this normalization step below. Both DV and LV can be computed with linear computational and memory complexity; they model the near-ﬁeld and far-ﬁeld attention, respectively. FMMformers are ﬂexible in designing the sparse banded matrix and the low-rank matrix for modeling near-ﬁeld and far-ﬁeld attention. In particular, we can control the bandwidth of the banded matrix D and the rank of the low-rank matrix L for expressivity and efﬁciency tradeoff.
+In addition to the efﬁciency and ﬂexibility, FMMformers gain signiﬁcant accuracy improvement over linear transformers and can even outperform the standard transformer in terms of accuracy. We illustrate the idea of FMMformers in Figure 1: Instead of modeling the full attention by a dense unstructured matrix, we employ a sparse banded matrix to model the near-ﬁeld attention and several rank one matrices to model the far-ﬁeld attention. (cid:28)
+Figure 1: Left-hand side: we visualize a randomly selected full attention map (the matrix A in (1)) from the standard transformer trained for the CIFAR10 image classiﬁcation task in the Long Range Arena (LRA) benchmark. Right-hand side: we illustrate how this attention map can be decomposed into near-ﬁeld and far-ﬁeld attention, which are modeled by a sparse banded matrix and the sum of several rank one matrices in our
+FMMformer, respectively. 2
+1.3 Organization
+We structure this paper as follows: In Sec. 2, we brieﬂy review the celebrated FMM and establish the connection between FMM and self-attention. In Sec. 3, we present a practical implementation of FMMformer that leverages existing techniques for low-rank approximation of the self-attention mechanism. We validate and empirically analyze the efﬁciency and accuracy of FMMformers in
+Sec. 4. We discuss related works in Sec. 5. The paper ends up with concluding remarks. Technical proofs and more experimental details are provided in the Appendix. 2 Fast Multipole Method and Self-attention Mechanism
+In this section, we review FMM and present an algebraic interpretation of FMM, see Sec. 2.1. Then, in Sec. 2.2, we explore the structure of the attention matrix, showing that FMM can be used to accelerate the self-attention mechanism. 2.1 Fast multipole method vs. sparse and low-rank matrix approximation
+FMM is a numerical method that was originally developed to speed up the calculation of long-range forces in the n-body problem [19] and has been regarded as one of the top 10 algorithms in scientiﬁc computing in the 20th century [14]. The key idea is that the far-ﬁeld interaction can be well-approximated by separable low-rank matrices, while the near-ﬁeld interaction can be calculated directly. We use the following simple example to illustrate mathematical reasoning. Without ambiguity, we reuse notations in the previous section and assume: (A1) A(i, j) = g(
+| (i, j)-th entry of the matrix A kj qi
+−
+) depends on the distance of two vectors qi and kj, where A(i, j) is the
+|
+RN ×N .
+∈ (A2) The function g(s) is smooth for s
+= 0. (A3) The function g satisﬁes g(st) = g(s)g(t). kj
+, for which the key vectors
+One noticeable example in the physical application is the gravitational potential g(
+) =
+| qi are the location of source particles and the query vectors 1/
+−
+| qi are the location of the target points. Assumption (A3) is not essential, which is presented here
+{ for the convenience of proof and can be replaced by other separable forms, e.g., g(st) = g(s) + g(t).
+The near-ﬁeld and far-ﬁeld are deﬁned through the distance kj
+{ qi
+| kj
+−
+}
+}
+| qi
+| kj
+.
+|
+−
+∈
+We now explain the low-rank approximation based on the well-separated condition. For illustrative purpose, we assume the index set
+Deﬁnition 1. Group T1 is called well-separated from T2 if there exists a vector k∗ and a number
+δ is partitioned into two groups 1, 2, . . . , N
+{ (0, 1) such that
+T1, T2
+.
+}
+{
+} k∗ k∗
+δ
+}
+∈
+∈
+∈
+∈
+−
+− qi
+| ≤
+T2.
+T1, j kj
+| i
+| ∀
+T2
+− kj, j
+{ and the far-ﬁeld interaction A(i, j), i qi
+∈
+|
+The vector k∗ is a representative vector of
+, e.g., the center of vectors in T2. For any
+} kj, j qi, i
+T1, it is far away from
+T2 can
+T2
+{ k∗
+), i.e. each row of A(T1, T2), the submatrix of A with the row index be approximated by g(
+|
+| set T1 and the column index set T2, is constant. For example, when calculating the gravitation of a galaxy from the Earth, we can simply treat the galaxy as one single point, although the galaxy may contain hundreds of millions of stars. By including p terms of the Taylor series, the approximation can be more accurate by using rank p instead of rank 1 matrix approximation. be two well-separated index sets. Assume (A1)-(A3) hold. For any ε > 0,
+Lemma 1. Let the sub-matrix A(T1, T2) can be uniformly approximated by a rank p matrix to a tolerance ε > 0 in the sense that: there exists rank p matrices U for some positive constant C, such that
+R|T2|×p, with p
+R|T1|×p, V logδ (cid:15)
+T1, T2
+T1, j
+≥
+C
+∈
+∈
+∈
+∈
+}
+{
+|
+|
+A(i, j)
+|
+− (U V (cid:62))(i, j)
+| ≤ (cid:15), i
+∀
+∈
+T1, j
+∈
+T2.
+The applicability of the analytic kernel function g was limited to partial differential equations or integral equations where Green’s function satisfying (A1)-(A3). In the application of machine learning, it is hard to verify (A1)-(A3). Instead, we use the deﬁnition of diagonal-plus-semi-separable matrices from the book [6, Deﬁnition 1.10]. We use MATLAB/Numpy notation tril(K, p) to denote the lower triangular matrix with zeros above the pth-subdiagonal of K and similar notation triu(K, p) for the upper triangular part. 3 (cid:54)
+Deﬁnition 2. [6, Deﬁnition 1.10] A matrix A matrices U , V
+RN ×p and W , Z
+∈
+RN ×q such that
+∈
+∈
+A = triu(U V (cid:62), 0) + tril(W Z(cid:62), 1).
+RN ×N is called (p, q)-semi-separable if there exist
+It is called diagonal-plus-semi-separable if
+A = D + triu(U V (cid:62), 1) + tril(W Z(cid:62), 1). with some diagonal matrix D.
+Deﬁnition 2 can be naturally extended to include a banded matrix D and sum of several low-rank matrices. Moreover, One can verify the semi-separable property of matrix K by checking the decay of singular values of the matrix. As often used in low-rank approximation methods, the numerical rank or ε-rank of a matrix K, for a tolerance ε, is the number of singular values of K that are greater than ε
+K (cid:107) 2. (cid:107)
+The low rank approximation relies on the well separateness of two subsets. Based on a hierarchical
+-matrix [21] can be constructed; see Figure 2 for an illustration. Further partition of the index set, a 2-matrix [20, 22] and the hierarchically semi-separable (HHS) matrix [11, 62]. compression leads to
+Other variants include hierarchically block-separable (HBS) [36], and hierarchically off-diagonal low-rank (HODLR) [3] matrices, etc.
+H
+H
+In our application, we write the decomposition as
+A = D + r (cid:88) l=1
+φl(Q)φ(cid:62) l (K). (3)
+In the query and key spaces, the vectors qi and kj may not be well-separated. Then nonlinear feature maps φl(
+, r
+), l = 1,
+· to higher dimensions, which are trainable, can be used to make the mapped datasets more separable. In (3), each kernel function
+RN is a vector function of length N . We can mimic
+φl : RN
+-matrix to use low rank the hierarchical decomposition used in kernel approximation φl(Q(1 : N/2, :)φ(cid:62) l (K(N/2 + 1 : N, :) with halved length. Such approximation can be recursively applied to get a multilevel decomposition in the low rank approximation component. Our numerical results show that a simple one level near-ﬁeld and far-ﬁeld decomposition is good enough.
+· · ·
+→
+H
+Figure 2: A H-matrix based on a hierarchical decomposition of the index set. The red part is a banded matrix and the green part can be written as sum of low rank matrices.
+Figure 3: First row: plot of two randomly selected attention matrices (left) and their singular values (right) from the transformer trained for WikiText-103 language modeling; see Sec. 4.3 for details. Second row: distributions of the rank of randomly selected 1000 attention matrices, from the same transformer, after removing a banded matrix D of bandwidth 0 (not remove anything from the matrix A), 5, 10, and 20 (from left to right). Matrix
+A − D is of low rank, and the rank becomes smaller in general when the bandwidth of D increases. 2.2 Sparse and low-rank patterns in attention maps
+In this section, we explore the sparse and low-rank structure of the attention matrix A. In particular,
+R256×256 obtained from the standard transformer trained for we consider the attention matrix A
+∈ 4
+WikiText-103 language modeling; see Sec. 4.3 for the experimental details. We randomly select 1000 different attention matrices, and we exclude a banded matrix D with bandwidth 5, 10, and 20 from each of such matrices. Then, we perform singular value decomposition (SVD) to compute the rank of
+D, and we threshold the small singular values with a magnitude of 10−6. Figure 3 each matrix A (top row) plots two randomly selected self-attention matrices and the distribution of the rank of the
+D. It is clear that matrix A has only a few large singular values and all other singular matrix A values are very small. Moreover, matrix A
+D is of low rank, and the rank becomes smaller in general when the bandwidth of D increases, which is consistent with the assumptions in Sec. 2.1, motivating FMMformers.
+−
+−
+− 3 FMMformer: Practical Near-ﬁeld and Far-ﬁeld Attention
+In this section, we present practical algorithms for implementing the proposed FMMformer deﬁned by (2). In particular, we present fast algorithms for computing the near-ﬁeld attention DV and the far-ﬁeld attention LV . 3.1 Banded matrix modeling of near-ﬁeld attention
+We model the near-ﬁeld attention with the following banded matrix (cid:17)(cid:19) (cid:18)
+D = softmax bandk (cid:16) QK(cid:62)
+√D
+, (4) (cid:28) where the operator bandk( with a bandwidth
+) represents taking only the banded part of the matrix
+∗
+N ). In practice, there is no need to calculate the matrix product QK(cid:62). Instead, we only k (k need to calculate the products of the vectors that correspond to the nonzero entries of the banded matrix bandk(QK(cid:62)/√D). Note that for long sequences, both the time and memory complexity of computing (4) are (kN ).
+∗ 3.2 Low-rank matrix modeling of far-ﬁeld attention
+O
+We consider practical and efﬁcient low-rank matrix modeling of the far-ﬁeld attention LV in (1). In principle, any existing off-the-shelf low-rank attention can be integrated into FMMformer to model the far-ﬁeld attention. In particular, we model the far-ﬁeld attention by leveraging the kernel trick used in [26, 13, 47], which is ﬂexible in selecting different kernels to modulate the rank of the far-ﬁeld attention. 3.2.1 Low-rank attention via kernelization
+Suppose we model the far-ﬁeld attention using a rank r matrix L the sum of r rank one matrices, i.e.,
+∈
+RN ×N , which can be written as
+L = a1b(cid:62) 1 + a2b(cid:62) 2 +
+RN . Note that
++ arb(cid:62) r ,
+· · · (5)
++ ar(b(cid:62) r V ), (6)
+· · · where a1, a2,
+LV = (a1b(cid:62)
+, ar; b1, b2, 1 + a2b(cid:62) which indicates that we can compute LV with
+, ur; v1, the vectors u1,
+∈
++ arb(cid:62)
+· · · 2 +
+, vr
+, br
+· · ·
+· · ·
+· · ·
+∈ r )V = a1(b(cid:62) 1 V ) + a2(b(cid:62) 2 V ) +
+· · · (rN ) time complexity. Also, we only need to store
+RN , resulting in linear complexity in memory footprint.
+O
+We borrow the idea of kernelization from the linear transformer [26] for practical implementation of (6). In particular, the authors in [26] generalize the softmax function in (1) to a general kernel function k(qi, kj), i.e.,
+ˆvi = (cid:124) (cid:80)N j=1 exp(qi, kj)vj (cid:80)N j=1 exp(qi, kj) (cid:123)(cid:122) self-attention (cid:125) 3 =
+⇒ (cid:80)N
+ˆvi = j=1 k(qi, kj)vj (cid:80)N j=1 k(qi, kj) (cid:124) (cid:125) (cid:123)(cid:122) generalized self-attention
+. (7)
+If k(qi, kj) = φ(qi)(cid:62)φ(kj) for a certain feature map φ(
+), then we have
+·
+ˆvi = (cid:80)N j=1 k(qi, kj)vj (cid:80)N j=1 k(qi, kj)
+= (cid:80)N j=1 φ(qi)(cid:62)φ(kj)vj (cid:80)N j=1 φ(qi)(cid:62)φ(kj)
+=
+φ(qi)(cid:62) (cid:80)N
+φ(qi)(cid:62) (cid:80)N j=1 φ(kj)v(cid:62) j j=1 φ(kj)
+, (8) 3Here, exp(qi, kj) := exp(q(cid:62) i kj/
+√
+D). 5
+Note that (8) can be regarded as a rank one approximation of self-attention. We can rewrite (8) into the following compact form
+ˆV =
+φ(Q)(φ(K)(cid:62)V )
+φ(Q)φ(K)(cid:62) . (9)
+To generalize (8) to the rank r approximation, we select a set of linearly independent feature maps r l=1. Together with the sparse banded matrix modeling of the near-ﬁeld attention, we propose
+}
+φl(
+{ the following efﬁcient attention model for the FMMformer
+)
+·
+ˆV = DV + r (cid:88) l=1
+φl(Q)(φl(K)(cid:62)V )
+φl(Q)φl(K)(cid:62) . (10)
+It is evident that both computational time and memory complexity are linear in computing (10).
+Our design is ﬂexible to selecting feature maps and the sparse banded matrix, which the users can customize. Moreover, causal masking can be implemented easily by truncating the sum from 1 to i in (8) together with masking out the corresponding part of the banded matrix D.
+RN (l = 1, 2,
+Proposition 1. Let φl(x)
+, r and r
+∈ linearly independent at x, then the following matrix L(x)
+RN ×N has rank r, r l=1 are
+}
+φl(x)
+{
+N ) for x
+Rn. If
+∈ (cid:28)
+∈
+L(x) := φ1(x)φ1(x)(cid:62) + φ2(x)φ2(x)(cid:62) +
+· · ·
++ φr(x)φr(x)(cid:62). (11)
+· · ·
+Feature map selection. The feature map selection is crucial for the success of far-ﬁeld attention modeling. In this work, we adopt the existing successful feature map φ1(x) := elu(x) + 1 used in the x) + 1, which is a straightforward modiﬁcation linear transformer [26] together with φ2(x) := elu( of φ1(x). Moreover, we consider the third feature map φ3(x) := tanh(x). It is easy to check that
+φ1(x), φ2(x), and φ3(x) are linearly independent for almost all x. We leave how to design a set of feature maps to optimize the far-ﬁeld attention modeling as future work.
+− 3.3 Blending of near-ﬁeld and far-ﬁeld attention
+Based on our experiments, adding a learnable weight in front of each attention component beneﬁts training and generalization. As such, we propose the following scheme to blend the near-ﬁeld attention and far-ﬁeld attention
+ˆV := (w1D + w2L)V , (12) where w1 and w2 are two learnable weights, and we enforce their positivity via a sigmoid map. 4 Experimental Results
+In this section, we numerically verify the efﬁciency of FMMformers and empirically analyze the effects of near-ﬁeld and far-ﬁeld attention on various benchmarks, including synthetic sequence copy (Sec. 4.1), Long Range Arena (LRA) (Sec. 4.2), and language modeling (Sec. 4.3). We aim to show that: (i) FMMformers are efﬁcient in both computational time and memory footprint. (ii)
+Multiple kernels beneﬁt learning of the far-ﬁeld attention. (iii) Blending near-ﬁeld attention with far-ﬁeld attention can boost the performance of linear transformers. Throughout this section, we compare FMMformers with linear transformers (linear, r = 1 in (11)), standard softmax transformers (softmax), and softmax transformers that use a banded attention matrix of bandwidth k (bandk). All experiments are conducted on a server with 4 NVIDIA 3090TI GPUs. 4.1 Synthetic sequence copy task
+We ﬁrst consider a synthetic copy task with various sequence lengths, including 128, 256, and 512.
+In this task, the model has to duplicate a sequence of symbols. Each training and test sample is a sequence of maximum length 128/256/512 with ten different symbols separated by a dedicated separator symbol. We train all transformers for this task using the same setting as in [26].
+Boosting performance of linear transformers with near-ﬁeld attention. We ﬁrst compare FMM-formers, obtained by blending the linear transformer with a banded attention matrix of bandwidths 10, 20, and 30, respectively. Figure 4 shows that for shorter sequences of length 128, all transformers reach similar loss; the standard softmax transformer converges much faster than the linear transformer while blending the linear transformers with near-ﬁeld attention can improve training. Moreover, the beneﬁts of near-ﬁeld attention become more signiﬁcant as the sequence length increases. 6
+Figure 4: Convergence comparison of softmax, linear, and the blend of linear transformer with a banded matrix on a sequence duplication task with different sequence lengths (left: 128, middle: 256, right: 512). Adding near-ﬁeld attention into linear attention consistently improves the training for different sequence lengths.
+Figure 5: Convergence comparison of softmax, linear, and different low-rank attention on a sequence duplication task with different sequence lengths (left: 128, middle: 256, right: 512). Attention with a higher rank improves training for different sequence lengths.
+Enhancing far-ﬁeld attention with multi-kernels. After observing that the linear transformer performs poorly as the sequence length increases, we consider augmenting the linear transformer with multiple feature maps; in particular, we consider the three feature maps mentioned above, i.e., x) + 1, and φ3(x) = tanh(x). Figure 5 compares different
+φ1(x) = elu(x) + 1, φ2(x) = elu( transformers on different sequence lengths, where rank 2 consists of the feature maps φ1(x) and
+φ2(x), and rank 3 consists of all three feature maps. These results show that multiple kernels can improve the learning of far-ﬁeld attention.
+−
+Computational and memory complexity.
+In this part, we compare different transformers in computational time and memory cost. Following [26], we compute the attention and gradient for 29, 210, input sequences with different lengths N and measure the peak allocated GPU memory and the required time for each transformer model. We conduct this experiment on an
+NVIDIA 3090TI with 24GB memory, and we report the time and memory cost per sample in the same way as in [26]. Figure 6 contrasts the time (left) and memory (right) costs of different models.
+, 216
+∈ {
+· · ·
+} 4.2 Long Range Arena (LRA) Benchmark
+In this experiment, we evaluate our model on tasks that involve longer sequence lengths in the
+Long Range Arena benchmark [54]. We show that the FMMformer outperforms the baseline linear transformer and standard softmax transformer [58], justifying the advantage of the FMMformer in capturing long-range dependencies. We provide model and training details in the Appendix.
+Figure 6: Comparison of the computational time and the peak memory cost of a forward/backward pass for standard softmax transformer, linear transformer, rank 2 linear transformer, rank 3 linear transformer, and the blend of rank 3 linear transformer with a banded attention matrix of bandwidth 30. All transformers are of linear complexity in time and memory except the softmax transformer. 7
+Model
+Softmax [58]
+Linear [26]
+Band5
+FMMformer (1-kernel + Band5)
+FMMformer (2-kernel + Band5)
+ListOps (2K) 37.10 (37.10) 18.30 32.16 33.22 36.74
+Text (4K) 64.17 (65.02) 64.22 66.31 66.52 67.84
+Retrieval (4K) 80.71 (79.35) 81.37 79.41 81.50 81.88
+Image (1K) 39.06 (38.20) 38.29 43.33 45.01 45.10
+Pathﬁnder (1K) 72.48 (74.16) 71.17 67.44 71.29 72.12
+Avg 58.70 (58.77) 54.67 57.73 59.51 60.74
+Table 1: Results on the LRA benchmark. We report the test classiﬁcation accuracy for each task and average accuracy across all tasks. The FMMformer outperforms the linear transformer and attains similar or better results than the standard transformer. Across tasks, the FMMformer achieves the best average accuracy. Also, the FMMformer with 2 kernels enhances the performance of the FMMformer with 1 kernel. The numbers in the parenthesis are from the paper [63]. Note that we use near-ﬁeld attentions of bandwidth 5 for all FMMformers reported here, and Band5 are softmax transformers with a banded attention matrix of bandwidth 5.
+Datasets and metrics. We consider all ﬁve tasks in the LRA benchmark, including Listops [38], byte-level IMDb reviews text classiﬁcation [35], byte-level document retrieval [42], CIFAR-10 image classiﬁcation on sequences of pixels [30], and Pathﬁnder [32]. These tasks involve long sequences of length 2K, 4K, 4K, 1K, and 1K, respectively. We follow the setup/evaluation protocol in [54] and report the test accuracy for individual task and the average result across all tasks.
+Results. We summarize our results in Table 1. Like in the copy task, we observe that adding near-ﬁeld attention modeled by banded attention matrices improves the performance of linear transformers.
+More interestingly, using bandwidth 5 already yields good results across all LRA tasks while signiﬁcantly reducing the computational and memory cost of calculating the attention matrix. For example, in the byte-level document retrieval [42] task, a banded matrix with bandwidth 5 only accounts for 0.125% of the corresponding full attention matrix. The FMMformer with 1 kernel (blending a banded matrix of bandwidth 5 with the linear transformer using feature map φ1(x)) outperforms the linear transformer and yields similar or better results than the standard softmax transformer in all tasks. Furthermore, the FMMformer with 2 kernels (blending a banded attention matrix of bandwidth 5 with the linear transformer using feature maps φ1(x) and φ2(x)) further improves the FMMformer with 1 kernel, justifying the need of better low-rank approximation for the far-ﬁeld attention. Across tasks, the FMMformer obtains the best average accuracy. Also, it is worth noting that tasks in the LRA benchmark cover different data modalities include text and images.
+Good performance of the FMMformer on these tasks demonstrates that the advantages of our model over the linear and standard transformers are consistent across data modalities. 4.3 Language Modeling on WikiText-103
+Experiments on the copy task in Sec. 4.1 illustrate the effect of combining near-ﬁeld and far-ﬁeld attention. Results on the LRA benchmark in Sec. 4.2 show the ability of our FMMformer to capture very long-range dependency and extend to different data modalities. Now our goal is to conﬁrm the advantage of the FMMformer on a large-scale application. We consider the word-level language modeling task on WikiText-103 [37].
+Datasets and metrics. WikiText-103 consists of articles from Wikipedia and is a dataset with long contextual dependencies. The training set is made up of about 28K articles containing 103M running words; this corresponds to text blocks of about 3600 words. The validation and test sets are composed of 218K and 246K running words, respectively. Each of them contains 60 articles and about 268K words. Our experiment follows the standard setting [37, 47] and split the training data into L-word independent long segments. For evaluation, we use a batch size of 1, and go through the text sequence with a sliding window of size L. We consider only the last position for computing perplexity (PPL) except in the ﬁrst segment, where all positions are evaluated as in [2, 47].
+Results. Table 2 shows the validation and test perplexity of our models versus the linear and standard softmax transformer on WikiText-103. Here, we also compare with the linear attention with the fast weight trick proposed in [47]. Consistent with previous experiments, the FMMformer outperforms the linear transformer with or without fast weight. The standard softmax transformer obtains the best results in this task, but the gap between the FMMformer and the standard transformer is very small when a larger bandwidth is used for near-ﬁeld attention in the FMMformer. This is justiﬁed by the improvement in terms of PPL of the FMMformer with a near-ﬁeld attention of bandwidth 20 compared to the FMMformer with a near-ﬁeld attention of bandwidth 5. Also, FMMformer with 2 kernels (φ1(x) and φ2(x)) still improves over FMMformer with 1 kernel (φ1(x)). Consider the linear complexity of computational time and memory advantage of FMMformers, the small performance gap of FMMformers to standard softmax transformers can potentially be overcome by using the multilevel or hierarchical near-ﬁeld and far-ﬁeld decomposition. 8
+Method
+Softmax [58]
+Linear [26]
+Fast weight [47]
+Fast weight [47] + Linear [26]
+Band20
+FMMformer (1-kernel linear + Band20)
+FMMformer (1-kernel fast weight + Band20)
+FMMformer (2-kernel linear + Band20)
+FMMformer (2-kernel fast weight + Band20)
+Valid PPL 33.15 37.27 35.75 34.78 38.18 35.41 34.54 35.10 34.16
+Test PPL 34.29 38.40 36.63 35.95 39.19 36.43 35.47 36.11 34.71
+Table 2: WikiText-103 language model perplexities of FMMformers compared to the baselines. The number of parameters (40 M) is almost the same for all models, up to the small difference introduced by additional weights on the far-ﬁeld attention in FMMformers. FMMformers outperform linear transformers [26]. The performance gap compared to softmax transformers is reduced when using a larger bandwidth in near-ﬁeld attention and more kernels in far-ﬁeld attention. Note that Band5 and Band20 are softmax transformers with a banded attention matrix of bandwidth 5 and 20, respectively. 5

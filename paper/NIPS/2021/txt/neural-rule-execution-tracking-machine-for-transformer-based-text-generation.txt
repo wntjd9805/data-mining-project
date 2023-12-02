@@ -1,0 +1,195 @@
+Abstract
+Sequence-to-Sequence (Seq2Seq) neural text generation models, especially the pre-trained ones (e.g., BART and T5), have exhibited compelling performance on various natural language generation tasks. However, the black-box nature of these models limits their application in tasks where speciﬁc rules (e.g., control-lable constraints, prior knowledge) need to be executed. Previous works either design speciﬁc model structures (e.g., Copy Mechanism corresponding to the rule
+“the generated output should include certain words in the source input”) or imple-ment specialized inference algorithms (e.g., Constrained Beam Search) to execute particular rules through the text generation. These methods require the careful design case-by-case and are difﬁcult to support multiple rules concurrently. In this paper, we propose a novel module named Neural Rule-Execution Tracking
+Machine (NRETM) that can be equipped into various transformer-based generators to leverage multiple rules simultaneously to guide the neural generation model for superior generation performance in an uniﬁed and scalable way. Extensive experiments on several benchmarks verify the effectiveness of our proposed model in both controllable and general text generation tasks. 1
+
+Introduction
+Transformer-based neural language models (LMs), such as GPT/BART [1–3], have led a wave of new trends in natural language generation, producing texts of prominent quality. They are trained roughly on huge amounts of text corpora to reconstruct the full sentences (i.e., next coming tokens and missing text fragments). Despite their success in varieties of NLP tasks, we argue that the black-box nature of these models leads to inefﬁciently learning to follow constraints and incorporating prior knowledge.
+In controllable text generation, most relevant studies [4–6] focus on controlling high-level text attributes (e.g., topic, sentiment) or simply keyword/phrase. More complex ﬁne-grained control constraints such as “generate a sequence of tokens with ‘apple’ in the ﬁrst sentence which has 15 words and ‘orange’ or ‘oranges’ in the fourth sentence” are less explored. A very recent work [7] reveals that large-scale LMs do not learn to obey the underlying constraints reliably, even in a quite simple constrained generation task (cover all the given keywords without hallucinating new ones). In general text generation, existing works on various tasks reveal the beneﬁt of incorporating task-speciﬁc prior knowledge: machine translation [8] (e.g., each source phrase should be translated
+∗Work done during the internship at Microsoft STCA.
+†Corresponding author: Daxin Jiang (djiang@microsoft.com). 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+into exactly one target phrase), text summarization [9] (e.g., the lead bias: front loading the most salient information), dialogue generation [10] (e.g., humans tend to repeat entity names or even long phrases in conversation). However, they either need designing speciﬁc model architectures (e.g.,
+Coverage Mechanism and Copy Mechanism) or devising well-designed learning objectives (e.g.,
+GSG [11]). These methods require careful design case-by-case and are difﬁcult to combine multiple arbitrary constraints or prior knowledge simultaneously.
+Motivated by the above research dilemma, we take the ﬁrst step towards building an uniﬁed framework to handle Fine-grained Control and Prior Knowledge Integration and propose a novel module Neural
+Rule-Execution Tracking Machine (NRETM) 3 Speciﬁcally, NRETM is a trainable neural module that can be equipped with transformer-based sequence-to-sequence pre-trained LMs. It can handle constraints in any Predicate Logic Formula, which crucially includes the arbitrarily complicated relations among different control tasks. For example, the above ﬁne-grained constraint can be written as: (cid:0)InSen(apple, 1 ) ∧ Len(1 , 15 )(cid:1) ∧ (cid:0)InSen(orange, 4 ) ∨ InSen(oranges, 4 )(cid:1)
+To build NRETM, we combat three major challenges: i) modeling the complicated relationships among control tasks and the logic operators (i.e., ∧, ∨) in the constraint expressions; ii) an uniﬁed control system is required to execute different control tasks simultaneously and iii), the control signals for different control tasks should be properly aligned with the constraint expressions. NRETM uses the encoder of transformer-based pre-trained sequence-to-sequence LMs to model the relationship between control tasks and the logic operators. NRETM completes different control tasks via non-differential Logic Trackers (empowered by executable programs) in an uniﬁed control progress system during the decoding process. Finally, the encoded constraint expressions and control progress signals are combined together in the transformer decoder. NRETM is ﬁne-tuned with the pre-trained
+LMs (except logical trackers) to follow the control progress signal and predicate logic formula.
+NRETM reconciles symbolic computing (that has precise logic and numerical calculation capabilities from logic trackers) with neural language generation (that has an exceptional ability of wording and phrasing), which results in both the accurate controllability and the superior generation performance.
+For evaluation, we select three representative benchmarks because all of them involve constraints or prior knowledge, allowing us to verify the effectiveness of our proposed NRETM model: ROCSto-ries [12] are ﬁve-sentence stories with complicated predicate constraints over the story structure;
+Commonsense Generation task [13] with the constraints of mentioning all input concepts; TED15
+Zh-En document-level machine translation benchmark [14] with prior knowledge of translating input sentences one by one.
+Our contributions in this work are three-fold: (1) To the best of our knowledge, we are the ﬁrst to propose a general framework that incorporates control signal and prior knowledge, formulated as predicate logic constraints, into transformer-based seq2seq text generation models; (2) We train (or ﬁne-tune) the transformer-based seq2seq text generation models to follow the predicate logic constraints(i.e., control signal or prior knowledge) by dynamically updating the rule execution intermediate progress value to the text decoder; and (3) Empirical veriﬁcation of the effectiveness of the proposed approach on three benchmarks. 2 Approach
+This section ﬁrst formalizes ﬁne-grained content control task, then introduces an overview of proposed
+NRETM model, followed by diving into details of each component. 2.1 Fine-Grained Content Control
+In this work, we focus on ﬁne-grained content control task where the model input consists of predicate logic constraints x = [x1, . . . , xlx ] ∈ X that should be satisﬁed in the outputs and optional context input c = [c1, . . . , clc]. The encoder takes concatenation of x and c (i.e., [c; x]) as input. At decoding step t, the decoder take y:t = [y1, · · · , yt] ∈ Y as input and generate yt+1. 3Our Source Code can be found in https://github.com/GaryYufei/NRETM 2
+Figure 1: An overview of NRETM. The rounded-angle boxes in the upper row are trainable neural components and the right-angle boxes in the lower row are non-differentiable symbolic components.
+The predicate logic constraints are modeled as follows: 1) the transformer encoder handles the relationships among the predicates and basic logic operators; 2) Logic Tracker keeps track of the control progress of all predicates simultaneously; 3) the encoded expression and control progress are combined in the transformer decoder to guide NRETM to satisfy the constraints. 2.2 Predicate Logic Constraint
+We deﬁne predicate U (a, y) as a boolean function that indicates whether output y has satisﬁed control task a which could be values (e.g., status, total length, stop word counts) or lexicons (e.g., copying particular words/phrases). In this paper, NRETM accepts predicate logic constraints in Conjunctive (cid:1). Each predicate logic constraint includes
+Normal Form (CNF): (cid:0)U1 · · · ∨ Ui multiple predicates Ui and basic logic operators (e.g., ∨, ∧ and brackets). (cid:1) ∧ · · · ∧ (cid:0)Uk · · · ∨ Un 2.3 Neural Rule-Execution Tracking Machine
+NRETM can be equipped into transformer-based sequence-to-sequence LMs. Figure 1 illustrates an overview of our neural rule-execution tracking machine (NRETM). To enable LMs to follow predicate logic constraints, it is essential to 1) model the complicated relationships among predicates and basic logic operators; 2) control multiple predicates (i.e., control tasks) in the constraints simultaneously; 3) combine the control signals with the predicate logic constraint expressions. For 1), we treat the whole constraint expressions as natural language sentences and feed it into the transformer encoder. For 2), we propose a set of uniﬁed control signals that can be used to dynamically describe the step-wise execution progress of different predicates. For 3), we represent the control signals as relative position embedding and align them with encoded constraints expressions in the transformer decoder. 2.3.1 Encoding Predicate Logic Constraints
+Given predicate logic constraint expression x = [x1, . . . , xlx ] where xi either corresponds to a predicate Ui or a basic logic operator, we feed x into the transformer encoder. Due to the tokenization strategies of pre-trained LMs, each xi may be tokenized into a continuous token sequence. x is tokenized into t = [t1, · · · , tlt] where lt ≥ lx and there exists one-to-one mapping m(ti) = xj. We use he to denote the encoder output of x. As pre-trained LMs is trained with signiﬁcant amount of natural language sentences, it should encode complicated sequential relationships within the constraints expressions. 2.3.2 Mentoring Control Progress
+Specialized controlling components (e.g., Constrained Beam Search [15] and Copy Mechanism [10]) can only be used for limited control tasks. To enable uniﬁed controlling system, we propose to complete control by mentoring control progress. We describe the control progress of different predicates using an uniﬁed progress state system. Each predicate Ui has a corresponding Logic
+Tracker QUi (y), which is a non-differentiable executable program (i.e., written by Python) and takes 3
+Figure 2: A running example of our NRETM model with three logic constraints (i.e., Copy(car) &
+SWC(5) & Length(2,9); The output should include “car” and 5 stop words. The length of second sentence should be 6. The words are stop words. current generated outputs and returns one progress state at each generation step, formulated as follows:
+QUi (y) =
+
+
+
+S0
+S1 (S2,V)
+S3
+Ui is ∅
+Ui is not triggered in y
+Ui is in progress in y
+Ui is satisﬁed in y (1) where State S0 always is assigned to non-predicate ∅ (i.e., basic logic operators in the constraint expression); State S1 means the tracking for predicate Ui is not triggered in y. For example, when controlling the stop word counts of the second sentence, the Logic Tracker returns S1 when the LMs are generating the ﬁrst sentence; State S2 means predicate Ui is in progress and V is the optimal intermediate value that allows ﬁne-grained tracking. For example, in generation length control, V could be total target length minus the current length informing pre-trained LMs the number of words left to satisfy the constraint; State S3 means Ui is satisﬁed in y. In short, Logic Tracker uniﬁes different predicates by returning the same set of control signals.
+Global Or-Clause Update: Each Logic Tracker traces the execution progress of its corresponding predicate Ui independently. This independent tracing strategy works well in the And-Clause because all involved predicates are required to reach State S3. However, only a subset of predicates are required to reach State S3 in the Or-Clause. Our preliminary experiment shows that the independent tracing strategy trains the model not to complete the constraints. To solve this issue, we propose to update the status of all predicates in the same Or-Clause to State S3 when one of the predicates reach State S3. This forces all predicates ﬁnish themselves in State S3 and improves the constraint satisfaction ratio in the Or-Clause.
+Control Progress Matrix: Given the predicate logic constraint expressions t = [t1 · · · , tlt], we further deﬁne Control Progress Matrix S to align the predicates with their control progress signals returned by Logic Trackers:
+S = [C(t, ε); C(t, y:1); · · · ; C(t, y:t)]
+C(t, y:t) = [v(t1, y:t), · · · , v(tlt , y:t)] where ε is the empty string at ﬁrst decoding step. S is a two-dimensional matrix where each row describes the control progress of all tokens in t at a single decoding step and each column describes the control progress of a single token in t along all decoding steps. Recall that basic logic operators in predicate logic constraint expressions do not require control progress tracking. Each cell Si,j in S is formulated as: (2) (3)
+Si,j = v(ti, y:j−1) = (cid:26) Q∅(y)
+QUq (y) m(ti) = xk and xk is a basic logic operator m(ti) = xk and xk is a predicate Uq (4)
+Example: In Figure 2, we are given three logic constraints, a) copy “car”; b) the stop word ratio of the output should be 0.5 and c) the length of second sentence should be 6. The basic logic operators
+& are assigned with S0. Length control and Stop Word Ratio maintain intermediate values (e.g., the residual Length and Stop Word Ratio). The length control is assigned with S1 when generating the
+ﬁrst sentence because it will only be triggered in the second sentence. Copy control does not have intermediate values and its State are updated from S2 to S3 only when the corresponding words (at step 10 in our example) appear in the y:t. 4
+Control Progress Matrix Encoder: Control Progress Matrix S aligns the results from Logic Tracker with the encoded predicate logic constraint expressions. However, S is a non-differentiable symbolic matrix with each cell Si,j being discrete symbol S0 to S3 combined with additional numbers (i.e.,
+V ). As the encoder has already captured the inter-relationship in the predicate logic constraints, we only model each cell Si,j independently. To support various types of predicates, we treat Si,j as a string and encode it using a single-layer transformer-based encoder ShallowEncoder which shares the same vocabulary and word embeddings as the pre-trained LMs: hs ij = ShallowEncoder(Si,j)
+¯hs ij = MeanPooling(hs ij ∈ Rd and ls ij is the length of the tokenized Si,j and d is the hidden size of ij) (6) (5) ij ∈ Rls ij ×d, ¯hs where hs
+ShallowEncoder. We use ¯hs to denote the neural representation of whole S. 2.3.3 Combining Predicate Logic Constraint with Control Progress Matrix
+Finally, we combine the encoded Predicate Logic Constraints he with the encoded Control Progress
+Matrix ¯hs in the transformer-based pre-trained LMs. Injecting ¯hs into the transformer encoder would result in encoder content re-computation at each decoding step and stop the standard parallel training for transformer-based decoders. In addition, as Control Progress Matrix incrementally increases as the decoding goes on, it is reasonable to equip ¯hs into the transformer decoder. Given the encoder output he, decoder input y:t, the probability of the next token yt+1 can be calculated by: t = KV(Ws hd ot+1 = CrossKV(Wc qy:t, Ws qhd ky:t, Ws t , Wc vy:t khe, Wc vhe) (7) (8) p(yt+1|x1:lx, y1:t) = softmax(Wo ot+1) (9) where ot+1 ∈ Rdc is the hidden state at step t with dc the hidden size, and Wo ∈ R|V |×dc, Both
+KV and CrossKV are the standard key-value self-attention described in [16]. In the CrossKV which takes hd t and he as input, the resulting attention score matrix has the same size as S, making
+CrossKV suitable to incorporate our Control Progress Matrix.
+Control Progress Matrix as Relative Position: Inspired by [17] which incorporates token relative positions into the self-attention module, we propose to inject Control Progress Matrix as the “relative positions” between encoder output he and current decoder input y:t in the cross-attention (Eq. 8) module. Following this approach, we linearly project each ¯hij into Control Progress Matrix key ij = Wf hk v . All transformer decoder layers share the same representations. Eq. 8 is changed to: ot+1 = R(Wc t , Wc where Rlx×t×d and R is the Self-Attention function with relative position, deﬁned as follows: k and Control Progress Matrix Value hv vHe, hk, hv) kHe, Wc ij = Wf ij + bf ij + bf k · ¯hs v · ¯hs qHd (10)
+R(q, k, v, mk, mv)j = lx(cid:88) ai,j(vi + mv i,j) (11) where a∗,j = Softmax (e∗,j) and ei,j = qj(ki + mk i=1 i,j)T d−1/2. 2.4 Why NRETM Could Satisfy Constraints
+A powerful implicit compulsion comes from the combined force of two aspects: 1) before generating the EOS token (i.e., End-Of-Sequence Token), all the predicate constraints should be satisﬁed. As demonstrated in Fig 2, all elements in Control Progress Matrix are set to “satisﬁed” (i.e., S3) at EOS position; 2) The pre-trained LMs are trained to generate text with limited length. Such a soft way of combining symbolic operators (good at logical and mathematical calculations ) and neural operators (good at wording and phrasing) can retain their respective strengths to the utmost extent. 2.5 What If NRETM Fails to Satisfy Constraints
+NRETM does not forces the pre-trained LMs to execute the hard constraints on the text decoder explicitly, but instead, provides Control Progress Matrix as input features describing rule execution 5
+intermediate values to the text decoder. That is, no explicit effect when NRETM fails to satisfy the constraints. It is possible that our text generators decide to stop the generation before completing all constraints. In our experiments, NRETM has less than 1% chance not to complete all constraints. 2.6 The Generalization Ability of NRETM
+The generalization ability of NRETM comes from two aspects: 1) NRETM can construct new constraints via combining pre-trained predicates with basic logic operators in arbitrarily complicated ways; 2)
+To expand a new predicate, users only need to implement the corresponding Logic Trackers, which returns S1-S3 and intermediate values, via executable programs. 3 Experiment
+We test our proposed NRETM on the controllable text generation and general text generation tasks.
+For controllable text generation, we verify NRETM on the complex ﬁne-grained control instructions in the ROCStories Benchmark [12]. Further, we test NRETM on the general text generation tasks, commonsense generation and document-level machine translation, to show that NRETM can efﬁciently integrate prior knowledge into seq2seq models towards superior generation performance.
+Table 1: Controllable ROCStories Experiment Results.
+Predicate Logic Constraint
+M CSR RL
+BS
+B1
+B2
+∧4 i=1 (cid:0)InSen(wi, ypi)(cid:1)
+Copy(w1) ∧3 i=1 (cid:0)Order(wi, wi+1)(cid:1)
+∧2 i=1 (cid:0)InSen(wi, ypi) ∧ Len(ypi, lpi)(cid:1)
+T5 94.6 56.1 91.7 52.5 27.7
+NRETM 97.6 56.0 91.7 52.1 27.5
+T5 95.6 55.5 91.5 51.4 26.5
+NRETM 98.3 55.6 91.4 47.5 25.0
+T5 15.0 33.0 87.8 38.6 11.5
+NRETM 78.8 33.1 87.8 38.4 11.5
+InSen(w1, yp1) ∧ InSen(w2, yp2) ∧ (¬InSen(w3, yp2))
+∧(Len(yp1 , lp1) ∨ SWC(yp1 , sp1 ))
+T5 32.4 33.2 87.8 36.1 11.8
+NRETM 70.0 32.7 87.7 36.9 11.7
+∧2 i=1 (cid:0)InSen(wi, ypi) ∧ (Len(ypi, lpi ) ∨ SWC(ypi , spi))(cid:1) T5 18.7 33.2 87.9 37.6 11.5
+NRETM 64.7 33.2 87.9 38.5 11.7 3.1 Controllable ROC Stories
+ROCStories is a corpus of ﬁve-sentence stories that capture a rich set of causal and temporal commonsense relations between daily events. Following [18], we extract key phrases from the ground-truth stories. In this experiment, we design multiple predicate logic constraints to inform
+NRETM about the stories to be generated and verify if NRETM can follow these constraints exactly.
+Predicate Logic Formulation As shown in table 1, ﬁve constraints with increasing difﬁculties are th sentence. (2) Generate a story with an ordered used: (1) Generate a story with storyline wi in the pi th sentence which has lpi words storyline w1, · · · , w4 (3) Generate a story with storyline wi in the pi th sentence which has lp1 words or sp1 stop words (i = 1, 2). (4) Generate a storyline w1 in the p1 th sentence and w2 in the p2 which has lpi words or spi stop words (i = 1, 2).
+Baselines and Metrics Both baseline and NRETM use T5-Base model [19]. We report Constraints
+Success Ratio (CSR), the ratio of stories that completely satisfy the given constraints. We additionally report ROUGE-L (RL), BERT-Score (BS), BLEU-1/4 (B1/4) to show the generated stories quality. th sentence that does not mention w3 (5) Generate a storyline wi in the pi
+Main Results As shown in Table 1, in all ﬁve predicate logic constraints, compared to the T5 model, the NRETM model achieves higher Constraint Success Ratio and maintains a similar level of ROUGH-L, showing that the NRETM model can be ﬂexibly controlled without loss of generated text quality. 6
+Table 2: Experiment Results on Commonsense.
+Method
+BS B1 B4
+C
+S
+Constraint
+Seen NovelALL
+T5-Base
+T5-Base + NRETM Pc
+T5-Base + NRETM ˆPc
+T5-Large
+T5-Large + NRETM Pc
+T5-Large + NRETM ˆPc 94.5 71.3 29.2 159.4 31.9 92.9 90.1 92.7 94.6 72.5 30.3 163.8 32.4 94.6 93.6 94.6 94.5 74.2 29.3 167.7 33.2 99.4 99.6 99.5 94.8 73.0 32.4 170.3 33.1 94.8 92.4 94.6 94.8 74.3 32.1 173.4 33.5 97.8 96.9 97.8 94.8 74.8 32.6 175.3 34.3 99.2 99.0 99.2
+T5-Base + G 92.8 58.6 40.2 110.7 27.8 100 100 100
+T5-Large + NEUROLOGIC 94.8 73.2 32.3 169.7 32.3 99.1 98.8 99.0 98.6
+-KGBART [23] 168.3 32.7
+----The gap in CSR between the T5 and NRETM model is moderate in the ﬁrst two constraints with simple token permutations. However, the success ratio of T5 model drops signiﬁcantly given constraints that requires long-range numerical tracking (e.g., sentence length and the count of stop words). 3.2 Commonsense Generation
+COMMONGEN is a generation benchmark dataset target explicitly test machines for the ability of generative commonsense reasoning. Given a set of common concepts the task is to generate a coherent sentence describing an everyday scenario using these concepts.
+Predicate Logic Formulation The input is an unordered set of n concepts x = {xi}n i=1. From the expectation of COMMONGEN, one easily obtained prior knowledge is that each xi must appear in output y. The corresponding predicate logic constraint Pc is: (cid:0)Copy(xi)(cid:1)
+Pc = ∧n i=1 where y will appear by default, for the sake of brevity, we have omitted y in predicate Copy.
+Another prior knowledge comes from the observation that generating y requires giving the correct k}|˜xi| morphological inﬂections of the concept word rather than copy its original form. Let ˜xi = {˜xi k=1 denote all inﬂections of xi. y covers concept xi, if at least one of {˜xi k=1 appears. The constraint
+ˆPc is: k}|˜xi|
+ˆPc = ∧n i=1 (cid:0) ∨|˜xi| j=1 Copy(˜xi j)(cid:1)
+Baselines and Metrics We experiment with T5-Base and T5-Large. We equip NRETM into the T5-Large and T5-Base model to incorporate Pc and ˆPc respectively (+ NRETM Pc) (+ NRETM ˆPc). Grid
+Beam Search (GBS) [20] (+ G) is a well-designed decoding method that ensures the generation model satisﬁes the lexical constraints. We only apply GBS to the T5-Base model due to the memory constraint. Following the suggestions in [13], we use CIDEr [21] and SPICE [22] to automatically assess the quality of generated texts. We calculate constraint satisfaction for all constraints (ALL), novel constraints (Novel) and seen constraints (Seen).
+Main Results Table 2 shows that the NRETM model improves the constraint satisfaction over the baselines for all cases, achieving close to 100% (i.e., 99.5% and 99.2%). While GBS achieves perfect constraint satisfaction (i.e., 100%), doing so signiﬁcantly degrades the output text quality (more than 50 CIDEr), indicating the necessity integrating prior knowledge in training rather than inference.
+In addition, both prior knowledge Pc and ˆPc have a positive effect on our model, improving our
+T5-large baseline by 3.1 and 5.0 CIDEr score, respectively. Finally, our T5-Large + NRETM ˆPc model outperforms the previous state-of-the-art result [23], which integrates the ConceptNet [24] into the
+BART model, suggesting that our incorporated task-speciﬁc prior knowledge could be as powerful as knowledge from large-scale hand-crafted corpus. All of the above shows how potential it is to ﬁnd a method that could execute multiple rules effectively. 7
+3.3 Document-Level Machine Translation
+Document-level machine translation tasks is a general text generation task, where the goal is to translate segments of text (up to an entire document). Following [14], we use TED15 Zh-En (from
+IWSLT 2014 and 2015 [25, 26]) as training and validation set and 2010-2013 TED as the test set.
+Predicate Logic Formulation The input is an ordered set of n sentences in the source language that form a document x = {xi}n i=1 in the target language. We observed that neural model is prone to sentence correspondence confusion (the ith sentence in source document is translated as the jth sentence in target document) when doing document-level translation. To alleviate this problem, we propose incorporating Doc-mBART25 with prior knowledge: each source sentence should be translated only once. It is formulated as: i=1, the expected output is a translated document y = {yi}n
+TranslatedOnce(xi) = (cid:40) S3
+S2
+S1
+θ(y:t) > i
+θ(y:t) = i
+θ(y:t) < i (12) where θ(·) returns the line number of yt in y, as t is monotonic during generation, the status only set to be 2 once. To trace the sentence translation progress, we add an additional End-Of-Sentence token at the end of each sentence to the training data. Once NRETM ﬁnishes the ith sentence (generating an end-of-sentence token) in the decoder, we assume that the ith sentence in the encoder has been translated. The predicate logic constraint Pc of this task can be formulated as:
+Pc = ∧n (cid:0)TranslatedOnce(xi)(cid:1) i=1
+Baselines and Metrics We combine our NRETM Pc component with the Doc-mBART25 model proposed in [3] which is a state-of-the-art multilingual pre-trained language model. We compare this model with the state-of-the-art non-pretraining and pretraining approaches, including HAN (Hierarchical Attention Networks) [14], Doc-mBART25 and Sen-mBART25 proposed in [3]. When implementing our model, we use the same pre-processing method, blocks segmentation strategy and beam search setting as [3]. TED15 Zh-En provides sentence-to-sentence translation from Chinese to English. We use both document-level (d-BLEU) and sentence-level (s-BLEU) to measure the similarities between generated target document and the source document. We also report Sentence
+Aligned Ratio (SAR), the ratio of source and target documents with the same sentence count, to show the effectiveness of our control over this translation prior knowledge.
+Main Results Table 3 shows that the NRETM
+Pc component helps the Doc-mBART25 model to better capture the sentence-level corresponding relationship between the source and target documents. In particular, sentence-level alignment ratio is improved from 98.7% to 100%. The improvement in s-BLEU (+ 1.1 BLEU) also conﬁrms that our ﬁnal Doc-mBART25 + NRETM Pc model learns to translate sentences based on the sentence order in source documents. 3.4 Discussion
+Table 3: Model Performance on TED15 Zh-En Test.
+Model s-BLEU d-BLEU
+SAR
+Doc-mBART25 + NRETM Pc
+Doc-mBART25 [3]
+Sen-mBART25 [3]
+HAN [14] 24.9 23.8
+--30.4 29.6 28.4 24.0 100 % 98.7 %
+--Updating Progress in Encoder In Sec 2.3.3, we incorporate the Control Progress Matrix as relative position embeddings in the decoder. To show the importance of this design choice, we conduct an ablation study in Table 4 where the row of Control Progress Matrix is concatenated with the encoder output. We ﬁnd that updating the rule execution progress information with the encoder output contributes little to improve the CSR. This shows that simply extracting rule execution intermediate values is not enough. This could be because the encoder that encodes the rule execution intermediate values cannot effectively broadcast this information into text decoders.
+NRETM Robustness The above experiment results are based on the perfect training data. In this section, we explore the effect of training data noise. We corrupt the training data by replacing the input commonsense keywords with a random sampled one under the probability 5%, 10%, 15%, 25%, and 50% (Validation and Test Split remain unchanged). As shown in Table 5, in all noise levels, 8
+Table 4: Updating Rule Execution Progress with Encoder Output
+Constraint (1) (2) (3) (4) (5)
+Model
+RL
+CSR
+RL
+CSR
+RL
+CSR
+RL
+CSR
+RL
+CSR
+T5
+NRETM enc-update 56.1 56.0 56.0 94.6 97.6 96.8 55.5 55.6 55.6 95.6 98.3 97.2 33.0 33.1 33.0 15.0 78.8 14.2 33.2 32.7 32.7 32.4 70.0 28.5 33.2 33.2 33.3 18.7 64.7 16.8
+NRETM successfully achieves higher constraint coverage (i.e, Cons) and CIDEr score than the T5 baseline model, showing that NRETM is robust to the training data noise. It is worthwhile to note that the main goal of NRETM is to incorporate constraints that are satisﬁed by the training data into transformer-based seq2seq text generators. It is reasonable to assume that in practice, the noise level should be relatively low (e.g., 0% - 10%).
+Table 5: NRETM performance on Commonsense Test Split under different noise levels.
+Noise
+Model 0% 5% 10% 15% 25% 50%
+C
+Cons
+C
+Cons
+C
+Cons
+C
+Cons
+C
+Cons
+C
+Cons
+T5 170.3
+NRETM 175.3 94.6 99.2 168.8 169.5 93.3 96.5 168.0 168.5 93.7 96.2 163.8 167.1 92.9 94.6 160.7 161.2 91.3 92.4 102.0 149.7 66.7 87.4
+Zero-Shot Execution In Table 1, we show that the pre-trained language model T5 cannot handle complicated and ﬁne-grained constraints even after ﬁne-tuning. Here, we further demonstrate that NRETM model is capable to handle zero-shot rule execution.
+We train the T5 and NRETM model to only mention keywords in the 3rd, 4th and 5th sentence and test these models to mention keywords in the ﬁrst and second sentence of the whole story. As shown in Table 6, although both T5 and NRETM model mention most of the keywords (95.7% and 98.3% respectively) in the generated story, the T5 model only mention 19.7% of keywords in the correct sentence and the NRETM model makes 97.7% of keywords correct. This is becuase the
+T5 model cannot recognize the novel sentence index (i.e., the ﬁrst and second) during the generation.
+The logic tracker helps the NRETM model to generalize to handle these cases.
+Table 6: Novel Sentence Index Ex-periment. MR for Mention Ratio. model CSA MR
+NRETM 95.7 30.0 19.7 33.3 97.7 98.3
+RL
+T5
+Running Efﬁciency We compare the inference time (in min-utes) for NRETM on the test split of commonsense generation task in Table 7. All models use the beam search decoding algorithm with beam size 5. Adding NRETM components to T5-Base and T5-Large approximately double the inference time. While the Grid Beam Search (GBS) algorithm uses a much longer inference time. Compared to existing constrained decoding approaches, NRETM uses much less computational costs. 4

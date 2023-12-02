@@ -1,0 +1,119 @@
+Abstract
+Integrating physics models within machine learning models holds considerable promise toward learning robust models with improved interpretability and abilities to extrapolate. In this work, we focus on the integration of incomplete physics models into deep generative models. In particular, we introduce an architecture of variational autoencoders (VAEs) in which a part of the latent space is grounded by physics. A key technical challenge is to strike a balance between the incomplete physics and trainable components such as neural networks for ensuring that the physics part is used in a meaningful manner. To this end, we propose a regularized learning method that controls the effect of the trainable components and preserves the semantics of the physics-based latent variables as intended. We not only demonstrate generative performance improvements over a set of synthetic and real-world datasets, but we also show that we learn robust models that can consistently extrapolate beyond the training distribution in a meaningful manner. Moreover, we show that we can control the generative process in an interpretable manner. 1
+
+Introduction
+Data-driven modeling is often opposed to theory-driven modeling, yet their integration has also been recognized as an important approach called gray-box or hybrid modeling. In statistical machine learning, incorporation of mathematical models of physics (in a broad sense; including knowledge of biology, chemistry, economics, etc.) has also been attracting attention. Gray-box / hybrid modeling in machine learning holds considerable promise toward learning robust models with improved abilities to extrapolate beyond the distributions that they have been exposed to during training. Moreover, it can bring signiﬁcant beneﬁts in terms of model interpretability since parts of a model get semantically grounded to concrete domain knowledge.
+A technical challenge in deep gray-box modeling is to ensure an appropriate use of physics models.
+A careless design of models and learning can lead to an erratic behavior of the components meant to represent physics (e.g., with erroneous estimation of physics parameters), and eventually, the overall model just learns to ignore them. This is particularly the case when we bring together simpliﬁed or imperfect physics models with highly expressive data-driven machine learning models such as deep neural networks. Such cases call for principled methods for striking an appropriate balance between physics and data-driven models to prevent the detrimental effects during learning.
+Integration of physics models into machine learning has been considered in various contexts (see, e.g.,
+[44, 40] and our Section 4), but most existing studies focus on prediction or forecasting tasks and are not directly applicable to other tasks. More importantly, the careful orchestration of physics-based and data-driven components have not necessarily been considered. A notable exception is Yin et al.
+[47], in which they proposed a method to regularize the action of trainable components of a hybrid 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+model of differential equations. Their method has been developed for dynamics forecasting with additive combinations of physics and trainable models, but application to other situations is not trivial.
+In this work, we aim at the integration of incomplete physics models into deep generative models.
+While we focus on variational autoencoders (VAEs, [15, 29]), our idea is applicable to other models in principle. In our VAE, the decoder comprises physics-based models and trainable neural networks, and some of the latent variables are semantically grounded to the parameters of the physics models.
+Such a VAE, if appropriately trained, is by construction partly interpretable. Moreover, since it can by construction capture the underlying physics, it will be robust in out-of-distribution regime and exhibit meaningful extrapolation properties. We propose a regularized learning framework for ensuring the meaningful use of the physics models and the preservation of the semantics of the latent variables in the physics-integrated VAEs. We empirically demonstrate that our method can learn a model that exhibits better generalization, and more importantly, can extrapolate robustly in out-of-distribution regime. In addition, we show how the direct access to the physics-grounded latent variables allows us to alter properties of generation meaningfully and explore counterfactual scenarios. 2 Physics-integrated VAEs
+We ﬁrst describe the structure of VAEs we consider, which comprise physics models and machine learning models such as neural nets. We suppose that the physics models can be solved analytically or numerically with a reasonable cost, and the (approximate) solution is differentiable with regard to the quantities on which the solution depends. This assumption holds in most physics models known in practice, which come in different forms such as algebraic and differential equations. If there is no closed-form solution of algebraic equations, we can utilize differentiable optimizers [3] as a layer of the model. For differential equations, differentiable integrators [see, e.g., 7] will constitute a layer.
+Handling non-differentiable and/or overly-complex simulators remains an important open challenge. 2.1 Example
+We start with an example to demonstrate the main concepts. Let us suppose that data comprise time-series of the angle of pendulums following an ordinary differential equation (ODE): d2ϑ(t)/dt2 + ω2 sin ϑ(t) (cid:125) (cid:123)(cid:122) (cid:124) given as prior knowledge, fP
++ ξdϑ(t)/dt − u(t) (cid:125) (cid:123)(cid:122) (cid:124) to be learned by NN, fA
+= 0, (1) where ϑ is a pendulum’s angle, and ω, ξ, and u are the pendulum’s angular velocity, damping coefﬁcient, and external force, respectively. We suppose that a data point x is a sequence of ϑ(t), i.e., x = [ϑ(0) ϑ(∆t) · · · ϑ((τ − 1)∆t)]T ∈ Rτ for some ∆t ∈ R and τ ∈ N, where ϑ(t) denotes the solution of (1) with a particular conﬁguration of ω, ξ, and u. In this example, we learn a VAE on a dataset comprising such x’s with different conﬁgurations of ω, ξ, and u.
+Suppose that the ﬁrst two terms of (1) are given as prior knowledge, i.e., we know that the governing equation should contain fP(ϑ, zP) := ¨ϑ + z2
+P sin ϑ. We will use such prior knowledge, fP, by incorporating it in the decoder of a VAE that we will learn. Since fP misses some effects of the true system (1), we complete it by augmenting the decoder with a neural network fA(ϑ, zA). The
+VAE’s latent variable will have two parts, zP and zA, respectively linked to fP and fA. On one hand, zA works as an ordinary VAE’s latent variable since fA is a neural net, and we suppose zA ∈ Rd, p(zA) := N (0, I). On the other hand, we semantically ground zP to a physics parameter; in this case, zP ∈ R should work as pendulum’s ω. In summary, the augmented decoder here is E[x] = (cid:2)fP(ϑ(t), zP) + fA(ϑ(t), zA) = 0(cid:3), where ODEsolveϑ denotes some differentiable
+ODEsolveϑ solver of an ODE with regard to ϑ. The encoder will have corresponding recognition networks for zP and zA. The situation in this example will be numerically examined in Section 5.1. 2.2 General formulation
+We now present the concept of our physics-integrated VAEs in a general form. Note that our interest is not limited to the additive model combination nor ODEs. In fact, the general formulation below subsumes non-additive augmentation of various physics models. The notation introduced in this section will be used to explain the proposed regularized learning method later in Section 3. 2
+For ease of discussion, we suppose that a VAE decoder comprises two parts: a physics-based model fP and a trainable auxiliary function fA. More general cases, for example with multiple trainable functions fA,1, fA,2, . . . used in different ways, are handled in Appendix A. 2.2.1 Latent variables and priors
+We consider two types of latent variables, zP ∈ ZP and zA ∈ ZA, which respectively will be used in fP and fA. The latent variables can be in any space, but for the sake of discussion, we suppose ZP and ZA are (subsets of) the Euclidean space and set their prior distribution as multivariate normal: p(zP) := N (zP | mP, v2 (2) where mP and v2
+P are deﬁned in accordance with prior knowledge of fP’s parameters. Note that zP will be directly interpretable as they will be semantically grounded to the parameters of the physics model fP; for example in Section 2.1, zP := ω was the angular velocity of a pendulum. and p(zA) := N (zA | 0, I),
+PI) 2.2.2 Decoder
+The decoder of a physics-integrated VAE comprises two types of functions1, fP : ZP → YP and fA : YP × ZA → YA. For notational convenience, we consider a functional F that evaluates fP and fA, solves an equation if any, and ﬁnally gives observation x ∈ X . X may be the space of sequences, images, and so on. Assuming Gaussian observation noise, we write the observation model as (cid:1), pθ(x | zP, zA) := N (cid:0)x | F[fA, fP; zP, zA], Σx (3) where zA ∈ ZA and zP ∈ ZP are the arguments of fA and fP, respectively. Note that fA and fP may have other arguments besides zA and zP, respectively, but they are omitted for simplicity. We denote the set of trainable parameters of fA and fP (and Σx) by θ, while fP may have no trainable global parameters other than zP.
+Let us see the semantics of the functional2 F ﬁrst in the light of the example of Section 2.1. Recall that there we considered the additive augmentation of ODE (as in [47] and other studies). It is subsumed by the expression (3) by setting F[fA, fP; zP, zA] := ODEsolve[fP(zP) + fA(zA) = 0].
+Let us generalize the idea. Our deﬁnition of the decoder in (3) allows not only additive augmentation of ODE but also broader range of architectures. The composition of fP and fA is not limited to be additive because we consider general composition of functions fA and fP. Moreover, the form of the physics model is not limited to ODEs. We list some examples of the conﬁguration:
+• If equation fP = 0 has a closed-form solution SfP ∈ YP (assuming that the solution space coincides with YP, just for ease of discussion), then F is simply an evaluation of fA, for example,
+F[fP, fA; zA] := fA(SfP , zA).
+• If an algebraic equation fP = 0 or fA ◦ fP = 0 has no closed-form solution, then F will have a differentiable optimizer, e.g., F[fP, fA] := fA(arg min (cid:107)fP(cid:107)2) or F := arg min (cid:107)fA ◦ fP(cid:107)2.
+• fP = 0 or fA ◦ fP = 0 can be a stochastic differential equation (and F contains its solver), for which zP and/or zA would become a sequence encoding the realization of the process noise.
+The role of fA can also be diverse; it can work not only as a complement of physics models inside equations, but also as correction of numerical errors of solvers or optimizers, downsampling or upsampling, and observables (e.g., from angle sequence to video of a pendulum). 2.2.3 Encoder
+The encoder of a physics-integrated VAE accordingly comprises two parts: for posterior inference of zP and for that of zA. We consider the following decomposition of the approximated posterior: qψ(zP, zA | x) := qψ(zA | x)qψ(zP | x, zA), where qψ(zA | x) := N (cid:0)zA | gA(x), ΣA (cid:1), qψ(zP | x, zA) := N (cid:0)zP | gP(x, zA), ΣP (cid:1). (4) 1The distinction between fP and fA depends on the origin of the functional forms (and not if trainable or not).
+The form of fP depends on physics’ insight and thus ﬁxed. On the other hand, the form of fA is determined only from utility as a function appoximator, and we can use whatever useful (e.g., feed-forward NNs, RNNs, etc.). 2It is natural to consider that F is a functional (and not a function) because we may need the access to the functions fA and fP themselves, rather than their pointwise values. For example, we need the full access to those functions when the decoder has an ODE solver with arbitrary initial condition. 3
+gA : X → ZA and gP : X × ZA → ZP are recognition networks. We denote the trainable parameters of gA and gP (and ΣA and ΣP) as ψ. This particular dependency is for our regularization method in
+Section 3.2, where gP should ﬁrst remove the information of zA from x and then infer zP. 2.3 Evidence lower bound
+The VAE is to be learned as usual by maximizing the lower bound of the marginal log likelihood known as evidence lower bound (ELBO). In our case, it is straightforward to derive: x) log pθ(x | zP, zA) (cid:2)qψ(zA | x) (cid:107) p(zA)(cid:3) − E (cid:2)qψ(zP | x, zA) (cid:107) p(zP)(cid:3).
+ELBO(θ, ψ; x) = E qψ(zP,zA|
+− DKL x)DKL (5) qψ(zA| 3 Striking balance between physics and trainable models
+We propose a regularized learning objective for physics-integrated VAEs. It comprises two types of regularizers. The ﬁrst is for regularizing unnecessary ﬂexibility of function approximators like neural networks and presented in Section 3.1. The second is for grounding encoder’s output to physics parameters and presented in Section 3.2. The overall objective is summarized in Section 3.3. 3.1 Regularizing excess ﬂexibility of trainable functions
+If the trainable component of the physics-integrated VAE (i.e., fA) has rich expression capability, as is often the case with deep neural networks, merely maximizing the ELBO in (5) provides no guarantee that the physics-based component (i.e., fP) will be used in a meaningful manner; e.g., fP may just be ignored. We want to ensure that fA does not unnecessarily dominate the behavior of the entire model and that fP is not ignored. To this end, we borrow an idea from the posterior predictive check (PPC), a procedure to check the validity of a statistical model [see, e.g., 9]. Whereas the standard PPCs examine the discrepancy between distributions of a model and data, we compute the discrepancy between those of the model and its “physics-only” reduced version, for monitoring and balancing the contributions of parts of the model.
+For the sake of argument, suppose that a given physics model fP is completely correct for given data.
+Then, the discrepancy between the original model and its “physics-only” reduced model (where fA is somehow invalidated) should be close to zero because the decoder of both the original model (with fP and fA working) and the reduced model (with only fP working) should coincide in an ideal limit with the true data-generating process. Even if fP captures only a part of the truth, the discrepancy should be kept small, if not zero, to ensure meaningful use of the physics models in the overall model.
+The “physics-only” reduced model is created as follows. Recall that the original VAE is deﬁned by
+Eqs. (3) and (4). We deﬁne the decoder of the reduced model by replacing fA : YP × ZA → YA of (3) with a baseline function hA : YP → YA. That is, the reduced observation model is
+θr (x | zP, zA) := N (cid:0)x | F[hA, fP; zP], Σx pr (3r) where we omit zA from the argument of F because hA no longer takes it. We denote the set of the trainable parameters of such a model as θr := θ\ param(fA) ∪ param(hA). The corresponding encoder is deﬁned as follows. Recall that in the original model, posterior distributions of both zP and zA are inferred in (4) and then used for reconstructing each input x in (3). On the other hand, in the
+“physics-only” reduced model, zA is not referred to by (3r), which makes it less meaningful to place a particular posterior of zA for each x. Hence, we deﬁne the “physics-only” encoder by marginalizing out zA and using prior3 p(zA) instead. That is, the reduced posterior is (cid:1), qr
+ψ(zA, zP | x) := p(zA) (cid:90) qψ(zP, zA | x)dzA. (4r)
+Below we give a guideline for the choice of the baseline function, hA:
+• If the ranges of fP and fA are the same (i.e., YP = YA), then hA can be an identity function hA = Id. Note that in the additive case fA ◦ fP = fP + fA(cid:48), where fA(cid:48) is a trainable function, replacing fA with hA = Id is equivalent to replacing fA(cid:48) with hA(cid:48) = 0. 3It is just for deﬁning qr
+ψ on the common support with qψ. Any non-informative distributions of zA are ﬁne. 4
+• If YP (cid:54)= YA, then hA can be a linear or afﬁne map from YP to YA. For example, if YP = RdP and
+YA = RdA (dP (cid:54)= dA), then we can set hA(fP(zP)) = W fP(zP) where W ∈ RdA× dP .
+The idea is to minimize the discrepancy between the full model and the “physics-only” reduced model. In particular, we minimize the discrepancy between the posterior predictive distributions
+DKL (cid:90) pθ,ψ( ˜x | X) = pr
+θr,ψ( ˜x | X) = (cid:90) (cid:2)pθ,ψ( ˜x | X) (cid:107) pr
+θr,ψ( ˜x | X)(cid:3), where pθ( ˜x | zP, zA)qψ(zP, zA | x)pd(x | X)dzPdzAdx, (6)
+θr ( ˜x | zP, zA)qr pr
+ψ(zP, zA | x)pd(x | X)dzPdzAdx. pd(x | X) is the empirical distribution with the support on data X := {x1, . . . , xn}. We use ˜x, instead of x, just for avoiding notational confusion by clarifying the target of integral (cid:82) dx.
+Unfortunately, analytically computing (6) is usually intractable. Hence, we take the following upper bound of (6) (a proof is in Appendix B, and further remarks are in Appendix C):
+Proposition 1. Let pθ and pr
+θr ( ˜x | zP, zA) in (3r), respectively. Let pP and pA be some distributions of zP and zA, e.g., p(zP) and p(zA) using the priors in (2), respectively. The KL divergence in (6) can be upper bounded as follows:
+θ be the shorthand of pθ( ˜x | zP, zA) in (3) and pr
+DKL (cid:2)pθ,ψ( ˜x | X) (cid:107) pr
+θr,ψ( ˜x | X)(cid:3) ≤ E
++ DKL[qψ(zA | x) (cid:107) pA] + E pd(x
+X)
+|
+E qψ(zP,zA| (cid:104) qψ(zA| x)DKL[pθ (cid:107) pr
+θ] (cid:105) x)DKL[qψ(zP | zA, x) (cid:107) pP]
+. (7)
+ˆD(θ, param(h), ψ; x). The regular-Deﬁnition 1. Let us denote the upper bound (7) by E ization for inhibiting unnecessary ﬂexibility of trainable functions is deﬁned as minimization of
+X)
+| pd(x
+RPPC(θ, param(h), ψ) := E (8) pd(x
+Remark 1. When multiple trainable functions are differently used in a model (e.g., inside and outside an equation solver), which is often the case in practice, the deﬁnition of RPPC should be generalized to consider marginal contribution of every trainable function. See Appendix A.
+ˆD(θ, param(h), ψ; x).
+X)
+| 3.2 Grounding physics encoder by physics-based data augmentation
+Toward properly learning physics-integrated VAEs, minimizing RPPC solely may not be enough because inferred zP may be still meaningless but makes RPPC not that large (e.g., with solution of fP ﬂuctuating around the mean pattern of data), and then optimization may not be able to escape such local minima. Though it is difﬁcult to avoid such a local solution perfectly, we can alleviate the situation by considering additional objectives to encourage a proper use of the physics.
+The idea is to use the physics model as a source of information for data augmentation, which helps us to ground the output of the recognition network, gP in (4), to the parameters of fP. We want to draw some zP, feed it to the physics model fP (and a solver if any), and use the generated signal as additional data during training. A technical challenge to this end is that because the physics model may be incomplete, the artiﬁcial signals from it and the real signals may have different natures.
+To compensate such difference, we arrange a particular functionality of the physics encoder, gP.
+P) by feeding z(cid:63)
+P be a sample drawn from some distribution of zP (e.g., prior
+P to the
+Let z(cid:63) p(zP)). We artiﬁcially generate signals xr(z(cid:63)
+“physics-only” decoding process in (3r), that is, xr(z(cid:63)
+P given the corresponding xr(z(cid:63)
+P) := F[hA, fP; zP = z(cid:63)
+We want the physics-part recognition network, gP, to successfully es-timate z(cid:63)
+P), which is necessary to say that the result of the inference by gP is grounded to the parameters of fP. However, in general, real data x and the augmented data xr(z(cid:63)
+P) have different natures because fP may miss some aspects of the true data-generating process.
+P]. (9) 5
+Figure 1: Diagrams of (upper) RDA,1 in (11) and (lower) RDA,2 in (12).
+We handle this issue by considering a speciﬁc design of the physics-part recognition network, gP.
+We decompose gP into two stages as gP(x, zA) = gP,2(gP,1(x, zA)) without loss of generality. On one hand, gP,1 should transform real data x to signals that resemble the physics-based augmented signal, xr. In other words, gP,1 should “cleanse” real data into a virtual “physics-only” counterpart.
+We enforce such a functionality of gP,1 by making its output close to the following quantity: (10) xr(gP(x, zA)) = F[hA, fP; zP = gP(x, zA)].
+On the other hand, gP,2 should receive such “cleansed” input and return the (sufﬁcient statistics of) posterior of zP. If the aforementioned functionality of gP,1 is successfully realized, we can directly
+P) because xr(gP(x, zA)) and xr(z(cid:63) self-supervise gP,2 with xr(z(cid:63)
+In summary, we deﬁne a couple of regularizers for setting such functionality of gP,1 and gP,2 as follows (with the corresponding diagrams of computation shown in Figure 1):
+Deﬁnition 2. Let sg[·] be the stop-gradient operator. The regularization for the physics-based data augmentation is deﬁned as minimization of (cid:13)gP,1(x, zA) − sg (cid:2)xr(gP(x, zA))(cid:3)(cid:13) (cid:13) 2
+RDA,1(ψ) := E (cid:13) 2 (cid:13) 2
+RDA,2(ψ) := Ez(cid:63) 2. (cid:13)
+P) should have similar nature.
+X)q(zA| pd(x
+| (cid:13) (cid:13)gP,2 x) (cid:0) sg (cid:2)xr(z(cid:63)
+P)(cid:3)(cid:1) − z(cid:63) (12) (11) and
+P
+P 3.3 Overall regularized learning objective
+The overall regularized learning problem of the proposed physics-integrated VAEs is as follows: minimize
+θ,param(h),ψ
+− E pd(x
+X)ELBO(θ, ψ; x) + αRPPC(θ, param(h), ψ) + βRDA,1(ψ) + γRDA,2(ψ),
+| where each term appears in (5), (8), (11), and (12), respectively. Recall that θ and ψ are the sets of the parameters of the full model’s decoder (3) and encoder (4), respectively, and that param(h) denotes the set of the parameters of h, which may be empty. If we cannot specify a reasonable sampling distribution of z(cid:63)
+P needed in (12), we do not use RDA,1 and RDA,2; it may happen when the semantics of zP are not inherently grounded, e.g., when fP is a neural Hamilton’s equation [39]. 4

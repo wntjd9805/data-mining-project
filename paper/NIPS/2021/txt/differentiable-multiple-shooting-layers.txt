@@ -1,0 +1,293 @@
+Abstract
+We detail a novel class of implicit neural models. Leveraging time–parallel methods for differential equations, Multiple Shooting Layers (MSLs) seek solutions of initial value problems via parallelizable root-ﬁnding algorithms. MSLs broadly serve as drop–in replacements for neural ordinary differential equations (Neural ODEs) with improved efﬁciency in number of function evaluations (NFEs) and wall– clock inference time. We develop the algorithmic framework of MSLs, analyzing the different choices of solution methods from a theoretical and computational perspective. MSLs are showcased in long horizon optimal control of ODEs and
+PDEs and as latent models for sequence generation. Finally, we investigate the speedups obtained through application of MSL inference in neural controlled differential equations (Neural CDEs) for time series classiﬁcation of medical data. 1
+
+Introduction
+For the last twenty years, one has tried to speed up numerical computation mainly by providing ever faster computers. Today, as it appears that one is getting closer to the maximal speed of electronic components, emphasis is put on allowing operations to be performed in parallel. In the near future, much of numerical analysis will have to be recast in a more “parallel” form. Nievergelt, 1964
+Discovering and exploiting parallelization opportu-nities has allowed deep learning methods to succeed across application areas, reducing iteration times for architecture search and allowing scaling to larger data sizes (Krizhevsky et al., 2012; Diamos et al., 2016; Vaswani et al., 2017). Inspired by multiple shooting, time–parallel methods for ODEs (Bock and Plitt, 1984; Diehl et al., 2006; Gander, 2015;
+Staff and Rønquist, 2005) and recent advances on the intersection of differential equations, implicit problems and deep learning, we present a novel class of neural models designed to maximize paralleliza-tion across time: differentiable Multiple Shooting Layers (MSLs). MSLs seek solutions of initial value problems (IVPs) as roots of a function designed to ensure satisfaction of boundary constraints.
+Figure 1 provides visual intuition of the parallel nature of MSL inference.
+Figure 1: MSLs apply parallelizable root ﬁnding methods to obtain differential equation solutions.
+∗Equal contribution. Author order was decided by ﬂipping a coin. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+An implicit neural differential equation MSL inference is built on the interplay of numerical methods for root ﬁnding problems and differential equations. This property reveals the proposed method as a missing link between implicit–depth architectures such as Deep Equilibrium Newtorks (DEQs) (Bai et al., 2019) and continuous–depth models (Weinan, 2017; Chen et al., 2018; Massaroli et al., 2020; Kidger et al., 2020b; Li et al., 2020). Indeed, MSLs can be broadly applied as drop–in replacements for Neural ODEs, with the advantage of often requiring a smaller number of function evaluations (NFEs) for neural networks parametrizing the vector ﬁeld. MSL variants and their computational signature are taxonomized on the basis of the particular solution algorithm employed, such as Newton and parareal (Maday and Turinici, 2002) methods.
+Faster inference and ﬁxed point tracking Differently from classical multiple shooting methods,
+MSLs operate in regimes where function evaluations of the vector ﬁeld can be signiﬁcantly more expensive than surrounding operations. For this reason, the reduction in NFEs obtained through time–parallelization leads to signiﬁcant inference speedups. In full-batch training regimes, MSLs provably enable tracking of ﬁxed points across training iterations, leading to drastic acceleration of forward passes (often the cost of a single root ﬁnding step). We apply the tracking technique to optimal control of ODEs and PDEs, with speedups in the order of several times over Neural ODEs.
+MSLs are further evaluated in sequence generation via a latent variant, and as a faster alternative to neural controlled differential equations (Neural CDE) (Kidger et al., 2020b) in long–horizon time series classiﬁcation. 2 Multiple Shooting Layers
+Consider the initial value problem (IVP)
+˙z(t) = fθ(t, z(t))
+, z(0) = z0
+[0, T ]. t
+∈ (2.1) (cid:82)nz , parameters θ with state z
+∈ Z ⊂ smooth vector ﬁeld fθ : [0, T ]
+φθ(z, s, t) the solution of (2.1) at time t starting from z at time s , i.e. φθ(z, s, t) : (z, s, t)
+The crux behind multiple–shooting methods for differential equations is to turn the initial value problem (2.1) into a boundary value problem (BVP). We split the the time interval [0, T ] in N
+< tN = T and deﬁne N left boundary subproblems sub–intervals [tn, tn+1] with 0 = t0 < t1 < (cid:82)nθ and a
+[0, T ]; s < t we denote with z(t). for some space
+. For all z of functions [0, T ]
+× Z × W → Z
+W
+, s, t
+∈ W
+∈ Z
+→ (cid:55)→
+∈
+· · · zn(tn) = bn and ˙zn(t) = fθ(t, zn(t)), t
+[tn, tn+1]
+∈ where bn are denoted as shooting parameters. At each time t
+[0, T ], the solution of (2.2) matches the one of (2.1) iff all the shooting parameters bn are identical to z(tn), bn = φθ(z0, t0, tn). Using z(tn) = φθ(z(tn 1, tn), we obtain the equivalent conditions 1), tn
+∈ (2.2)
+−
+− b0 = φθ(z0, t0, t0) = z0 b1 = φθ(b0, t0, t1) = z0(t1)
+... bN = φθ(bN
+−
+−
+Let B := (b0, b1,
+, bN ) and γθ(B, z0) := (z0, φθ(b0, t0, t1),
+− thus turn the IVP (2.1) into the roots–ﬁnding problem the of a function gθ deﬁned as
+, φθ(bN 1, tN
+· · ·
+· · ·
+−
+− 1, tN )). We can 1, tN 1, tN ) = zN 1(tN ) gθ(B, z0) = B
+γθ(B, z0)
+−
+Deﬁnition 1 (Multiple Shooting Layer (MSL)). With (cid:96)x : two afﬁne maps, a multiple shooting layer is deﬁned as the implicit input–output mapping x and (cid:96)y :
+X → Z
+→ Y y:
+Z
+N +1 (cid:55)→ z0 = (cid:96)x(x)
+B∗ : gθ(B∗, z0) = (cid:48) y = (cid:96)y(B∗) 2 (2.3)
+3 Realization of Multiple Shooting Layers
+The remarkable property of MSL is the possibility of computing the solutions of all the N IVPs (2.2) in parallel from the shooting parameters in B with any standard ODE solver. This allows for a drastic reduction in the number of vector ﬁeld evaluations at the cost of a higher memory requirement for the parallelization to take place. Nonetheless, the forward pass of MSLs requires the shooting parameters
+B to satisfy the nonlinear algebraic matching condition gθ(B, z0) = (cid:48), which has also to be solved numerically. 3.1 Forward Model
+The forward MSL model involves the synergistic combination of two main classes of numerical methods: ODE solvers and root ﬁnding algorithms, to compute γθ(B, z0) and B∗, respectively. There exists a hierarchy between the two classes of methods: the ODE solver will be invoked at each step k of the root ﬁnding algorithm to compute γθ(Bk, z0) and evaluate the matching condition gθ(Bk, z0).
+Newton methods for root ﬁnding Let us denote with Bk the solution of the root ﬁnding problem at the k-th step of the Newton method and let Dgθ(Bk, z0) be the Jacobian of gθ computed in Bk.
+The solution B∗ : gθ(B∗, z0) = (cid:48) can be obtained by iterating the Newton–Raphson ﬁxed point iteration
+Bk+1 = Bk
+α
+−
+Dγθ(Bk, z0) 1
+−
+Bk (cid:73)nz −
+γθ(Bk, z0)
+− (3.1) (cid:3) which converges quadratically to B∗ (Nocedal and Wright, 2006). The exact Newton iteration
+Dγθ(Bk, z0). Without the special theoretically (3.1) requires the inverse of the Jacobian (cid:73)N ⊗ structure of the MSL problem, the Jacobian would have had to be the computed in full, as in the case of DEQs (Bai et al., 2019). Being the Jacobian of dimension (cid:82)N nz
+N nz , its computation with reverse–mode automatic differentiation (AD) tools scales poorly with state dimensions and number of shooting parameter (cubically in both nz and N ).
+Instead, the special structure of the MSL matching function gθ(B, z0) = B
+−
+Jacobian, opens up application of direct updates where inversion is not required.
+γθ(B, z0) and its (cid:3) (cid:2) (cid:73)nz −
+× (cid:73)N ⊗ (cid:2)
+Direct multiple shooting Following the treatment of Chartier and Philippe (1993), we can obtain a direct formulation of the Newton iteration which does not require the composition of the whole
+Jacobian nor its inversion. The direct multiple shooting iteration is derived by setting α = 1 and multiplying the Jacobian on both sides of (3.1) yielding (cid:73)nz −
+Dγθ(Bk, z0) (Bk+1
+Bk) = γθ(Bk, z0)
+Bk
+−
+− (cid:73)N ⊗ (cid:2) which leads to the following update rule for the individual shooting parameters bk (cid:3) n (see Fig. 2): n) = dφθ,n(bk where Dφθ,n(bk
+Due to the dependence of bk+1 sequential stages. bk+1 n+1 = φθ,n(bk n) + Dφθ,n(bk n) bk+1 n − bk n
+, bk+1 0 = z0 (3.2) (cid:1) n)/dbn is the sensitivity of each individual ﬂow to its initial condition. n+1 on bk+1 1
+, a complete Newton iteration theoretically requires N (cid:0) n
+−
+−
+Finite-step convergence
+Iteration (3.2) exhibits convergence to the exact solution of the IVP (2.1) 1 steps (Gander, 2018, Theorem 2.3). In par-in N ticular, given perfect integration of the sub–IVPs, bk n coincides with the exact solution φθ(z0, t0, tn) from iteration index k = n onward, i.e. at iteration k only k shooting parameters are actually up-the last N dated. Thus, the computational and memory footprint of the method diminishes with the number of iterations. This result can be visualized in the graphical representation of iteration (3.2) in Figure 3 while further details are discussed in Appendix B.1.
+Figure 2: One stage of Newton iteration (3.2).
+− 3
+Numerical implementation Practical imple-mentation of the Newton iteration (3.2) re-quires an ODE solver to approximate the ﬂows
+φθ,n(bk n) and an algorithm to compute their sen-sitivities w.r.t. bk n. Besides direct application of
+AD, we show an efﬁcient alternative to obtain all Dφθ,n in parallel alongside the ﬂows, with a single call of the ODE solver. 0 = z0, we see how the correcting term bk+1
+Figure 3: Propagation in k and n of the Newton iteration (3.2). The intertwining between the updates in n and k leads to the ﬁnite step convergence result. In fact, by setting b0 n − bk n multiplying the ﬂow sensitivity Dφθ,n progressively nulliﬁes at the same rate in n and k. As a result, the exact sequential solution of the IVP (2.1) unfolds on the diagonal k = n and the only active part of the algorithm is the one above the diagonal (highlighted in yellow).
+Efﬁcient exact sensitivities Differentiating through the steps of the forward numerical
+ODE solver using reverse–mode AD is straight-forward, but incurs in high memory cost, additional computation to unroll the solver steps and introduces further numerical error on Dφθ,n. Even though the memory footprint might be mitigated by applying the adjoint method (Pontryagin et al., 1962), this still re-k adjoint quires to solve backward the N
+ODEs and sub–IVPs (2.2), at each iteration k. We leverage forward sensitivity analysis to compute Dφθ,n alongside φθ,n in a single call of the ODE solver. This approach, which might be considered as the continuous variant of forward– mode AD, scales quadratically with nz, has low memory cost, and explicitly controls numerical error.
+Proposition 1 (Forward Sensitivity (Khalil, 2002)). Let φθ(z, s, t) be the solution of (2.1). Then, v(t) = Dφθ(z, s, t) satisﬁes the linear matrix–valued differential equations
+−
+˙v(t) = Dfθ(t, z(t))v(t), v(s) = (cid:73)nz where Dfθ denotes ∂fθ/∂z.
+Therefore, at iteration k all Dφθ,n(bk integration of the N k IVPs (2.2) and their forward sensitivities, i.e. n) can be computed in parallel while performing the forward
+−
+ForwardSensitivity : bk n (cid:55)→ (φθ,n, Dφθ,n) k<n
+N
+≤ (cid:8) which enables full vectorization of Jacobian–matrix products between ∂fθ/∂z and v as well as maximizing re–utilization of vector ﬁeld evaluations. Detailed derivations are provided in Appendix
+B.2. Appendix C.1 analyzes practical considerations and software implementation of the algorithm. (cid:9)
+Zero–order approximate iteration In high state dimension regimes, the quadratic memory scaling of the forward sensitivity method might be infeasible. If this is the case, a zero–order approximation of the Newton iteration preserving the ﬁnite–step converge property can be employed: the parareal method Lions et al. (2001). From the Taylor expansion of φθ,n(bk+1
+) around bk n n
+φθ,n(bk+1 n
+) = φθ,n(bk n) + Dφθ,n(bk n) bk+1 n − bk n
++ o bk+1 n − 2 2 bk n(cid:107) (cid:107)
+, we have the following approximant for the correction term of (3.2) (cid:0) (cid:1) bk+1 n −
+Parareal computes the RHS of (3.3) by coarse2 numerical solutions ψθ,n(bk
+φθ,n(bk
+), leading to the forward iteration,
+Dφθ,n(bk n) n), φθ,n(bk+1
+φθ,n(bk n). bk n
+≈
+− (cid:0) (cid:1)
+) n n (3.3) n), ψθ,n(bk+1 n
+) of (cid:0) (cid:1)
+φθ,n(bk+1 bb+1 n+1 = φθ,n(bk n) + ψθ,n(bk+1 n
+ψθ,n(bk n).
+)
+− 2e.g. few steps of a low–order ODE solver 4
+Figure 4: Scheme of the forward–backward pass of MSLs. After applying the input map (cid:96)x to the input x and choosing initial shooting parameters B0, the forward pass is iteratively computed with one of the numerical schemes described in Sec. 3.1 which, in turn, makes use of some ODE solver to compute φθ,n in parallel, at each step. Once the output y and the loss are computed computed by applying (cid:96)y and Lθ to B∗, the loss gradients can be computed by standard adjoint methods or reverse–mode automatic differentiation. 3.2 Properties of MSLs
+Differentiating through MSL Computing loss gradients through MSLs can be performed by directly back–propagating through the steps of the numerical solver via reverse–mode AD.
+A memory efﬁcient alternative is to apply the sequential adjoint method to the underlying Neural
+ODE. In particular, consider a loss functions computed independently with the values of different
+N shooting parameters, L(x, B∗, θ) = n=1 cθ(x, b∗n). The adjoint gradient for the MSL is then given by (cid:80)
+∇θL = 0 (cid:90)
+T
+λ(cid:62)(t)
+∇θfθ(t, z(t))dt where the Lagrange multiplier λ(t) satisﬁes a backward piecewise–continuous linear ODE
+˙λ(t) =
+−
+Dfθ(t, z(t))λ(t)
+λ−(tn) = λ(tn) + (cid:62)b cθ(x, bn)
+∇
+[tn, tn+1) if t
+∈
+λ(T ) = (cid:62)b cθ(x, bN )
+∇
+The adjoint method typically requires the IVP (2.1) to be solved backward alongside λ to retrieve the value of z(t) needed to compute the Jacobians Dfθ and
+∇θfθ. This step introduces additional errors z(T ) during forward pass, propagate on the ﬁnal gradients: numerical errors accumulated on b∗N ≈ to the gradients and sum up with errors on the backward integration of (2.1).
+Here we take a different, more robust direction by interpolating the shooting parameters and drop the integration of (2.1) during the backward pass. The values of the shooting parameters retrieved by the forward pass of MSLs are solution points of the IVP (2.1), i.e. b∗n = φ(z0, t0, tn) (up to the forward numerical solver tolerances). On this assumption, we construct a cubic spline interpolation ˆz(t) of the shooting parameters b∗n and we query it during the integration of λ to compute the Jacobians of fθ.
+Further results on back–propagation of MSLs are provided in Appendix B.3. Appendix C.4 practical aspects of the backward model alongside software implementation of the interpolated adjoint. The entire scheme of a forward–backward pass of an MSL is shown in Figure 4.
+One-step inference: ﬁxed point tracking Consider training a MSL to minimize a twice– differentiable loss function L(x, B∗, θ) with Lipschitz constant mθ
+L through the gradient descent iteration
+θp+1 = θp −
+ηp∇θL(x, B∗p, θp) where ηp is a positive learning rate and B∗p is the exact root of the matching function gθ computed with parameters θp (i.e. the exact solution of the IVP (2.1) at the boundary points). Due to Lipschitzness of
+L, we have the following uniform bound on the variation of the parameters across training iterations
+θp(cid:107)2 ≤ (cid:107)
+If we also assume γθ to be Lipschitz continuous w.r.t z and θ with constants mθ
+γ and differentiable w.r.t. θ we can obtain the variation of the ﬁxed point B∗ to small changes in the model parameters by linearizing solutions around θp
+θp+1 −
+ηpmθ
+L.
+γ, mz
+B∗p+1 − to obtain the uniform bound
+B∗p = [θp+1 −
+θp]
+∂γθp (B∗p, z0)
+∂θ
++ o(
+θp+1 − (cid:107) 2 2)
+θp(cid:107)
+B∗p+1 − (cid:107)
+B∗p(cid:107)2 ≤
+ηpmθ
+Lmθ
+θp+1 −
+γ + o( (cid:107) 2 2).
+θp(cid:107) 5
+Figure 5: Single iteration computational span (McCool et al., 2012) in MSL. We normalize to 1 the cost of evaluating fθ. The N − k sub–IVPs are solved in parallel in their sub–intervals, thus requiring a minimum span
+NFEφ. Forward sensitivity introduces Jacobian–matrix products costs amounting to jmp, which can be further parallelized into jvps.
+Having a bounded variation on the solutions of the MSL for small changes of the model parameters
+θ, we might think of recycling the previous shooting parameters B∗p as an initial guess for the direct
+Newton algorithms in the forward pass succeeding the gradient descent update. We show that by choosing a sufﬁciently small learning rate ηp one Newton iteration can be sufﬁcient to track the true value of B∗ during training. In particular, the following bound can be obtained.
+Theorem 1 (Quadratic ﬁxed-point tracking). If fθ is twice continuously differentiable in z then for some M > 0. ¯B∗p is the result of one Newton iteration applied to B∗p.
+B∗p+1 − (cid:107)
+¯B∗p(cid:107)2 ≤
+M η2 p (3.4)
+The proof, reported in Appendix A.1, relies on the quadratic converge of Newton method. The quadratic dependence of the tracking error bound on ηk allows use of typical learning rates for standard gradient based optimizers to keep the error under control. In this way, we can turn the implicit learning problem into an explicit one where the implicit inference pass reduces to one Newton iteration. This approach leads to the following training dynamics:
+θ
+η
+∇θL(x, B∗, θ)
+− (3.2), B∗ apply
+{
+We note that the main limitation of this method is the assumption on input x to be constant across training iterations (i.e. the initial condition z0 is constant as well). If the input changes during the training (e.g. under mini-batch SGD training regime), the solutions of the IVP (2.1) and thus its corresponding shooting parameters may drastically change with x even for small learning rates.
+θ
+B∗
+←
+←
+}
+Numerical scaling Each class of MSL outlined in Section 3.1 is equipped with unique computa-tional scaling properties. In the following, we denote with NFEφ the total number of vector ﬁeld fθ evaluations done, in parallel across shooting parameters, in a single sub–interval [tn, tn+1]. Similarly,
+NFEψ indicates the function evaluations required by the coarse solver used for parareal approxima-tions. Here, we set out to investigate the computational signature of MSLs as parallel algorithms.
+To this end, we decompose a single MSL iteration into two core steps: solving the IVPs across sub–intervals and computing sensitivities Dφ (or their approximation). Figure 5 provides a summary of the algorithmic span3 of a single MSL iteration as a function of number of Jacobian vector products (jvp), Jacobian matrix products (jmp), and vector ﬁeld evaluations (NFE).
+Fw sensitivity MSL frontloads the cost of computing Dφθ,n by solving the forward sensitivity
+ODEs of Proposition 1 alongside the evaluation of γθ. Forward sensitivity equations involve a jmp, which can be optionally further parallelized as nz jvps by paying a memory overhead. Once sensitivities have been obtained along with γθ, no additional computation needs to take place until application of the shooting parameter update formula. The forward sensitivity approach thus enjoys the highest degree of time–parallelizability at a larger memory cost.
+Zeroth–order MSL computes γθ via a total of NFEφ evaluations fθ, parallelized across sub–intervals.
+The cheaper IVP solution in both memory and compute is however counterbalanced during calculation 3Longest sequential cost, in terms of computational primitives, that is not parallelizable due to problem– speciﬁc dependencies. A speciﬁc example for MSLs are the sequential NFEφ calls required by the sequential
+ODE solver for each sub–interval. 6
+− of the sensitivities, as this MSL approach approximates the sensitivities Dφθ,n by a zeroth–order update requiring N k sequential calls to a coarse solver.
+The analysis of MSL backpropagation scaling is straightforward, as sequential adjoints for MSLs mirror standard sensitivity techniques for Neural ODEs in both compute and memory footprints.
+Alternatively, AD can be utilized to backpropagate through the operations of the forward pass methods in use. This approach introduces a non–constant memory footprint which scales in the number of forward iterations and thus depth of computational graph. 4 Applications 4.1 Variational MSL
+Let x : (cid:82)
+→
+M , . . . , x0, . . . , xN } ∈ x
+{
+−
+< t0 <
+M < t
+−
+M , . . . , x0, equivalent to approximating the conditional distribution p(x1:N | x x we introduce variational MSLs (vMSLs) as the following latent variable model: (cid:82)nx , be an observable of some continuous–time process and let X = nx be a sequence of observations of x(t) at time instants
+< tN . We seek a model able to predict x1, . . . , xN given past observations
+M :0). To this end (cid:82)(M +N +1)
+· · ·
+· · ·
+×
+−
+−
+M :0) qω(z0| x (µ, Σ) =
+M :0) = z0 ∼
+−
+Eω(x
+− (µ, Σ)
+N x qω(z0|
+−
+Encoder
+Approx. Posterior
+M :0) Reparametrization
+Eω
+B∗ : gθ(B∗, z0) = (cid:48)
+Decoder
+ˆx1, . . . , ˆxN = (cid:96)(B∗) Readout (cid:96)
+Dθ
+Once trained, such model can be also used to generate new realistic sequences of the observable x(t) by querying the decoder network at a desired z0. vMSLs are designed to scale data generation to longer sequences, exploiting wherever possible parallel computation in time in both encoder as well as decoder modules. The structure of
+Eω is designed to leverage modern advances in representation learning for time–series via temporal convolutions (TCNs) or attention operators (Vaswani et al., 2017) to offer a higher degree of parallelizability compared to sequential encoders e.g RNNs, ODE-RNNs (Rubanova et al., 2019) or Neural CDEs (Kidger et al., 2020b). This, in turn, allows the encoder to match the decoder in efﬁciency, avoiding unnecessary bottlenecks. The decoder
+Dθ is composed of a MSL which is tasked to unroll the generated trajectory in latent space. vMSLs are trained via traditional likelihood methods. The iterative optimization problem can be cast as the maximization of an evidence lower bound (ELBO): min (θ,ω) (cid:69)z0 qω(z0
+∼ x−M :0)
+|
+N n=1 (cid:88) log pn(ˆxn)
+KL(qω||N
+− ((cid:48), (cid:73))) (xn, σn) and the standard deviations σn are left as a hyperparameters. with pn(ˆxn) =
+N
+Sequence generation under noisy observations We apply vMSLs on a sequence generation task given tra-jectories corrupted by state–correlated noise. We con-sider a baseline latent model sharing the same over-all architecture as vMSLs, with a Neural ODE as de-coder. In particular, the Neural ODE is solved via the dopri5 solver with absolute and relative tolerances set 4, whereas the vMSL decoder is an instance of to 10− fw sensitivity MSL. The encoder for both models is comprised of two layers of temporal convolutions (TCNs). All decoders unroll the trajectories directly in output space without additional readout networks. The validation on sample quality is then performed by in-spection of the learned vector ﬁelds and the error against the nominal across the entire state–space. The proposed model obtains equivalent results as the baseline at a signiﬁcantly cheaper computational cost. As shown in Figure 6, vMSLs require 60% less NFEs for a single training iteration as well as for sample generation, achieving results comparable to standard Latent Neural ODEs (Rubanova et al., 2019).
+We report further details and results in Appendix E.1.
+Figure 6: Mean and standard deviation of
+NFEs during vMSL and Latent Neural ODE across training trials. vMSLs require 60% less
+NFEs during both training and inference. 7
+4.2 Neural Optimal Control
+Beyond sequence generation, the proposed framework can be applied to optimal control.
+Here we can fully exploit the drastic computa-tional advantages of MSLs. In fact, we leverage on the natural assumption of ﬁniteness of initial conditions z0 where the controlled system (or plant) is initialized to verify the result of Th. 1.
+Let us consider a controlled dynamical system
+˙z(t) = f (t, z(t), πθ(t, z)), z(0) = z0 (4.1) with a parametrized policy πθ : t, z
+πθ(t, z) and initial conditions z0 ranging in a ﬁnite set zj 0}j. We consider the problems of
+Z0 = stabilizing a low–dimensional limit cycle and deriving an optimal boundary policy for a linear
+PDE discretized as a 200–dimensional ODE. (cid:55)→
+{ z
+{
+∈ Z
+Figure 7: [Left] Closed–loop vector ﬁelds and trajec-tories corresponding to the uθ-controlled MSL. [Right]
+Learned controller uθ(z) (z ∈ (cid:82)2) for the two different desired limit cycles. Although, the inference of the all trajectory is performed with just two steps of RK4 (8 NFE), the initial accuracy of dopri5 (> 3000 NFE) is preserved throughout training.
+Limit cycle stabilization We consider a sta-bilization task where, given a desired closed curve Sd =
+, we mini-: sd(z) = 0
+} mize the 1-norm between the given curve and the MSL solution of (4.1) across the timestamp-sas well as the control effort
+. We verify the approach on a one degree–of–freedom mechanical
+πθ| system, aiming with closed curves Sd of various shapes. Following the assumptions on ﬁxed point tracking and slow–varying–ﬂows of Th. 1, we initialize B0 j by dopri5 adaptive–step solver set 8. Then, at each training iteration, we perform inference with a single parallel with tolerances 10− rk4 step for each sub–interval [tn, tn+1] followed by a single Newton update. Figure 7 shows the learned vector ﬁelds and controller, conﬁrming a successful system stabilization of the system to different types of closed curves. We compare with a range of baseline Neural ODEs, solved via rk4 and dopri5. Training of the controller via MSLs is achieved with orders of magnitude less wall–clock time and NFEs. Figure 8 shows the difference in NFEs w.r.t. dopri5 while Fig. 9 compares wall–clock times per training iteration of MSL, dopri5 and rk4.
+|
+We further provide Symmetric Mean Average
+Percentage Error (SMAPE) measurements be-tween trajectories obtained via MSLs and an adaptive–step solver. MSLs initialized with re-cycled solutions are able to track the nominal trajectories across the entire training process.
+Additional details on the experimental setup, including wall–clock time comparisons with rk4 and dopri5 baseline Neural ODEs is are provided in Appendix E.2. the Timo-Neural Boundary Control of shenko Beam We further show how MSLs can be scaled to high–dimensional regimes by tackling the optimal boundary control prob-lem for a linear partial differential equation.
+In particular, we consider the Timoshenko beam (Macchelli and Melchiorri, 2004) model in Hamiltonian form. We derive formalize the boundary control problem and obtain a structure–preserving spectral discretization yielding a 160–dimensional Hamiltonian ODE.
+Figure 8: Symmetric Mean Average Percentage Error (SMAPE) between solutions of the controlled systems obtained by MSLs and nominal. Compared to Neural
+ODEs, MSLs solve the optimal control problem with
+NFE savings of several orders of magnitude by carrying forward their solution across training iterations.
+We parameterize the boundary control policy with a multi–layer perceptron taking as input (control feedback) the 160–dimensional discrete state. We train the model in similar setting to the previous example having the MSL equipped with fw sensitivity and one step of rk4 for the parallel 8
+Figure 9: Mean and standard deviation of wall-clock time of complete training iteration (for-ward/backward passes + GD update) for differ-ent solvers on the circle experiment.
+Figure 10: Mean and standard deviation of wall–clock time per training iteration for MSL and Neural ODE across training trials. MSLs require are three times faster than the sequential rk4 with same accuracy (step size). integration. We compare the training wall–clock time with a Neural ODE solved by sequential rk4 in
+Fig. 10. The resulting speed up of MSL with forward sensitivity is three time faster than the baseline
+Neural ODE proving that the proposed method is able to scale to high–dimensional regimes. We include a formal treatment of the boundary control problem in Appendix D while further experimental details are provided in Appendix E.3. 4.3 Fast Neural CDEs for Time Series Classiﬁcation
+To further verify the broad range of applicability of
+MSLs, we apply them to time series classiﬁcation as faster alternatives to neural controlled differen-tial equations (Neural CDEs) (Kidger et al., 2020b).
+Here, MSLs remain applicable since Neural CDEs are practically solved as ODEs with a special struc-ture, as described in Appendix E.4. We tackle the
+PhysioNet 2019 challenge (Goldberger et al., 2000) on sepsis prediction, following the exact experi-mental procedure described by Kidger et al. (2020b), including hyperparameters and Neural CDE architectures. However, we train all models on the full dataset to enable application of the ﬁxed point tracking technique for MSLs4. Figure 11 visualized training convergence of zeroth–order MSL Neural CDEs and the baseline Neural CDE solved with rk4 as in the original paper. Everything else being equal, including architecture and backpropagation via sequential adjoints, MSL Neural CDEs converge with total wall–clock time one order of magnitude smaller than the baseline.
+Figure 11: Mean and standard deviation of AUROC during training of MSLs and baseline Neural CDEs on sepsis prediction. 5

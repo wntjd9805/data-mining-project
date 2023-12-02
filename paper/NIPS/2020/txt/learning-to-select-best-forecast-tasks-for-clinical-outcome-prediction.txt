@@ -1,0 +1,436 @@
+Abstract
+The paradigm of ‘pretraining’ from a set of relevant auxiliary tasks and then
+‘ﬁnetuning’ on a target task has been successfully applied in many different domains.
+However, when the auxiliary tasks are abundant, with complex relationships to the target task, using domain knowledge or searching over all possible pretraining setups is inefﬁcient and suboptimal. To address this challenge, we propose a method to automatically select from a large set of auxiliary tasks, which yields a representation most useful to the target task. In particular, we develop an efﬁcient algorithm that uses automatic auxiliary task selection within a nested-loop meta-learning process. We have applied this algorithm to the task of clinical outcome predictions in electronic medical records, learning from a large number of self-supervised tasks related to forecasting patient trajectories. Experiments on a real clinical dataset demonstrate the superior predictive performance of our method compared to direct supervised learning, naive pretraining and simple multitask learning, in particular in low-data scenarios when the primary task has very few examples. With detailed ablation analysis, we further show that the selection rules are interpretable and able to generalize to unseen target tasks with new data.
+
+Introduction 1
+The wide adoption of electronic medical record (EMR) systems has generated large repositories of patient data in the form of multivariate time-series. These data are increasingly used for supervised learning, with the goal of providing decision support to clinicians by predicting clinical outcomes for individual patients [1]. Recent examples have focused on the prediction of inpatient mortality [2], acute kidney injury [3], circulatory shock [4], etc.
+One major challenge with EMR modeling is that the raw data is high-dimensional, noisy, sparse and heterogeneous, as it is generated in the course of routine clinical care [5]. Furthermore, accurately labeling clinical endpoints can be extremely challenging and often requires time-consuming manual chart review by clinicians, meaning that modeling must be data efﬁcient. Even in cases where the outcome label is more clearly encoded, e.g. mortality, data availability is often still an issue as there are only a limited number of patients with that outcome in a selected cohort.
+To tackle these issues of data quality and label shortage, a common approach widely applied in computer vision (CV) and natural language processing (NLP) domains is pretraining and ﬁnetuning.
+Pretraining involves learning a compact representation on related tasks with abundant data. These learned representations can then be ﬁnetuned on the primary task with limited labels, assisting supervised performance by leveraging prior knowledge.
+EMRs contain thousands of different laboratory tests, observations, medications, procedures etc., for each patient over time. Using the trajectories of these time series data as self-supervised objectives provides a promising way to learn a useful patient representation. However, naively pretraining across
+*Authors contributed equally. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+all measurements can easily lead to a representation oblivious of the target clinical prediction task.
+Furthermore, pretraining from trivial and less important measurements may overshadow important signals in the learned representation. Since the number of available measurement trajectories is large, an exhaustive search over all possible task combinations is not tractable. With complex relationships between the measurement trajectories and the primary outcome, the decision of how to structure pretraining is not a straightforward process.
+To address this challenge, the goal of this paper is to automatically select and mix the most relevant auxiliary tasks to be used in pretraining for a speciﬁc primary task. In particular, we introduce a new connection between multitask learning and transfer learning within the framework of meta learning.
+Each auxiliary task is a self-supervised trajectory forecast for a speciﬁc clinical measurement, and the primary target task involves supervised learning based on the learned representation. We propose an efﬁcient gradient-based algorithm that learns to automatically select the most relevant auxiliary tasks for pretraining, and then optimizes the meta objective of generalizing to the target task.
+Experiments on real world clinical datasets show that the learned representation from the selected auxiliary tasks leads to favorable predictive performance compared to both direct supervised learning, naive pretraining and simple multitask learning. This advantage further increases in low data regimes where the target task has few labeled examples. Detailed ablation analysis demonstrates that the selected auxiliary tasks are meaningful and able to generalize to unseen target tasks. 2 Learning Tasks
+In a longitudinal EMR dataset, a patient’s record is a collection of sequential clinical-visit data which can be naturally represented as multi-variate time series. Each time series captures the readings over time from one type of clinical measurement (e.g., blood pressure, lactate, etc.), or intervention (e.g., ventilator settings). For a given patient, we use xf at the time step t. xf xf
+T t=1 denotes the f th time series, and T is the number of time steps. We also t }
+{ use xt as the t to represent the f th feature value f
+-dimensional feature vector at the time t. 2F
+T t=1, there is an
+Primary supervised task: Clinical outcome prediction. For each sequence associated label y representing the occurrence of a clinical outcome of interest, e.g., sepsis, shock, mortality, etc. The goal is to learn a model that predicts the most likely label value ˆy for a given input
+T sequence t=1. The learning process thus takes the standard form of supervised learning with a loss `(ˆy, y) associated with the model. xt}
+{ xt}
+{
+T =
+|F|
+Auxiliary task: Trajectory forecast. The goal of the trajectory forecast task is to model the distribution of the future values of raw EMR data elements p(xf xf 1:⌧ ) given the past history xf 1:⌧ . Here, ⌧ is the time of prediction, H represents the number of time steps we look into the future, and xf
+⌧ +H t=⌧ +1. This task by nature takes the form of self-supervised learning since the future values of a time series can be easily treated as the learning signal. Compared to the clinical outcome prediction task, the patient’s trajectory forecast task requires no human labels, and many powerful self-supervised techniques can be applied to the task [6–13].
+⌧ +1:⌧ +H =
+⌧ +1:⌧ +H | xf t }
+{
+We can expect that pretraining with self-supervised trajectory forecast tasks for each feature f 2F will produce useful patient representations for the clinical outcome prediction task which often has few examples. However, when the set of auxiliary tasks is large, both joint pretraining using all the tasks in
+, or successive pretraining in an iterative way, can be sub-optimal and inefﬁcient in that not all the auxiliary tasks are equally useful for transferring knowledge to the target primary task, leading to a less informative representation for downstream tasks.
+|F|
+F 3 Automatic Task Selection
+We study the problem of learning to select the most relevant trajectory forecast tasks so that the learned representation is optimized for improving the performance of the target clinical outcome prediction task (schematic in Figure 1). In the following sections, we present our problem formulation, model design, and learning algorithms. 3.1 Problem Formulation requires exploring 2|F |
+Selecting the optimal subset of auxiliary trajectory forecast tasks from combinations, which is prohibitive in practice. To make the search space continuous, we relax
+F 2
+Figure 1: Schematic for guiding pretraining by supervised learning on a primary outcome via a nested-loop meta-learning process. The inner loop learning uses a sequence-to-sequence architecture for trajectory prediction.
+The utility of the learned representation from the encoder is measured by the supervised learning in the outer loop, and then used to update the weight of each trajectory prediction task in the inner loop via gradient descent. the categorical choice of a particular task f by learning a weight  f , f  f = 1 to indicate the importance of each task. Alternatively,   can be treated as a learned distribution over the task space
+, without loss of generality, we use a very basic sequence to sequence
+F model, which can easily be extended to more advanced attention-based models [7] or state-space models [8–13].
+. For each task f 2F
+P
+Enc✓e (xf 1:⌧ ) = s⌧ , Dec✓d (s⌧ ) = ˆxf
+⌧ +1:⌧ +H ,` p(✓e,✓ d
+ ) =
+|
+Xf
+ f k
+ˆxf
+⌧ +1:⌧ +H   xf 2 2,
+⌧ +1:⌧ +H k where the encoder Enc✓e encodes the input sequence xf 1:⌧ up to time ⌧ into an intermediate state s⌧ from which the decoder Dec✓d decodes the predicted sequence ˆxf
+⌧ +1:⌧ +H . Here, we use the regression loss for simplicity. `p denotes the pretraining loss. Other reconstruction losses, e.g., negative log likelihood losses, can also be easily applied. For the primary supervised learning task, we reuse the pretrained encoder, and train an additional classiﬁer head for outcome prediction with a typical cross-entropy log loss h⌧ ), (1)
+Enc✓e( x1:⌧ }
+{
+) = h⌧ ,` c(✓e,✓ c) = log p✓c (y x1:⌧ }
+{
+| where ✓c are the parameters of the classiﬁer, and (
+, y) is the training example of one patient, and `c denotes the classiﬁcation loss.. We formulate the task selection problem into the following optimization task. minimize
+ 
+|
+ 
+`c val such that
+NS ,✓ c
+✓e
+NS train(✓e,✓ c),✓ e
+NS = argmin `c
+ 
+ 
+`p train(✓e,✓ d
+NP = argmin
+ )
+✓e
+NS ,✓ c
+NP ,✓ d
+✓e
+|
+ !
+✓e,✓d
+NS =  train(✓e
+NP ) self-supervised learning
+ ! supervised learning (2)
+NP
+NP and ✓d where NP and NS are the number of training update steps of the Pretraining and the Supervised training, respectively. ✓e
+NP are the encoder and decoder parameters learned after NP steps of self-supervised training. We then switch to the target task by treating ✓e
+NP as the initialization
+) is an operator that updates the initialization ✓e of the encoder.  train(✓e
+NP for NS steps to obtain
+✓e
+NS . In practice,  train can be the normal gradient update using the train data of the target task.
+Here, we explicitly use  train to denote the initialization from ✓e
+NP . More importantly, because the self-supervised learning output ✓e
+NP implicitly depends on a given  , it further enables the learning of   using the error signals back-propagated from the target task. That is, we explicitly optimize the validation loss `c of the target task, which is often referred to as the response val function (or meta objective), with respect to   known as the hyper (or meta) parameter, so that the generalization of the target task can be directly optimized.
+✓e
+NS
+,✓ c
+NS
+ 
+ 
+ 
+| 3.2 Bi-level Optimization
+The optimization of the meta objective 2 determines the quality of the learned representation from the encoder with parameter ✓e
+Np , and it includes two loops of learning processes shown in Figure 1.
+Given a ﬁxed   as one conﬁguration, the inner loop ﬁrst ﬁnds a candidate representation through the self-supervised learning on the trajectory forecast tasks, some of which receives more attention while others may be discarded. It then ﬁnetunes the representation via supervised learning on the clinical outcome prediction task. The quality of the learned representation is measured by the meta objective of the outer loop. The outer loop then updates the conﬁguration of the inner loop to locate a 3
+`c val
+NS ,✓ c
+✓e
+NS potentially better hypothesis space where the two objectives `p and `c will be minimized again. This nested learning process also arises in gradient-based hyper-parameter optimization[14, 15], and can be reformulated as follows. minimize
+✓d
+✓e
+✓c
+,
+,
+ , i } i } i }
+{
+{
+{ i (✓e
+✓e i =  e 1,✓ d 1,  ),✓ d i i
+ 
+  1),✓ c 1,✓ c i (✓e i =  e
+✓e i i
+ 
+ 
+  i =  d i (✓e (3) i
+  where  ·i and  ·i represent the gradient step of the optimization that updates the parameters at step i in the respective pretrain and ﬁnetune stage. This reformulates the implicit dependencies among the parameters in the training procedure into explicit optimization constraints. The Lagrangian of problem 3 is thus
+[1, NP ] ,
+[NP + 1, NP + NS] , i (✓e i
+  1,✓ c i
+  1,✓ d i
+  1), i i =  c such that 1,  ), i 2 2
+  ( ,
+L
+✓e i }
+{
+,
+✓d i
+,
+✓c i }
+{
+,↵, , , 
+) = `c val
+NS ,✓ c
+✓e
+NS
++
+↵i
+NP
+  i (✓e i
+   d
+NP
+ i i=1
+X
+  1,✓ d i
+  1,  )
+ 
+✓d i
++
+ 
+  i (✓e i
+ 
+ e i=1
+X 1,✓ c i
+  1)
+ 
+NP +NS
+ i
+Xi=NP +1
+   e i (✓e i
+  1,✓ d i
+  1,  )
+ 
+✓e i
++ (4)
+ 
+ 
+ 
+✓e i
++  i
+ c i (✓e i
+  1,✓ c i
+  1)
+ 
+✓c i
+ 
+ 
+  where for each step i, ↵i,  i,  i, and  i are the associated row vectors of Lagrangian multipliers.
+Since the encoder parameter ✓e
+Np at the last step of the pretraining builds the connection between the self-supervised trajectory forecast tasks and the supervised clinical outcome prediction task, and the value at the last supervised step ✓e
+Ns is used for predictions, their derivatives are ﬁrst given by
+NP +1(✓e
+ NP
+=
+↵NP +  NP +1
+NP ,✓ c
+NP ,  )
+ NS ,
+ e
+NP
+⌘ r✓e
+⇣ r✓d
+NP L
+  r✓e r✓e
+NP L
+NS L
+=
+=
+  r✓e
+NS
+`c val  
+= i L
+Then, at each intermediate step i in the pretrain and ﬁnetune stage, the respective derivatives are i ,✓ d i ,✓ c i ,✓ d
+↵i + ↵i+1r✓e
+ i +  i+1r✓e
+ i +  i+1r✓d
+ 
+Finally, we can derive the gradient of the hyper-parameter   as 2
+[NP + 1, NP + NS   2 i ,  ), for i i ), for i 2 i ,  ), for i  e i+1(✓e i+1(✓e
+ e  d i+1(✓e r✓e r✓e r✓d
+[1, NP  
+[1, NP   1] , 1] , 1] . i L i L
+ 
+=
+ 
+= i i i
+NP
+= r L
+↵ir  e i (✓e i
+  1,✓ d i
+  1,  ) +  ir  d i (✓e i
+  1,✓ d i
+  1,  )
+. i=1
+X
+ 
+ 
+The optimal conditions are then obtained by setting each derivative to zero. i i
+NS
+NP 2 1] 1]
+ !
+ ! (9) (10) r✓e knowledge transfer supervised learning self-supervised learning
+`c
+NS ,✓ c
+✓e
+ NS =
+NS val i ,✓ c i+1(✓e
+ e
+ i =  i+1r✓e i ), i
+ 
+  2
+ e
+NP ,✓ c
+NP +1(✓e
+↵NP =  NP +1r✓e i ,✓ d i+1(✓e  e i ,  ), i
+↵i = ↵i+1r✓e supervised objective
+[NP + 1, NP + NS  
+NP )
+ !
+[1, NP  
+We ﬁrst observe that Equation 10 back-propagates the signal from the meta-objective that quantiﬁes the utility of the learned representation from the encoder through the supervised learning process.
+Equation 11 is the touching point of the two learning processes that further transfers this signal back to the self-supervised learning stage. Finally, Equation 12 distributes the signal to each learning step of the pretraining process. Compared to the encoder that is involved in both pretraining and
+ﬁnetuning, the decoder of the sequence to sequence model is only used in the pretraining stage to serve the self-supervised loss only. As a result, even though the decoder ✓d i to r  d measure how fast the gradient of the encoder can change w.r.t  , the second order information i from the decoder itself is not needed to update  . This is also veriﬁed by the optimality condition from Equation 7. Therefore, the gradient of   can that  NP = 0 and  i =  i+1r✓d be solely determined by the signals of both ↵ and   from Equation 10 to 12. The full algorithm is
+  given in the Appendix. i is involved in r  e i ,✓ d
+✓e (12) (11) i ,   d
+ ! i+1
+  i 4 (5) (6) (7) (8)  
+Algorithm 1: First-Order Automatic Task Selection
+Randomly initialize ✓e 0 , ✓c for k = 1, 2, ... do
+NP and  ; 0, ✓d for i
+[1, NP ] do
+✓e i
+  train/@✓e
+  1,✓ d
+, ✓d 1,  k i
+ 
+NP , and b = @`p i =  d i train/@ ;
+ 
+ 
+✓e i
+  1,✓ d i
+  1,  k
+;
+  2 i =  e
+✓e i
+Get a = @`p for i 2
+✓e i =  e
+Get c = @`c
+Get g  = c
+ k =  k 1
+ 
+NP ,   return ✓e 1), ✓c
+[NP + 1, NP + NS] do i (✓e 1,✓ c i i
+ 
+  val/@✓e
+NS ; (1/a)
+✏
+· g  ; b ;
+·
+ 
+· i =  c i (✓e i
+  1,✓ c i
+  1);
+. Self-supervised learning loop
+. Gradient descent
+. Supervised learning loop
+. Gradient descent
+. Compute hyper-gradient by Equation 13
+. Gradient descent 3.3 Efﬁcient Gradient-based Learning Algorithm i ,✓ c r  e i ) include
+Exact evaluation of Equation 8 is expensive in that r✓e the Jacobian and Hessian matrix of the gradient update operation  e i+1. Motivated by related techniques in [16], we propose an efﬁcient ﬁrst-order approximation to Equation 8. More speciﬁcally, 1 given that ✓e are treated as constants [16]. By applying the chain rule with the gradient approximation, we can have
+`c train in Equation 2, the gradients 1,  ) and i and  e
+NP +NS   i=NP
+=  train(✓e 1,✓ d i
+  i (✓e i
+  i+1(✓e
+) = ✓e
+`c train r✓e r✓e
+ e
+P
+NP
+NP
+NS
++
+  i i i
+@`p
+·
+ 
+=
+NS
+NS
+NS
+,✓ c
+@`p
+/@`p
+@`c val
+@✓e
+@✓e
+NS
+NP ·
+@`c val
+@  train(✓e,✓ d
+@ 
+@✓e
+NP train(✓e,✓ d
+✓e
+NS
+@✓e
+ 
+|
+/@✓e
+NP to be the identity matrix due to the gradient approximation,
+ ) = 1/ @`p which can be simply achieved at the end of the self-where we have @✓e train(✓e,✓ d
+@✓e supervised training, and @`p
+ )/@  can be obtained via back-propagation. The overall
+ﬁrst-order approximation algorithm is given in Algorithm 1. After the joint training, there will be a
+ﬁnal round of ﬁnetuning on the target task alone. Experimentally, we ﬁnd this stage is useful when the target task has very few examples, and its contribution decreases as more training examples become available. train(✓e,✓d
+@✓e
+NP train(✓e,✓ d (13)
+ ) ·
+ )
+NP
+ )
+|
+|
+,
+|
+| 4 Experiments
+We evaluate our proposed algorithm, referred to as AutoSelect, using the openly accessible
+MIMIC-III dataset [17] which contains over 38,000 adult patients admitted to the intensive care unit. We select a set of 96 common clinical measurements, which constitutes the set of candidate auxiliary tasks used for trajectory forecast. All values were normalized using z-score, and missing values were imputed by carrying forward the last observation. Yet, the model is always trained only using the true values as the targets instead of the imputed values.
+We consider three primary supervised learning tasks deﬁned using the criteria in Table 1. The prediction uses data from the ﬁrst 48 hours of the
+ICU admission, and the label is positive if the cri-teria are fulﬁlled within the next 48 hour window (i.e. 48 96 hours post admission). Moreover, the event sequence of each patient is also restricted to a window of 48 hours in the past, so that the bias towards longer stays can be alleviated. For simplicity, the latter two organ failure tasks are deﬁned in a lightweight manner following the SOFA score criteria [18]. We report the details of the inclusion and exclusion criteria, the cohort and feature statistics, data preprocessing methods and results on additional tasks in the Appendix.
+Mortality
+Low Blood Pressure (BP)
+Kidney Dysfunction (KD)
+Table 1: Task deﬁnitions.
+Mean blood pressure
+Creatinine
+Patient expired
+ 2mg/dl
+Deﬁnition 65mmhg
+Task
+ 
+  4.1 Baselines and Experiment Setting
+Supervised Learning. We train a single baseline model with exactly the same architecture as the model used for the primary tasks of Table 1 in AutoSelect. Given that these primary tasks often have low resources, we expect supervised learning to have low predictive performance in general. 5  
+Task y t i l a t r o
+M
+P
+B
+D
+K
+Data 1% 10% 100% 1% 10% 100% 1% 10% 100%
+Supervised
+Pretrain (All)
+CoTrain
+AutoSelect 0.738 (0.017) 0.853 (0.016) 0.899 (0.008) 0.730 (0.022) 0.754 (0.040) 0.886 (0.026) 0.745 (0.015) 0.849 (0.015) 0.901 (0.011) 0.809 (0.010) 0.853 (0.013) 0.899 (0.011) 0.778 (0.031) 0.772 (0.028) 0.881 (0.030) 0.771 (0.021) 0.828 (0.012) 0.907 (0.007) 0.725 (0.014) 0.854 (0.014) 0.902 (0.009) 0.718 (0.041) 0.724 (0.031) 0.892 (0.018) 0.748 (0.020) 0.849 (0.012) 0.899 (0.009) 0.833 (0.017) 0.882 (0.012) 0.909 (0.008) 0.838 (0.022) 0.833 (0.018) 0.899 (0.021) 0.823 (0.018) 0.862 (0.018) 0.910 (0.011)
+Table 2: Predictive performance (AUC-ROC) of different competing methods for the three primary outcome prediction tasks under consideration with respect to different levels of data-scarcity.
+Pretraining (All). This is the same pretraining-and-ﬁnetuning paradigm as in the work of [19]. We
+ﬁrst learn the patient representation by pretraining using all the 96 self-supervised trajectory forecast tasks, and then ﬁnetune the model on the target tasks in Table 1.
+CoTrain via Multitask Learning. This is a simple widely used multitask learning setup. We ﬁrst cotrain the target task with all the auxiliary tasks, and use a task weight hyperparameter to balance the losses between these two groups of tasks. We set the weight of the target loss to be 10 tuned by the validation set performance to make the losses in the same scale, and the auxiliary task has a weight of 1. After the co-training stage, we ﬁnetune the model using only the data of the primary task.
+Experimental Setup. The sequence-to-sequence architecture of the trajectory forecast task uses an
+LSTM for both encoder and decoder, where the hidden state has a dimension of 70. For the primary clinical outcome prediction task, the decoder is replaced by a simple 1-layer MLP as the classiﬁcation head. All the baselines and our method use the same architecture. This does not prevent our method from using more advanced architectures. All models were implemented⇤ in TensorFlow [20].
+For the direct supervised learning baseline, we use early stopping with the validation set to avoid overﬁtting. For all the experiments of the other approaches, we run approximately 5,000 steps during the pretraining stage, followed by 5 epochs for ﬁnetuning. For AutoSelect, these 5,000 steps are further divided between inner loop steps and outer meta-learning steps, so that the total number of training steps is consistent with other pretrained methods for fair comparison. The learning rates of all training loops were tuned and are 0.001 for supervised learning, 0.005 for self-supervised learning, 0.01 for   hyper-gradient update. Detailed hyperparameter tuning process is reported in the
+Appendix. Finally, we use 10-fold cross validation and estimate the standard error of the mean. For each fold, we split the dataset into train/validation/test according to 80%/10%/10% based on the hash value of the patient ID, and AUC-ROC is used as the evaluation metric by default with standard error reported in the parentheses next to it. 4.2 Performance Comparison of Clinical Outcome Prediction
+Table 2 shows the results of gradually adding more training data by taking 1%, 10% and 100% from the original train dataset. We ﬁrst observe that the performance of all methods in all tasks increases as more training data from the primary task are used. In the low resource regime, ‘Pretrain (All)’ has better performance than naive supervised learning, which is expected since it can transfer knowledge by learning from the auxiliary trajectory forecast tasks. Second, we also observe that the ‘CoTrain’ baseline has a hard time to balance all the 96 self-supervised trajectory forecasts and the supervised outcome prediction task even if it has an additional ﬁnetuning process. More sophisticated mixing ratios are thus needed to reconcile the different training speed of each task. Finally, we further compare AutoSelect to the two-stage pipeline approach [21] in the extreme case of using 1% of the data where it achieves 0.751(0.013), 0.720(0.022), 0.760(0.025) on the task of Mortality, BP and KD, respectively. By comparison, AutoSelect learns to adaptively tune the weight of each auxiliary task guided by the validation error from the primary task during pretraining, and thus is able to outperform these baselines by a signiﬁcantly large margin.
+⇤https://github.com/google-health/records-research/meta-learn-forecast-task 6
+Table 3: Predictive performance of AutoSelect in selected tasks.
+Task
+Pretrain (Top) Pretrain (Down) Pretrain (All)
+Data AutoSelect
+Table 4: Generalization of AutoSelect
+KD
+Data Mortality
+BP Mortality
+!
+! 1% 0.838 (0.022) 10% 0.833 (0.018) 0.812 (0.014) 0.824 (0.021) 0.788 (0.019) 0.781 (0.027) 0.778 (0.031) 0.772 (0.028) 1% 10% 0.842 (0.019) 0.847 (0.020) 0.833 (0.017) 0.869 (0.019) 1% 0.823 (0.018) 10% 0.862 (0.018) 0.805 (0.016) 0.855 (0.021) 0.749 (0.028) 0.825 (0.021) 0.771 (0.021) 0.828 (0.012)
+Mortality 1% 0.833 (0.017) 10% 0.882 (0.012) 0.810 (0.013) 0.850 (0.011) 0.772 (0.019) 0.823 (0.014) 0.809 (0.010) 0.853 (0.013)
+Data
+BP
+!
+Mortality KD
+Mortality
+! 1% 10% 0.812 (0.020) 0.871 (0.012) 0.809 (0.018) 0.867 (0.013)
+BP
+KD 4.3 Ablation Study
+What tasks are selected? We now examine the pretraining tasks that were assigned with higher weights in the meta learning process shown in Figure 2b. The following features were consistently ranked within the top 20 across different training data splits for mortality prediction: invasive and non-invasive blood pressures, heart rate, anion gap, respiratory rate (Full list is available in the
+Appendix). These represent a mixture of common vital signs and laboratory values that are clinically sensible correlates for mortality. Indeed, there is signiﬁcant overlap with the input features for classical risk scores that have been validated as mortality predictors in intensive care (e.g. APACHE
+II [22]). The top features for the other two supervised tasks, kidney dysfunction and low blood pressure, are detailed in the Appendix. Notably, the top features for low blood pressure include all available blood pressure recordings; however in the kidney dysfunction task, creatinine, which is the laboratory value on which the outcome is deﬁned, does not appear in this top list. Our hypothesis is that creatinine is measured sparsely - typically once every 24 hours - thus providing a weak signal over the 48 hour window of the self-supervising trajectory forecast task.
+How good are the selected tasks? To further validate the quality of top selected tasks and evaluate the impact of these features as pretraining tasks on the supervised outcome, we have conducted two ablation studies. In the ﬁrst, we pretrain the encoder using the top selected auxiliary tasks only, referred to as ‘Pretrain (Top)’. In the second, we instead pretrain the model with the remaining auxiliary tasks excluding the top ones, referred to as ‘Pretrain (Down)’. The hypothesis is that the top selected tasks already capture the necessary knowledge needed to optimize the performance of the target task, while the remaining ones are less important. We report the results of these two studies in
+Table 3. It shows that ‘Pretrain (Top)’ performs closer to AutoSelect and is consistently better than
+‘Pretrain (Down)’ and ‘Pretrain (Full)’, suggesting that the top selected tasks are able to transfer the most useful information to the target task. Meanwhile,we also observe that ‘Pretrain (Down)’ has similar performance to ‘Pretrain (Full)’ showing that the useful signals are indeed overshadowed in the learned representation with the full set of tasks.
+How does the learning occur? Figure 2a presents the training dynamics of AutoSelect for the mortality task as an example. During the pretraining stage, its performance measured by AUC-ROC in the validation set keeps improving and then jumps even higher when the ﬁnetuning stage starts at step 5,500 when the validation performance of the auxiliary tasks reaches the peak. The performance of mortality prediction then quickly decreases due to overﬁtting to its small ﬁnetuning data. The blue curve represents the learning process of ‘Pretrain (All)’. Because the mortality task was not involved in the pretraining stage, it only starts from the beginning of ﬁnetuning. The yellow curve is the process of ‘CoTrain’, where the validation performance of the mortality task ﬁrst jumps and then decreases during the pretraining period. This is caused by the learning speed difference among all the tasks where the training of the small primary task starts to overﬁt while that of the other auxiliary tasks still improves. Finally, we study the impact of different training steps of the nested learning loops of AutoSelect. By ﬁxing the total number of iterations around 5,000, in Figure 2c, we explore different conﬁgurations by varying the number of self-supervised training iterations (NP ) at the inner loop from 1,000 steps to 10 steps where (1,000/5) means 1,000 inner loop iterations and 5 outer loop iterations. In addition, the inner supervised training loop (NS) is conﬁgured to take 1/10 of the self-supervised iterations (NP ). We observe AutoSelect is generally robust across different conﬁgurations, and sweet points seem to be around (100/50) and (50/100).
+How does AutoSelect generalize? Finally, we look at how well the learned weights of the auxiliary tasks guided by a given target task are able to generalize to unseen new tasks. We ﬁrst use the mortality prediction task as the given primary task to guide the selection of the auxiliary trajectory forecast tasks. Then, we treat BP and KD as two new tasks, and directly ﬁnetune the model using 1% and 10% of the train data respectively. The reason is that, from a clinical perspective, mortality is a 7
+(a) Learning Dynamics (b) Task Weight Distribution (c) Robustness
+Figure 2: (a) Pretraining and ﬁnetuning curves of competing methods. AUC-ROC on the validation set is reported. (b) The learned weights of the 96 auxiliary tasks for mortality prediction as the primary task. (c)
+Predictive performance with respect to different meta-learning processes of AutoSelect. more general endpoint than speciﬁc dysfunctions. The hypothesis is that representations learned on the more general endpoint of mortality will be useful for more speciﬁc tasks. The prediction results are given in the top row of Table 3. Despite training only on the mortality task, the learned weights of the auxiliary tasks are able to improve the performance of BP and KD compared to the ‘Pretrain (All)’ baseline. Next, we use BP and KD to guide the selection learning separately, and then test on the mortality task at the bottom of Table 3. Since the speciﬁc dysfunction does not always imply an endpoint of mortality, the predictive performance on mortality is slightly worse than the respective results of AutoSelect. 5

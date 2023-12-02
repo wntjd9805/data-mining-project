@@ -1,0 +1,177 @@
+Abstract
+Consider learning a generative model for time-series data. The sequential setting poses a unique challenge: Not only should the generator capture the conditional dy-namics of (stepwise) transitions, but its open-loop rollouts should also preserve the joint distribution of (multi-step) trajectories. On one hand, autoregressive models trained by MLE allow learning and computing explicit transition distributions, but suffer from compounding error during rollouts. On the other hand, adversarial mod-els based on GAN training alleviate such exposure bias, but transitions are implicit and hard to assess. In this work, we study a generative framework that seeks to com-bine the strengths of both: Motivated by a moment-matching objective to mitigate compounding error, we optimize a local (but forward-looking) transition policy, where the reinforcement signal is provided by a global (but stepwise-decomposable) energy model trained by contrastive estimation. At training, the two components are learned cooperatively, avoiding the instabilities typical of adversarial objectives. At inference, the learned policy serves as the generator for iterative sampling, and the learned energy serves as a trajectory-level measure for evaluating sample quality.
+By expressly training a policy to imitate sequential behavior of time-series features in a dataset, this approach embodies “generation by imitation”. Theoretically, we illustrate the correctness of this formulation and the consistency of the algorithm.
+Empirically, we evaluate its ability to generate predictively useful samples from real-world datasets, verifying that it performs at the standard of existing benchmarks. 1
+
+Introduction
+Time-series data are ubiquitous in diverse machine learning applications, such as ﬁnancial, industrial, and healthcare settings. At the same time, lack of public access to data is a recurring obstacle to the development and reproducibility of research in domains where datasets are proprietary [1]. Generating synthetic—but realistic—time-series data is a promising solution [2], and has received increasing attention in recent years, driven by advances in deep learning and generative adversarial networks [3,4].
+Owing to the fact that time-series features are generated sequentially, generative modeling in the temporal setting faces a two-pronged challenge: First, a good generator should accurately capture the conditional dynamics of stepwise transitions p(xt|x1, ..., xt−1); this is important, as the faithfulness of any conceivable downstream time-series analysis depends on the learned correlations across both temporal and feature dimensions. Second, however, the recursive rollouts of the generator should also respect the joint distribution of multi-step trajectories p(x1, ..., xT ); this is equally important, as synthetic trajectories that inadvertently wander beyond the support of original data are useless at best. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Recent work falls into two main categories. On one hand, autoregressive models trained via MLE [5] explicitly factor the distribution of trajectories into a product of conditionals (cid:81) t p(xt|x1, ..., xt−1).
+While this allows directly learning and computing such transitions, with ﬁnite data this is prone to com-pounding errors during multi-step generation, due to the discrepancy between closed-loop training (i.e. conditioned on ground-truths as inputs) and open-loop sampling (i.e. conditioned on its own previous outputs) [6]. A variety of methods have sought to counteract this problem of exposure bias, employing auxiliary techniques from curriculum learning [7, 8] and adversarial domain adaptation [9, 10]; how-ever, such remedies are not without biases [11], and empirical improvements have been mixed [12–14].
+On the other hand, adversarial models based on GAN training and its relatives [15–17] directly model the distribution of trajectories p(x1, ..., xT ) [18–20]. To provide a more granular learning signal for the generator, a popular variant matches the induced distribution of sub-trajectories instead, providing stepwise feedback from the discriminator [21, 22]. TimeGAN [12] is the most recent incarnation of this, and operates within a jointly optimized latent space. GAN-based approaches alleviate the risk of compounding errors, and have been applied to banking [23], sensors [24], biosignals [25], and smartgrids [26]. However, the conditional dynamics are only implicitly learned, yielding no way of inspecting or assessing the quality of sampled transitions nor trajectories. Moreover, the adversarial objective leads to characteristically challenging optimization—exacerbated by the temporal dimension.
+Three Operations Consider a probabilistic generative model p for some dataset D. We are generally interested in performing one or more of the following operations: (1) sampling a time series τ ∼ p, (2) evaluating the likelihood p(τ ), and (3) learning the model p from a set of i.i.d. samples τ . In light of the preceding, we investigate a generative framework that attempts to fulﬁll the following criteria:
+• Samples should respect both the stepwise conditional distributions of features, as well as the joint distribution of full trajectories; unlike pure MLE, we wish to avoid multi-step compounding error.
+• Evaluating likelihoods should be possible as generic measures of sample quality for both transitions and trajectories—often desired for sample comparison, model auditing, or bias correction [27, 28].
+• Unlike black-box GAN discriminators, we wish that the evaluator be decoupled from any speciﬁc sampler, such that the two components can be trained non-adversarially, thus may be more stable.
+Contributions In the sequel, we explore an approach that seeks to satisfy these criteria. We ﬁrst give precise treatment of the “compounding error” problem, thus motivating a speciﬁc trajectory-centric optimization objective from ﬁrst principles (Section 2). To carry it out, we develop a general training framework and practical algorithm, along with its theoretical justiﬁcation: We train a forward-looking transition policy to imitate the sequential behavior of time series using a stepwise-decomposable energy model as reinforcement, giving a method that embodies “generation by imitation” (Section 3).
+Importantly, to understand its strengths and limitations, we compare the method to existing generative models for time-series data, and relate it to imitation learning of sequential behavior (Section 4).
+Lastly, through experiments with application to real-world time-series datasets, we verify that it gen-erates predictively useful samples that perform at the standard of comparable benchmarks (Section 5). 2 Synthetic Time Series 2.1 Problem Setup
+We operate in the standard discrete-time setting for time series. Let feature vectors xt ∈ X be indexed by time steps t, and let a full trajectory of length T be denoted τ := (x1, ..., xT ) ∈ T := X T . Also, t=1X t the history prior to time t. For ease of exposition denote with ht := (x1, ..., xt−1) ∈ H := ∪T we shall work with trajectories of ﬁxed lengths T , but our results trivially generalize to the case where
+T itself is a random variable (for instance, by employing padding tokens up to some maximum length).
+Consider a dataset D := {τn}N n=1 of N trajectories sampled from some true source s. We assume the trajectories are generated sequentially by some unknown transition process πs ∈ ∆(X )H, such that features at each step t are sampled as xt ∼ πs(·|ht). In addition to this stepwise conditional, denote with µs(h) := 1 t p(ht = h|πs) the normalized occupancy measure—i.e. the distribution
+T of histories induced by πs. Intuitively, this is the visitation distribution of “history states” encountered by a generator when navigating about the feature space X by rolling out policy πs. With slight abuse of notation, we may also write µs(h, x) := µs(h)πs(x|h) to indicate the marginal distribution of transitions. Finally, let the joint distribution of full trajectories be denoted by ps(τ ) := (cid:81) t πs(xt|ht). (cid:80) 2
+The goal is to learn a sequential generator πθ parameterized as θ using samples τ ∼ ps from D, such that pθ ≈ ps. Note here that we do not assume stationarity of the time-series data, nor stationarity of the transition conditionals; any inﬂuence of t is implicit through the dependence of πs (and πθ) on variable-length histories. In line with recent work [14, 20], for simplicity we do not consider static metadata as supplemental inputs or outputs, as these are commonly and easily incorporated via an additional conditioning layer or auxiliary generator [12, 19]. Lastly, note that much recent work on sequential modeling is devoted to domain-speciﬁc, architecture-level designs for generating audio [29, 30], text [31, 32], and video [33, 34]. In contrast, our work is closer in spirit to [12, 14] in being an agnostic, framework-level study applicable to generic tabular data in any time-series setting.
+Measuring Sample Quality How do we determine the “quality” of a sample? In specialized domains, of course, we often have prior access to task-speciﬁc metrics such as BLEU or ROUGE scores in text generation [6, 35]—then, the generator can simply be optimized for such scores via standard methods in reinforcement learning [36]. In generic time-series settings, however, the challenge is that any such metric must necessarily be task-agnostic, and access to it must necessarily come from learning.
+So, for any data source s, let us speak of some hypothetical function fs : H×X → [−c, c] with c < ∞, such that fs(h, x) gives the quality of any sampled transition—that is, any tuple (h, x). Intuitively, we may interpret this as quantifying how “typical” it is for the random process to be in state h and step towards x. Likewise, let as also speak of some function Fs : T → [−cT, cT ] such that Fs(τ ) gives the quality of any sampled trajectory. Naturally, in time-series settings where the underlying process is causally-conditioned, it is reasonable to deﬁne this as the decomposition Fs(τ ) := (cid:80) t fs(ht, xt).
+Now of course, we have no access to the true Fs. But clearly, in learning a generative model pθ of ps, we wish that the quality of samples τ drawn from pθ and ps be similar in expectation. More precisely:
+Deﬁnition 1 (Expected Quality Difference) Let ∆ ¯Fs :Θ→ [−2cT, 2cT ] denote the expected qual-ity difference between ps and pθ, where Θ indicates the space of parameterizations for generator πθ:
+∆ ¯Fs(θ) := Eτ ∼psFs(τ ) − Eτ ∼pθ Fs(τ )
+Our objective, then, is to learn a generator πθ that minimizes the expected quality difference ∆ ¯Fs(θ).
+Two points bear emphasis. First, we know nothing about Fs—beyond it being the sequential aggregate of fs. This challenge uniquely differentiates this agnostic setting from more popular media-speciﬁc applications—for which various predeﬁned measures are readily available for supervision. Second, in addition to matching this expectation over samples, we also wish to match the variety of samples in the original data. After all, we want pθ to mimic samples from ps of different degrees of “typicality”. So we should expect to incorporate some measure of entropy, e.g. the commonly used Shannon entropy. (1) 2.2 Matching Local Moments
+Recall the apparent tradeoff between autoregressive models and adversarial models. In the spirit of the former, suppose we seek to directly learn transition conditionals via supervised learning. That is, argminθ
+Eh∼µs L(πs(·|h), πθ(·|h)) (2)
+Consider the log likelihood loss L(πs(·|h), πθ(·|h)) := E x∼πs(·|h) log πθ(x|h). In the case of expo-nential family models for πθ(·|h), a basic result is that this is dual to maximizing its conditional en-tropy subject to the constraint on feature expectations E h∼µs;x∼πs(·|h)T (x), where T : X → R is some sufﬁcient statistic [37–39]. More generally for deep energy-based models, we have (however, recall that strong duality does not generalize to the nonlinear case; see Appendix A): h∼µs;x∼πθ(·|h)T (x) = E argminθ (cid:16)
+E h∼µs x∼πθ(·|h) log πθ(x|h) + maxf ∈RH×X (cid:0)E h∼µs x∼πs(·|h) f (h, x) − E h∼µs x∼πθ(·|h) f (h, x)(cid:1)(cid:17) (3)
+Note that the moment-matching constraint is local—that is, at the level of individual transitions, and all conditioning is based on h from µs alone. This is precisely the “exposure bias”: The objective is only ever exposed to inputs h drawn from the (perfect) source distribution µs, and is thus unaware of the endogeneity of the (imperfect) synthetic distribution µθ induced by πθ. This is not desirable since
+πθ is rolled out by open-loop sampling at test time. Now, although at the global optimum the moment-matching discrepancy must be zero (i.e. the equality constraint is enforced), in practice there may be a variety of reasons why this is not perfectly achieved (e.g. error in estimating expectations, error in 3
+function approximation, error in optimization, etc). Suppose we could bound how well we are able to enforce the moment-matching constraint; as it turns out, we cannot eliminate error compounding:1 f (h, x)(cid:1) ≤ (cid:15). Then ∆ ¯Fs(θ) ∈ O(T 2(cid:15)). (cid:3)
+Lemma 1 Let maxf ∈RH×X f (h, x) − E h∼µs (cid:0)E h∼µs x∼πθ(·|h) x∼πs(·|h)
+Proof. Appendix A.
+This reveals the problem with modeling conditionals per se: Not all mistakes are equal. An objective like Equation 2 penalizes unrealistic transitions (h, x) by treating all conditioning histories h equally— regardless of how realistic h is to begin with. Clearly, however, we care much less about how x looks like, if the current subsequence h is already highly unlikely (and vice versa). Intuitively, earlier mistakes in a trajectory should weigh more: Once πθ wanders into areas of H with low support in µs, no amount of “good” transitions will bring the trajectory back to high-likelihood areas of T under ps. 2.3 Matching Global Moments
+Now suppose instead that we seek to directly constrain the trajectory distribution pθ to be similar to ps: argminθ L(ps, pθ) (4)
+Consider the Kullback-Leibler divergence L(ps, pθ) := DKL(ps(cid:107)pθ). Like before, we know that in the case of exponential family models for pθ, this is dual to maximizing its entropy subject to the constraint
+Eτ ∼psT (τ ) = Eτ ∼pθ T (τ ), where T : T → R is some sufﬁcient statistic [40]. More broadly for deep energy-based models, we have argminθ (Eτ ∼pθ log pθ(τ ) + maxF ∈RT (Eτ ∼psF (τ ) − Eτ ∼pθ F (τ ))) (but again, recall here that strong duality does not generalize to the nonlinear case; see Appendix A).
+Now, observe that by deﬁnition of occupancy measure µ, for any function f : H × X → R it must be the case that Eτ ∼p h∼µ,x∼π(·|h)f (h, x). Therefore we may equivalently write (cid:16) t f (ht, xt) = T E (cid:80) argminθ
+E h∼µθ x∼πθ(·|h) log πθ(x|h) + maxf ∈RH×X (cid:0)E h∼µs x∼πs(·|h) f (h, x) − E h∼µθ x∼πθ(·|h) f (h, x)(cid:1)(cid:17) (5)
+Importantly, note that the moment-matching constraint is now global—that is, at the level of trajectory rollouts, and πθ is now conditioned on histories h drawn from its own induced occupancy measure µθ.
+There is no longer any “exposure bias” here: In order to respect the constraint, not only does πθ(·|h) have to be close to πs(·|h) for any given h, but the occupancy measure µθ induced by πθ also has to be close to the occupancy measure µs induced by πs. As it turns out, this seemingly minor difference is sufﬁcient to mitigate compounding errors. As before, although at the global optimum the moment-matching discrepancy must be zero, in practice this may not be perfectly achieved. Now, suppose we could bound how well we are able to enforce the moment-matching constraint; but we now have: f (h, x)(cid:1) ≤ (cid:15). Then ∆ ¯Fs(θ) ∈ O(T (cid:15)). (cid:3)
+Lemma 2 Let maxf ∈RH×X f (h, x) − E h∼µθ (cid:0)E h∼µs x∼πθ(·|h) x∼πs(·|h)
+Proof. Appendix A.
+This illustrates why even transition-centric adversarial models such as [12,21] have shown promise in generating realistic trajectories [23–26]. First, unlike trajectory-centric GANs [18, 19] which directly attempt to minimize some form of Equation 4, in transition-centric GANs the objective is to match the transition marginals µθ(h, x) and µs(h, x)—so the discriminator provides more granular feedback to the generator for training. At the same time, we see from Lemma 2 that matching transition marginals is already—indirectly—performing the sort of moment-matching that alleviates compounding error.
+Can we be more direct? In Section 3, we shall start by tackling Equation 5 itself. As we shall see, this endeavor gives rise to a technique that trains a conditional policy (for sampling), an energy model (for evaluation), and a non-adversarial framework (for learning)—addressing our three initial criteria. 3 Generating by Imitating
+First, consider the most straightforward implementation: Let us parameterize f ∈ RH×X as φ, and begin with the primal form of Equation 5, which yields the following adversarial learning objective: 1Lemmas 1 and 2 are similar in spirit to results for error accumulation in imitation by behavioral cloning and distribution matching. See Appendix A; this analogy with imitation learning is formally identiﬁed in Section 4. 4
+L(θ, φ) := maxφ minθ (cid:16)
+E h∼µθ x∼πθ(·|h) log πθ(x|h) + E h∼µs x∼πs(·|h) fφ(h, x) − E h∼µθ x∼πθ(·|h) fφ(h, x) (cid:17) (6)
+It is easy to see that this effectively describes variational training of the energy-based model pφ(τ ) := exp(Fφ(τ ) − log Zφ)—where Fφ(τ ) := (cid:80) t fφ(ht, xt)—to approximate the true ps(τ ), using sam-ples from the variational pθ. The (outer) energy player is the maximizing agent, and the (inner) policy player is the minimizing agent. The form of this objective naturally prescribes a bilevel optimization procedure in which we perform (gradient-based) updates of φ with nested (best-response) updates of θ. 3.1 Challenges of Learning
+Abstractly, of course, training energy models using variational samplers is not new: Multiple works in static domains—such as image modeling—have investigated this approach as a means of bypassing the expense and variance of MCMC sampling [41, 42]. In our setting, however, there is the additional temporal dimension: The negative energy Fφ(τ ) of any trajectory is computed as the sequential composition of stepwise qualities fφ(ht, xt), and each trajectory sampled from pθ must be generated as the sequential rollout of stepwise policies πθ(xt|ht). Consider the gradient update for the energy,
+∇φL = E h∼µs x∼πs(·|h)
+∇φfφ(h, x) − E h∼µθ x∼πθ(·|h)
+∇φfφ(h, x) and the inner-loop update for the policy,
+E h∼µθ x∼πθ(·|h) argminθ log πθ(x|h) − E h∼µθ x∼πθ(·|h) fφ(h, x) (7) (8)
+Note that the max-min optimization requires complete optimization within each inner update in order for the outer update to be correct. Otherwise the gradients will be biased, and there would be no guarantee the procedure converges to anything meaningful. Yet unlike in the static setting—for which there exists variety of standard approximations for the inner update [41–44]—here the policy update amounts to entropy-regularized reinforcement learning [45–47] using fφ(ht, xt) as reward function.
+Thus our ﬁrst difﬁculty is computational: Repeatedly performing inner-loop RL is simply infeasible.
+Now, an obvious alternative is to dispense with complete policy optimization at each step, and instead to employ importance sampling to ensure that the gradients for the energy updates are still unbiased:
+∇φL = Eτ ∼ps ∇φFφ(τ ) − 1
+Zφ
+Eτ ∼pθ (cid:104) exp((cid:80) (cid:81) t fφ(ht, xt)) t πθ(xt|ht) (cid:105)
+∇φFφ(τ ) (9) where the partition function is computed as Zφ = Eτ ∼pθ [exp((cid:80) tπθ(xt|ht)], and the sampling policy πθ is no longer required to be perfectly optimized with respect to fφ. Unfortunately, this strategy simply replaces the original difﬁculty with a statistical one: As soon as we consider time-series data of non-trivial lengths T , the multiplicative effect of each time step on the importance weights means the gradient estimates—albeit unbiased—will have impractically high variance [48,49]. tfφ(ht, xt))/(cid:80) 3.2 Contrastive Imitation
+We now investigate a generative framework that seeks to avoid these difﬁculties. The key idea is that instead of Equation 7, we shall learn pφ by contrasting (real) “positive” samples τ ∼ ps and (any) “neg-ative” samples τ ∼ pθ, which—as we shall see—rids us of the requirement that πθ be fully optimized at each step for learning to be guaranteed. First, let us establish the notion of a “structured classiﬁer”:2
+Deﬁnition 2 (Structured Classiﬁcation) Recall the πθ-induced distribution pθ(τ ) := (cid:81) t πθ(xt|ht).
+Denote with ˜pφ the un-normalized energy-based model such that ˜pφ(τ ) := exp((cid:80) t fφ(ht, xt)), and let Zφ be folded into φ as a learnable parameter. Deﬁne the structured classiﬁer dθ,φ : T → [0, 1]: dθ,φ(τ ) := 1
+Zφ
+˜pφ(τ )
+˜pφ(τ ) + pθ(τ ) 1
+Zφ (10) 2The idea that density estimation can be performed by logistic regression goes back at least to [50], and formalized as negative sampling [51] and noise-contrastive estimation [52]. Structured classiﬁers have been studied in the context of imitation learning [53, 54] by analogy with GANs. In the time-series setting, however, we shall see that this approach is equivalent to noise-contrastive estimation with an adaptive noise distribution. 5
+(a) T-Forcing [5] (b) C-RNN-GAN [18] (c) TimeGAN [12] (d) TimeGCI (Ours)
+Figure 1: Comparison of Time-series Generative Models. Examples of (a) conditional MLE-based autoregressive model, (b) trajectory-centric GAN, and (c) transition-centric GAN. (d) Our proposed technique. See also Table 1.
+That is, unlike a black-box classiﬁer that may be arbitrarily parameterized—such as a generic discrim-inator d in a GAN—here dθ,φ is “structured” in that it is modularly parameterized by the embedded energy and policy functions. Now, we shall train φ such that dθ,φ discriminates well between τ ∼ ps and τ ∼ pθ—that is, so that the output dθ,φ(τ ) represents the (posterior) probability that τ is real,
+Lenergy(φ; θ) := −Eτ ∼ps log dθ,φ(τ )−Eτ ∼pθ log (cid:0)1−dθ,φ(τ )(cid:1) and as before,
+Lpolicy(θ; φ) := E h∼µθ x∼πθ(·|h) log πθ(x|h) − E h∼µθ fφ(h, x) x∼πθ(·|h) (11) (12)
+Why is this better? As we now show formally, each gradient update no longer requires θ to be optimal for the current value of φ—nor does it require importance sampling—unlike the procedure described by Equation 6. The only requirement is that pθ can be sampled and evaluated efﬁciently, e.g. using learned Gaussian policies as usual, or—should more ﬂexibility be required—with normalizing ﬂow-based policies. As a practical result, this means policy updates can be interleaved with energy updates, instead of being nested within a repeated inner loop. Speciﬁcally, let us establish the following results:
+Proposition 3 (Global Optimality) Let fφ ∈ RH×X , and let pθ ∈ ∆(T ) be any distribution satisfy-ing positivity: ps(τ ) > 0 ⇒ pθ(τ ) > 0 (this does not require πθ be optimal for fφ). Then Lenergy(φ; θ) is globally minimized at Fφ(·) − log Zφ = log ps(·), whence pφ is self-normalized with unit integral.
+Proof. Appendix A. (cid:3)
+This result is intuitive by analogy with noise-contrastive estimation [52, 55]: φ is learnable as long as negative samples τ ∼ pθ cover the support of the true ps. The positivity condition is mild (e.g. take Gaussian policies πθ), and so is the realizability condition (e.g. take neural-networks for fφ).
+Importantly, note that at optimality classiﬁer dθ,φ is decoupled from any speciﬁc value of θ; contrast this with generic discriminators d in GANs, which are only ever optimal for the current generator.
+Now, in practice we must approximate ps and pθ using ﬁnite samples. In light of this, two questions are immediate: First, does the learned φ converge to the global optimum as the sample size increases?
+Second, what role does the “quality” of the policy’s samples play in how φ is learned? For the former:
+Proposition 4 (Asymptotic Consistency) Let φ∗ denote the minimizer for Lenergy(φ; θ), and let ˆφ∗
+M denote the minimizer for its ﬁnite-data approximation—that is, where the expectations over ps and pθ are approximated by M samples. Then under some mild conditions, as M increases ˆφ∗ p−→ φ∗.
+M
+Proof. Appendix A. (cid:3)
+Now for the second question: Clearly if pθ were too far from ps, learning would be slow—the job would be too easy for the classiﬁer dθ,φ, and it may be able to distinguish samples via basic statistics alone. Indeed, in standard noise-contrastive estimation with a ﬁxed noise distribution, learning is inef-fective in the presence of many variables [56]. Precisely, however, that is why we continuously update the policy itself as an adaptive noise distribution: As pφ moves closer to ps, so does pθ—thus provid-ing more “challenging” negative samples.3 In fact, should we insist on greedily taking each policy update to optimality, we recover a “weighted” version of the original max-min gradient from before: 3It is easy to see that minimizing Equation 12 equivalently minimizes the reverse KL div. between pφ and pθ. 6
+Proposition 5 (Gradient Equality) Let φk be the value taken by φ after the k-th gradient update, and let θ∗ k denote the associated minimizer for Lpolicy(θ; φk). Suppose pφ is already normalized; then
+∇φLenergy(φ; θ∗ k) = − T 2 ∇φL(θ∗ k, φ) k the energy gradient (of Equation 11) recovers the original gradient (from Equation 7). In k = pφ/Kφ for some constant Kφ; then
+That is, at θ∗ the general case, suppose pφ is un-normalized, such that pθ∗ k) = T Kφ
+Kφ+1
+∇φfφ(h, x) − T
+∇φLenergy(φ; θ∗
+Kφ+1
+E h∼µs x∼πs(·|h)
+∇φfφ(h, x) (cid:3)
+E h∼µθ∗ x∼πθ∗ k k (·|h)
+Proof. Appendix A.
+This “weighting” is intuitive: If pφ were un-normalized such that Kφ > 1, the energy loss automati-cally places higher weights on negative samples h ∼ µθ∗ k (·|h) to bring it down; conversely, if pφ were un-normalized such that Kφ < 1, the energy loss places higher weights on positive samples h ∼ µs, x ∼ πs(·|h) to bring it up. (If pφ were normalized, then Kφ = 1 and the weights are equal).
+In sum, we have arrived at a framework that learns an explicit sampling policy without exposure bias, a decoupled energy model without nested or saddle-point optimization, and is self-normalizing without importance sampling or estimating the partition function. Figure 1 gives a representative comparison. k , x ∼ πθ∗ 3.3 Optimization Algorithm
+Algorithm 1 Time-series Generation by Contrastive Imitation 1: Input: source dataset D ≈ ps, mini-batch size M , regularization coefﬁcient κ, learning rates λ 2: Initialize: replay buffer B, energy parameter φ, policy parameter θ, critic parameter ψ 3: for each iteration do 4: 5: 6: 7: 8: 9: 10: Output: learned policy parameter θ∗ and energy parameter φ∗
+θ ← θ − λactor ∇θ Lactor (θ; φ, ψ) + κ∇θLmle(θ)
+φ ← φ − λenergy∇φ Lenergy(φ; θ)
+ψ ← ψ − λcritic ∇ψLcritic (ψ; φ) for each policy rollout do
+B ← B ∪ {τ ∼ pθ} for each gradient step do (cid:46) Update policy (cid:46) Update energy (cid:46) Update critic (cid:46) Generate sample (cid:46) Details in Appendix B
+The only remaining choice is the method of policy optimization. Here we employ soft actor-critic [57], although in principle any technique will do—the only requirement is that it performs reinforcement learning with entropy-regularization [45–47]. To optimize the policy per Equation 12, in addition to the policy “actor” itself, this trains a “critic” to estimate value functions. As usual, the actor takes soft policy improvement steps, minimizing Lactor(θ; φ, ψ) := Eh∼B E x∼πθ(·|h)[log πθ(x|h) − Qψ(h, x)], where Qψ : H × X → R is the transition-wise soft value function parameterized by ψ, and B is a re-play buffer of samples generated by πθ. For stability, the actor is regularized with the conditional MLE loss Lmle(θ) := E x∼πs(·|h) log πθ(x|h). The critic is trained to minimize the soft Bellman residual:
+Lcritic(ψ; φ) := Eh,x∼B(Qψ(h, x) − fφ(h, x) − Vψ(h(cid:48)))2, where the state-values are bootstrapped as Vψ(h(cid:48)) := E x(cid:48)∼πθ(·|h(cid:48))[Qψ(h(cid:48), x(cid:48)) − log πθ(x(cid:48)|h(cid:48))]. By expressly training an imitation policy to mimic time-series behavior using rewards from an energy model trained by contrastive learning, we call this framework Time-series Generation by Contrastive Imitation (TimeGCI): See Algorithm 1. 4 Discussion
+Our theoretical motivations are apparent (Sections 2.2–3.1), and the practical mechanics of optimiza-tion are straightforward (Section 3.2–3.3). To understand the strengths and limitations of TimeGCI, two questions remain: First, how does this relate to bread-and-butter imitation learning of sequential decision-making? Second, how does this compare with recent deep generative models for time series?
+Imitation Perspective In sequential decision-making, imitation learning deals with training a policy purely on the basis of demonstrated behavior—that is, with no knowledge of the reward signals that induced the behavior in the ﬁrst place [58–60]. Consider the standard Markov decision process setting, with states z ∈ Z, actions u ∈ U, dynamics ω ∈ ∆(Z)Z×U , and rewards ρ ∈ RZ×U . Classically, imitation learning seeks to minimize the regret Rs(θ):=Eπs [(cid:80) tρ(zt, ut)], with
+πs, πθ ∈ ∆(U)Z here being the demonstrator and imitator policies, and expectations are taken over episodes generated per ut ∼ π(·|zt) and zt+1 ∼ ω(·|zt, ut) [61,62]. First, observe that by interpreting h as “states” and x as “actions”, our problem setup bears a precise resemblance to imitation learning: tρ(zt, ut)]−Eπθ [(cid:80) 7
+Table 1: Comparison of Time-series Generative Models. Examples of conditional MLE-based autoregressive models, trajectory-centric GANs, transition-centric GANs, as well as our proposed technique. See also Figure 1.
+Type
+Examples
+Optimization Objective(s)
+Generator
+Signal
+Discrim.
+Signal
+No Ex-posure Bias
+Decoupled
+Discrim.
+Non-Adversarial
+Explicit
+Policy
+Explicit
+Energy
+. t i d n o
+C
+E T-Forcing [5]
+Z-Forcing [13]
+L
+M
+P-Forcing [10]
+Data LL
+Data LL (ELBO) (N/A) (N/A)
+Data LL + Class. LL (pθ v. ˜pθ) Stepwise Global
+Stepwise
+Stepwise
+. t c e j a r
+T
+. t i s n a r
+T
+N
+A
+G
+N
+A
+G
+C-RNN-GAN [18]
+DoppelGANger [19]
+COT-GAN [20]
+Classiﬁcation LL (pθ v. ps)
+Classiﬁcation LL (pθ v. ps)
+Global Global
+Global Global
+Sinkhorn Divergence (pθ v. ps) Global Global
+RC-GAN [21]
+T-CGAN [22]
+TimeGAN [12]
+Classiﬁcation LL (µθ v. µs)
+Classiﬁcation LL (µθ v. µs)
+Stepwise Stepwise
+Stepwise Stepwise
+Class. LL (µθ v. µs) + Data LL Stepwise Stepwise
+TimeGCI (Ours)
+Discrim.: Class. LL (pθ v. ps)
+Generator: Policy Optimization
+Stepwise Global (cid:55) (cid:55) (cid:55) (cid:51) (cid:51) (cid:51) (cid:51) (cid:51) (cid:51) (cid:51) (N/A) (N/A) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:51) (cid:51) (cid:51) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:51) (cid:51) (cid:51) (cid:51) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:51) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:51)
+Corollary 6 (Generation as Imitation) Let state space Z := H, action space U := X , and reward function ρ := fs. In addition, let the dynamics be such that ω(·|ht, xt) is the Dirac delta centered at ht+1:=(x1, ..., xt). Then the regret exactly corresponds to the expected quality difference: Rs =∆ ¯Fs.
+Proof. Immediate from Deﬁnition 1. (cid:3)
+Now, since we want low regret but have no knowledge of the true quality measure (i.e. “reward sign-al”), we may naturally learn it together. In this sense, TimeGCI is analogous to imitation by inverse reinforcement learning (IRL), which seeks to infer rewards that plausibly induced the demonstrated be-havior, and to optimize imitating policies on that basis [63–66]. Further, in simultaneously optimizing for variety (cf. entropy) and typicality (cf. energy), TimeGCI is analogous to maximum-entropy IRL
+[67, 68]. Our contrastive approach also bears mild resemblance to stepwise discriminators studied in this vein [54, 69], although our framework focuses on trajectory-wise modeling, and is not adversarial (see Appendix D for more discussion on how TimeGCI relates to popular imitation learning methods).
+There are also crucial differences: In imitation learning, dynamics are generally Markovian; states are readily deﬁned as discrete elements or real vectors, and action spaces are small/discrete. The practical challenge is sample efﬁciency—to reduce the cost of environment interactions [70, 71]. In time-series generation, however, rollouts are free—generating a synthetic trajectory does not require interacting with the real world. But dynamics are never Markovian: The practical challenge is that representations of variable-length histories must be jointly learned. Moreover, actions are the full-dimensional feature vectors themselves, which renders policy optimization more demanding than usual (see Appendix B); beyond the tractable tabular settings we experiment in, higher-dimensional data may prove challenging.

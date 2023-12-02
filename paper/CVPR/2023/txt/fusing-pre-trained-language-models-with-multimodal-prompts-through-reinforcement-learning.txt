@@ -1,0 +1,198 @@
+Abstract
+Language models are capable of commonsense reason-ing: while domain-specific models can learn from ex-plicit knowledge (e.g. commonsense graphs [6], ethical norms [25]), and larger models like GPT-3 [7] mani-fest broad commonsense reasoning capacity. Can their knowledge be extended to multimodal inputs such as im-ages and audio without paired domain data?
+In this work, we propose
+ESPER (Extending Sensory PErception with Reinforcement learning) which enables text-only pre-trained models to address multimodal tasks such as visual commonsense reasoning. Our key novelty is to use rein-forcement learning to align multimodal inputs to language model generations without direct supervision: for example, our reward optimization relies only on cosine similarity de-rived from CLIP [52] and requires no additional paired (image, text) data. Experiments demonstrate that ESPER outperforms baselines and prior work on a variety of mul-timodal text generation tasks ranging from captioning to commonsense reasoning; these include a new benchmark we collect and release, the ESP dataset, which tasks mod-els with generating the text of several different domains for each image. Our code and data are publicly released at https://github.com/JiwanChung/esper. 1.
+
+Introduction
+Collecting multimodal training data for new domains can be a Herculean task. Not only is it costly to assemble mul-timodal data, but also curated datasets cannot completely cover a broad range of skills, knowledge, and form (e.g. free text, triplets, graphs, etc.). Ideally, we want to endow
+* denotes equal contribution
+Figure 1. The intuition of ESPER, Extending Sensory PErception with Reinforcement learning. To better align knowledge in CLIP and pretrained language models (PLM), we use CLIP as a reward for the pairs of images and self-generated text. multimodal models with diverse reasoning capacity (e.g. ethics [25], commonsense [57], etc.) without undertaking a separate multimodal annotation effort each time.
+In this work, we propose Extending Sensory PErception with Reinforcement learning(ESPER), a new framework that enables a pre-trained language model to accept multimodal inputs like images and audio. ESPER extends diverse skills embodied by the pre-trained language model to similarly diverse multimodal capabilities, all without requiring ad-ditional visually paired data.
+In a zero-shot fashion, our model generates text conditioned on an image: using this interface, we show that ESPER is capable of a diverse range of skills, including visual commonsense [50], news [39], di-alogues [60], blog-style posts [28], and stories [22].
+ESPER combines insights from two previously disjoint lines of work: multimodal prompt tuning and reinforce-ment learning. Like prior multimodal prompt tuning work,
+ESPER starts from a base language-only model (e.g., GPT-2 [53], COMET [6]), keeps most of its parameters frozen,
+and trains a small number of encoder parameters to map visual features into the embedding space of the language model [40, 45, 68]. Unlike prior works, however, ESPER does not train these parameters using maximum likelihood estimation over a dataset of aligned (image, caption) pairs.
+Instead, it uses a reinforcement learning objective. During training, the model is first queried for completions condi-tioned on visual features. Then, the lightweight vision-to-text encoder is updated using proximal policy optimization (PPO) [59] to maximize a similarity score computed with a secondary pre-trained image-caption model, CLIP [52]. As a result, the frozen language model can interpret the mul-timodal inputs in the same context as the text embedding space without additional human-annotated paired data.
+Reinforcement learning has two advantages over maxi-mum likelihood objectives. First, RL bypasses the costly process of collecting multimodal paired data by using a re-ward model. This relaxation is especially favorable when image/audio groundings rarely exist (e.g. ethics [25] and knowledge graph [57]). The second major advantage of
+RL is the maintenance of generalizability. Similar to prior work, we freeze the parameters of the language model, which helps keep its reasoning capacities. However, ESPER goes a step further: Tsimpoukelli et al. [68] and Mokady et al. [45] fine-tune their lightweight adapters using paired visual-linguistic datasets such as Conceptual Captions [61] or COCO Captions [38]. Because these literal scene de-scriptions cannot match the textual variety of the large-scale corpus GPT-2 is trained on, the supervised models may gen-erate less richly styled language or be capable of as diverse reasoning over input contexts [33, 73].
+We experimentally compare ESPER to two classes of prior methods that seek to adapt language models to ac-cept visual inputs: (1) maximum likelihood prompt tun-ing [45, 68]; and (2) decoding-time methods [67] that post-process token probabilities of a frozen language model ac-cording to estimated image similarity. For zero-shot im-age/audio captioning, we find that ESPER outperforms all prior unsupervised methods, both in terms of text qual-ity (e.g., 14.6 point improvement in CIDEr over Laina et al. [34] in COCO unpaired captioning) and inference speed (e.g., 100× speedup vs. Tewel et al. [67], which relies on per-token gradient optimization over partial decodings).
+In addition, we show that ESPER can efficiently adapt without paired resources on visual commonsense reason-ing [6, 50], visual news [39], visual dialogue [11], and our new zero-shot multimodal generation benchmark named
+ESP (Evaluation for Styled Prompt dataset), which tests the model’s capability to generate text of different domains for the same image. Furthermore, ESPER also shows the capa-bility to learn about audio inputs using an audio reward. We hope the strong performance of ESPER presented here will encourage researchers to consider RL-based training for fu-ture multimodal prompt tuning work. 2. Method
+ESPER consists of three components: 1) CLIP’s non-generative image/text encoders [52];1 2) a left-to-right lan-guage generator such as GPT-2 [53] or COMET [6]; and 3) an encoder that projects multimodal inputs into the sub-word embedding space of the language generator.2 During training, CLIP and the language generator’s parameters are frozen; gradients are back-propagated through the frozen language model to train the encoder parameters. We em-ploy reinforcement learning (specifically, PPO [59]) to de-rive these gradients: our reward is the similarity of the sam-pled text to the input image, as estimated by CLIP. After RL training, we evaluate ESPER in various zero-shot scenarios.
+We use CLIP ViT-B/32 and GPT-2-base (12-layer) as de-faults for our experiments. In this setting, ESPER features 8M trainable and 300M untrainable parameters. 2.1. Architecture
+CLIP. Radford et al. [52]’s Contrastive Language Image
+Pre-trained (CLIP) encoder plays two roles in our frame-work: first, as a feature extractor for the input images, and second, as an alignment reward between the images and the model-generated text. First, the fixed CLIP image encoder
+CLIP -I extracts single vector feature from the image xi; second, the fixed CLIP text encoder CLIP -T is applied to text samples the model generates; finally, we use the cosine similarity of these two vectors as the reward signal.
+Encoder. The encoder Fϕ is the only trainable module in
+ESPER. Given the vector representation of an image xi ex-tracted using CLIP, the module outputs a series of vectors of length k to be passed on to the language model, i.e., hi = hi 1, . . . , hi k = Fϕ(CLIP -I(xi)) (1)
+The output image representations hi work as the multi-modal prompt and are concatenated to the embedded word representations. For fair comparison in later experiments, we use the same multimodal encoder architecture as CLIP-Cap [45]: a lightweight, two-layer Multi-Layer Perceptron (MLP), and set k = 10.
+Pre-trained Language Model. ESPER employs a pre-trained deep autoregressive language model such as GPT-2 [53] as the backbone. Autoregressive language models 1While we describe image modeling here, we also experiment with au-dio/text encoders, specifically Wav2CLIP [74], in § 3.4 that extend ESPER to audio inputs. 2In principle, any model architecture with the same APIs could be used, e.g., ALIGN [24] could be substituted for CLIP, or T5 [54] could be sub-stituted for GPT-2
+Figure 2. Illustration of the proposed model, ESPER. We use a pre-trained language model (e.g. GPT-2 [53]) as the language generator. parameterize likelihood of a text sequence y factored as text tokens yj with length l using autoregressive decomposition.
+Given an input image x and the corresponding generated text y, our reward is given by: pθ(y) = l (cid:89) j=1 pθ(yj|yj′<j) (2)
+Inspired by prompt tuning in the text-only domain [40], we concatenate hi with the output of GPT-2’s text embedding lookup layer to prefix the conditioned text generation: pθ(yi|hi) = l (cid:89) j=1 pθ(yi j|hi, yi j′<j) (3)
+The initial text prompt can be as short as a single subword token for free-form training or contain task-specific tem-plates for zero-shot adaption to downstream tasks. The pa-rameters of the language model θ are kept frozen. 2.2. Training
+Reinforcement Learning. We propose to view CLIP as a black-box model and apply reinforcement learning to max-imize cosine similarity between the input image and gen-erated text as a reward.3 From the RL perspective, our language generator can be viewed as a policy, which pro-duces actions (in the form of generations) given states (in the form of text+image prompts). We use the clipped ver-sion of Proximal Policy Optimization (PPO-clip) [59,63] as the RL algorithm to optimize the reward: specifically, we adapt the implementation of PPO from Stiennon et al. [63].
+Stiennon et al. include an additional reward term that penal-izes the KL divergence between the RL policy and the orig-inal policy to ensure the generation stays fluent and mean-ingful. Our value model has the same architecture as the policy model (see Sec. 2.1). We use random sampling with temperature 0.7 during training. 3Because CLIP does not provide differentiable per-token feedback (as the model is only differentiable given a full caption) it’s not possible to do gradient-based updates directly; we quantitatively compare against Tewel et al. [67] who apply CLIP to partial decodings. (cid:18) CLIP -I(x)
+||CLIP -I(x)||
+α
+·
+CLIP -T (y)
+||CLIP -T (y)|| (cid:19)
++ β (4) where α = 50, β = −10 are fixed normalizing factors that empirically cause the reward function to have roughly zero mean and unit variance during training. We defer the detail of the PPO-clip algorithm to Appendix C.
+Language Model Stability. Reward hacking can poten-tially occur [30] if the agent discovers incoherent texts that nonetheless achieve high rewards. To prevent this, we in-corporate auxiliary rewards to stabilize the training process.
+First, we compute the KL divergence between pθ and a sep-arate (fixed) text-only GPT-2 model to maintain language generation capability. We also find it beneficial to con-sider text-only likelihood as an additional reward. Finally, as reported in previous literature [20, 72], language models often falsely assign high likelihoods to repetitive phrases.
+We introduce an explicit repetition penalty against this phe-nomenon. Refer to Appendix C for the details. 2.3. Adaptation on Pretrained Language Model
+ESPER can also adapt to domain-specific language mod-els. We use the unpaired text data to train the domain-specific backbones such as COMET [6] via standard super-vised learning. Then, we build the multimodal text gen-erator (e.g. ESPER-COMET) by finetuning the backbone using RL without any paired data. ESPER-Domain de-notes an overarching term for the domain-specific types of
+ESPER. In all our experiments, we build the text backbones by finetuning GPT-2 4 with domain-specific text data such as ATOMIC [57], News [39] and Dialog [39], alongside the corresponding prompts (e.g., "news:", "dialog:", etc.). On the other hand, ESPER also extends the zero-shot 4Again, ESPER can utilize any generative text model architecture, e.g.,
+T5 [54].
+Figure 3. A sample in Evaluation for Styled Prompt dataset (ESP dataset).
+Domain B@4 M C
+✓
+✓
+✓
+Model
+Pseudo-Align [34]
+RSA [21]
+Unpaired [34]
+ZeroCap [67]
+ZeroCap-CaptionLM ✓
+✓
+CLIPRe [64]
+✓
+MAGIC [64]
+ESPER-GPT
+ESPER-CaptionLM
+✓
+Time
+---65s 65s
+-3s 15.5 29.4 5.2 7.6 13.5 31.8 19.3 20.1 63.6 11.5 14.6 2.6 15.4 34.5 7.0 4.9 11.4 13.6 12.9 17.4 49.3 6.3 13.3 29.1 0.65s 21.9 21.9 78.2 0.65s
+Table 1. Unpaired captioning experiments in COCO test split.
+B@4 denotes Bleu-4, M METEOR, and C CIDEr score. Running time entails each step of inference, including image loading and feature extraction. Domain indicates domain-specific text-only pre-training. CLIPRe is a retrieval-based approach using CLIP.
+Model
+CLIPCap-MLP
+CLIPCap-Full
+ESPER-CaptionLM
+ESPERInit-MLP
+ESPERInit-Full
+Zero-shot
+✓
+B@4 27.4 32.2 21.9 31.2 33.1
+M 22.4 27.1 21.9 25.4 27.7
+C 94.4 108.4 78.2 103.1 111.1
+Table 2. Finetuning experiment in COCO Captions test split. We omit the zero-shot baselines here for readability. adaptability of general language models (GPT-2) to multi-modal inputs. ESPER-GPT is an instance of the general-purpose models that do not utilize task-specific text data. 3. Experiments
+Our main goal is to extend the diverse knowledge in pre-trained language models to multimodal domain. Ex-periments in Sec. 3.1 test whether ESPER can align vision and language, and those in Sec. 3.2 and Sec. 3.3 check that
+ESPER maintains textual diversity in the backbone. As GPT is a general-purpose language model, we want to show that
+ESPER can likewise work as a general-purpose multimodal text generator on diverse tasks such as commonsense rea-soning, news, and dialogue. Finally, we extend ESPER to another modality of audio in Sec. 3.4. 3.1. Evaluation of Visual Alignment
+We first evaluate strength of the alignment between an input image and the generated text in ESPER using the
+MSCOCO captioning corpus [38]. While ESPER could ben-efit from a more diverse set of unpaired images, for fair comparisons with the baselines, we limit our data to COCO training set images (unpaired with their captions). 3.1.1 Zero-Shot Image Captioning
+Following previous works on unpaired captioning [13, 34], we split the pairing between image and caption and train them separately using ESPER for unsupervised evalua-tion. We split COCO Captions dataset [38] with Karpathy split [26]. Models are evaluated with BLEU-4 [49], ME-TEOR [2], and CIDEr [69]. The models in Table 1 use greedy decoding to generate descriptions at inference time.
+In Table 1, without any explicitly paired MSCOCO data, we show that ESPER outperforms a variety of prior works in unpaired captioning [21, 34], and CLIP-based decoding methods [64, 67]. Domain-specific language generators im-prove conditional generations: ESPER-GPT, which does not know COCO caption text, falls behind ESPER-CaptionLM (which is pre-trained on unaligned COCO captions, with the prefix caption:). Also, at inference time, ESPER is faster than decoding time methods like Tewel et al. [67]. 3.1.2 RL helps, even in supervised finetuning
+As our encoder shares the same architecture with MLP-variant CLIPCap [45], we can directly evaluate the benefit of ESPER’s RL training, even if supervised data is available.
+We experiment two supervised variants: ESPERInit-MLP, which finetunes only the encoder, and ESPERInit-Full, which finetunes the encoder and language model jointly. Table 2 shows that initializing with ESPER’s RL-trained encoder outperforms random initialization when performing usual maximum likelihood training; this promising result shows that RL and MLE training can complement each other.
+(a) Visual Commonsense Graph (VCG)
+Model
+Retrieval [52]
+ZeroCap-COMET [67]
+CLIPCap [45]
+VisualCOMET [50]
+Text-VCGLM
+ESPER-VCGLM
+✓
+✓
+✓
+Zero-shot B@4 M C 7.0 0.3 5.6 10.0 13.1 3.0 0.9 6.4 0.0 12.5 10.7 16.5 9.9 12.8 9.5 13.0 10.5 16.4
+✓
+✓ (b) COCO Captions + COMET
+Val
+Test
+Model
+Retrieval [52]
+ZeroCap-COMET [67] 8.8 13.1 8.0
+CLIPCap [45]
+Text-COMET
+ESPER-COMET
+B@4 M C B@4 M C 15.2 19.5 17.3 15.3 19.5 18.0 8.4 13.2 8.0 10.9 12.3 17.3 10.5 12.4 17.6 17.8 18.9 3.3 17.7 18.9 3.3 28.3 23.6 28.9 28.3 23.6 29.7
+Table 3. Commonsense reasoning experiments in (a) unpaired
+Visual Commonsense Graph validation split [50] and (b) COCO
+Captions with commonsense extension of text-only COMET [6].
+Model
+Show Attend Tell [75]
+Text-Only
+ZeroCap-News [67]
+CLIPCap [45]
+ESPER-NewsLM
+ESPERInit-MLP
+Model
+ViLBERT [42]
+ViLBERT-Head
+Text-Only
+ESPER-DialogLM (a) News
+Zero-shot
+✓
+✓
+✓
+✓
+B@4 0.7 0.2 0.3 0.2 0.8 1.3
+M 4.1 2.7 0.2 3.8 4.4 4.8
+C 12.2 1.3 0.0 1.6 4.6 15.7
+✓ (b) Dialog
+Zero-shot NDCG MRR R@1 2.6 3.4 5.7 14.6 6.9 9.8 18.3 25.7 11.6 19.7 19.3 22.3
+✓
+✓
+Table 4. Downstream task evaluation in (a) VisualNews [39] test split and (b) VisDial [11] validation split.5 NDCG denotes
+Normalized Discounted Cumulative Gain, MRR Mean Reciprocal
+Rank and R@1 Recall at top 1.
+Model
+Retrieval [52]
+ZeroCap-CaptionLM [67]
+ESPER-GPT-2-Audio
+ESPER-CaptionLM-Audio
+B@4 0.71 1.29 0.32 3.40
+M 6.46 5.91 4.62 9.47
+C 2.49 6.21 2.84 7.92
+Table 5. Audio alignment experiment in AudioCaps [27] test split. 5We use the validation set for evaluation for fair comparison against previous zero-shot baseline results [47]
+Figure 4. Examples for zero-shot commonsense reasoning experi-ments; ATOMIC [57] and Visual Commonsense Graph [50]. 3.2. Fusing Domain-specific Language Models
+Going beyond standard image captioning setups, we evaluate ESPER’s capacity to adapt to text generators with domain-specific knowledge such as commonsense. First, we extend i) commonsense graphs to multimodal inputs.
+We then evaluate ii) news and iii) dialogue domains, which have existing public corpora. 3.2.1 Visual Commonsense Graph
+While general language models (e.g. GPT-2) embody im-plicit commonsense, commonsense knowledge graphs offer explicit structures to represent commonsense. For instance,
+ATOMIC [57] connects two everyday events with nine types of If-then relations (e.g. cause and effects). We evalu-ate ESPER on commonsense graphs with a text-only dataset (ATOMIC) and a visual-language dataset (Visual Common-sense Graph [50]). Figure 4 shows examples and model output of ESPER in the selected commonsense datasets.
+We first use Visual Commonsense Graph (VCG) dataset [50] to show that ESPER can extend commonsense graphs to visual inputs. Given an image and the correspond-ing event description, VCG evaluate commonsense reason-ing capability to generate text description on what happens before, what will happen after the event, and why the event took place. As in other experiments, ESPER-VCG uses un-paired data with image and caption decoupled. We com-pare ESPER-VCG against a supervised baseline of Visual-COMET (trained with VCG) as well as a text-only finetuned
+GPT-2. Note that all compared methods use event descrip-tion as the only text context, discarding place annotation.
+Results in Table 3-(a) show that ESPER improves over the text-only baseline and even performs on par with Visu-alCOMET, a baseline trained with image-caption pair infor-mation not provided in ESPER-VCG. Hence, ESPER training can substitute supervised training in commonsense graphs.
+Next, we turn to a more complex task of adapting a text-only dataset without any visual annotation. Here, we fuse commonsense knowledge in ATOMIC [57] to visual
+Figure 5. Human evaluation of captions for each domain prompt. We take the average of 5-point Likert-scale ratings from three annotators.
+V denotes visual relevance, I is informativeness, and F is fluency. Domain denotes domain-specific backbones described in Section 2.3. 3.2.3 Visual Dialogue
+VisDial [11] is a dataset of iterative dialogues conditioned on an image. The model output should be the ranking of the given 100 next-response candidates. The reported met-rics (NDCG, MRR, and R@1) compare the model order-ing of the next response with the human ordering: refer to the dataset paper [11] for details on the evaluation scheme.
+After training ESPER with the unpaired dialogue-domain generator, we rank the answer candidates by their likeli-hood. The baselines consist of zero-shot ViLBERT [42] and frozen ViLBERT finetuned with a linear head.
+Table 4-(b) shows the VisDial dataset re-ranking results.
+Zero-shot ESPER improves the baselines by a large margin.
+It even outperforms the supervised ViLBERT-Head, show-ing that ESPER can discern likely visual dialogues. 3.3. From One Image to Many Domains
+While we observe that ESPER-GPT can generate diverse image-related texts, we still need to prove that this textual diversity is controllable by text prompts; a null hypothesis is that there are identifiable and consistent features found, e.g., only in news images, and that ESPER cannot produce diverse captions for the same image.
+ESP dataset. To benchmark ESPER-GPT’s capability to generate diverse domain-specific language from the same image, we collect and release a novel dataset, ESP dataset (Evaluation for Styled Prompt dataset): a benchmark for zero-shot domain-conditional caption generation. It com-prises 4.8k captions from 1k images in the COCO Captions test set [38]. We collect five text domains with everyday usage: blog, social media, instruction, story, and news, as illustrated in Figure 3. We defer the dataset details and the collection process to Appendix D and E, respectively.
+Automatic evaluations on ESP dataset Figure 6 shows that ESPER generates conditional text depending on the do-main prompts. ESPER outperforms CLIPCap-MLP [45],
+Figure 6. ESP dataset experiment. We report CIDEr in this plot. stimuli. For evaluation purposes, we instead build visually aligned validation set using ATOMIC and COCO captions.
+We defer the detail of evaluation set in appendix.
+In Table 3-(b), we show that ESPER outperforms retrieval-based and CLIP-based decoding methods. Thus,
+ESPER trains a visually-conditioned commonsense model successfully even when the text data is collected outside of a visual context. 3.2.2 Visual News
+VisualNews [39] includes 1.08 million news images along with the associated image captions and articles. For a fair comparison, we compare against models that rely only on image inputs, 6 e.g., Show Attend Tell [75], from Liu et al. [39]. We also include the text-only backbone as another baseline (Text-Only).
+Results are in Table 4-(a): zero-shot ESPER outperforms not only the text-only baseline but also the supervised base-line in Bleu-4 and METEOR scores. However, it lags be-hind the supervised model in CIDEr. While various proper nouns appear in news articles, CLIP has no knowledge of most of them. Since CIDEr takes rarity of terms into ac-count, this difference in data extends to performance degra-dation in news texts generated from ESPER. By finetuning the adaptor, ESPER overcomes the knowledge gap and ex-ceeds the baselines even in CIDEr. 6Other baselines for VisualNews use the article text or keywords as inputs and hence are not directly comparable to our framework.
+a COCO-supervised model, showing that ESP dataset re-quires domain conditioning. Also, the text-only baseline (which generates random domain-specific texts) is substan-tially worse, indicating the importance of visual-linguistic alignment. Finally, ESPER-Domain improves over ESPER-GPT, demonstrating the effect of explicit domain condition-ing. For fine-grained results, refer to Table 6 in Appendix F.
+Human evaluations on ESP dataset We conduct a hu-man evaluation on ESPER, ZeroCap [67],7 and ZeroCap-Domain generated descriptions as well as ground truth captions that cover six domain prompts in ESP dataset.
+We choose 100 random images from ESP dataset and ask
+English-proficient human annotators to provide a 5-point
+Likert-scale if the sentences: 1) are visually relevant to the image (Vis), 2) provide informative and interesting content for the prompt (Inf), 3) and sound fluent and human-like (Flu). Each sample is evaluated by three annotators us-ing the Amazon Mechanical Turk platform. The results are shown in Figure 5. On average, ESPER provides more visu-ally relevant and informative content than ZeroCap. We also measured Krippendorff’s alpha for each category (Vis:0.61,
+Inf:0.50, Flu:0.31), which indicates high agreement be-tween annotators. While ZeroCap is rated as slightly more fluent (Flu), we suspect this is due to their short text length leaving less room for grammatical errors. 3.4. Evaluation of Auditory Alignment
+We extend ESPER to audio by replacing CLIP with its audio variant Wav2CLIP [74]. For the audio captioning dataset, we use the unpaired AudioCaps [27]. We follow an identical protocol as in § 3.1, but use audio modality. For baselines, we consider ZeroCap [67] and Retrieval, which first samples text using fixed prompt (e.g. Sound of a) and then retrieves ones with maximal CLIP score. Zero-Cap here used Wav2CLIP as ESPER does. The results are in Table 5:8 ESPER outperforms the baseline models. As in the visual experiments, text-only pre-training in ESPER-Domain further improves CIDEr by 5. Wav2CLIP (and early experiments with other audio encoders [18, 74, 81], also pre-trained on a classification dataset [8, 16]) provides noisier training signal for ESPER compared to image CLIP pre-trained on image caption dataset [52]. We expect this variation is not only because Wav2CLIP’s datasets are rela-tively small [81] but also because the datasets have less rich language than image-text datasets. For samples on audio captioning, refer to Appendix I. 7We use a version of GPT2-base size model to generate descriptions to be comparable to our generation framework.
+Figure 7.
+ESPER Zero-shot captioning examples on various prompts. The conditioning prompt is denoted in bold(i.e. “text”).
+We mark visually relevant points with green and errors with red. 3.5. Qualitative Results
+Figure 7 gives zero-shot captioning results on COCO images generated by ESPER-Domain and ZeroCap base-line [67].9 Conditioning on both image and prefix, ESPER usually generates various visually sensible and informative captions. However, it is not perfect, e.g. in example (c), while the monk is holding an umbrella, it is not raining.
+Interestingly, ESPER is not internally consistent and, for the same image but a different prompt, correctly says the weather is clear. While ESPER sometimes generates factual dialogues, it sometimes has difficulty counting, e.g., in ex-ample (d) Dialogue A: how many people are there B: 3.
+Figure 8 shows generation results on the “recipe” task prompt that was not previously pre-trained as a domain prompt. ESPER generates not only a sensible cake recipe (Fig 8 (b)), but also reasonable “recipes” even when it is not conditioned on a food image (Fig 8 (a),(c)); similar per-formance is observed for “My favorite poem” and “lyrics” 8With audio, we cannot compare to previous unpaired captioning meth-9We used their public demo for qualitative results. ods [21, 34] directly, as these methods require visual object detectors. https://replicate.com/yoadtew/zero-shot-image-to-text
+Figure 9. ESPER samples given audio inputs. Each image is the keyframe of the original video for illustration purposes. ESPER-Audio uses only audio without visual input. inference data [4, 55] or optimize discrete metrics di-rectly [56]. Storytelling models employ RL to maintain coherence in the story [65] or incorporate human feed-back [43]. RL is also used in goal-driven dialogue [1], inter-active QA [77], and grounded generation in text games [19, 70]. Recently, Instruction GPT [48] shows RL improves the prompt-conditioning strength of pre-trained language mod-els. To the best of our knowledge, ESPER is the first method to use multimodal rewards. While Cho et al. [10] use CLIP rewards as well, they finetune an already finetuned caption-ing model while ESPER builds on text-only backbones. 5. Conclusion
+ESPER combines language generation capability in a pre-trained language generator with knowledge in CLIP to align multimodal inputs to text without any supervision: we train via reinforcement learning instead of maximum likelihood training. ESPER offers strong visual alignment and fast in-ference speed while maintaining the text domain. We hope
+ESPER initiates further research on using RL for multimodal language modeling, and ESP dataset invites work on ex-tracting diverse contexts from the same image. 6. Acknowledgements
+We express special thanks to the Mosaic team mem-bers and AI2 researchers for their constructive feedback.
+Also, we thank Jaekyeom Kim for the comments on RL techniques. This work was supported by the Allen Insti-tute for AI and DARPA MCS program through NIWC Pa-cific (N66001-19-2-4031), the Institute of Information & communications Technology Planning & Evaluation (IITP) grant funded by the Korea government(MSIT), Artificial In-telligence Graduate School Program, Yonsei University, un-der Grant 2020-0-01361, and Basic Science Research Pro-gram through the National Research Foundation of Korea (NRF) (2020R1A2B5B03095585) and Institute of Informa-tion & communications Technology Planning & Evaluation (IITP) grant (No.2019-0-01082, SW StarLab). We thank workers on MTurk for their contributions.
+Figure 8. Samples with unseen text domain prompt; (Recipe: ). that GPT-2 can generate. In most cases, ZeroCap produces short generations and does not generalize well to custom text prompts. Yet another strong baseline, the story mode of
+MAGIC [64], fails to capture the visual topic and prompt. 4.

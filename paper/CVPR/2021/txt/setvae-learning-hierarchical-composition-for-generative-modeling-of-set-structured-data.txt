@@ -1,0 +1,143 @@
+Abstract
+Sample 1
+Sample 2
+Sample 3
+Generative modeling of set-structured data, such as point clouds, requires reasoning over local and global structures at various scales. However, adopting multi-scale frameworks for ordinary sequential data to a set-structured data is nontrivial as it should be invariant to the permu-tation of its elements. In this paper, we propose SetVAE, a hierarchical variational autoencoder for sets. Motivated by recent progress in set encoding, we build SetVAE upon attentive modules that ﬁrst partition the set and project the partition back to the original cardinality. Exploiting this module, our hierarchical VAE learns latent variables at multiple scales, capturing coarse-to-ﬁne dependency of the set elements while achieving permutation invariance.
+We evaluate our model on point cloud generation task and achieve competitive performance to the prior arts with sub-stantially smaller model capacity. We qualitatively demon-strate that our model generalizes to unseen set sizes and learns interesting subset relations without supervision. Our implementation is available at https://github.com/ jw9730/setvae. 1.
+
+Introduction
+There have been increasing demands in machine learning for handling set-structured data (i.e., a group of unordered instances). Examples of set-structured data include object bounding boxes [19, 2], point clouds [1, 18], support sets in the meta-learning [6], etc. While initial research mainly focused on building neural network architectures to encode sets [32, 17], generative models for sets have recently grown popular [33, 16, 25, 30, 31].
+A generative model for set-structured data should verify the two essential requirements: (i) exchangeability, mean-ing that a probability of a set instance is invariant to its elements’ ordering, and (ii) handling variable cardinality, meaning that a model should ﬂexibly process sets with vari-able cardinalities. These requirements pose a unique chal-*Equal contribution
+Level 1
+Level 2
+Level 3
+Figure 1: Color-coded attention learned by SetVAE encoder for three data instances of ShapeNet Airplane [3]. Level 1 shows attention at the most coarse scale. Level 2 and 3 show attention at more ﬁne-scales. lenge in set generative modeling, as they prevent the adap-tation of standard generative models for sequences or im-ages [7, 12, 28, 27]. For instance, typical operations in these models, such as convolution or recurrent operations, exploit implicit ordering of elements (e.g., adjacency), thus break-ing the exchangeability. Several works circumvented this issue by imposing heuristic ordering [10, 5, 8, 22]. How-ever, when applied to set-structured data, any ordering as-sumed by a model imposes an unnecessary inductive bias that might harm the generalization ability.
+There are several existing works satisfying these require-ments. Edwards et al., [4] proposed a simple generative model encoding sets into latent variables, while other ap-proaches build upon various generative models, such as generative adversarial networks [18, 25], ﬂow-based mod-els [30, 13], and energy-based models [31]. All these works deﬁne valid generative models for set-structured data, but with some limitations. To achieve exchangeability, many approaches process set elements independently [18, 30], 15059
+Table 1: Summary of several set generative frameworks available to date. Our SetVAE jointly achieves desirable properties, with the advantages of the VAE framework combined with our novel contributions.
+Model
+Exchangeability
+Variable cardinality
+Inter-element dependency
+Hierachical latent structure l-GAN [1]
+PC-GAN [18]
+PointFlow [30]
+EBP [31]
+SetVAE (ours)
+× (cid:13) (cid:13) (cid:13) (cid:13)
+× (cid:13) (cid:13) (cid:13) (cid:13) (cid:13)
+×
+× (cid:13) (cid:13)
+×
+×
+×
+× (cid:13) limiting the models in reﬂecting the interactions between the elements during generation. Some approaches take the inter-element dependency into account [25, 31], but have an upper bound on the number of elements [25], or less scal-able due to heavy computations [31]. More importantly, existing models are less effective in capturing subset struc-tures in sets presumably because they represent a set with a single-level representation. For sets containing multiple sub-objects or parts, it would be beneﬁcial to allow a model to have structured latent representations such as one ob-tained via hierarchical latent variables.
+In this paper, we propose SetVAE, a novel hierarchical variational autoencoder (VAE) for sets. SetVAE models in-teraction between set elements by adopting attention-based
+Set Transformers [17] into the VAE framework, and extends it to a hierarchy of latent variables [23, 26] to account for
+ﬂexible subset structures. By organizing latent variables at each level as a latent set of ﬁxed cardinality, SetVAE is able to learn hierarchical multi-scale features that decompose a set data in a coarse-to-ﬁne manner (Figure 1) while achiev-ing exchangeability and handling variable cardinality. In addition, composing latent variables invariant to input’s car-dinality allows our model to generalize to arbitrary cardinal-ity unseen during training.
+The contributions of this paper are as follows:
+• We propose SetVAE, a novel hierarchical VAE for sets with exchangeability and varying cardinality. To the best of our knowledge, SetVAE is the ﬁrst VAE successfully applied for sets with arbitrary cardinal-ity. SetVAE has a number of desirable properties com-pared to previous works, as summarized in Table 1.
+• Equipped with novel Attentive Bottleneck Layers (ABLs), SetVAE is able to model the coarse-to-ﬁne de-pendency across the arbitrary number of set elements using a hierarchy of latent variables.
+• We conduct quantitative and qualitative evaluations of
+SetVAE on generative modeling of point cloud in var-ious datasets, and demonstrate better or competitive performance in generation quality with less number of parameters than the previous works. 2. Preliminaries 2.1. Permutation Equivariant Set Generation
+Denote a set as x = {xi}n i=1 ∈ X n, where n is the cardinality of the set and X represents the domain of each element xi ∈ Rd. In this paper, we represent x as a matrix x = [x1, ..., xn]T ∈ Rn×d. Note that any operation on a set should be invariant to the elementwise permutation and satisfy the two constraints of permutation invariance and permutation equivariance.
+Deﬁnition 1. A function f : X n → Y is permutation in-variant iff for any permutation π(·), f (π(x)) = f (x).
+Deﬁnition 2. A function f : X n → Y n is permuta-tion equivariant iff for any permutation π(·), f (π(x)) =
+π(f (x)).
+In the context of generative modeling, the notion of per-mutation invariance translates into exchangeability, requir-ing a joint distribution of the elements invariant with respect to the permutation.
+Deﬁnition 3. A distribution for a set of random variables x = {xi}n i=1 is exchangeable if for any permutation π, p(x) = p(π(x)).
+An easy way to achieve exchangeability is to assume each element to be i.i.d. and process a set of initial elements z(0) = {z(0)
+) with an elementwise function felem to get the x: i=1 independently sampled from p(z(0) i }n i x = {xi}n i=1 where xi = felem(z(0) i
+) (1)
+However, assuming elementwise independence poses a limit in modeling interactions between set elements. An alternative direction is to process z(0) with a permutation-equivariant function fequiv to get the x: x = {xi}n i=1 = fequiv({z(0) i }n i=1). (2)
+We refer to this approach as the permutation-equivariant generative framework. As the likelihood of x does not de-pend on the order of its elements (because elements of z(0) are i.i.d.), this approach achieves exchangeability. 15060
+Q'
+FF
+Multihead q k v
+Q
+V (a) MAB x'
+Q
+MAB
+V h
+MAB
+Q
+V
+I x (b) ISAB
+Figure 2: Illustration of Multihead Attention Block (MAB) and Induced Set Attention Block (ISAB). 2.2. Permutation Equivariant Set Encoding
+To design permutation-equivariant operations over a set,
+Set Transformer [17] provides attentive modules that model pairwise interaction between set elements while preserving invariance or equivariance. This section introduces two es-sential modules in the Set Transformer.
+First, Multihead Attention Block (MAB) takes the query and value sets, Q ∈ Rnq×d and V ∈ Rnv×d, respectively, and performs the following transformation (Figure 2a):
+MAB(Q, V ) = LN(a + FF(a)) ∈ Rnq×d, where a = LN(Q + Multihead(Q, V, V )) ∈ Rnq×d, (3) (4) where FF denotes elementwise feedforward layer, Multi-head denotes multi-head attention [29], and LN denotes layer normalization [17]. Note that the output of Eq. (3) is permutation equivariant to Q and permutation invariant to V .
+Based on MAB, Induced Set Attention Block (ISAB) processes the input set x ∈ Rn×d using a smaller set of inducing points I ∈ Rm×d (m < n) by (Figure 2b):
+ISABm(x) = MAB(x, h) ∈ Rn×d, where h = MAB(I, x) ∈ Rm×d. (5) (6)
+The ISAB ﬁrst transforms the input set x into h by attending from I. The resulting h is a permutation invariant projection of x to a lower cardinality m. Then, x again attends to h to produce the output of n elements. As a result, ISAB is permutation equivariant to x.
+Property 1. In ISABm(x), h is permutation invariant to x.
+Property 2. ISABm(x) is permutation equivariant to x. 3. Variational Autoencoders for Sets
+The previous section suggests that there are two essen-tial requirements for VAE for set-structured data: it should be able to model the likelihood of sets (i) in arbitrary cardi-nality and (ii) invariant to the permutation (i.e., exchange-able). This section introduces our SetVAE objective that satisﬁes the ﬁrst requirement while achieving the second re-quirement is discussed in Section 4.
+The objective of VAE [15] is to learn a generative model pθ(x, z) = pθ(z)pθ(x|z) for data x and latent variables z. Since the true posterior is unknown, we approximate it using the inference model qφ(z|x) and optimize the varia-tional lower bound (ELBO) of the marginal likelihood p(x):
+LVAE = Eqφ(z|x)[log pθ(x|z)] − KL (qφ(z|x)||pθ(z)) . (7)
+Vanilla SetVAE When our data is a set x = {xi}n i=1,
+Eq. (7) should be modiﬁed such that it can incorporate the set of arbitrary cardinality n1. To this end, we propose to decompose the latent variable z into the two independent variables as z = {z(0), z(1)}. We deﬁne z(0) = {z(0) i=1 to be a set of initial elements, whose cardinality is always the same as a data x. Then we model the generative process as transforming z(0) into a set x conditioned on the z(1). i }n
+Given the independence assumption, the prior is fac-torized by p(z) = p(z(0))p(z(1)). The prior on initial set p(z(0)) is further decomposed into the cardinality and element-wise distributions as: p(z(0)) = p(n) n
+Yi=1 p(z(0) i
+). (8)
+We model p(n) using the empirical distribution of the train-ing data cardinality. We ﬁnd that the choice of the prior p(z(0)
+) is critical to the performance, and discuss its imple-i mentation in Section 4.2.
+Similar to the prior, the approximate posterior is deﬁned as q(z|x) = q(z(0)|x)q(z(1)|x) and decomposed into: q(z(0)|x) = q(n|x) n
+Yi=1 q(z(0) i
+|x) (9)
+We deﬁne q(n|x) = δ(n) as a delta function with n = |x|, and set q(z(0)
+) similar to [30, 16, 21]. The resulting ELBO can be written as
+|x) = p(z(0) i i
+LSVAE = Eq(z|x)[log p(x|z)]
+− KL(q(z(0)|x)||p(z(0)))
+− KL(q(z(1)|x)||p(z(1))). (10)
+In the supplementary ﬁle, we show that the ﬁrst KL diver-gence in Eq. (10) is a constant and can be ignored in the op-timization. During inference, we sample z(0) by ﬁrst sam-pling the cardinality n ∼ p(n) then the n initial elements independently from the prior p(z(0)
+). i 1Without loss of generality, we use n to denote the cardinality of a set but assume that the training data is composed of sets in various size. 15061
+Hierarchical SetVAE To allow our model to learn a more expressive latent structure of the data, we can extend the vanilla SetVAE using hierarchical latent variables.
+Speciﬁcally, we extend the plain latent variable z(1) into
+L disjoint groups {z(1), ..., z(L)}, and introduce a top-down hierarchical dependency between z(l) and {z(0), ..., z(l−1)} for every l > 1. This leads to the modiﬁcation in the prior and approximate posterior to p(z) = p(z(0))p(z(1)) p(z(l)|z(<l)) (11)
+Yl>1 q(z|x) = q(z(0)|x)q(z(1)|x) q(z(l)|z(<l), x). (12)
+Yl>1
+Applying Eq. (11) and (12) to Eq. (10), we can derive the ELBO as
+LHSVAE = Eq(z|x)[log p(x|z)]
+− KL(q(z(0)|x)||p(z(0))) − KL(q(z(1)|x)||p(z(1)))
+−
+L
+Xl=2
+E q(z(<l)|x)KL(q(z(l)|z(<l), x)||p(z(l)|z(<l)). (13)
+Hierarchical prior and posterior To model the prior and approximate posterior in Eq. (11) and (12) with top-down latent dependency, we employ the bidirectional inference in
+[23]. We outline the formulations here and elaborate on the computations in Section 4.
+Each conditional p(z(l)|z(<l)) in the prior is modeled by the factorized Gaussian, whose parameters are dependent on the latent variables of the upper hierarchy z(<l): p(z(l)|z(<l)) = N
+µl(z(<l)), σl(z(<l)) (cid:16)
+. (cid:17) (14)
+Similarly, each conditional in the approximate posterior q(z(l)|z(<l), x) is also modeled by the factorized Gaussian.
+We use the residual parameterization in [26] which predicts the parameters of the Gaussian using the displacement and scaling factors (∆µ,∆σ) conditioned on z(<l) and x: q(z(l)|z(<l), x) = N (µl(z(<l)) + ∆µl(z(<l), x),
+σl(z(<l)) · ∆σl(z(<l), x)). (15)
+Invariance and equivariance We assume that the decod-ing distribution p(x|z(0), z(1:L)) is equivariant to the per-mutation of z(0) and invariant to the permutation of z(1:L) since such model induces an exchangeable model: p(π(x)) =
+Z p(π(x)|π(z(0)), z(1:L))p(π(z(0)))p(z(1:L))dz p(x|z(0), z(1:L))p(z(0))p(z(1:L))dz = p(x). (16)
+=
+Z
+We further assume that the approximate posterior distribu-tions q(z(l)|z(<l), x) are invariant to the permutation of x.
+In the following section, we describe how we implement the encoder and decoder satisfying these criteria. 4. SetVAE Framework
+We present the overall framework of the proposed Set-VAE. Figure 3 illustrates an overview. SetVAE is based on the bidirectional inference [23], which is composed of the bottom-up encoder and top-down generator sharing the same dependency structure. In this framework, the infer-ence network forms the approximate posterior by merging bottom-up information from data with the top-down infor-mation from the generative prior. We construct the encoder using a stack of ISABs in Section 2.2, and treat each of the projected set h as a deterministic encoding of data.
+Our generator is composed of a stack of special layers called Attentive Bottleneck Layer (ABL), which extends the
+ISAB in Section 2.2 with the stochastic interaction with the latent variable. Speciﬁcally, ABL processes a set at each layer of the generator as follows:
+ABLm(x) = MAB(x, FF(z)) ∈ Rn×d with h = MAB(I, x) ∈ Rm×d, (17) (18) where FF denotes a feed-forward layer, and the latent vari-able z is derived from the projection h. For generation (Fig-ure 3a), we sample z from the prior in Eq. (14) by, z ∼ N (µ, σ) where µ, σ = FF(h). (19)
+For inference (Figure 3b), we sample z from the posterior in Eq. (15) by, z ∼ N (µ + ∆µ, σ · ∆σ) where ∆µ, ∆σ = FF(h + henc), (20) where henc is obtained from the corresponding ISAB layer of the bottom-up encoder. Following [23], we share the pa-rameters between the generative and inference networks. A detailed illustration of ABL is in the supplementary ﬁle.
+To generate a set, we ﬁrst sample the initial elements z(0) and the latent variable z(1) from the prior p(z(0)) and p(z(1)), respectively. Given these inputs, the generator iter-atively samples the subsequent latent variables z(l) from the prior p(z(l)|z(<l)) one by one at each layer of ABL, while processing the set conditioned on the sampled latent vari-able via Eq. (17). The data x is then decoded elementwise from the ﬁnal output. 4.1. Analysis
+Modeling Exchangeable Likelihood The architecture of
+SetVAE satisﬁes the invariance and equivariance criteria in
+Section 3. This is, in part, achieved by producing latent vari-ables from the projected sets of bottom-up ISAB and top-down ABL. As the projected sets are permutation invariant to input (Section 2), the latent variables z(1:L) provide an invariant representation of the data. Furthermore, due to 15062
+the case of point sets, we design the likelihood by
+Lrecon(x) = − log pθ(x|z) 1 2 where d(x, ˆx) is the optimal matching distance deﬁned as d(x, ˆx) + const,
+= (22) d(x, ˆx) = min
+π Xi kxi − ˆxπ(i)k2 2. (23)
+In other words, we measure the likelihood with the Gaus-sian at optimally permuted x, and thus maximizing this likelihood is equivalent to minimizing the optimal matching distance between the data and the reconstruction. Unfortu-nately, directly maximizing this likelihood requires O(n3) computation due to the matching. Instead, we choose the
+Chamfer Distance (CD) as a proxy reconstruction loss,
+Lrecon(x) = CD(x, ˆx) kxi − ˆxjk2
+= min j 2 +
+Xi min i kxi − ˆxjk2 2. (24)
+Xj
+The CD may not admit a direct interpretation as a nega-tive log-likelihood of pθ(x|z), but shares the optimum with the matching distance having a proper interpretation. By employing the CD for the reconstruction loss, we learn the
+VAE with a surrogate for the likelihood pθ(x|z). CD re-quires O(n2) computation time, so is scalable to the mod-erately large sets. Note also that the CD should be scaled appropriately to match the likelihood induced by optimal matching distance. We implicitly account for this by apply-ing weights to KL divergence in our ﬁnal objective function:
+LHSVAE(x) = Lrecon(x) + βLKL(x), (25) where LKL(x) is the KL divergence in Eq. (13). 5.

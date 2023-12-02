@@ -1,0 +1,59 @@
+Abstract
+We present MaX-DeepLab, the ﬁrst end-to-end model for panoptic segmentation. Our approach simpliﬁes the cur-rent pipeline that depends heavily on surrogate sub-tasks and hand-designed components, such as box detection, non-maximum suppression, thing-stuff merging, etc. Although these sub-tasks are tackled by area experts, they fail to comprehensively solve the target task. By contrast, our
+MaX-DeepLab directly predicts class-labeled masks with a mask transformer, and is trained with a panoptic quality in-spired loss via bipartite matching. Our mask transformer employs a dual-path architecture that introduces a global memory path in addition to a CNN path, allowing direct communication with any CNN layers. As a result, MaX-DeepLab shows a signiﬁcant 7.1% PQ gain in the box-free regime on the challenging COCO dataset, closing the gap between box-based and box-free methods for the ﬁrst time.
+A small variant of MaX-DeepLab improves 3.0% PQ over
+DETR with similar parameters and M-Adds. Furthermore,
+MaX-DeepLab, without test time augmentation, achieves new state-of-the-art 51.3% PQ on COCO test-dev set. 1.
+
+Introduction
+The goal of panoptic segmentation [48] is to predict a set of non-overlapping masks along with their correspond-ing class labels. Modern panoptic segmentation methods address this mask prediction problem by approximating the target task with multiple surrogate sub-tasks. For exam-ple, Panoptic-FPN [47] adopts a ‘box-based pipeline’ with three levels of surrogate sub-tasks, as demonstrated in a tree structure in Fig. 1. Each level of this proxy tree in-volves manually-designed modules, such as anchors [77], box assignment rules [105], non-maximum suppression (NMS) [7], thing-stuff merging [98], etc. Although there are good solutions [77, 12, 33] to individual surrogate sub-tasks and modules, undesired artifacts are introduced when these sub-tasks ﬁt into a pipeline for panoptic segmentation, especially in the challenging conditions (Fig. 2).
+∗Work done while an intern at Google.
+Panoptic
+Segmentation
+Ours
+Instance
+Segmentation
+Semantic
+Segmentation
+Box
+Detection
+Box-based
+Segmentation
+Anchor
+Classification
+Anchor
+Regression
+Previous Methods (Panoptic-FPN)
+Figure 1. Our method predicts panoptic segmentation masks di-rectly from images, while previous methods (Panoptic-FPN as an example) rely on a tree of surrogate sub-tasks. Panoptic segmen-tation masks are obtained by merging semantic and instance seg-mentation results. Instance segmentation is further decomposed into box detection and box-based segmentation, while box detec-tion is achieved by anchor regression and anchor classiﬁcation. (a) Our MaX-DeepLab 51.1 PQ (box-free) (b) Axial-DeepLab [89] 43.4 PQ (box-free) (c) DetectoRS [76] 48.6 PQ (box-based)
+Figure 2. A case study for our method and state-of-the-art box-free and box-based methods. (a) Our end-to-end MaX-DeepLab cor-rectly segments a dog sitting on a chair. (b) Axial-DeepLab [89] relies on a surrogate sub-task of regressing object center off-sets [21]. It fails because the centers of the dog and the chair are close to each other. (c) DetectoRS [76] classiﬁes object bounding boxes, instead of masks, as a surrogate sub-task. It ﬁlters out the chair mask because the chair bounding box has a low conﬁdence.
+Recent work on panoptic segmentation attempted to sim-plify this box-based pipeline. For example, UPSNet [98] proproses a parameter-free panoptic head, permitting back-propagation to both semantic and instance segmentation modules. Recently, DETR [10] presents an end-to-end ap-proach for box detection, which is used to replace detectors 5463
+Method
+Anchor Center NMS Merge Box
+-Free
+-Free
+-Free
+-Free
+-Free
+Panoptic-FPN [47]
+UPSNet [98]
+DETR [10]
+Axial-DeepLab [89]
+MaX-DeepLab 7 7 3 3 3 3 3 3 7 3 7 7 3 7 3 7 3 3 7 3 7 7 7 3 3
+Table 1. Our end-to-end MaX-DeepLab dispenses with these com-mon hand-designed components necessary for existing methods. in panoptic segmentation, but the whole training process of
+DETR still relies heavily on the box detection task.
+Another line of work made efforts to completely remove boxes from the pipeline, which aligns better with the mask-based deﬁnition of panoptic segmentation. The state-of-the-art method in this regime, Axial-DeepLab [89], along with other box-free methods [100, 21, 11], predicts pixel-wise offsets to pre-deﬁned instance centers. But this center-based surrogate sub-task makes it challenging to deal with highly deformable objects, or near-by objects with close centers.
+As a result, box-free methods do not perform as well as box-based methods on the challenging COCO dataset [60].
+In this paper, we streamline the panoptic segmenta-tion pipeline with an end-to-end approach.
+Inspired by
+DETR [10], our model directly predicts a set of non-overlapping masks and their corresponding semantic labels with a mask transformer. The output masks and classes are optimized with a panoptic quality (PQ) style objective.
+Speciﬁcally, inspired by the deﬁnition of PQ [48], we deﬁne a similarity metric between two class-labeled masks as the multiplication of their mask similarity and their class sim-ilarity. Our model is trained by maximizing this similarity between ground truth masks and predicted masks via one-to-one bipartite matching [51, 82, 10]. This direct modeling of panoptic segmentation enables end-to-end training and inference, removing those hand-coded priors that are nec-essary in existing box-based and box-free methods (Tab. 1).
+Our method is dubbed MaX-DeepLab for extending Axial-DeepLab with a Mask Xformer.
+In companion with direct training and inference, we equip our mask transformer with a novel architecture. In-stead of stacking a traditional transformer [87, 10] on top of a Convolutional Neural Network (CNN) [52], we propose a dual-path framework for combining CNNs with trans-formers. Speciﬁcally, we enable any CNN layer to read and write a global memory, using our dual-path transformer block. This block supports all types of attention between the CNN-path and the memory-path, including memory-path self-attention (M2M), pixel-path axial self-attention (P2P), memory-to-pixel attention (M2P), and ﬁnally pixel-to-memory attention (P2M). The transformer block can be inserted anywhere in a CNN, enabling communication with the global memory at any layer. Besides this commu-nication module, our MaX-DeepLab employs a stacked-hourglass-style decoder [78, 71, 19]. The decoder aggre-gates multi-scale features into a high resolution output, which is then multiplied with the global memory feature, to form our mask set prediction. The classes for the masks are predicted with another branch of the mask transformer.
+We evaluate MaX-DeepLab on one of the most challeng-ing panoptic segmentation datasets, COCO [60], against the state-of-the-art box-free method, Axial-DeepLab [89], and state-of-the-art box-based method, DetectoRS [93] (Fig. 2).
+Our MaX-DeepLab, without test time augmentation (TTA), achieves the state-of-the-art result of 51.3% PQ on the test-dev set. This result surpasses Axial-DeepLab (with TTA) by 7.1% PQ in the box-free regime, and outperforms De-tectoRS (with TTA) by 1.7% PQ, bridging the gap between box-based and box-free methods for the ﬁrst time. For a fair comparison with DETR [10], we also evaluate a lightweight model, MaX-DeepLab-S, that matches the number of pa-rameters and M-Adds of DETR. We observe that MaX-DeepLab-S outperforms DETR by 3.3% PQ on the val set and 3.0% PQ on the test-dev set. In addition, we perform extensive ablation studies and analyses on our end-to-end formulation, model scaling, dual-path architectures, and our loss functions. We also notice that the extra-long training schedule of DETR [10] is not necessary for MaX-DeepLab.
+To summarize, our contributions are four-fold:
+• MaX-DeepLab is the ﬁrst end-to-end model for panop-tic segmentation, inferring masks and classes directly without hand-coded priors like object centers or boxes.
+• We propose a training objective that optimizes a PQ-style loss function via a PQ-style bipartite matching between predicted masks and ground truth masks.
+• Our dual-path transformer enables CNNs to read and write a global memory at any layer, providing a new way of combining transformers with CNNs.
+• MaX-DeepLab closes the gap between box-based and box-free methods and sets a new state-of-the-art on
+COCO, even without using test time augmentation. 2.

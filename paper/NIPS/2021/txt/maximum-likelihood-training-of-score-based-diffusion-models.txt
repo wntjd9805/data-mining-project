@@ -1,0 +1,299 @@
+Abstract
+Score-based diffusion models synthesize samples by reversing a stochastic process that diffuses data to noise, and are trained by minimizing a weighted combination of score matching losses. The log-likelihood of score-based diffusion models can be tractably computed through a connection to continuous normalizing ﬂows, but log-likelihood is not directly optimized by the weighted combination of score matching losses. We show that for a speciﬁc weighting scheme, the objective upper bounds the negative log-likelihood, thus enabling approximate maximum likelihood training of score-based diffusion models. We empirically observe that maximum likelihood training consistently improves the likelihood of score-based diffusion models across multiple datasets, stochastic processes, and model architectures.
+Our best models achieve negative log-likelihoods of 2.83 and 3.76 bits/dim on
+CIFAR-10 and ImageNet 32 ˆ 32 without any data augmentation, on a par with state-of-the-art autoregressive models on these tasks. 1
+
+Introduction
+Score-based generative models [44, 45, 48] and diffusion probabilistic models [43, 19] have recently achieved state-of-the-art sample quality in a number of tasks, including image generation [48, 11], audio synthesis [5, 27, 37], and shape generation [3]. Both families of models perturb data with a sequence of noise distributions, and generate samples by learning to reverse this path from noise to data. Through stochastic calculus, these approaches can be uniﬁed into a single framework [48] which we refer to as score-based diffusion models in this paper.
+The framework of score-based diffusion models [48] involves gradually diffusing the data distribution towards a given noise distribution using a stochastic differential equation (SDE), and learning the time reversal of this SDE for sample generation. Crucially, the reverse-time SDE has a closed-form expression which depends solely on the time-dependent gradient ﬁeld (a.k.a., score) of the perturbed data distribution. This gradient ﬁeld can be efﬁciently estimated by training a neural network (called a score-based model [44, 45]) with a weighted combination of score matching losses [23, 56, 46] as the objective. A key advantage of score-based diffusion models is that they can be transformed into continuous normalizing ﬂows (CNFs) [6, 15], thus allowing tractable likelihood computation with numerical ODE solvers.
+˚Equal contribution. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Compared to vanilla CNFs, score-based diffusion models are much more efﬁcient to train. This is because the maximum likelihood objective for training CNFs requires running an expensive ODE solver for every optimization step, while the weighted combination of score matching losses for training score-based models does not. However, unlike maximum likelihood training, minimizing a combination of score matching losses does not necessarily lead to better likelihood values. Since better likelihoods are useful for applications including compression [21, 20, 51], semi-supervised learning [10], adversarial puriﬁcation [47], and comparing against likelihood-based generative models, we seek a training objective for score-based diffusion models that is as efﬁcient as score matching but also promotes higher likelihoods.
+We show that such an objective can be readily obtained through slight modiﬁcation of the weighted combination of score matching losses. Our theory reveals that with a speciﬁc choice of weighting, which we term the likelihood weighting, the combination of score matching losses actually upper bounds the negative log-likelihood. We further prove that this upper bound becomes tight when our score-based model corresponds to the true time-dependent gradient ﬁeld of a certain reverse-time
+SDE. Using likelihood weighting increases the variance of our objective, which we counteract by introducing a variance reduction technique based on importance sampling. Our bound is analogous to the classic evidence lower bound used for training latent-variable models in the variational autoencoding framework [26, 39], and can be viewed as a continuous-time generalization of [43].
+With our likelihood weighting, we can minimize the weighted combination of score matching losses for approximate maximum likelihood training of score-based diffusion models. Compared to weight-ings in previous work [48], we consistently improve likelihood values across multiple datasets, model architectures, and SDEs, with only slight degradation of Fréchet Inception distances [17]. Moreover, our upper bound on negative log-likelihood allows training with variational dequantization [18], with which we reach negative log-likelihood of 2.83 bits/dim on CIFAR-10 [28] and 3.76 bits/dim on ImageNet 32 ˆ 32 [55] with no data augmentation. Our models present the ﬁrst instances of normalizing ﬂows which achieve comparable likelihood to cutting-edge autoregressive models. 2 Score-based diffusion models
+Score-based diffusion models are deep generative models that smoothly transform data to noise using a diffusion process, and synthesize samples by learning and simulating the time-reversal of this diffusion. The overall approach is illustrated in Fig. 1. 2.1 Diffusing data to noise with an SDE
+Let ppxq denote the unknown distribution of a dataset consisting of D-dimensional i.i.d. samples.
+Score-based diffusion models [48] employ a stochastic differential equation (SDE) to diffuse ppxq towards a noise distribution. The SDEs are of the form dx “ f px, tq dt ` gptq dw, (1) where f p¨, tq : RD Ñ RD is the drift coefﬁcient, gptq P R is the diffusion coefﬁcient, and w P RD denotes a standard Wiener process (a.k.a., Brownian motion). Intuitively, we can interpret dw as inﬁnitesimal Gaussian noise. The solution of an SDE is a diffusion process txptqutPr0,T s, where r0, T s is a ﬁxed time horizon. We let ptpxq denote the marginal distribution of xptq, and p0tpx1 | xq denote the transition distribution from xp0q to xptq. Note that by deﬁnition we always have p0 “ p when using an SDE to perturb the data distribution.
+The role of the SDE is to smooth the data distribution by adding noise, gradually removing structure until little of the original signal remains. In the framework of score-based diffusion models, we choose f px, tq, gptq, and T such that the diffusion process txptqutPr0,T s approaches some analytically tractable prior distribution πpxq at t “ T , meaning pT pxq « πpxq. Three families of SDEs suitable for this task are outlined in [48], namely Variance Exploding (VE) SDEs, Variance Preserving (VP)
+SDEs, and subVP SDEs. 2.2 Generating samples with the reverse SDE
+Sample generation in score-based diffusion models relies on time-reversal of the diffusion process.
+For well-behaved drift and diffusion coefﬁcients, the forward diffusion described in Eq. (1) has an 2
+Figure 1: We can use an SDE to diffuse data to a simple noise distribution. This SDE can be reversed once we know the score of the marginal distribution at each intermediate time step, x log ptpxq.
+∇
+∇
+“ dx “
+‰ x log ptpxq associated reverse-time diffusion process [1, 16] given by the following SDE f px, tq ´ gptq2 (2) where ¯w is now a standard Wiener process in the reverse-time direction. Here dt represents an inﬁnitesimal negative time step, meaning that the above SDE must be solved from t “ T to t “ 0.
+This reverse-time SDE results in exactly the same diffusion process txptqutPr0,T s as Eq. (1), assuming it is initialized with xpT q „ pT pxq. This result allows for the construction of diffusion-based generative models, and its functional form reveals the key target for learning: the time-dependent x log ptpxq. Again, see Fig. 1 for a helpful visualization of this two-part formulation. score function dt ` gptq d ¯w,
+∇
+∇ x log ptpxq from a given dataset, we ﬁt the parameters of a neural network
+In order to estimate x log ptpxq for almost all x P RD and sθpx, tq, termed a score-based model, such that sθpx, tq « t P r0, T s. Unlike many likelihood-based generative models, a score-based model does not need to satisfy the integral constraints of a density function, and is therefore much easier to parameterize.
+Good score-based models should keep the following least squares loss small
+T
+∇
+ż
+SMpθ; λp¨qq :“
+J 1 2 0
+Eptpxqrλptq 2 2s dt, x log ptpxq ´ sθpx, tq (cid:107) (cid:107)∇ (3) where λ : r0, T s Ñ Rą0 is a positive weighting function. The integrand features the well-known 2 score matching [23] objective Eptpxqr 2s. We therefore refer to Eq. (3) as a (cid:107) weighted combination of score matching losses. x log ptpxq ´ sθpx, tq (cid:107)∇
+With score matching techniques [56, 46], we can compute Eq. (3) up to an additive constant and minimize it for training score-based models. For example, we can use denoising score matching [56]
+SMpθ; λp¨qq into the following, which is equivalent up to a constant independent of θ: to transform
+J
+ż
+T 0 1 2
+DSMpθ; λp¨qq :“
+J
+Eppxqp0tpx1|xqrλptq (cid:13) (cid:13)
+∇ x1 log p0tpx1 | xq ´ sθpx1, tq (cid:13) 2 2s dt. (cid:13) (4)
+Whenever the drift coefﬁcient fθpx, tq is linear in x (which is true for all SDEs in [48]), the transition density p0tpx1 | xq is a tractable Gaussian distribution. We can form a Monte Carlo estimate of
+DSMpθ; λp¨qq with a sample pt, x, x1q, where t is uniformly both the time integral and expectation in drawn from r0, T s, x „ ppxq is a sample from the dataset, and x1 „ p0tpx1 | xq. The gradient x1 log p0tpx1 | xq can also be computed in closed form since p0tpx1 | xq is Gaussian.
+∇
+After training a score-based model sθpx, tq with
+DSMpθ; λp¨qq, we can plug it into the reverse-time
+J
+SDE in Eq. (2). Samples are then generated by solving this reverse-time SDE with numerical SDE solvers, given an initial sample from πpxq at t “ T . Since the forward SDE Eq. (1) is designed such that pT pxq « πpxq, the reverse-time SDE will closely trace the diffusion process given by Eq. (1) in the reverse time direction, and yield an approximate data sample at t “ 0 (as visualized in Fig. 1).
+J 3 Likelihood of score-based diffusion models
+The forward and backward diffusion processes in score-based diffusion models induce two probabilis-tic models for which we can deﬁne a likelihood. The ﬁrst probabilistic model, denoted as pSDE pxq, is given by the approximate reverse-time SDE constructed from our score-based model sθpx, tq. In particular, suppose tˆxθptqutPr0,T s is a stochastic process given by dt ` gptq d ¯w, f pˆx, tq ´ gptq2sθpˆx, tq
+ˆxθpT q „ π. dˆx “ (5)
+‰
+“
+θ 3
+θ as the marginal distribution of ˆxθp0q. The probabilistic model pSDE
+We deﬁne pSDE is jointly deﬁned by the score-based model sθpx, tq, the prior π, plus the drift and diffusion coefﬁcients of the forward
+SDE in Eq. (1). We can obtain a sample ˆxθp0q „ pSDE by numerically solving the reverse-time SDE in Eq. (5) with an initial noise vector ˆxθpT q „ π.
+The other probabilistic model, denoted pODE pxq, is derived from the SDE’s associated probability ﬂow
+ODE [32, 48]. Every SDE has a corresponding probability ﬂow ODE whose marginal distribution at each time t matches that of the SDE, so that they share the same ptpxq for all time. In particular, the
+ODE corresponding to the SDE in Eq. (1) is given by
+θ
+θ
+θ 1 2
+Unlike the SDEs in Eq. (1) and Eq. (2), this ODE describes fully deterministic dynamics for x log ptpxq. By the process. Notably, it still features the same time-dependent score function approximating this score function with our model sθpx, tq, the probability ﬂow ODE becomes
+“ f px, tq ´ x log ptpxq. dx dt gptq2 (6)
+∇
+∇ d˜x dt
+“ f p˜x, tq ´ 1 2 gptq2sθp˜x, tq. (7)
+θ
+θ
+θ
+, the model pODE
+In fact, this ODE is an instance of a continuous normalizing ﬂow (CNF) [15], and we can quantify how the ODE dynamics transform volumes across time in exactly the same way as these traditional
+ﬂow-based models [6]. Given a prior distribution πpxq, and a trajectory function ˜xθ : r0, T s Ñ RD satisfying the ODE in Eq. (7), we deﬁne pODE as the marginal distribution of ˜xθp0q when ˜xθpT q „ π.
+Similarly to pSDE is jointly deﬁned by the score-based model sθpx, tq, the prior π, and the forward SDE in Eq. (1). Leveraging the instantaneous change-of-variables formula [6], we can evaluate log pODE is a CNF, we can generate a sample ˜xθp0q „ pODE by numerically solving the ODE in Eq. (7) with an initial value ˜xθpT q „ π.
+Although computing log pODE
+θ with maximum likelihood will require calling an ODE solver for every optimization step [6, 15], which can be prohibitively expensive for large-scale score-based models. Unlike pODE pxq exactly for an arbitrary data point x. However, we have a lower bound on log pSDE pxq which allows both efﬁcient evaluation and optimization, as will be shown in Section 4.2. pxq exactly with numerical ODE solvers. Since pODE pxq is tractable, training pODE
+, we cannot evaluate log pSDE
+θ
+θ
+θ
+θ
+θ
+θ
+θ 4 Bounding the likelihood of score-based diffusion models
+Many applications beneﬁt from models which achieve high likelihood. One example is lossless compression, where log-likelihood directly corresponds to the minimum expected number of bits needed to encode a message. Indeed, popular likelihood-based models such as variational autoen-coders and normalizing ﬂows have already found success in image compression [51, 20, 21]. Despite some known drawbacks [50], likelihood is still one of the most popular metrics for evaluating and comparing generative models.
+θ or pODE
+θ
+Maximizing the likelihood of score-based diffusion models can be accomplished by either maximizing the likelihood of pSDE is a continuous normalizing ﬂow (CNF) and its log-likelihood is tractable, training with maximum likelihood is expensive. As mentioned already, it requires solving an ODE at every optimization step in order to evaluate the log-likelihood on a batch of training data. In contrast, training with the weighted combination of score matching losses is much more efﬁcient, yet in general it does not directly promote high likelihood of either pSDE
+. Although pODE
+θ
+. or pODE
+θ
+θ
+In what follows, we show that with a speciﬁc choice of the weighting function λptq, the combination of score matching losses q, and can therefore serve as an efﬁcient proxy for maximum likelihood training. In addition, we provide a related lower bound on log pSDE pxq that can be evaluated efﬁciently on any individual datapoint x.
+SMpθ; λp¨qq actually becomes an upper bound on DKLpp } pSDE
+J
+θ
+θ 4.1 Bounding the KL divergence with likelihood weighting
+It is well-known that maximizing the log-likelihood of a probabilistic model is equivalent to minimiz-ing the KL divergence from the data distribution to the model distribution. We show in the following theorem that for the model pSDE
+SMpθ; λp¨qq when using the weighting function λptq “ gptq2, where gptq is the diffusion coefﬁcient of SDE in Eq. (1).
+, this KL divergence can be upper bounded by
+J
+θ 4
+Table 1: SDEs and their corresponding weightings for score matching losses.
+SDE
+VE
+VP subVP dx “ ´ 1 2 βptqx dt ` dx “ ´ 1 1 ´ e´
+βptq dw
+ş
+ş 0 βpsq dsq2 0 βpsq dsq dw p1 ´ e´ t t
+βptqp1 ´ e´2
+λptq in [48]
+σ2ptq
+ş t 0 βpsq ds likelihood weighting
+σ2ptq
+βptq
+βptqp1 ´ e´2
+ş 0 βpsq dsq t
+Formula dx “ σptq dw a 2 βptqx dt ` b
+Theorem 1. Let ppxq be the data distribution, πpxq be a known prior distribution, and pSDE be deﬁned as in Section 3. Suppose txptqutPr0,T s is a stochastic process deﬁned by the SDE in Eq. (1) with xp0q „ p, where the marginal distribution of xptq is denoted as pt. Under some regularity conditions detailed in Appendix A, we have
+θ
+DKLpp } pSDE
+θ q ď
+SMpθ; gp¨q2q ` DKLppT } πq.
+J (8)
+Sketch of proof. Let µ and ν denote the path measures of SDEs in Eq. (1) and Eq. (5) respectively.
+Intuitively, µ is the joint distribution of the diffusion process txptqutPr0,T s given in Section 2.1, and ν represents the joint distribution of the process tˆxθptqutPr0,T s deﬁned in Section 3. Since we can marginalize µ and ν to obtain distributions p and pSDE
+, the data processing inequality gives DKLpp } pSDE q ď DKLpµ } νq. From the chain rule for the KL divergence, we also have
+DKLpµ } νq “ DKLppT } πq ` EpT pzqrDKLpµp¨ | xpT q “ zq } νp¨ | ˆxθpT q “ zqqs, where the KL divergence in the ﬁnal term can be computed by applying the Girsanov theorem [34] to Eq. (5) and the reverse-time SDE of Eq. (1).
+θ
+θ
+J
+When the prior distribution π is ﬁxed, Theorem 1 guarantees that optimizing the weighted combination
+SMpθ; gp¨q2q is equivalent to minimizing an upper bound on the KL of score matching losses divergence from the data distribution p to the model distribution pSDE
+. Due to well-known equivalence
+θ between minimizing KL divergence and maximizing likelihood, we have the following corollary.
+Corollary 1. Consider the same conditions and notations in Theorem 1. When π is a ﬁxed prior distribution that does not depend on θ, we have
+´Eppxqrlog pSDE where C1 and C2 are constants independent of θ.
+SMpθ; gp¨q2q ` C1 “
+DSMpθ; gp¨q2q ` C2, pxqs ď
+J
+J
+θ
+In light of the result in Corollary 1, we henceforth term λptq “ gptq2 the likelihood weighting.
+The original weighting functions in [48] are inspired from earlier work such as [44, 45] and [19], which are motivated by balancing different score matching losses in the combination, and justiﬁed by empirical performance. In contrast, likelihood weighting is motivated from maximizing the likelihood of a probabilistic model induced by the diffusion process, and derived by theoretical analysis. There are three types of SDEs considered in [48]: the Variance Exploding (VE) SDE, the
+Variance Preserving (VP) SDE, and the subVP SDE. In Table 1, we summarize all these SDEs and contrast their original weighting functions with our likelihood weighting. For VE SDE, our likelihood weighting incidentally coincides with the original weighting used in [48], whereas for VP and subVP
+SDEs they differ from one another.
+Theorem 1 leaves two questions unanswered. First, what are the conditions for the bound to be tight (become an equality)? Second, is there any connection between pSDE under some conditions? We provide both answers in the following theorem.
+Theorem 2. Suppose ppxq and qpxq have continuous second-order derivatives and ﬁnite second moments. Let txptqutPr0,T s be the diffusion process deﬁned by the SDE in Eq. (1). We use pt and qt to denote the distributions of xptq when xp0q „ p and xp0q „ q, and assume they satisfy the same assumptions in Appendix A. Under the conditions qT “ π and sθpx, tq ” x log qtpxq for all t P r0, T s, we have the following equivalence in distributions and pODE
+∇
+θ
+θ
+Moreover, we have
+θ “ pODE pSDE
+θ “ q.
+DKLpp } pSDE
+θ q “
+SMpθ; gp¨q2q ` DKLppT } πq.
+J 5 (9) (10)
+Sketch of proof. When sθpx, tq matches x log qtpxq, they both represent the time-dependent score
+∇ of the same stochastic process so we immediately have pSDE
+θ “ q. According to the theory of probability ﬂow ODEs, we also have pODE
+θ “ q “ pSDE
+. To prove Eq. (10), we note that DKLpp }
+ş
+T
+T d d pSDE dt DKLppt } qtq dt. dt DKLppt } qtq dt “ DKLppT }πq´ q “ DKLpp}qq “ DKLppT }qT q´
+θ 0 0
+We can now complete the proof by simplifying the integrand using the Fokker–Planck equation of pt and qt followed by integration by parts.
+ş
+θ
+∇
+In practice, the conditions of Theorem 2 are hard to satisfy since our score-based model sθpx, tq x log qtpxq of some reverse-time diffusion process with will not exactly match the score function the initial distribution qT “ π. In other words, our score model may not be a valid time-dependent score function of a stochastic process with an appropriate initial distribution. Therefore, although score matching with likelihood weighting performs approximate maximum likelihood training for pSDE
+, we emphasize that it is not theoretically guaranteed to make the likelihood of pODE better.
+θ
+That said, pODE if our score-based model well-approximates the true score such that sθpx, tq « x log ptpxq for all x and t P r0, T s. Moreover, we empirically observe in our experiments (see Table 2) that training with the likelihood weighting is actually able to consistently improve the likelihood of pODE across multiple datasets, SDEs, and model architectures.
+θ will closely match pSDE
+∇
+θ
+θ
+θ 4.2 Bounding the log-likelihood on individual datapoints
+The bound in Theorem 1 is for the entire distributions of p and pSDE
+, but we often seek to bound the
+SMpθ; λp¨qq in the bound is not directly log-likelihood for an individual data point x. In addition,
+J x log ptpxq, and can only be evaluated up to an additive computable due to the unknown quantity
+DSMpθ; λp¨qq (as we already discussed in Section 2.2). Therefore, the bound in constant through
+Theorem 1 is only suitable for training purposes. To address these issues, we provide the following bounds for individual data points.
+Theorem 3. Let p0tpx1 | xq denote the transition distribution from p0pxq to ptpxq for the SDE in
+Eq. (1). With the same notations and conditions in Theorem 1, we have
+∇
+J
+θ where
+L
+SM
+θ pxq is deﬁned as
+ż
+´Ep0T px1|xqrlog πpx1qs ` 1 2
+T 0
+´ log pSDE
+θ pxq ď
+SM
+θ pxq “
+DSM
+θ pxq,
+L
+L
+Ep0tpx1|xq
+” 2gptq2
+∇ x1 ¨ sθpx1, tq ` gptq2 (cid:13) (cid:13)sθpx1, tq(cid:13) 2 2 ´ 2 (cid:13)
+∇ (11)
+ı x1 ¨ f px1, tq dt, and
+DSM
+θ
+L pxq is given by
+´ Ep0T px1|xqrlog πpx1qs ` 1 2
+ż
+T 0
+´
+” gptq2 (cid:13) (cid:13)sθpx1, tq ´ ∇x1 log p0tpx1 | xq(cid:13) 2 (cid:13) 2
+” gptq2 (cid:13) (cid:13)∇x1 log p0tpx1 | xq(cid:13) (cid:13) 2
+Ep0tpx1|xq
+ı dt
+Ep0tpx1|xq
+ż
+T 0 1 2 2 ` 2∇x1 ¨ f px1, tq
+ı dt.
+H q ` ppq, where
+Sketch of proof. For any continuous data distribution p, we have ´Eppxqrlog pSDE pxqs “ DKLpp } pSDE ppq denotes the differential entropy of p. The KL term can be bounded
+θ according to Theorem 1, while the differential entropy has an identity similar to Theorem 2 (see
+Theorem 4 in Appendix A). Combining the bound of DKLpp } pSDE ppq, we obtain a bound on ´Eppxqrlog pSDE pxqs that holds for all continuous distribution p. Removing the expectation over p on both sides then gives us a bound on ´ log pSDE pxq for an individual datapoint x. We can simplify this bound to pxq with similar techniques to [23] and [56]. q and the identity of
+H
+H
+θ
+θ
+θ
+θ
+SM
+θ pxq and
+L
+DSM
+θ
+L
+SM
+θ pxq and pxq. The former bears resemblance to score
+We provide two equivalent bounds
+L
+L matching while the second resembles denoising score matching. Both admit efﬁcient unbiased pxq estimators when f p¨, tq is linear, as the time integrals and expectations in can be estimated by samples of the form pt, x1q, where t is uniformly sampled over r0, T s, and x1 „ p0tpx1 | xq. Since the transition distribution p0tpx1 | xq is a tractable Gaussian when f p¨, tq is pxq. linear, we can easily sample from it as well as evaluating x1 log p0tpx1 | xq for computing
+SM
+θ pxq and
+DSM
+θ
+L
+DSM
+θ
+L
+DSM
+θ
+L
+∇ 6
+x ¨ f px, tq in
+Moreover, the divergences unbiased estimators via the Skilling–Hutchinson trick [42, 22]. x ¨ sθpx, tq and
+∇
+∇
+L
+SM
+θ pxq and
+DSM
+θ
+L pxq have efﬁcient
+DSM
+θ
+L pxq as a continuous-time generalization of the evidence lower bound (ELBO) in
+We can view diffusion probabilistic models [43, 19]. Our bounds in Theorem 3 are not only useful for optimizing and estimating log pSDE pxq, but also for training the drift and diffusion coefﬁcients f px, tq and gptq jointly with the score-based model sθpx, tq; we leave this avenue of research for future work.
+In addition, we can plug the bounds in Theorem 3 into any objective that involves minimizing
+´ log pSDE pxq to obtain an efﬁcient surrogate. Section 5.2 provides an example, where we perform variational dequantization to further improve the likelihood of score-based diffusion models.
+θ
+θ
+Similar to the observation in Section 4.1,
+´ log pODE sufﬁciently close to the ground truth. In fact, we empirically observe that ´ log pODE pxq are not guaranteed to upper bound
+L pxq. However, they should become approximate upper bounds when sθpx, tq is trained
+SM
+θ pxq “ pxq ď
+SM
+θ pxq and
+DSM
+θ
+L
+θ
+θ pxq holds true for x sampled from the dataset in all experiments.
+L
+DSM
+θ
+L 4.3 Numerical stability
+So far we have assumed that the SDEs are deﬁned in the time horizon r0, T s in all theoretical analysis. In practice, however, we often face numerical instabilities when t Ñ 0. To avoid them, we choose a small non-zero starting time (cid:15) ą 0, and train/evaluate score-based diffusion models in the time horizon r(cid:15), T s instead of r0, T s. Since (cid:15) is small, training score-based diffusion models with likelihood weighting still approximately maximizes their model likelihood. Yet at test time, the likelihood bound as computed in Theorem 3 is slightly biased, rendering the values not directly comparable to results reported in other works. We use Jensen’s inequality to correct for this bias in our experiments, for which we provide a detailed explanation in Appendix B. 4.4

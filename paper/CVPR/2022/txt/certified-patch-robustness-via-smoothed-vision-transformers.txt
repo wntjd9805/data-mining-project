@@ -1,0 +1,156 @@
+Abstract
+Certiﬁed patch defenses can guarantee robustness of an image classiﬁer to arbitrary changes within a bounded con-tiguous region. But, currently, this robustness comes at a cost of degraded standard accuracies and slower inference times. We demonstrate how using vision transformers en-ables signiﬁcantly better certiﬁed patch robustness that is also more computationally efﬁcient and does not incur a substantial drop in standard accuracy. These improvements stem from the inherent ability of the vision transformer to gracefully handle largely masked images.1 1.
+
+Introduction
+High-stakes scenarios warrant the development of cer-tiﬁably robust models that are guaranteed to be robust to a set of transformations. These techniques are beginning to ﬁnd applications in real-world settings, such as verify-ing that aircraft controllers behave safely in the presence of approaching airplanes [19], and ensuring the stability of automotive systems to sensor noise [54].
+We study robustness in the context of adversarial patches—a broad class of arbitrary changes contained within a small, contiguous region. Adversarial patches cap-ture the essence of a range of maliciously designed physi-cal objects such as adversarial glasses [44], stickers/grafﬁti
+[12], and clothing [55]. Researchers have used adversar-ial patches to fool image classiﬁers [4], manipulate object detectors [18, 24], and disrupt optical ﬂow estimation [38].
+Adversarial patch defenses can be tricky to evaluate— recent work broke several empirical defenses [1, 16, 35] with stronger adaptive attacks [6, 48]. This motivated certiﬁed defenses, which deliver provably robust models without having to rely on an empirical evaluation. How-ever, certiﬁed guarantees tend to be modest and come at a cost: poor standard accuracy and slower inference times [25, 26, 56, 63]. For example, a top-performing, re-cently proposed method reduces standard accuracy by 30% and increases inference time by two orders of magnitude, while certifying only 13.9% robust accuracy on ImageNet against patches that take up 2% of the image [25]. These drawbacks are commonly accepted as the cost of certiﬁ-cation, but severely limit the applicability of certiﬁed de-fenses. Does certiﬁed robustness really need to come at such a high price?
+Our contributions
+In this paper, we demonstrate how to leverage vision transformers (ViTs) [10] to create certiﬁed patch defenses that achieve signiﬁcantly higher robustness guarantees than prior work. Moreover, we show that certiﬁed patch defenses with ViTs can actually maintain standard accuracy and in-ference times comparable to standard (non-robust) models.
+At its core, our methodology exploits the token-based na-ture of attention modules used in ViTs to gracefully handle the ablated images used in certiﬁed patch defenses. Specif-ically, we demonstrate the following:
+Improved guarantees via smoothed vision transformers.
+We ﬁnd that using ViTs as the backbone of the derandom-ized smoothing defense [25] enables signiﬁcantly improved certiﬁed patch robustness. Indeed, this change alone boosts certiﬁed accuracy by up to 13% on ImageNet, and 5% on
+CIFAR-10 over similarly sized ResNets.
+Standard accuracy comparable to that of standard ar-chitecures. We demonstrate that ViTs enable certiﬁed de-fenses with standard accuracies comparable to that of stan-In particular, our largest ViT dard, non-robust models. improves state-of-the-art certiﬁed robustness on ImageNet while maintaining standard accuracy that is similar to that of a non-robust ResNet (>70%).
+*Equal contribution. 1Our code is available at https://github.com/MadryLab/ smoothed-vit.
+Faster inference. We modify the ViT architecture to drop unnecessary tokens, and reduce the smoothing process to
+pass over mostly redundant computation. These changes turn out to vastly speed up inference time for our smoothed
+ViTs. In our framework, a forward pass on ImageNet be-comes up to two orders of magnitude faster than that of prior certiﬁed defenses, and is close in speed to a standard (non-robust) ResNet. 2. Certiﬁed patch defense with smoothing & transformers
+Smoothing methods are a general class of certiﬁed de-fenses that combine the predictions of a classiﬁer over many variations of an input to create predictions that are certi-ﬁably robust [7, 26]. One such method that obtains robust-ness to adversarial patches is derandomized smoothing [25], which aggregates a classiﬁer’s predictions on various image ablations that mask most of the image out.
+These approaches typically use CNNs, a common de-fault model for computer vision tasks, to evaluate the im-age ablations. The starting point of our approach is to ask: are convolutional architectures the right tool for this task?
+The crux of our methodology is to leverage vision trans-formers, which we demonstrate are more capable of grace-fully handling the image ablations that arise in derandom-ized smoothing. 2.1. Preliminaries
+Image ablations.
+Image ablations are variations of an im-age where all but a small portion of the image is masked out
+[25]. For example, a column ablation masks the entire im-age except for a column of a ﬁxed width (see Figure 1 for an example). We focus primarily on column ablations and explore the more general block ablation in Appendix G.
+Figure 1. Examples of column ablations for the left-most image with column width 19px.
+For a input h × w sized image x, we denote by Sb(x) the set of all possible column ablations of width b. A col-umn ablation can start at any position and wrap around the image, so there are w total ablations in Sb(x).
+Derandomized smoothing. Derandomized smoothing
+[25] is a popular approach for certiﬁed patch defenses that constructs a smoothed classiﬁer comprising of two main components: (1) a base classiﬁer, and (2) a set of image ab-lations used to smooth the base classiﬁer. Then, the result-ing smoothed classiﬁer returns the most frequent prediction of the base classiﬁer over the ablation set Sb(x). Speciﬁ-cally, for an input image x, ablation set Sb(x), and a base classiﬁer f , a smoothed classiﬁer g is deﬁned as: g(x) = arg max c nc(x) (1) where nc(x) = (cid:88)
+I{f (x(cid:48)) = c} x(cid:48)∈Sb(x) denotes the number of image ablations that were classi-ﬁed as class c. We refer to the fraction of images that the smoothed classiﬁer correctly classiﬁes as standard ac-curacy.
+A smoothed classiﬁer is certiﬁably robust for an input image if the number of ablations for the most frequent class exceeds the second most frequent class by a large enough margin. Intuitively, a large margin makes it impossible for an adversarial patch to change the prediction of a smoothed classiﬁer since a patch can only affect a limited number of ablations.
+Speciﬁcally, let ∆ be the maximum number of ablations in the ablation set Sb(x) that an adversarial patch can si-multaneously intersect (e.g., for column ablations of size b, an m × m patch can intersect with at most ∆ = m + b − 1 ablations). Then, a smoothed classiﬁer is certiﬁably robust on an input x if it is the case that for the predicted class c: nc(x) > max c(cid:48)(cid:54)=c nc(cid:48)(x) + 2∆. (2)
+If this threshold is met, the most frequent class is guaran-teed to not change even if an adversarial patch compromises every ablation it intersects. We denote the fraction of pre-dictions by the smooth classiﬁer that are both correct and certiﬁably robust (according to Equation 2) as certiﬁed ac-curacy.
+Vision transformers. A key component of our approach is the vision transformer (ViT) architecture [10]. In contrast to convolutional architecures, ViTs use self-attention lay-ers instead of convolutional layers as their primary building block and are inspired by the success of self-attention in natural language processing [49]. ViTs process images in three main stages: 1. Tokenization: The ViTs split the image into p × p patches. Each patch is then embedded into a position-ally encoded token. 2. Self-Attention: The set of tokens are then passed through a series of multi-headed self-attention layers
+[49]. 3. Classiﬁcation head: The resulting representation is fed into a fully connected layer to make predictions for classiﬁcation.
+Figure 2. Illustration of the smoothed vision transformer. For a given image, we ﬁrst generate a set of ablations. We encode each ablation into tokens, and drop fully masked tokens. The remaining tokens for each ablation are then fed into a vision transformer, which predicts a class label for each ablation. We predict the class with the most predictions over all the ablations, and use the margin to the second-place class for robustness certiﬁcation.
+Recent works have investigated whether ViTs can im-prove robustness in various settings. ViTs initially appeared to be more robust than CNNs to natural and adversarial perturbations [36]. However, recent work showed that this might not be the case [2]. In Appendix B we demonstrate that standard ViTs and CNNs can both be easily broken us-ing simple patch attacks. perform our analysis on three sizes of vision transformers—
+ViT-Tiny (ViT-T), ViT-Small (ViT-S), and ViT-Base (ViT-B) models [10, 51]. We compare to residual networks of similar size—ResNet-18, ResNet-50 [17], and Wide
+ResNet-101-2 [60], respectively. Further details of our ex-perimental setup are in Appendix A. Further experiments exploring data-augmentation are in Appendix C. 2.2. Smoothed vision transformers
+Two central properties of vision transformers make ViTs particularly appealing for processing the image ablations that arise in derandomized smoothing.
+Firstly, unlike
+CNNs, ViTs process images as sets of tokens. ViTs thus have the natural capability to simply drop unnecessary to-kens from the input and “ignore” large regions of the im-age, which can greatly speed up the processing of image ablations.
+Moreover, unlike convolutions which operate locally, the self-attention mechanism in ViTs shares information glob-ally at every layer [49]. Thus, one would expect ViTs to be better suited for classifying image ablations, as they can dynamically attend to the small, unmasked region. In con-trast, a CNN must gradually build up its receptive ﬁeld over multiple layers and process masked-out pixels.
+Guided by these intuitions, our methodology leverages the ViT architecture as the base classiﬁer for processing the image ablations used in derandomized smoothing. We ﬁrst demonstrate that these smoothed vision transformers enable substantially improved robustness guarantees, without los-ing much standard accuracy (Section 3). We then modify the ViT architecture and smoothing procedure to drastically speed up the cost of inference of a smoothed ViT (Section 4). We present an overview of our approach in Figure 2.
+Setup. We focus primarily on the column smoothing set-ting and defer block smoothing results to Appendix G. We consider the CIFAR-10 [22] and ImageNet [9] datasets, and 3. Improving certiﬁed and standard accuracies with ViTs
+Recall that even though certiﬁed patch defenses can guarantee robustness to patch attacks, this robustness typ-ically does not come for free. Indeed, certiﬁed patch de-fenses tend to have substantially lower standard accuracy when compared to typical (non-robust) models, while de-livering a fairly limited degree of (certiﬁed) robustness.
+In this section, we show how to use ViTs to substantially improve both standard and certiﬁed accuracies for certiﬁed patch defenses. To this end, we ﬁrst empirically demon-strate that ViTs are a more suitable architecture than tra-ditional convolutional networks for classifying the image ablations used in derandomized smoothing (Section 3.1).
+Speciﬁcally, this change in architecture alone yields models with signiﬁcantly improved standard and certiﬁed accura-cies. We then show how a careful selection of smoothing parameters can enable smoothed ViTs to have even higher standard accuracies that are comparable to typical (non-robust) models, without sacriﬁcing much certiﬁed perfor-mance (Section 3.2).
+Our ImageNet and CIFAR-10 results are summarized in
+Table 1 and Table 2, respectively. We further include the in-ference time to evaluate a batch of images, using the mod-iﬁcations described in Section 4. See Appendix H for ex-tended tables covering a wider range of experiments.
+Table 1. Summary of our ImageNet results and comparisons to certiﬁed patch defenses from the literature: Clipped Bagnet (CBN),
+BAGCERT, Derandomized Smoothing (DS), and PatchGuard (PG). Time refers to the inference time for a batch of 1024 images, b is the ablation size, and s is the ablation stride. An extended version is in Appendix H.
+Standard and Certiﬁed Accuracy on ImageNet (%)
+Standard 1% pixels 2% pixels 3% pixels Time (sec)
+Baselines
+Standard ResNet-50
+WRN-101-2
+ViT-S
+ViT-B
+CBN [63]
+BAGCERT [32]‡
+DS [25]*
+PG [56]†
+Smoothed models
+ResNet-50 (b = 19)
+ViT-S (b = 19)
+WRN-101-2 (b = 19)
+ViT-B (b = 19)
+ViT-B (b = 37)
+ViT-B (b = 19, s = 10) 76.1 78.9 79.9 81.8 49.5 45.3 44.4 55.1† 51.5 63.5 61.4 69.3 73.2 68.3
+—
+—
+—
+— 13.4
+— 17.7 32.3† 22.8 36.8 33.3 43.8 43.0 36.9
+—
+—
+—
+— 7.1 22.9 14.0 26.0† 18.3 31.6 28.1 38.3 38.2 36.9
+—
+—
+—
+— 3.1
+— 11.2 19.7† 15.3 27.9 24.1 34.3 34.1 31.4 0.67 3.1 0.4 0.95 3.05 8.60 149.5 3.05 149.5 14.0 694.5 31.5 58.7 3.2
+Table 2. Summary of our CIFAR-10 results and comparisons to certiﬁed patch defenses from the literature: Clipped Bagnet (CBN), Derandomized Smoothing (DS), and PatchGuard (PG).
+Here, b is the column ablation size out of 32 pixels. An extended version is in Appendix H.
+Standard and Certiﬁed Accuracy on CIFAR-10 (%)
+Standard 2 × 2 4 × 4
+Baselines
+CBN [63]
+DS [25]*
+PG [56]†
+Smoothed models
+ResNet-50 (b = 4)
+ViT-S (b = 4)
+WRN-101-2 (b = 4)
+ViT-B (b = 4) 84.2 83.9 84.7† 44.2 68.9 69.2† 9.3 56.2 57.7† 86.4 88.4 88.2 90.8 71.6 75.0 73.9 78.1 59.0 63.8 62.0 67.6 3.1. ViTs outperform ResNets on image ablations.
+We ﬁrst isolate the effect of using a ViT instead of a
+ResNet as the base classiﬁer for derandomized smoothing.
+Speciﬁcally, we keep all smoothing parameters ﬁxed and only vary the base classiﬁer. Following [25], we use col-umn ablations of width b = 4 for CIFAR-10 and b = 19 for
+ImageNet for both training and certiﬁcation.
+Ablation accuracy. The performance of derandomized smoothing entirely depends on whether the base classiﬁer can accurately classify ablated images. We thus measure the accuracy of ViTs and ResNets at classifying column ab-lated images across a range of evaluation ablation sizes as shown in Figure 3. We ﬁnd that ViTs are signiﬁcantly more accurate on these ablations than comparably sized ResNets.
+For example, on ImageNet, ViT-S has up to 12% higher ac-curacy on ablations than ResNet-50.
+Certiﬁed patch robustness. We next measure the effect of improved ablation accuracy on certiﬁed accuracy. We
+ﬁnd that using a ViT as the base classiﬁer in derandomized smoothing substantially boosts certiﬁed accuracy compared
+*We found that ResNets could achieve a signiﬁcantly higher certiﬁed accuracy than was reported by [25] if we use early stopping-based model selection. We elaborate further in Appendix A.
+†The PatchGuard defense uses a speciﬁc mask size that guarantees ro-bustness to patches smaller than the mask, and provides no guarantees for larger patches. In this table, we report their best results: each patch size corresponds to a separate model that achieves 0% certiﬁed accuracy against larger patches. Comparisons across the individual models can be found in
+Appendix H.
+‡No code was available, so we extracted the numbers from the paper.
+certiﬁed accuracy of 39%—well above the highest reported baseline of 26% [56].
+Standard accuracy. We further ﬁnd that smoothed ViTs can mitigate the precipitous drop in standard accuracy ob-served in previously proposed certiﬁed defenses, particu-larly so for larger architectures and datasets.
+Indeed, the smoothed ViT-B remains 69% accurate on ImageNet— 14.2% higher standard accuracy than that of the best per-forming prior work (Table 1). A full comparison between the performance of smoothed models and their non-robust counterparts can be found in Appendix H. 3.2. Ablation size matters
+In the previous section, we ﬁxed the width of column ablations at b = 19 for derandomized smoothing on Ima-geNet, following [25]. We now demonstrate that properly choosing the ablation size can improve the standard accu-racy even further—by 4% on ImageNet—without sacriﬁc-ing certiﬁed performance.
+Speciﬁcally, we take ImageNet models trained on col-umn ablations with width b = 19, and change the smooth-ing procedure to use a different width at test time. We report the resulting standard and certiﬁed accuracies in Figure 5, and defer additional experiments on changing the ablation size during training to Appendix D.1.
+Although [25] found a steep trade-off between certiﬁed and standard accuracy in CIFAR-10 (which we verify in Ap-pendix D.2), we ﬁnd this to not be the case for ImageNet for either CNNs or ViTs. We can thus substantially increase the ablation size to improve standard accuracy without signiﬁ-cantly dropping certiﬁed performance as shown in Figure 5.
+For example, increasing the width of column ablations to b = 37 improves the standard accuracy of the smoothed
+ViT-B model by nearly 4% to 73% while maintaining a 38% certiﬁed accuracy against 32×32 patches. In addition to be-ing 12% higher than the standard accuracy of the best per-forming prior work, this model’s standard accuracy is only 3% lower than that of a non-robust ResNet-50.
+Thus, using smoothed ViTs, we can achieve state-of-the-art certiﬁed robustness to patch attacks in the ImageNet set-ting while attaining standard accuracies that are more com-parable to those of non-robust ResNets. 4. Faster inference with ViTs
+Derandomized smoothing with column ablations is an expensive operation, especially for large images.
+Indeed, an image with h × w pixels has w column ablations, so the forward pass of smoothed model is w times slower than a normal forward pass—two orders of magnitude slower on
+ImageNet.
+To address this, we ﬁrst modify the ViT architecture (a) CIFAR-10 (b) ImageNet
+Figure 3. Accuracies on column-ablated images for models on
+CIFAR-10 and ImageNet. The models were trained on column ablations of width b = 19 for ImageNet and b = 4 for CIFAR-10, and evaluated on a range of ablation sizes. ViTs outperform
+ResNets on image ablations by a sizeable margin. (a) CIFAR-10 (b) ImageNet
+Figure 4. Certiﬁed accuracies for ViT and ResNet models on
+CIFAR-10 and ImageNet for various adversarial patch sizes. Cer-tiﬁcation was performed using a ﬁxed ablation of size b = 4 for
+CIFAR-10 and b = 19 for ImageNet (as in [25]). to ResNets across a range of model sizes and adversarial patch sizes, as shown in Figure 4. For example, against 32×32 adversarial patches on ImageNet (2% of the image), a smoothed ViT-S improves certiﬁed accuracy by 14% over a smoothed ResNet-50, while the larger ViT-B reaches a
+Figure 5. Certiﬁed (left) and standard (right) accuracies for a collection of smoothed models trained with a ﬁxed ablation size b = 19 on
+ImageNet, and evaluated with varying ablation sizes. Certiﬁed accuracy remains stable across a range of ablation sizes, while standard accuracy substantially improves with larger ablations. to avoid unnecessary computation on masked pixels (Sec-tion 4.1). We then demonstrate that reducing the number of ablations via striding offers further speed up (Section 4.2).
+These two (complementary) modiﬁcations vastly improve the inference time for smoothed ViTs, making them com-parable in speed to standard (non-robust) convolutional ar-chitectures. 4.1. Dropping masked tokens
+Recall that the ﬁrst operation in a ViT is to split and en-code the input image as a set of tokens, where each token corresponds to a patch in the image. However, for image ab-lations, a large number of these tokens correspond to fully masked regions of the image.
+Our strategy is to pass only the subset of tokens that con-tain an unmasked part of the original image, thus avoiding computation on fully masked tokens. Speciﬁcally, given an image ablation, we alter the ViT architecture to do the fol-lowing steps: 1. Positionally encode the entire ablated image into a set of tokens. 2. Drop any tokens that correspond to a fully masked re-gion of the input. 3. Pass the remaining tokens through the self-attention layers.
+The algorithm for dropping masked tokens is described in Algorithm 1, and the overall inference procedure for a smoothed ViT is summarized in Algorithm 2. As one would expect, since the positional encoding maintains the spatial information of the remaining tokens, the ViT’s accuracy on image ablations barely changes when we drop the fully masked tokens. We defer a detailed analysis of this phe-nomenon to Appendix E.
+Computational complexity. We now provide an informal summary of the computational complexity of this proce-dure, and defer a formal asymptotic analysis to Appendix
+Algorithm 1 Mechanism for processing an image ablation z ∈ R3×h×w with mask m using a ViT with tokens of size p × p while dropping masked tokens. The ViT is decom-posed into a positional encoder E and attention layers V .
+T = {} Initialize set of tokens for an ablation for i, j ∈ [h/p] × [w/p] do 1: function PROCESSABLATION(z, m) 2: 3: 4: 5: if not mip:(i+1)p,jp:(j+1)p = 0 then
+T = T ∪ E(zip:(i+1)p,jp:(j+1)p, i, j) end if 6: 7: 8: 9: end function end for return V (T )
+Algorithm 2 Forward pass for a smoothed ViT on an input image x for k classes and ablation set S(x), where z, m ∈
+S(x) are the image ablations z and the corresponding mask m. 1: function SMOOTHEDVIT(x) 2: 3: ci = 0 for i ∈ [k] // Initialize counts to zero for z, m ∈ S(x) do y = PROCESSABLATION(z, m) cy = cy + 1 // Update counts 4: 5: 6: 7: 8: end function end for return arg maxy cy
+E.1. After tokenization, the bulk of a ViT consists of two main operation types:
+• Attention operators, which have costs that scale quadratically with the number of tokens but linearly in the hidden dimension.
+• Fully-connected operators, which have costs that scale linearly with the number of tokens but quadratically in the hidden dimension.
+Reducing the number of tokens thus directly reduces the cost of attention and fully connected operators at a quadratic
+Table 3. Multiplicative speed up of inference for a smoothed ViT with dropped tokens over a smoothed ResNet, measured over a batch of 1024 images with b = 19.
+ResNet-18 ResNet-50 WRN-101
+ViT-T
+ViT-S
+ViT-B 5.85x 2.85x 1.26x 21.96x 10.68x 4.75x 101.99x 49.62x 22.04x and linear rate, respectively. For a small number of tokens, the linear scaling from the fully-connected operators tends to dominate. The cost of processing column ablations thus scales linearly with the width of the column, which we em-pirically validate in Figure 6. Further details about how we time these models can be found in Appendix A.4.
+Figure 6. The average time to compute a forward pass for ViTs on 1024 column ablated images with varying ablation sizes, with and without dropping masked tokens. The cost of processing a full im-age without dropping masked tokens corresponds to the maximum ablation size b = 224. 4.2. Empirical speed-up for smoothed ViTs
+Smoothed classiﬁers must process a large number of im-age ablations in order to make predictions and certify ro-bustness. Consequently, using our ViT (with dropped to-kens) as the base classiﬁer for derandomized smoothing di-rectly speeds up inference time. In this section, we explore how much faster smoothed ViTs are in practice.
+We ﬁrst measure the number of images per second that smoothed ViTs and smoothed ResNets can process. We use column ablations of size b = 19 on ImageNet, following
+[25]. In Table 3 that describes our results, we ﬁnd speedups of 5-22x for smoothed ViTs over smoothed ResNets of sim-ilar size, with larger architectures showing greater gains.
+Notably, using our largest ViT (ViT-B) as the base classi-ﬁer is 1.25x faster than using a ResNet-18, despite being 8x larger in parameter count. Dropping masked tokens thus substantially speeds up inference time for smoothed ViTs, to the point where using a large ViT is comparable in speed to using a small ResNet.
+Strided ablations. We now consider a complementary means of speeding up smoothed classiﬁers: directly reduc-ing the size of the ablation set via strided ablations. Specif-ically, instead of using every possible ablation, we can sub-sample every s-th ablation for a given stride s. Striding can reduce the total number of ablations (and consequently speed up inference) by a factor of s, without substantially hurting standard or certiﬁed accuracy (Table 1). We study this in more detail in Appendix F.
+Strided ablations, in conjunction with the dropped to-kens optimization from Section 4.1, lead to smoothed ViTs having inference times comparable to standard (non-robust) models. For example, when using stride s = 10 and drop-ping masked tokens, a smoothed ViT-S is only 2x slower than a single inference step of a standard ResNet-50, while a smoothed ViT-B is only 5x slower. We report the infer-ence time of these models, along with their standard and certiﬁed accuracies, in Table 1. 5.

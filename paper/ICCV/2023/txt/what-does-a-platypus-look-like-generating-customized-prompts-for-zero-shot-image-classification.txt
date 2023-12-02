@@ -1,0 +1,260 @@
+Abstract
+{}
+Open-vocabulary models are a promising new paradigm for image classiﬁcation. Unlike traditional classiﬁcation models, open-vocabulary models classify among any arbi-trary set of categories speciﬁed with natural language dur-ing inference. This natural language, called “prompts”, typically consists of a set of hand-written templates (e.g.,
+“a photo of a
+”) which are completed with each of the category names. This work introduces a simple method to generate higher accuracy prompts, without relying on any explicit knowledge of the task domain and with far fewer hand-constructed sentences. To achieve this, we com-bine open-vocabulary models with large language models (LLMs) to create Customized Prompts via Language mod-els (CuPL, pronounced “couple”). In particular, we lever-age the knowledge contained in LLMs in order to gener-ate many descriptive sentences that contain important dis-criminating characteristics of the image categories. This allows the model to place a greater importance on these re-gions in the image when making predictions. We ﬁnd that this straightforward and general approach improves accu-racy on a range of zero-shot image classiﬁcation bench-marks, including over one percentage point gain on Ima-geNet. Finally, this simple baseline requires no additional training and remains completely zero-shot. Code available at https://github.com/sarahpratt/CuPL.
+A photo of a goldﬁsh
+A photo of a platypus
+A photo of a spatula
+Image encoder
+Text encoder
+What does  a platypus  look like? 
+Image encoder
+A platypus  looks like a  beaver with  a ducks bill
+Goldﬁsh are small orange ﬁsh  with shiny scales
+A platypus looks like a beaver  with a ducks bill
+A spatula is a ﬂat rectangular  kitchen utensil with a long  handle
+Text encoder d r a d n a t
+S t o h s
+-o r e
+Z a v i s t p m o r
+P d e z m o t s u
+C i
+)
+L
+P u
+C ( l s e d o m e g a u g n a
+L
+Figure 1. Schematic of the method. (Top) The standard method of a zero-shot open-vocabulary image classiﬁcation model (e.g.,
+CLIP [42]). (Bottom) Our method of CuPL. First, an LLM gener-ates descriptive captions for given class categories. Next, an open-vocabulary model uses these captions as prompts for performing classiﬁcation. 1.
+
+Introduction
+Open-vocabulary models [40, 23, 42, 63] achieve high classiﬁcation accuracy across a large number of datasets without labeled training data for those tasks. To accomplish this, these models leverage the massive amounts of image-text pairs available on the internet by learning to associate the images with their correct caption, leading to greater
+ﬂexibility during inference. Unlike standard models, these
+*Correspondence to spratt3@uw.edu. models classify images by providing a similarity score be-tween an image and a caption. To perform inference, one can generate a caption or “prompt” associated with each of the desired categories, and match each image to the best prompt. This means that categories can be selected ad hoc and adjusted without additional training.
+However, this new paradigm poses a challenge:
+How can we best represent an image category through natural language prompts?            
+Lorikeet
+Marimba
+Viaduct
+Papillon
+“A lorikeet is a small to medium-sized parrot with a brightly colored plumage.” 
+“A marimba is a large wooden percussion instrument that looks like a xylophone.” 
+“A viaduct is a bridge composed of several spans supported by piers or pillars.” 
+“A Papillon is a small, spaniel-type dog with a long, silky coat and fringed ears”
+LLM
+LLM-prompts:
+“What does a 
+{lorikeet, marimba,  viaduct, papillon}  look like?”
+Image-prompts:
+“A lorikeet is a small to medium-sized parrot with a brightly colored plumage.” 
+“A marimba is a large wooden percussion instrument that looks like a xylophone.” 
+“A viaduct is a bridge composed of several spans supported by piers or pillars.” 
+“A papillon is a small, spaniel-type dog with a long, silky coat and fringed ears.”
+Lorikeet
+Marimba
+Viaduct
+Papillon
+Figure 2. Example CuPL LLM-prompts and Image-prompts. LLM-prompts are ﬁlled in with a class name and then used as input to
+GPT-3, which then outputs image-prompts. Example LLM generated image-prompts and associated images from ImageNet are shown.
+Only image-prompts are used for the downstream image classiﬁcation.
+The standard approach is to hand write a number of prompt templates [42] (e.g.,“a photo of a
+”), compile a natural language label for each category in the dataset, and create a set of prompts for each category by ﬁlling in each template with the natural language labels. Then, image embeddings are matched to the nearest set of prompt embeddings and la-belled with the category associated with that set of prompts (more details in Section 2).
+{}
+This method has three major drawbacks. Firstly, each prompt template has to be hand-written, so having twice as many prompts for a category requires twice as much human effort. This can become costly as each new dataset typically has a different set of prompt templates [42].
+Secondly, the prompt templates must be general enough to apply to all image categories. For example, a prompt for the ImageNet [13] category “platypus” could only be
+”, and could not be as speciﬁc as “a photo of a platypus
+}
+{ something like “a photo of a
+, a type of aquatic platypus
+}
+{ mammal” as that template would no longer be relevant for other image categories. This is limiting, as descriptive de-tails are useful for ﬁne-grained classiﬁcation. For example, different species of frogs share many of the same character-istics. However, tree frogs can be distinguished with their distinct large eyes. This is a valuable detail for classiﬁcation but cannot be included in a general template. Therefore, when using these basic templates, the model may not take advantage of this detail in the image, leading to an incorrect categorization as demonstrated in Figure 5.
+Lastly, writing high performing prompt templates cur-rently requires prior information about the contents of the dataset. For example, the list of hand-written ImageNet
+.”, prompts [42] includes “a black and white photo of the
+{}
+“a low resolution photo of a
+.” all of which demonstrate prior knowledge about the type of rep-.”, and “a toy
+{}
+{} resentations present in the dataset. This information is not generalizable to other datasets, as ImageNet contains “black and white” and “toy” representations of its categories, but other datasets do not (e.g., FVGC Aircraft [32]).
+To overcome these challenges, we propose Customized
+Prompts via Language models (CuPL). In this algorithm, we couple a large language model (LLM) with a zero-shot open-vocabulary image classiﬁcation model. We use the
+LLM to generate prompts for each of the image categories in a dataset. Using an LLM allows us to generate an ar-bitrary number of prompts with a ﬁxed number of hand-written sentences. Additionally, these prompts are now customized to each category and contain speciﬁed visual descriptions while still remaining zero-shot. This allows prompts to contain details about a class which distinguish it from other similar classes. For example, to describe a tree frog, the LLM generates the sentence “A tree frog looks like a small frog with large eyes.” This not only describes the category, but speciﬁcally mentions the eyes, the feature which distinguishes the Tree frog class from the most visu-ally similar classes - other types of frogs. We ﬁnd that CuPL prompts are rich with these discriminating details and show that the model is able to leverage these details to place more importance on relevant parts of the image when classifying between similar, commonly confused categories (Figure 5).
+We ﬁnd these customized prompts outperform the hand-written templates on 15 zero-shot image classiﬁcation benchmarks, including a greater than 1 percentage point gain on ImageNet [13] Top-1 accuracy and a greater than 6 percentage point gain on Describable Textures Dataset [11], with fewer hand-written prompts when compared to the standard method used in [42]. Finally, this method requires no additional training or labeled data for either model.
+2. Methods
+The CuPL algorithm consists of two steps: (1) generat-ing customized prompts for each of the categories in a given dataset and (2) using these prompts to perform zero-shot image classiﬁcation. 2.1. Generating Customized Prompts
+This step consists of generating prompts using an LLM.
+For clarity, we distinguish between two different kind of prompts. The ﬁrst are the prompts which cue the LLM to generate the descriptions of the dataset categories. These prompts do not describe an object, but rather prompt the description of an object (e.g., “What does a platypus look like?”). We will refer to these as “LLM-prompts”.
+Secondly, there are the prompts to be matched with im-ages in the zero-shot image classiﬁcation model. These are the prompts that describe a category (e.g., “A platypus looks like ...”). We call them “image-prompts.” In CuPL, these are the output of the LLM, as exempliﬁed in Figure 2.
+In this work, we use GPT-3 [5] as our LLM. To gener-ate our image-prompts, we must ﬁrst construct a number of
+LLM-prompt templates. While this does require some en-gineering by hand, it is signiﬁcantly less than the amount of hand-engineered sentences used in the standard method of creating image-prompt templates for CLIP. For example, in our ImageNet experiments, we construct 5 LLM-prompt templates compared to the 80 image-prompts used by CLIP for zero-shot ImageNet classiﬁcation.
+After constructing these LLM-prompts, we generate 10 different image-prompts for each of the LLM-prompts. This means for ImageNet we use an LLM to generate a total of 50 customized image-prompts for each image category. For each of these, we generate a maximum of 50 tokens, but halt a generation early if it produces a period. Additionally, we generate with a high temperature of 0.99, which encourages more diversity among the 10 generated image-prompts. We also clean each generated sentence by deleting any blank lines and adding a period at the end. 2.2. Utilizing Customized Prompts
+After generating image-prompts for each of the cat-egories, we then perform zero-shot image classiﬁcation.
+While there are a number of open-vocabulary models [40, 23, 42, 63], we report our results using CLIP [42] as this is the most popular publicly available open-vocabulary model.
+CLIP consists of a text encoder and and image encoder (schematic on the top of Figure 1). In the standard setting, there are a number of hand-written templates which can be completed with the relevant category names (e.g. “A photo
+”). To classify the images in of a
+{} a dataset, each of these templates is ﬁlled in with a given category name. Then each of these sentences is embedded
+”, “A photo of many
+{} via the text encoder, and all sentences completed with the same category name are averaged and normalized. This re-sults in n embeddings where n is the number of categories in the dataset. Each of these n embeddings is the mean of many different sentence embeddings. Then each image in the dataset is embedded using the image encoder. This em-bedding is compared to each of the n text embeddings using cosine similarity and is labeled with the most similar one.
+CuPL requires only a small adjustment from this stan-dard practice.
+Instead of ﬁlling in the hand-written tem-plates for each category, we simply replace these altogether with the sentences output by GPT-3. This means that for
+CuPL, hand-written templates are only used as input for the
+LLM, while the prompts for CLIP are entirely generated text. We present 2 different setting of CuPL (as shown in
+Table 1), each representing a different trade-off between ac-curacy and hand-engineering. 1. CuPL (base). This setting uses three hand-written sentences across all 15 examined datasets. We do this by constructing general LLM-prompt templates which are
+ﬁlled in with the category names for each dataset. Our three general templates are as follows:
+Describe what a/the looks like:
+Describe a/the
+What are the identifying characteristics of a/the
+:
+?
+The blank portion of this template is either ﬁlled in with
+{} the category type plus the category name (e.g. “pet” +
+{} for the Oxford Pets dataset [38] or “aircraft” + for FGVC
+Aircraft [32]) or just the category name for more general datasets like ImageNet [13]. Type speciﬁcation is necessary because of words that have multiple meanings. For example
+“boxer” from the Oxford Pets dataset can also mean a per-son who boxes, as opposed to a dog breed, so it is necessary to specify “Describe a pet boxer:”. Similarly, “Tornado” from the FGVC Aircraft dataset can be a type of aircraft or a type of weather. 2. CuPL (full). In this setting we use different LLM-prompt templates for each dataset, just as [42] uses different image-prompt templates for each dataset. However, we use fewer hand-written templates overall and also contain less speciﬁc information about each dataset in the templates. For this work, each dataset has between 2 and 9 LLM-prompts which generate between 20 and 90 image-prompt per cate-gory (10 generated sentences per LLM-prompt). For Ima-geNet, we use the following 5 LLM-prompts: (1) “Describe looks like”, (2) “How can you identify a(n) what a(n) look like?”, (4) “A caption of
+”, (5) “Describe an image from the inter-”. Full LLM-prompts for all datasets as well
+{} an image of a(n) net of a(n) as example image-prompts are given the Appendix.
+?”, (3) “What does a(n)
+{}
+{}
+{}
+{}
+t e
+N e g a m
+I
+D
+T
+D s r a
+C d r o f n a t
+S 7 9 3
+N
+U
+S 1 0 1 d o o
+F t f a r c r i
+A
+C
+V
+G
+F s t e
+P d r o f x
+O 1 0 1 h c e t l a
+C 2 0 1 s r e w o l
+F 1 0 1
+F
+C
+U 0 0 7
+-s c i t e n i
+K 5 4
+C
+S
+I
+S
+E
+R 0 1
+-R
+A
+F
+I
+C 0 0 1
+-R
+A
+F
+I
+C p a n s d r i
+B n a e m l a t o
+T e u q i n
+U std
+# hw 75.54 55.20 77.53 69.31 93.08 32.88 93.33 93.24 78.53 77.45 60.07 71.10 95.59 78.26 50.43 73.43 80 8 8 2 1 2 1 34 1 48 28 18 18 18 1 268 175
+CuPL (base) 76.19 58.90 76.49 72.74 93.33 36.69 93.37 93.45 78.83 77.74 60.24 68.96 95.81 78.47 51.11 74.15
+  std
+# hw
++0.65 +3.70 -1.04 +3.43 +0.25 +3.81 +0.04 +0.21 +0.30 +0.29 +0.17 -2.14 +0.22 +0.21 +0.63 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3
+CuPL (full) 76.69 61.70 77.63 73.31 93.36 36.11 93.81 93.45 79.67 78.36 60.63 71.69 95.84 78.57 51.11 74.80
+  std
+# hw
++1.15 +6.50 +0.10 +4.00 +0.28 +3.23 +0.48 +0.21 +1.14 +0.91 +0.56 +0.59 +0.25 +0.31 +0.63 3 2 2 5 3 9 4 2 3 3 4 3 6 5 5 45 3 59 45
+Table 1. Performance of CuPL prompts compared to the standard, hand-written prompts in CLIP [42] on 15 zero-shot image classiﬁcation benchmarks. “ std” stands for the difference; green shows improvement. In addition to accuracy, we show number of prompt templates that are hand-written (“# hw”) for each dataset using each method, as well as the total and unique number of hand-written templates for each method (unique number only counts templates once even if used for multiple datasets). Note that CuPL (base) uses just three hand-constructed sentence across all datasets compared to 175 in the standard method. vations regarding hyperparameters such as the number of hand-written prompts. Finally, we provide evidence that the model is able to use CuPL prompts to place more im-portance on the most relavent parts of the image. 3.1. Setup
+Unless speciﬁed otherwise, we use CLIP with a back-bone of ViT-L/14 [14] and the GPT-3 DaVinci-002 model.
+Additionally, in order to perform open-vocabulary image classiﬁcation, each image category needs a natural language label. This is sometimes provided by the dataset, but not al-ways (e.g. ImageNet categories are described by an id num-ber which can map to multiple synonyms). For this work, we use the same natural language labels speciﬁed in [42].
+We report our ﬁndings on 15 zero-shot image recognition benchmarks: ImageNet [13], Describable Textures Dataset (DTD) [11], Stanford Cars [26], Scene UNderstanding (SUN397) [60], Food101 [4], FGVC Aircraft [32], Oxford
+Pets [38], Caltech101 [16], Flowers 102 [36], UCF101 [52],
+Kinetics-700 [8], Remote Sensing Image Scene Classiﬁca-tion (RESISC45) [10], CIFAR-10 [27], CIFAR-100 [27], and Birdsnap [2]. For the two video datasets, we extract the middle frame of the video, as is done in Radford et al. [42]. 3.2. Results
+Our results for the base prompts setting and the full prompts setting are in Table 1. We present our method’s performance on 15 different image classiﬁcation bench-marks, comparing both the classiﬁcation accuracy and the number of hand-written sentence templates needed for each method. Note that for the standard method [42], the hand-written sentences refer to the image-prompts, while for
+Figure 3. Performance of CuPL as models scale. (Top) Ima-geNet Top-1 accuracy for various scales of CLIP. CuPL prompts remain consistently better than standard prompts even we adjust
+CLIP model size (ViT-B/32, ViT-B/16, ViT-L/14). GPT-3 model set as DaVinci-002. (Bottom) ImageNet Top-1 accuracy for var-ious scales of GPT-3 (ada, babbage, curie, davinci-002). Larger models produce higher accuracy. CLIP model set as ViT-L/14. 3. Experiments and Results
+We ﬁrst discuss the details of our experimental setup.
+We next show improvements on a wide range of image classiﬁcation benchmarks. We then examine the scaling behavior with respect to the model size and report obser-Standard CuPL Menon et al. [33] 75.54 76.69 75.00
+Table 2. Comparison with Menon et al. [33] on Top-1 Imagenet accuracy with ViT L/14.
+CuPL the hand-written sentences refer to the LLM-prompts, with which image-prompts are generated. 1. CuPL (base).
+In this setting, we see performance gains in 13 out of the 15 examined datasets. Note this set-ting uses just three hand-constructed sentence across all datasets. This is in comparison to the nearly 175 unique image-prompt templates that are hand-written across all of these datasets in the standard setting. Additionally, in the standard setting these hand-constructed prompts must be very speciﬁc to the dataset (e.g., “a black and white photo of a
+.”). In comparison, CuPL (base) re-quires only the category type of the overall dataset and still outperforms the hand-written, domain speciﬁed baseline in almost all cases. Thus, we present this base prompt setting as a simple standard that matches or exceeds prompt engi-neering open-vocabulary models.
+.”, “a plastic
+{}
+{} 2. CuPL (full prompts). Here we see improvements on all examined datasets. This includes large (over 1 per-centage point) gains on ImageNet Top-1, DTD (texture classiﬁcation), SUN397 (scene classiﬁcation), FGVC Air-craft (ﬁne-grained aircraft classiﬁcation), and Flowers 102 (ﬂower classiﬁcation). While this setting requires more hand-written prompts than setting (1), it still requires signif-icantly fewer than the baseline method (5 sentences versus 80 sentence for ImageNet), and does not include knowledge about the image domain. The full list of hand-constructed sentences for CuPL (full prompts) and the baseline method
+[42] can be found in the Appendix. 3.3. Analysis and Ablations
+Other prompting techniques. Concurrent work by
+Menon et al. [33] also explores LLM generated descrip-tions for image classiﬁcation. This work differs from CuPL as it generates a structured list of identifying attributes in a single generation, which are reformatted into multiple sen-tences.
+In contrast, CuPL outputs a single sentence for multiple generations, with no enforced format. The ben-eﬁt of the structured output used in Menon et al. [33] is that the authors can examine the similarity of a given im-age with each individual attribute to understand which ones most contribute to a prediction. However, unlike CuPL, this method performs worse than standard human-written prompts, as shown in Table 2. This is potentially because this work focuses on explainability, and therefore enforces a strict format on the generated prompts, likely reducing
+Figure 4. Ablation on number of LLM-prompts (top) and (Top) As number of hand-written image-prompts (bottom).
+LLM-prompts increases, so does accuracy. 10 image-prompts are generated for each LLM-prompt. Note that CuPL outperforms the baseline even with just one hand-written sentence. We add the prompts in a greedy manner, at each step adding the 10 prompts which lead to the largest performance gain. (Bottom) We adjust the number of image-prompts generated by a ﬁxed number (5) of
+LLM-prompts. Even at 5 Image-prompts per LLM-prompt (25 prompts total), we outperform the baseline which uses 80 image-prompts. overall accuracy.
+Model Size. In Figure 3, we show CuPL (full prompts) at different model scales. As there are two different zero-shot models in the CuPL algorithm, we show the effects of varying each model individually. On the top, we vary the CLIP model used while holding the LLM constant. We see consistent gains across all model sizes. On the bottom, we vary the size of the LLM. We plot the accuracy of the baseline as well, which does not vary as it does not utilize an
+LLM. We ﬁnd larger models lead to higher accuracy, though the 2nd and 3rd largest models perform similarly.
+Number of Prompts.
+In Figure 4, we present abla-tions on the number of LLM-prompts and image-prompts for CuPL (full prompts). On the top, we show ImageNet accuracy as we increase the number of LLM-prompts. This also corresponds to the number of sentences that have to be hand-written. Notably, this method outperforms the base-line even when using prompts generated from a single hand-written sentence. On the bottom, we hold the number of
+LLM-prompts constant at 5 and adjust how many image-prompts we generate per LLM-prompt. We plot the accu-racy given the total number of image-prompts (so 10 gen-erated image-prompt per LLM-prompt corresponds to 50 total image-prompts). We see that CuPL begins to outper-form the baseline at just 25 image-prompts, well below the 80 image-prompts used in the baseline.
+Additional Analysis. In the Appendix, we provide com-parisons between CuPL prompts and descriptive prompts generated with deﬁnitions of ImageNet classes as well as with Wikipedia descriptions of ImageNet classes. We ﬁnd that CuPL prompts outperform both of these baselines. Ad-ditionally, we provide results of ensembling CuPL prompts and the baseline hand-written prompts used in [42]. We ﬁnd that this ensemble outperforms just baseline prompts for all datasets, and outperforms just CuPL prompts for some datasets. 3.4. Shapley Value Analysis
+We show that CuPL descriptions allow CLIP to place more importance on image regions that are most relevant for the correct classiﬁcation. In order to measure the im-portance of regions in the image, we invoke Shapley val-ues [49], a tool from game theory that has become popu-lar for understanding which input information contributes to a model’s ﬁnal prediction [31, 9]. Shapley values can be computed for any model, and although there are meth-ods designed speciﬁcally for vision transformers [12] (the underlying architecture of CLIP), we use a simple model-agnostic calculation [35]. We employ Shapley values to understand the importance of different image regions with
+CuPL prompts versus baseline prompts, and we ﬁnd that
+CuPL places more value on regions that are emphasized in object descriptions, and thus are likely important for obtain-ing correct classiﬁcations. We demonstrate this correlation in two ways: (1) visualizing heatmaps of importance over images, and (2) measuring the importance of segmented im-age parts annotated by the PartImageNet Dataset [18].
+Importance Heatmaps To understand how CuPL cap-tions lead to a change in importance of different image regions, we calculate the Shapley value of small image patches when using CuPL prompts versus when using base-line prompts. We calculate the Shapley values with respect to a binary classiﬁcation probability between the correct class and a similar distractor class in order to understand how CuPL corrects these errors. As shown in Figure 5, we examine the important regions of an image of a dog when classifying between two very similar dog categories: a “Schipperke dog” versus a “Groenendael dog”. Both of these classes are Belgian dogs that are black with pointy ears. However, they have a few subtle differences includ-ing the typical appearance of their tails. Additionally, we show the important regions of an image when classifying between a “Tree frog” and a “Tailed frog”, which also look very similar.
+For each binary classiﬁcation, we show four heatmaps: (1) the regions that contribute to a higher probability of the correct class when using CuPL prompts, (2) the regions that contribute to a higher probability of the incorrect class when using CuPL prompts, (3) the regions that contribute to a higher probability of the correct class when using baseline prompts, (4) the regions that contribute to a higher proba-bility of the incorrect class when using baseline prompts.
+Interestingly, we ﬁnd that not only does CuPL place impor-tance on different regions of the image, but these regions correspond to descriptions in the CuPL prompts. For exam-ple, the tail of the dog is very important to the “Schipperke” probability when using CuPL prompts, but not when us-ing baseline prompts, and the tail of the Schipperke dog is described 10 times in the CuPL descriptions of this class.
+Similarly, we ﬁnd that the eyes in the image of the frog are much more important when classifying with CuPL than with the baseline, and that the eyes are mentioned 10 times in the CuPL description of a tree frog. We provide more examples of this phenomenon in the Appendix.
+Importance of Segmented Parts In order to understand the correlation between the importance of an image region and its frequency in CuPL prompts on a larger scale, we utilize the PartImageNet Dataset [18]. This dataset contains segmentation maps of the different parts of a class for a sub-set of ImageNet classes. For example, the dog classes have the parts: ‘head’, ‘body’, ‘leg’ and ‘tail’. We use these seg-mentation maps to obtain the Shapley value for each part of the animal with respect to the ﬁnal probability of the ground truth class. To understand the effect of changing to CuPL prompts, we calculate the difference between the Shapley values with CuPL prompts and with baseline prompts, and we average across all images in a class. So for each part in each examined class we calculate the following (where SV denotes the Shapley value):
+SVCuPL(image, part)
+SVbase(image, part)
+  1 class
+|
+| Ximage 2 class
+This gives us a score for how much more important a part of an animal is to CuPL compared to the baseline for classiﬁcation. Additionally, we quantify how prevalent each body part is in the CuPL descriptions. We do this using the
+WordNet [34] database to tag each words as part of the ‘leg’,
+‘head’, etc. More details of this tagging system are given in the Appendix. We present our ﬁndings in Figure 6. We ﬁnd that the parts that are more important to CuPL are highly correlated with the parts that are present in the descriptions of the animals (and thus likely important to the identiﬁca-tion of the animal). For example, head-related attributes of the Japanese Spaniel class are frequently mentioned in the descriptions. Additionally, the ‘head’ in the image is much more important to the ﬁnal prediction for CuPL than for
+Original Image
+Region Importance with 
+CuPL Prompts
+Region Importance with 
+Baseline Prompts
+Example Image of 
+Distractor Class (A) (B) (C) (D) (E) (F)
+Schipperke Prompt: 
+Groenendael Prompt:
+Schipperke Prompt:  Groenendael Prompt:
+GT Label:  
+Schipperke
+"A Schipperke is a  small, black Belgian  dog with pointy ears  and an upright tail."
+"A Groenendael dog can  be identiﬁed by its black  coat and erect ears."
+“A photo of a 
+Schipperke”
+“A photo of a 
+Groenendael dog”
+Example:  
+Groenendael dog
+Prediction: Schipperke
+Prediction: Groenendael dog
+Tree Frog Prompt: 
+Tailed Frog Prompt:
+Tree Frog Prompt: 
+Tailed Frog Prompt:
+GT Label:  
+Tree Frog
+"A tree frog looks  like a small frog  with large eyes."
+"The tailed frog is a  small frog that is found  in North America."
+“A photo of a  tree frog”
+“A photo of a  tailed frog”
+Example:  
+Tailed frog
+Prediction: Tree Frog
+Prediction: Tailed Frog
+Figure 5. CuPL prompts lead the model to focus on semantically important regions of the image. We use Shapley values (Section 3.4) to visualize the importance of each region in a binary classiﬁcation problem. We examine which parts of an image lead the model to classify it as the correct class versus a commonly confused class. We present the original image (column A), as well as four heatmaps showing which regions raise the probability of the correct class for the CuPL model (column B), the incorrect class for the CuPL model (column
+C), the correct class for the baseline model (column D), and the incorrect class for the baseline model (column E). Additionally, we show that the regions that are more important to CuPL than to the baseline correspond to regions mentioned in the CuPL prompts (i.e. “tail” which is a commonly mentioned word in Schipperke Dog CuPL prompts and “eyes” which is a common word in Tree Frog prompts). We also show an example image from the distractor class to demonstrate the level of similarity between these ﬁne-grained classes (column F).
+Finally, we see that CuPL scores the correct class higher, whereas the baseline scores the incorrect class higher. This series of observations lead us to believe that CuPL is able to correct errors because the descriptive prompts cause the model to weigh semantically important regions more heavily. baseline. Thus, CuPL is able to extract important informa-tion for identifying the animal from the text and incorporate it into classiﬁcation predictions. 4.

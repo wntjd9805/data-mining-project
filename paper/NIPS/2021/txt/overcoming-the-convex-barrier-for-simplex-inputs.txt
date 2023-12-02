@@ -1,0 +1,177 @@
+Abstract
+Recent progress in neural network veriﬁcation has challenged the notion of a convex barrier, that is, an inherent weakness in the convex relaxation of the output of a neural network. Speciﬁcally, there now exists a tight relaxation for verifying the robustness of a neural network to (cid:96)∞ input perturbations, as well as efﬁcient primal and dual solvers for the relaxation. Buoyed by this success, we consider the problem of developing similar techniques for verifying robustness to input perturbations within the probability simplex. We prove a somewhat surprising result that, in this case, not only can one design a tight relaxation that overcomes the convex barrier, but the size of the relaxation remains linear in the number of neurons, thereby leading to simpler and more efﬁcient algorithms. We establish the scalability of our overall approach via the speciﬁcation of (cid:96)1 robustness for
+CIFAR-10 and MNIST classiﬁcation, where our approach improves the state of the art veriﬁed accuracy by up to 14.4%. Furthermore, we establish its accuracy on a novel and highly challenging task of verifying the robustness of a multi-modal (text and image) classiﬁer to arbitrary changes in its textual input. 1
+
+Introduction
+Veriﬁcation refers to the challenging computational problem of determining whether a neural network satisﬁes a given speciﬁcation. Perhaps the most popular speciﬁcation is to prove or disprove that a neural network classiﬁer is robust to perturbations of the input that lie within an (cid:96)p ball [de Palma et al., 2021a, Wong and Kolter, 2018, Zhang et al., 2018, Weng et al., 2018, Mirman et al., 2018,
+Dvijotham et al., 2018], with impressive state of the art results recently achieved in Wang et al. [2021].
+The ability to verify neural networks would open the door to better understanding their nature, and allow us to apply deep learning in safety critical domains where errors can have a large cost. Given the importance of the problem, it is unsurprising that it has attracted considerable atttention from the machine learning and automated veriﬁcation communities [Katz et al., 2017, Ehlers, 2017].
+Early work in veriﬁcation lead to the notion of a convex barrier, that is, a limitation in the tightness of the bounds obtainable by the convex relaxation of the output of a neural network [Salman et al., 2019]. This weakness was seen as a primary reason for the slow convergence of branch-and-bound algorithms for veriﬁcation, which rely on convex relaxations to compute the bounds, on a large number of speciﬁcations on standard datasets. However, recent work has been able to successfully overcome this barrier. Speciﬁcally, Anderson et al. [2019] proposed a tight relaxation that precisely deﬁnes the convex hull of a composition of a linear function of a vector within an (cid:96)∞ ball with the
+ReLU non-linearity. While their relaxation has a large number of constraints (exponential in the size of the vector), they provide an efﬁcient algorithm for identifying the most violated constraint at any infeasible point. This enables the use of efﬁcient cutting plane algorithms to solve the 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+primal [Anderson et al., 2019], active sets to solve the dual [de Palma et al., 2021a,b], and even approximate linear bound propagation algorithms [Tjandraatmadja et al., 2020].
+Buoyed by the possibility of realizing practical veriﬁcation using tight relaxations, we consider an important speciﬁcation, namely, robustness to perturbations that lie in a probability simplex. Examples of such a speciﬁcation include robustness to (cid:96)1 perturbations or to word substitutions [Huang et al., 2019]. Previous approaches for addressing this speciﬁcation relied on fairly loose relaxations based on interval bound propagation [Huang et al., 2019, Gowal et al., 2018]. To alleviate this deﬁciency, we derive the convex hull of the composition of a linear transformation of the probability simplex with a convex non-linearity such as ReLU or SoftPlus. Somewhat surprisingly, we show that, unlike the previously considered case of (cid:96)∞ balls, the probability simplex helps greatly simplify the description of the convex hull. In fact, the number of constraints required is linear in the dimensionality of the simplex. By using a novel technique to propagate the simplex constraints through the hidden layers of the network, we derive a tight relaxation for the output of a network whose size scales linearly with the size of the network. Furthermore, we suitably extend a linear bound propopagation algorithm [Zhang et al., 2018] to solve the tight relaxation efﬁciently, thereby realizing practical veriﬁcation over simplex inputs.
+We demonstrate the scalability of our approach using the speciﬁcation of robustness to (cid:96)1 perturbations for MNIST and CIFAR-10 classiﬁcation. Our method achieves 13.6% higher veriﬁed accuracy on
+MNIST and up to 14.4% higher veriﬁed accuracy on CIFAR-10 compared to the state of the art baselines on the same networks given the same computational budget.
+To further demonstrate the beneﬁts of our tight relaxation, we consider a novel and highly challenging speciﬁcation of global robustness in multi-modal classiﬁcation. Speciﬁcally, we consider the Food 101 dataset [Wang et al., 2015], where each sample consists of an image of a food item together with its recipe. Our speciﬁcation requires a neural network trained to classify the food item to be robust to arbitrary changes in the text of a sample. This speciﬁcation captures the scenario where the image is carefully curated while the text is crowd-sourced and can therefore be easily manipulated by adversarial actors. While similar speciﬁcations have been considered in previous works [Jia et al., 2019, Huang et al., 2019], they focus on substituting a very small subset of words with their synonyms, which leads to simpler veriﬁcation problems. We show that, on our signiﬁcantly more difﬁcult global veriﬁcation task, our method achieves up to 25% higher veriﬁed accuracy in the same amount of time as the state of the art baseline. 2 Preliminaries
+We provide a formal mathematical description of our veriﬁcation problem, and brieﬂy discuss the existing relaxations in order to contextualise our contributions. 2.1 Problem description as
+∆m, denote simplex the m-dimensional is,
+We probability
+∆m = {x ∈ Rm | x ≥ 0, 1(cid:62)x ≤ 1}. As mentioned in the previous section, we are inter-ested in verifying speciﬁcations of a given neural network when its input is constrained to lie in a simplex. We focus on networks with a layered architecture to keep notation simple, but our ideas easily extend to any feed-forward network, including residual networks. We consider a neural network with n layers. Each layer is assumed to be composed of two operations: (i) an afﬁne operation (fully connected layer or convolution layer), which we denote by Lk(·); and (ii) a non-linear activation function, which we denote by σ(·). In other words, given its input xk−1 ∈ Rnk−1, the k-th layer performs the operation ˆxk = Lk(xk−1) ∈ Rnk , followed by xk = σ( ˆxk) ∈ Rnk . While we place no restriction on the linear operation, we make the following assumption on the activation function. that
+Assumption 1. We assume that the activation function σ is an element-wise convex function (for example, ReLU or SoftPlus).
+Veriﬁcation problem: Using the above notation, the veriﬁcation problem we solve can be formu-lated as min x
+Ψ ( ˆxn) (1a) 2
+s.t.
+ˆxk = Lk (xk−1) , xk = σ( ˆxk) x0 ∈ ∆n0 , k ∈ [n], (1b) (1c) where [n] denotes the set {1, · · · , n}. The objective function Ψ is a scalar-valued linear function of the output of the ﬁnal layer of the the network. For example, say we wish to verify that a classiﬁcation network is not vulnerable to any adversarial attacks. In this case, we deﬁne Ψ as the difference between the true logit and a target logit outputted by the network. The sign of the optimum value of problem (1) can be used to either prove or disprove the aforementioned speciﬁcation.
+We illustrate the practical importance of considering simplex inputs using two examples. These examples will also form the basis of our experimental setup. (cid:96)1 perturbations: Consider a network with a continuous valued input x ∈ Rm. We are interested in verifying the behavior of the network under input perturbations that lie within an (cid:96)1 ball: {x | (cid:13)x − x0(cid:13) (cid:13) (cid:13)1 ≤ (cid:15)}. This input domain can be reformulated as a simplex as x = x0 + (cid:15)M z, z ∈ ∆2m, M (m×2m)
+=
+ 1 −1 0 0
+
+...
+
+ 0 0 0 0 1 −1
+. . .
+. . . 0 0 0 0
+
+
+
+
+. (2) 0 0
+. . . 1 −1
+Bag of words models: Consider a text classiﬁcation network that takes text as input and makes predictions based on an embedding of the text. A commonly used embedding is the so-called “bag of words”. Here, we ﬁrst take an embedding for every word in the text (for example, using a precomputed set like GloVe [Pennington et al., 2014] or Word2Vec [Mikolov et al., 2013]). Next, we take the mean of all the word embeddings to obtain the ﬁnal representation. We denote the word embeddings as a matrix E ∈ Rd×v, where each d-dimensional column represents an embedding of a putative word in a vocabulary of size v. Using the above matrix, the text embedding is given by Ex where x represents the normalized counts of words from the vocabulary in the text. In other words, x ∈ ∆v assuming that arbitrarily long text with arbitrary numbers of repetitions of each word in the vocabulary are allowed. 2.2 Planet and disjunctive relaxations
+Ehlers [2017] proposed a convex relaxation for the ReLU activation function, which is commonly referred to as Planet in the literature. The Planet relaxation has been widely used in many veriﬁcation algorithms [Bunel et al., 2020b, Dvijotham et al., 2018, Bunel et al., 2020a, Lu and Kumar, 2020].
+Brieﬂy, it relaxes the sequence of two operations: ˆx = wT x + b where x ∈ Rm, followed by y = ReLU(ˆx). To this end, it utilizes lower and upper bounds on ˆx. In our case, since x ∈ ∆m, we can compute the bounds as ˜(cid:96) = wmin + b ≤ wT x + b ≤ wmax + b = ˜u. Here, wmin and wmax denote the minimum and maximum entries of w respectively. Using the bounds on ˆx, the Planet relaxation for the set S = {y, x | y = ReLU(wT x + b), x ∈ ∆m} is deﬁned as
+P∆ : y ≥ wT x + b, y ≥ 0, y ≤
+˜u
+˜u − ˜(cid:96) (cid:16) (cid:17) wT x + b − ˜(cid:96)
+, x ∈ ∆m. (3)
+In Anderson et al. [2019, 2020], the authors propose a tighter relaxation and characterize the exact convex hull of the set
+{(x, relu (cid:0)wT x + b(cid:1)) : (cid:96) ≤ x ≤ u}.
+However, this characterization involves exponentially many inequalities. And efﬁcient algorithms based on it need to resort to cutting plane methods, adding violated inequalities sequentially. Doing so is computationally challenging and requires signiﬁcant effort to implement in a scalable manner.
+Further, this does not handle the simplex constraint on the input. Thus using this relaxation would require replacing the simplex constraint with the unit hypercube, a much weaker constraint on the inputs.
+Anderson et al. [2020] also propose an ideal formulation for the product of k simplices. Their formulation needs additional variables and still requires cutting planes. However, eliminating the auxiliary variable, as in our case, leads to a concise formulation. Further, our relaxation is derived for convex activation functions, whereas the formulation of Anderson et al. [2020] is limited to the maximum of two afﬁne functions. 3
+3 A Concise Convex Relaxation
+In this section, we derive our novel tight convex relaxation for problem (1). In order to make the exposition clearer, we assume that we have access to simplex constraints for all xk, k ∈ [n − 1]. As will be seen in the next section, such constraints can be derived by propagating the simplex constraint on the input x0 through the network. 3.1 An exact convex relaxation for a single neuron
+We begin by considering the simple case of a single neuron, which will form the building block of our ﬁnal relaxation. Similar to the previous relaxations, we consider the set S = {y, x | y =
+σ(wT x + b), x ∈ ∆m}, where σ is a convex activation function, for example ReLU. We aim to characterize the convex hull CH∆ of the set S.
+Theorem 3.1. The convex hull CH∆ of S is deﬁned by the following convex constraints y ≥ σ (cid:0)wT x + b(cid:1) , x ∈ ∆m, y ≤ (cid:0)σ (cid:0)wT ei + b(cid:1) − σ (b)(cid:1) + σ (b) , (4a) (cid:88) (4b) xi i where ei ∈ Rm, ei i = 1, ei j = 0 ∀j (cid:54)= i, denotes the i-th coordinate vector in Rm.
+By the deﬁnition of a convex hull, the proposed relaxation is the tightest possible relaxation for a single neuron with x ∈ ∆m. Note that, when σ is the ReLU activation func-tion, the only difference between the proposed relaxation and the Planet relaxation P∆ is the upper bound on y. Fig-ure 1 compares the upper bound of the Planet relaxation
+P∆ with the proposed relaxation CH∆ for the case where m = 2. As can be seen, our relaxation is signiﬁcantly tighter than Planet, which paves the way for tractable ver-iﬁcation over simplex inputs. The following proposition formally characterizes the difference between the tightness of CH∆ and P∆.
+Proposition 3.2. For any input dimension m, CH∆ is provably tighter than P∆. Speciﬁcally, we can characterize the gap between CH∆ and P∆ by the gap in the optimal value of the problem max x y − y(cid:48) subject to (y, x) ∈ P∆, (y(cid:48), x) ∈ CH∆.
+The gap in the optimal value is proportional to the variance in the weight vector w (see supplementary material for details).
+Figure 1: The input domain x ∈ ∆2 is shown in light blue, while the out-put function y = ReLU(wT x + b) is shown in blue. It can be seen that the upper bound corresponding to the Planet relaxation (shown in green), is signiﬁ-cantly looser in comparison to the upper bound corresponding to the proposed re-laxation (shown in orange). Even the
+Anderson relaxation (shown in yellow) is much looser than our relaxation.
+The proofs of the above theorem and proposition are pro-vided in the supplementary material. The proof of Theo-rem 3.1 utilizes a fundamental result from convex analysis, that any linear function obtains the same maximum value over S as over its convex hull CH∆.
+Note that our relaxation overcomes the convex barrier by providing bounds that are signiﬁcantly tighter than the Planet relaxation. Convex barrier is a term introduced in Salman et al. [2019], which is deﬁned as the gap between the optimal value of the original veriﬁcation problem and the optimal convex relaxation of the non-linearity.
+Comparison to Tjandraatmadja et al. [2020] Our relaxation requires only a linear number of inequalities to describe the convex hull for the composition of a linear function with a convex activation function for simplex inputs. In contrast, the Anderson relaxation [Tjandraatmadja et al., 2020, Anderson et al., 2020] requires an exponential number of constraints. The submodularity based proof for deriving the relaxation from Tjandraatmadja et al. [2020] can help us understand the discrepancy. The method makes use of the Kuhn triangulation of [0, 1]n [Todd, 1976], which 4
+describes the collection of simplices whose union is [0, 1]n, and requires an exponential number of simplices. Since a unique afﬁne interpolation of the function needs to be constructed on each of these simplices, it requires an overall exponential number of inequalities. In contrast, our relaxation only requires a linear number of inequalities. Note that the input simplex ∆n is not one of the simplices from the Kuhn triangulation whose union is the unit hypercube. We provide a visualization for this intuition in the supplementary material. 3.2 Final relaxation
+Using the convex hull for a single neuron, we can now describe our overall relaxation. Recall that we have assumed xk ∈ ∆nk for each k ∈ [n − 1]. This is ensured through a simplex propagation algorithm described in the next section. In addition, we also compute interval bounds on the pre-activations ˆxk ∈ [(cid:96)k, uk]. Using the interval bounds, we deﬁne θk = uk
+, γk = −(cid:96)k, uk (x) = uk−(cid:96)k (cid:0)ei(cid:1)(cid:1) − σ (Lk (0))(cid:1) + σ (Lk (0)). Furthermore,
+θk (cid:12) (Lk (x) − γk) and u(cid:48) since ˆxn is itself a linear function of xn−1, with a slight overload of notation, we denote the objective function of our relaxation as Ψ (xn−1). Using the above notation, the overall proposed convex relaxation of problem (1) for the ReLU activation function can be written as k (x) = (cid:80) (cid:0)σ (cid:0)Lk i xi
+Ψ (xn−1) min x s.t. xk ≥ Lk (xk−1) , xk ≥ 0 xk ≤ uk(xk−1), xk ≤ u(cid:48) k(xk−1), xk ∈ ∆ k ∈ [n − 1], (Planet lower bound) k ∈ [n − 1], (Planet upper bound) k ∈ [n − 1], (from equation 4b) k ∈ {0} ∪ [n − 1]. (5a) (5b) (5c) (5d) (5e)
+Similar relaxations can be derived for other convex activation functions by linearizing the convex function around a given point. However, we focus on the ReLU case for brevity of exposition, particularly since ReLU is the most commonly used convex activation function. 4 Algorithm
+Our veriﬁcation algorithm is composed of two phases: (i) propagating simplex constraints on the activations at every layer; and (ii) computing a lower bound on problem (1). We describe these in the following subsections. 4.1 Simplex propagation
+We assume that the output of each layer is non-negative. If this is not the case, we can simply add a constant to the activation of each layer so that the output becomes non-negative. Let us denote hk(x) = σ (Lk (x)). Since hk(.) is an element-wise convex function of its inputs, 1T hk(.) is also a convex function. Using the fact that the maximum of a convex function over the simplex is attained at one of the vertices, it can be shown that the following inequality holds true (cid:88) i xki ≤ max j∈{0,...,nk−1} 1T hk (cid:0)ej(cid:1) = αk. (6)
+Here, xki denotes the i-th coordinate of the vector of activations xk at the output of layer hk.
+Note that the above inequality can be rewritten in the form (cid:80)
+, so that we can propagate simplex-like constraint simply by rescaling activations at the layer appropriately.
+Details for conditioning the intermediate layers into simplex using inequalities of the above form are provided in the supplementary material. i ˜xki ≤ 1, where ˜xki = xki
+αk 4.2 Efﬁcient solver
+The optimization problem (5) is a Linear Program and as such can be solved easily by off-the-shelf solvers [Gurobi]. However, given the size of modern deep networks, such an approach would struggle to scale. Hence, researchers have recently started developing scalable custom solvers for relaxations of neural network outputs. 5
+Zhang et al. [2018], Singh et al. [2019] developed efﬁcient solvers for relaxations that rely on bounds on the output of a neuron that are expressed as linear functions of the input. Such solvers have been scaled to be extremely efﬁcient and amenable to use within branch and bound frameworks [Wang et al., 2021]. Inspired by their success, we extend their capabilities to solve our novel tight relaxations derived in the previous section. To this end, we ﬁrst relax problem (5) to a form that can be solved efﬁciently using a single backward pass. Concretely, we combine the lower bounds (5b) and the non-negativity constraint from (5e) into a single lower bound using weighting coefﬁcients ak. We also combine the upper bounds (5c and 5d) into a single upper bound with weighting coefﬁcients ¯ak.
+The values of the weighting coefﬁcients ak and ¯ak are constrained to lie between 0 and 1. This leads to the following optimization problem
+L(a, a) = min
+Ψ (xn−1) x s.t. x0 ∈ ∆ , xk ≥ ak (cid:12) Lk (xk−1) xk ≤ ak (cid:12) uk (xk−1) + (1 − ak) (cid:12) u(cid:48) k (xk−1) k ∈ [n − 1], k ∈ [n − 1]. (7a) (7b) (7c) (7d)
+It turns out that the above formulation can be solved efﬁciently by a single backward pass over the network. In order to derive the solution, it is useful to introduce the notion of decomposition of an afﬁne function into monotone, anti-monotone and constant parts.
+Deﬁnition 4.1. For any scalar-valued afﬁne function f (x), deﬁne (cid:18) ∂f
+∂x x, f c = f (0) , x, f − (x) = (cid:18) ∂f
+∂x f + (x) = (cid:19)(cid:19)T (cid:19)(cid:19)T max min (8)
+, 0
+, 0 (cid:18) (cid:18) so that f (x) = f + (x) + f − (x) + f c.
+Since f + only involves the positive coefﬁcients in the gradient of f , it is monotonically increasing, and similarly, f − is monotonically decreasing. Exploiting this and the fact that Ψ is a scalar valued linear function, we obtain
+Ψ (xn−1) = Ψ+ (xn−1) + Ψ− (xn−1) + Ψ0
+≥ Ψ− (cid:0)an−1 (cid:12) un−1 (xn−2) + (1 − an−1) (cid:12) u(cid:48) n−1 (xn−1)(cid:1) + Ψ+ (cid:0)an−1 (cid:12) Ln−1 (xn−2)(cid:1)
++ Ψc. (9)
+The lower bound above is an afﬁne function of xn−2 and hence leads to a recursive algorithm where we compute lower bounds on the speciﬁcation expressed as a function of xk−1 given a lower bound on the speciﬁcation expressed as a linear function of xk.
+Therefore, this leads to a recursive algorithm for computing a lower bound on the optimal value of (7), that is presented in the Subroutine SIMPLEX_BACKWARD function on line 11 in Algorithm 1.
+It can in fact be proven that this is the exact optimal value, using an argument similar to Salman et al.
+[2019], Section 3.
+The computation required to express a lower bound on the speciﬁcation given as a linear function of xk+1 to a lower bound expressed as a linear function of xk is shown on line (14) of Algorithm 1. Note that this computation can be conveniently done in frameworks that support automatic differentiation, by computing the gradient of the expression on the right hand side of line 14 at 0 and its value at 0, which gives the vector of coefﬁents and the bias term of the afﬁne function of xk. Thus, the cost of implementing line 14 of the algorithm is equal to the cost of performing backpropagation through a single layer of the network.
+Denote the projection onto the unit hypercube as π (x) = min (max (x, 0) , 1). Our overall algorithm is presented in Algorithm 1. It consists of two main functions SIMPLEX_BACKWARD and SIM-PLEX_VERIFY. The SIMPLEX_BACKWARD algorithm computes L (a, a) for a ﬁxed value of a, a.
+However, this lower bound is valid for any choice of these parameters. Hence SIMPLEX_VERIFY performs projected gradient ascent on L with respect to a, a to obtain the tightest possible lower bound on the (equation 1). The idea of optimizing the weighting coefﬁcients a, a to obtain tighter bounds is inspired from the algorithm of Xu et al. [2021], with suitable adaptations to the setting involving our novel relaxation. 6
+Proposition 4.2. Algorithm 1 computes a lower bound on the optimal value of (1).
+Proof. Follows by recursively applying the lower bound at each layer while deﬁning fk.
+Computational Complexity: The complexity of SIMPLEX_BACKWARD function 11 for com-puting bounds for a given value of at, ¯at, is the same as the cost of two backward passes through the network. This is twice the cost of CROWN [Zhang et al., 2018], or one iteration of auto-lirpa [Xu et al., 2021], which uses a single backward pass.
+Algorithm 1 Simplex Verify
+Initialise a and ¯a with values between 0 and 1 for t ∈ do 1: function SIMPLEX_VERIFY(Ψ) 2: 3: 4: 5: 0, tmax − 1 (cid:75)
+L(at, at) = SIMPLEX_BACKWARD(Ψ, at, at)
+Compute gradients dL dat , dL dat via backpropagation at+1, ¯at+1 ← update gradient ascent (or Adam) at+1, at+1 ← π (cid:0)at+1(cid:1) , π(at+1) (cid:74) (projection) end for return L(at+1, ¯at+1) 6: 7: 8: 9: 10: end function 11: function SIMPLEX_BACKWARD(Ψ, a, a) 12: 13: 14: 15: 16: 17: 18: end function end for
+L(a, a) = minx0∈∆ f0 (x0) return L(a, a) fN ← Ψ for k ∈ n − 1, 0 (cid:75) (cid:74)
+Set fk (x) ← f − k+1 (ak (cid:12) uk (x) + (1 − ak) (cid:12) u(cid:48) do k (x)) + f + k+1 (ak (cid:12) Lk (x)) + f c k+1. 5 Experiments
+In this section, we demonstrate the effectiveness of the proposed method on two speciﬁcations: (i) robustness to (cid:96)1 perturbations for image classiﬁers (Sec 5.1), and (ii) robustness of multi-modal classiﬁers to text perturbations (Sec 5.2). 5.1 (cid:96)1 robustness veriﬁcation
+Experimental Setup We verify the (cid:96)1 robustness of networks from [de Palma et al., 2021a, Bunel et al., 2020b] and VNN-COMP [2020]. We compute the lower bound on the robustness margin (difference between the ground truth logit and the other logits) using the veriﬁcation methods. An image is said to be veriﬁed if the lower bound across all possible labels is positive. We evaluate the effectiveness of various methods for incomplete veriﬁcation on the MNIST [Lecun] and CIFAR-10
+[Krizhevsky and Hinton, 2009] datasets. For MNIST, we evaluate on the entire test set, and for
+CIFAR-10 we evaluate on 1000 random images from the test set [Krizhevsky and Hinton, 2009]. The
+MNIST and CIFAR-10 datasets are widely used in the machine learning community, and are available under the creator’s consent and MIT license respectively. For both MNIST and CIFAR-10, we use the model architectures from [de Palma et al., 2021a]. The models are trained using the SLIDE attack (sparse (cid:96)1-descent attack) from Tramer and Boneh [2019] with (cid:15) = 0.3 for all networks except the
+VNN-comp big network, which is trained with (cid:15) = 0.05. We used the publicly available training implementation of [Ding et al., 2019] (see supplementary material for details). The code is made available under the LGPL License online 1. We also test on the SGD trained CIFAR Wide model from [de Palma et al., 2021a]. We verify robustness against input perturbations lying in (cid:96)1 norm ball with (cid:15) = 0.35 for the MNIST network, (cid:15) = 0.2 for the VNN-comp big network and (cid:15) = 0.5 for all the other CIFAR-10 networks. 1https://github.com/BorealisAI/advertorch. 7
+Dataset
+Model
+Training
+Accuracy
+Veriﬁed
+Accuracy
+Nominal
+Pgd
+Gurobi Planet
+Gurobi Simplex
+Opt-Lirpa Planet
+Simplex Verify
+Gurobi Planet
+Veriﬁed
+Gurobi Simplex
+Time/Sample Opt-Lirpa Planet
+Simplex Verify
+MNIST
+OVAL
+Wide
+SLIDE 98.8% 98.2% 31.7% 45.2% 31.0% 44.6% 74.61s 72.47s 0.04s 0.04s
+CIFAR-10
+OVAL
+Base
+SLIDE 75.1% 73.5% 34.1% 48.6% 33.6% 48.0% 22.80s 22.95s 0.04s 0.04s
+OVAL
+Wide
+SLIDE 79.3% 77.0% 18.4% 29.4% 17.9% 28.8% 114.92s 72.17s 0.04s 0.04s
+OVAL
+Deep
+SLIDE 72.1% 69.8% 11.1% 13.4% 10.8% 13.4% 86.84s 59.22s 0.06s 0.05s
+OVAL
+Wide
+SGD 74.4% 73.3% 13.5% 23.7% 13.5% 22.4%
+VNN
+Med
+SLIDE
+VNN
+Big
+SLIDE 81.4% 83.6% 80.5% 82.3%
+----48.8% 60.0% 59.4% 66.4% 114.70s 70.42s 0.04s 0.04s
+--0.05s 0.05s
+--0.06s 0.06s
+Table 1: Veriﬁed accuracy and veriﬁcation time of different solvers on MNIST and CIFAR-10 models. We test on the entire test set for MNIST, and random 1000 test images for CIFAR-10. Simplex Verify denotes our proposed solver. Our proposed method achieves much higher veriﬁed accuracy in comparison to the state of the art baseline, in the same amount of time. ‘-’ denotes instances not solved within a 5 minute timeout.
+Methods We compare against other propagation based solvers and Gurobi. Gurobi baselines employ the commercial black-box solver Gurobi [Gurobi Optimization, 2020]. Gurobi solves the problems to optimality, giving the tightest possible bounds for the corresponding relaxations. Gurobi
+Planet corresponds to solving the Planet relaxation [Ehlers, 2017] of the network. Gurobi Simplex corresponds to solving our relaxation using Gurobi. Both the methods are run on 4 CPU threads on an Intel(R) Core(TM) i7-4960X CPU @ 3.60GHz processor. We also compare against an optimized
+LiRPA solver for the Planet relaxation [Ehlers, 2017], and refer to it as Opt-Lirpa Planet. The solver remains the same as our solver, with the only difference being that the upper bound corresponding to our relaxation is not present (see supplementary material for details). Note that the intermediate layer bounds in Opt-Lirpa Planet are not jointly optimized. Simplex Verify corresponds to our solver described in Sec 4.2. Both the LiRPA based solvers use Adam [Kingma and Ba, 2015] for updating the weighting vectors a, and are run on a single Nvidia Titan Xp GPU. All the methods use the same intermediate bounds, which are computed using Opt-Lirpa Planet run for 20 iterations. We compare the effectiveness of the different methods for computing the ﬁnal layer bounds. Further details about the baselines and experimental settings, including the hyper-parameters, are provided in the supplementary material.
+Results Table 1 shows the veriﬁed accuracy and average veriﬁcation time per sample of different methods. Gurobi Simplex achieves much higher veriﬁed accuracy (up to 16.5% higher) in comparison to Gurobi Planet. This is in line with Theorem 3.1 and Proposition 3.2 because our proposed relaxation is much tighter than Planet. This also shows the beneﬁt of using tighter relaxations. For a fair comparison, the number of iterations of both LiRPA based methods were tuned such that each of them take the same amount of time. We tuned the number of iterations on a subset of images. It is worth noting that the proposed solver, Simplex Verify, achieves much higher veriﬁed accuracy than
+Opt-Lirpa Planet, in the same amount of time. Simplex Verify also achieves comparable accuracy to
+Gurobi Simplex, while being nearly 3 orders of magnitudes faster, which shows the effectiveness of the proposed solver in solving Problem 5.
+We also compare the tightness of the bounds achieved by different methods. We obtained the lower bounds provided by different solvers. We can get the upper bounds using the sparse PGD attack,
+SLIDE [Tramer and Boneh, 2019]. A smaller gap between the PGD upper bound and veriﬁed lower bound, indicates tighter veriﬁcation. Figure 2a shows the pointwise comparison of the gap to PGD for Gurobi Planet and Gurobi Simplex, on the same data. PGD gap is much smaller for Gurobi
+Simplex in comparison to Gurobi Planet, thereby showing that our relaxation achieves much tighter veriﬁcation. Figure 2b shows the pointwise comparison of the gap for Opt-Lirpa Planet and our
+Simplex Verify. Simplex Verify achieves much tighter veriﬁcation. 8
+(a) Comparison of runtime (left) and gap of lower bounds to PGD upper bounds (right), for Gurobi
+Simplex and Gurobi Planet. (b) Comparison of runtime (left) and gap of lower bounds to PGD upper bounds (right), for Simplex
+Verify and Opt-Lirpa Planet.
+Figure 2: Pointwise comparison of the lower bounds on CIFAR-10 test set on the adversarially trained Wide model, for a subset of the methods. Darker colour shades mean higher point density (on a logarithmic scale).
+The oblique dotted line corresponds to the equality. 5.2 Multi-modal classiﬁer robustness veriﬁcation
+Experimental Setup In this section, we are interested in verifying the robustness of multi-modal classiﬁers to text-based attacks. The motivation are scenarios where image based models are aug-mented with text to improve the accuracy of the classiﬁer. However, this makes the model vulnerable to text based attacks. The aim of this experiment is to show the adversarial vulnerability of such models and verify their robustness. For this experiment we verify the robustness of models on the
+UPMC FOOD-101 dataset [Wang et al., 2015], which is a commonly used dataset for multi-modal classiﬁcation (see [Kiela et al., 2019]). This dataset consists of images and recipes of different food items. It is made available by the creators’ consent online 2. The speciﬁcation that we are interested in verifying is as follows: for a given image and text pair, only the text is perturbed and any possible text from the given vocabulary is allowed in the attack. The aim of this speciﬁcation is to characterise the worst-case sensitivity of the model. We are not aiming for perfect robustness to the noise in text, but aim to check its sensitivity. We use a ConcatBOW model for this task as proposed in Kiela et al.
+[2019]. The model extracts an image embedding using a standard pretrained ResNet-152 model. It also extract a Bag of words embedding for the text. The model concatenates the embeddings and feeds them into a multilayer perceptron (MLP) classiﬁer, which has 1,846,200 parameters. Arbitrary changes in the text can be modelled as a simplex as described in Section 2.1. The model follows the same architecture as the state-of-the-art model for this dataset [Ignazio Gallo and Grassa, 2020], except that we replace Bert embeddings with BOW embeddings. We reduce the dataset from 101 classes to 10 classes. More details are provided in the supplementary.

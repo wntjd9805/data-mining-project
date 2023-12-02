@@ -1,0 +1,258 @@
+Abstract
+Augmenting pre-trained language models with knowledge graphs (KGs) has achieved success on various commonsense reasoning tasks. However, for a given task instance, the KG, or certain parts of the KG, may not be useful. Although
+KG-augmented models often use attention to focus on specific KG components, the KG is still always used, and the attention mechanism is never explicitly taught which KG components should be used. Meanwhile, saliency methods can measure how much a KG feature (e.g., graph, node, path) influences the model to make the correct prediction, thus explaining which KG features are useful. This paper explores how saliency explanations can be used to improve KG-augmented models’ performance. First, we propose to create coarse (Is the KG useful?) and fine (Which nodes/paths in the KG are useful?) saliency explanations. Second, to motivate saliency-based supervision, we analyze oracle KG-augmented models which di-rectly use saliency explanations as extra inputs for guiding their attention. Third, we propose SALKG, a framework for KG-augmented models to learn from coarse and/or fine saliency explanations. Given saliency explanations created from a task’s training set, SALKG jointly trains the model to predict the explanations, then solve the task by attending to KG features highlighted by the predicted explanations. On three commonsense QA benchmarks (CSQA, OBQA, CODAH) and a range of
+KG-augmented models, we show that SALKG can yield considerable performance gains — up to 2.76% absolute improvement on CSQA. 2 1
+
+Introduction
+Natural language processing (NLP) systems generally need common sense to function well in the real world [15]. However, NLP tasks do not always provide the requisite commonsense knowledge as input. Moreover, commonsense knowledge is seldom stated in natural language, making it hard for pre-trained language models (PLMs) [11, 35] — i.e., text encoders — to learn common sense from corpora alone [9, 38]. In contrast to corpora, a knowledge graph (KG) is a rich, structured source of commonsense knowledge, containing numerous facts of the form (concept1, relation, concept2). As a result, many methods follow the KG-augmented model paradigm, which augments a text encoder with a graph encoder that reasons over the KG (Fig. 2). KG-augmented models have outperformed text encoders on various commonsense reasoning (CSR) tasks, like question answering (QA) (Fig. 1) [31, 5, 36, 61], natural language inference (NLI) [7, 57], and text generation [33, 65].
+Since KGs do not have perfect knowledge coverage, they may not contain useful knowledge for all task instances (e.g., if the KG in Fig. 1 only consisted of the gray nodes). Also, even if the
+KG is useful overall for a given task instance, only some parts of the KG may be useful (e.g., the
+∗Work done while TG interned remotely at USC. 2Code and data are available at: https://github.com/INK-USC/SalKG. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+green nodes in Fig. 1). Ideally, a KG-augmented model would know both if the KG is useful and which parts of the KG are useful. Existing KG-augmented models always assume the KG should be used, but do often use attention [54] to focus on specific KG components (e.g., nodes [13, 47, 60], paths [56, 46, 5]) when predicting. Still, the attention mechanism is supervised (end-to-end) only by the task loss, so the model is never explicitly taught which KG components should be used. Without component-level supervision, the attention mechanism is more likely to overfit to spurious patterns.
+How can we better teach the model whether each KG feature (e.g., graph, node, path) is useful for solving the given task instance? Using the task’s ground truth labels, saliency methods [2] can score each KG feature’s influence on the model making the correct prediction. Whereas attention weights show which KG features the model already used, saliency scores indicate which KG features the model should use. By binarizing these scores, we are able to produce saliency explanations, which can serve as simple targets for training the model’s attention mechanism. For example,
+Fig. 1 shows saliency explanations [market=1, produce=1, trading=0, merchant=1, store=0, shop=0], stating that market, produce, and merchant are useful nodes for answering the question.
+In this paper, we investigate how saliency explana-tions can be used to improve KG-augmented mod-els’ performance. First, we propose to create coarse (graph-level) and fine (node-/path-level) saliency ex-planations. Since KGs have features at different gran-ularities, saliency explanations can supply a rich array of signals for learning to focus on useful KG fea-tures. To create coarse explanations, we introduce an ensemble-based saliency method which measures the performance difference between a KG-augmented model and its corresponding non-KG-augmented model. To create fine explanations, we can adapt any off-the-shelf saliency method, e.g., gradient-based
+[10] or occlusion-based [30]. Second, to demonstrate the potential of saliency-based supervision, we ana-lyze the performance of oracle KG-augmented mod-els, whose attention weights are directly masked with coarse and/or fine saliency explanations.
+Figure 1: KG Saliency Explanations for Com-monsense QA. Across different questions, the
+KG’s usefulness can vary considerably. Coarse explanations indicate if the KG is useful overall, while fine explanations highlight useful nodes or paths. Here, the fine explanations state that the market, produce, and merchant nodes are useful, while the other nodes are not.
+Third, as motivated by our oracle model analysis, we propose the Learning from Saliency Explanations of KG-Augmented Models (SALKG) framework.
+Given coarse and/or fine explanations created from thse task’s training set, SALKG jointly trains the model to predict the explanations, then solve the task by attending to KG features highlighted in the predicted explanations. Using saliency explanations to regularize the attention mechanism can help the model generalize better to unseen instances, especially when coarse and fine explanations are used together as complementary learning signals. Indeed, on three standard commonsense QA benchmarks (CSQA, OBQA, CODAH) and a range of KG-augmented models, we show that SALKG can achieve considerable performance gains. 2 Preliminaries
+Since KGs abundantly provide structured commonsense knowledge, KG-augmented models are often helpful for solving CSR tasks. CSR tasks are generally formulated as multi-choice QA (discriminative) tasks [52, 39, 23], but sometimes framed as open-ended response (generative) [33, 32] tasks.
+Given that multi-choice QA has been more extensively studied, we consider
+CSR in terms of multi-choice QA. Here, we present the multi-choice QA problem setting (Fig. 1) and the structure of KG-augmented models (Fig. 2).
+Problem Definition Given a question q and set of answer choices A = {ai}, a multi-choice QA model aims to predict a plausibility score ρ(q, ai) for each (q, ai) pair, so that the predicted answer ˆa = arg maxai∈A ρ(q, ai) matches the target answer a∗. Let q ⊕ ai be the text statement formed from (q, ai), where ⊕ denotes concatenation. For example, in Fig. 1, the text statement
+Figure 2:
+KG-Augmented Models fuse knowledge from text and KG inputs to solve CSR tasks. 2
+for q ⊕ a∗ would be: What kind of store does a merchant have if they sell produce? market. We abbreviate q ⊕ ai as xi and its plausibility score as ρ(xi).
+KG-Augmented Models KG-augmented models use additional supervision from knowledge graphs to solve the multi-choice QA task. They encode the text and KG inputs individually as embeddings, then fuse the two embeddings together to use for prediction. A KG is denoted as ˜G = ( ˜V, ˜R, ˜E), where ˜V, ˜R, and ˜E are the KG’s nodes (concepts), relations, and edges (facts), respectively. An edge is a directed triple of the form e = (c1, r, c2) ∈ ˜E, in which c1, c2 ∈ ˜V are nodes, and r ∈ ˜R is the relation between c1 and c2. A path is a connected sequence of edges in the KG. When answering a question, the model does not use the entire KG, since most information in ˜G is irrelevant to xi.
+Instead, the model uses a smaller, contextualized KG Gi = (Vi, Ri, Ei), which is built from ˜G using xi. Gi can be constructed heuristically by extracting edges from ˜G [31, 37], generating edges with a
+PLM [5], or both [56, 60]. In this paper, we consider KG-augmented models where Gi is built by heuristically by extracting edges from ˜G (see Sec. A.1 for more details), since most KG-augmented models follow this paradigm. If xi and Gi are not discussed in the context of other answer choices, then we further simplify xi’s and Gi’s notation as x and G, respectively. Since the model never uses the full KG at once, we use “KG” to refer to G in the rest of the paper.
+As in prior works [31, 5], a KG-augmented model FKG has three main components: text encoder ftext, graph encoder fgraph, and task predictor ftask (Fig. 2). Meanwhile, its corresponding non-KG-augmented model FNo-KG has no graph encoder but has a slightly different task predictor ¯ftask which only takes x as input. In both FKG and FNo-KG, the task predictor outputs ρ(x). Let x and g be the embeddings of x and G, respectively. Then, the workflows of FKG and FNo-KG are defined below: x = ftext(x); g = fgraph(G, x); FKG(x, G) = ftask(x ⊕ g); FNo-KG(x) = ¯ftask(x).
+Typically, ftext is a PLM [11, 35], fgraph is a graph neural network (GNN) [13, 47] or edge/path aggregation model [31, 5, 46], and ftask and ¯ftask are multilayer perceptrons (MLPs). In general, fgraph reasons over G by encoding either nodes or paths, then using soft attention to pool the encoded nodes/paths into g. Let Ltask be the task loss for training FKG and FNo-KG. For multi-choice QA, Ltask is cross-entropy loss, with respect to the distribution over A. For brevity, when comparing different models, we may also refer to FKG and FNo-KG as KG and No-KG, respectively. 3 Creating KG Saliency Explanations
+Now, we show how to create coarse and fine saliency explanations, which tell us if the KG or certain parts of the KG are useful. These explanations can be used as extra inputs to mask oracle models’ attention (Sec. 4) or as extra supervision to regularize SALKG models’ attention (Sec. 5). We first abstractly define a unit as either G itself or a component of G. A unit can be a graph, node, path, etc., and we categorize units as coarse (the entire graph G) or fine (a node or path within G) (Table 1).
+Given a model and task instance (x, G), we define an explanation as a binary indicator of whether a unit u of G is useful for the model’s prediction on (x, G). If u is useful, then u should strongly influence the model to solve the instance correctly. By making explanations binary, we can easily use explanations as masks or learning targets (since binary labels are easier to predict than real-valued scores) for attention weights.
+Explanation Setting Unit 3.1 Coarse Saliency Explanations
+Since G may not always be useful, a KG-augmented model should ideally know when to use G. Here, the unit u is the graph G. Given instance (x, G), a coarse saliency explanation yc(x, G) ∈ {0, 1} indicates if G helps the model solve the instance. By default, FKG assumes G is used, so we propose an ensemble-based saliency formulation for yc(x, G). That is, we define yc(x, G) as stating if FKG (i.e., uses G) or FNo-KG (i.e., does not use G) should be used to solve (x, G). Under this formulation, each (x, G) has coarse units G and None, where None means “G is not used”.
+To get yc(x, G), we begin by computing coarse saliency score sc(x, G) ∈ R, which we define as the performance difference between FKG and FNo-KG. For QA input xi = q ⊕ ai and its KG Gi, let pKG(xi, Gi) and pNo-KG(xi) be the confidence probabilities for xi predicted by FKG and FNo-KG, respectively.
+Table 1: KG unit types used for different explana-tion modes (Sec. 3) and graph encoders (Sec. 4.2).
+Coarse
+Fine (MHGRN)
+Fine (PathGen)
+Fine (RN)
+KG
+Node
+Path
+Path 3
+sc(xi, Gi)
+Ideally, a QA model should predict higher prob-abilities for answer choices ai that are correct, and vice versa. To capture this notion, we de-fine sc(xi, Gi) in Eq. 1, where a∗ denotes the correct answer. Note that sc(xi, Gi) is positive if pKG(xi, Gi) is higher than pNo-KG(xi) for correct choices and lower for incorrect choices. We obtain yc(xi, Gi) by binarizing sc(xi, Gi) to 0 or 1 based on whether it is greater than or less than a threshold T , respectively. If yc(xi, Gi) = 1, then the KG is useful, and vice versa. See the appendix for more details about why we use ensemble-based saliency for coarse explanations (Sec. A.2) and how we tune T (Sec. A.6). (cid:26)pKG(xi, Gi) − pNo-KG(xi), ai = a∗, pNo-KG(xi) − pKG(xi, Gi), ai ̸= a∗. (1)
+= 3.2 Fine Saliency Explanations
+Even if G is useful, not every part of G may be useful. Hence, fine saliency explanations can identify which parts of a KG are actually useful. For a given instance (x, G), we denote the fine saliency explanation for a fine unit u in G as yf(u; x, G) ∈ {0, 1}. Fine units can be nodes, paths, etc. in the KG. If a graph encoder fgraph encodes a certain type of unit, it is natural to define yf(u; x, G) with respect to such units. For example, MHGRN [13] encodes G’s nodes, so we define MHGRN’s fine saliency explanations with respect to nodes. Similar to coarse saliency explanations, to obtain yf(u; x, G), we first compute fine saliency score sf(u; x, G) ∈ R, and then binarize it. For a QA input xi = q ⊕ ai and its KG Gi, let uij be the jth fine unit in Gi and pKG(xi, Gi) denote FKG’s predicted probability for xi. There are many existing saliency methods (a.k.a. attribution methods) [10, 51, 30] for calculating the importance score of an input, with respect to a model and a given label. While sf(uij; xi, Gi) can be computed via any saliency method, we use gradient-based and occlusion-based methods, since they are the most common types of saliency methods [2].
+Let ϕ(uij; xi, Gi) denote the raw saliency score given by some saliency method. Gradient-based methods measure an input’s saliency via the gradient of the model’s output with respect to the input. We use the gradient×input (Grad) method [10], where ϕ(uij; xi, Gi) is the dot product of uij’s embedding and the gradients of pKG(xi, Gi) with respect to uij. Occlusion-based methods measure an input’s saliency as how the model’s output is affected by erasing that input. We use the leave-one-out (Occl) method [30], where ϕ(uij; xi, Gi) is the decrease in pKG(xi, Gi) if uij is removed from Gi, i.e., ϕ(uij; xi, Gi) = pKG(xi, Gi) - pKG(xi, Gi \ uij).
+Intuitively, a unit is more useful if it increases the probabil-ity of correct answer choice a∗, and vice versa. Thus, we define the saliency score sf(uij; xi, Gi) for unit uij as Eq. 2.
+Next, we binarize the saliency scores to get yf(uij; xi, Gi), by selecting the top-k%-scoring units in Gi and setting yf(uij; xi, Gi) = 1 (i.e., uij is useful) for these units. For all other units in G, we set yf(uij; xi, Gi) = 0 (i.e., uij is not useful). See the appendix for more details about the fine saliency methods (Sec. A.3) and tuning threshold k (Sec. A.6). (cid:26)ϕ(uij; xi, Gi),
+−ϕ(uij; xi, Gi), ai ̸= a∗ (2) sf(uij; xi, Gi) ai = a∗
+= 4 ORACLE: Using KG Saliency Explanations as Inputs
+In this section, we analyze KG saliency explanations’ potential to improve KG-augmented models’ performance. Recall that creating saliency explanations requires the task’s ground truth labels (Sec. 3), so directly using test set explanations is infeasible. Still, before exploring ways to leverage training set explanations (Sec. 5), we first establish upper bounds on how much models can benefit from saliency explanations. Here, we study three key questions: (1) Does the model improve when provided oracle access to coarse/fine explanations? (2) Are coarse and fine explanations complementary? (3)
+How do gradient-based explanations compare to occlusion-based explanations? 4.1 ORACLE Models
+ORACLE models are KG-augmented models with oracle access to saliency explanations. An ORACLE model uses ground truth labels to create explanations (even at inference time), and then uses the explanations as extra inputs to perform hard attention over the units. We define the model attention weights that are modified based on saliency explanations as saliency weights. Below, we introduce the ORACLE-Coarse, ORACLE-Fine, and ORACLE-Hybrid models, shown in Fig. 3a-c. 4
+Model
+Output
+Saliency Weights
+ORACLE-Coarse F ∗
+ORACLE-Fine
+ORACLE-Hybrid F ∗ c (x, G) = yc(x, G)FKG(x, G) + (1 − yc(x, G))FNo-KG(x) f (x, G) ∼ FKG(x, G)
+F ∗ h (x, G) = yh(x, G)F ∗ f (x, G) + (1 − yh(x, G))FNo-KG(x)
+[yc(x, G), 1 − yc(x, G)]
+ˆyf(x, G) ⊙ yf(x, G)
+[yh(x, G), 1 − yh(x, G)]
+Table 2: Comparison of ORACLE Models. For each ORACLE Model, we show its output and saliency weights.
+Note that the explanations are given (not predicted), so there is no Lsal. While F ∗ h are both ensembles of
+FKG and FNo-KG, F ∗ f has the same architecture as FKG (denoted by ∼) besides the attention masking. c and F ∗
+CSQA Test Accuracy (%)
+OBQA Test Accuracy (%)
+Model
+No-KG
+KG
+No-KG + KG
+ORACLE-Coarse
+ORACLE-Fine (Grad)
+ORACLE-Fine (Occl)
+ORACLE-Hybrid (Grad)
+ORACLE-Hybrid (Occl)
+MHGRN
+PathGen
+RN
+MHGRN
+PathGen
+RN
+BERT RoBERTa BERT RoBERTa BERT RoBERTa BERT RoBERTa BERT RoBERTa BERT RoBERTa 55.44 56.57 56.57 66.16 74.86 91.06 85.50 95.89 70.59 73.33 71.39 81.39 76.15 87.99 84.21 98.63 55.44 56.65 57.45 68.57 79.61 79.61 90.49 88.96 70.59 72.04 73.00 80.10 87.35 75.34 92.83 96.78 55.44 55.60 56.73 67.28 81.39 73.73 92.26 85.25 70.59 71.07 68.49 79.69 83.24 68.41 93.56 95.25 53.60 53.20 55.60 70.60 67.60 77.00 80.80 87.00 68.40 69.80 70.60 79.40 72.60 71.20 84.80 89.60 53.60 55.00 54.40 65.00 73.80 83.60 85.60 92.80 68.40 67.80 70.6 76.60 73.40 62.60 92.80 90.60 53.60 58.60 53.40 69.00 68.00 55.60 85.40 67.40 68.40 70.20 69.60 79.00 62.80 61.40 86.80 80.60
+Table 3: ORACLE Performance on CSQA and OBQA f ’s soft attention weight for u. We train F ∗ f
+ORACLE-Coarse ORACLE-Coarse (F ∗ c ) uses coarse explanations to do hard attention over FKG’s and FNo-KG’s predictions. First, FKG and FNo-KG are trained separately, then frozen. Next, for each instance (x, G), they are used to create a coarse explanation yc(x, G) ∈ {0, 1}. Then, F ∗ c is defined as an ensemble model that performs hard attention over coarse units (G and None) by weighting
+FKG’s prediction with yc(x, G) and FNo-KG’s prediction with 1 − yc(x, G) (Table 2; Fig. 3a). In other words, yc(x, G) and 1 − yc(x, G) are the saliency weights for F ∗ c .
+ORACLE-Fine ORACLE-Fine (F ∗ f ) has the same architecture as FKG and uses fine explanations to do hard attention over fine units (i.e., nodes or paths in G). First, FKG is trained, then frozen. As usual,
+FKG uses soft attention over fine units in G to compute graph embedding g (Sec. 2). Then, for each fine unit u in G, FKG is used to create fine explanation yf(u; x, G) ∈ {0, 1}. Let ˆyf(u; x, G) ∈ [0, 1] denote F ∗ the same way as FKG, except each ˆyf(u; x, G) is (hard attention) masked with yf(u; x, G), i.e., ˆyf(u; x, G) ← ˆyf(u; x, G) ⊙ yf(u; x, G), where ⊙ denotes element-wise multiplication (Table 2; Fig. 3b). This means only units with yf(u; x, G) = 1 will have ˆyf(u; x, G) > 0 and thus be able to influence F ∗ f ’s prediction. Let yf(x, G) and ˆyf(x, G) denote the explanations and soft attention weights, respectively, for all units in the graph. Then,
+ˆyf(x, G) ⊙ yf(x, G) are the saliency weights for F ∗ f .
+ORACLE-Hybrid ORACLE-Hybrid (F ∗ h ) unifies ORACLE-Coarse and ORACLE-Fine as a single model, thus leveraging the coarse-fine hierarchy inherent in KG saliency explanations. First, F ∗ f (which uses fine explanations) and FNo-KG are separately trained, then frozen. Then, for each (x, G),
+F ∗ f and FNo-KG are used to create yh(x, G) ∈ {0, 1}, which we define as the coarse explanation for f and FNo-KG. yh(x, G) is computed the same way as yc(x, G), besides replacing FKG with F ∗
+F ∗ f .
+Finally, similar to F ∗ h is an ensemble that performs hard attention over coarse units by weighting
+F ∗ f ’s prediction with yh(x, G) and FNo-KG’s prediction with 1 − yh(x, G) (Table 2; Fig. 3c). That is, yh(x, G) and 1 − yh(x, G) are the saliency weights for F ∗ h . c , F ∗ 4.2 Evaluation Protocol
+We use the CSQA [52] and OBQA [39] multi-choice QA datasets. For CSQA, we use the accepted in-house data split from [31], as the official test labels are not public. As in prior works, we use the
+ConceptNet [49] KG for both datasets. We report accuracy, the standard metric for multi-choice QA.
+For FNo-KG and FKG, we pick the best model over three seeds, then use them to create explanations for ORACLE models. We use thresholds T = 0.01 and k = 10 for coarse and fine explanations, respectively. For text encoders, we use BERT(-Base) [11] and RoBERTa(-Large) [35]. For graph encoders, we use MHGRN [13], PathGen [56], and Relation Network (RN) [46, 31]. MHGRN has node units, while PathGen and RN have path units. As baseline models, we use FNo-KG, FKG, and
+FNo-KG + FKG, where FNo-KG + FKG is an ensemble whose prediction is the mean of FNo-KG’s and
+FKG’s predictions. ORACLE and baseline models are trained only with task loss Ltask. 5
+Figure 3: Schematics for ORACLE and SALKG Models. Red arrows indicate the ORACLE pipeline, where the target explanation is provided as input. Purple arrows indicate the SALKG pipeline, where the target explanation is used as supervision for the predicted explanation. In SALKG-Coarse and SALKG-Hybrid, the saliency predictor has the same architecture as FKG. Meanwhile, ORACLE-Fine and SALKG-Fine (shown as white module, with text encoder and task predictor omitted) both have the same architecture as FKG. 4.3 Analysis
+In Table 3, we show CSQA and OBQA performance for the baseline and ORACLE models. We analyze these results via the three questions below.
+Does the model improve when provided oracle access to coarse/fine explanations? Yes. ORACLE-Coarse beats all baselines, while ORACLE-Fine beats all baselines except on OBQA RN+RoBERTa.
+These results motivate us to develop a framework for models to improve performance by learning from coarse/fine explanations. Also, on average, ORACLE-Fine outperforms ORACLE-Coarse, which suggests that fine explanations may often provide richer signal than their coarse counterparts. Indeed, fine explanations indicate the saliency of every unit in the KG, while coarse explanations only indicate the saliency of the KG as a whole.
+Are coarse and fine explanations complementary? Yes. Across all settings, ORACLE-Hybrid performs significantly better than ORACLE-Coarse and ORACLE-Fine. This suggests that coarse and fine explanations are complementary and that it is effective to leverage both hierarchically.
+How do gradient-based explanations compare to occlusion-based explanations? Overall, Grad and
+Occl perform similarly. Grad performs better on some settings (e.g., MHGRN), while Occl performs better on others (e.g., RN). See Table 8 and Sec. A.9 for more Grad vs. Occl experiments.
+In our ORACLE pilot study, KG-augmented models achieve large performance gains when given explanations as input. This suggests that, if oracle explanations can somehow be predicted accurately during inference without using ground truth labels, then KG-augmented models can still achieve improvements without directly using explanations as input. This motivates us to train KG-augmented models with explanation-based supervision via SALKG, which we describe in Sec. 5. 5 SALKG: Using KG Saliency Explanations as Supervision
+Based on the analysis from Sec. 4.3, we propose the SALKG framework for KG-augmented models to learn from coarse/fine saliency explanations. Whereas ORACLE models (Sec. 4.1) use explanations directly as extra inputs, SALKG models only use them as extra supervision during the training phase.
+With explanations created from the training set via FKG and FNo-KG, SALKG models are jointly trained to predict the explanations (via saliency loss Lsal) and use the predicted explanations to solve the task (via task loss Ltask). Thus, SALKG models have the following objective: LS = Ltask + λLsal, where λ ≥ 0 is a loss weighting parameter. This multitask objective not only encourages SALKG models to focus on useful KG units for solving the task, but also to learn more general graph/node/path representations. Below, we present SALKG-Coarse, SALKG-Fine, and SALKG-Hybrid models.
+SALKG-Coarse Unlike ORACLE-Coarse, SALKG-Coarse (Fc) is not given oracle coarse explana-tion yc(x, G) as input. Instead, a saliency predictor Sc (with the same architecture as FKG) is trained to predict the oracle coarse explanation. Sc predicts coarse explanation as probability ˆyc(x, G) ∈ [0, 1].
+Fc’s output is an ensemble that does soft attention over coarse units by weighting FKG’s and FNo-KG’s predictions with saliency weights ˆyc(x, G) and 1 − ˆyc(x, G), respectively (Table 4; Fig. 3a). Here,
+Lsal(ˆyc(x, G), yc(x, G)) is the cross-entropy loss. 6
+Model
+Output
+Saliency Weights
+Saliency Loss (Lsal)
+SALKG-Coarse Fc(x, G) = ˆyc(x, G) FKG(x, G) + (1 − ˆyc(x, G)) FNo-KG(x)
+SALKG-Fine
+SALKG-Hybrid
+Ff(x, G) ∼ FKG(x, G)
+Fh(x, G) = ˆyh(x, G)Ff(x, G) + (1 − ˆyh(x, G))FNo-KG(x)
+[ˆyc(x, G), 1 − ˆyc(x, G)] CE(ˆyc(x, G), yc(x, G))
+KL(ˆyf(x, G), yf(x, G))
+[ˆyh(x, G), 1 − ˆyh(x, G)] CE(ˆyh(x, G), yh(x, G))
+ˆyf(x, G)
+Table 4: Comparison of SALKG Models. For each SALKG Model, we show its output, saliency weights, and
+Lsal. While Fc and Fh are both ensembles, Ff has the same architecture as FKG (denoted by ∼). “CE” denotes cross-entropy loss, while “KL” denotes KL divergence loss.
+SALKG-Fine Similarly, SALKG-Fine (Ff) is not given oracle fine explanation yf(u; x, G) as input,
+Instead, for each fine unit u, Ff’s attention although both have the same architecture as FKG. mechanism is trained to predict yf(u; x, G) as soft attention weight ˆyf(u; x, G) ∈ [0, 1] (Table 4;
+Fig. 3b). As before, ˆyf(x, G) = [ˆyf(u; x, G)]u∈G are the soft attention weights for (x, G), while yf(x, G) = [yf(u; x, G)]u∈G are the fine explanations for (x, G). Then, ˆyf(x, G) are the saliency weights for Ff, trained with KL divergence loss Lsal(ˆyf(x, G), yf(x, G)).
+SALKG-Hybrid Similar to the other SALKG variants, SALKG-Hybrid (Fh) does not use any oracle explanations. Like in SALKG-Coarse, a saliency predictor Sh is trained to predict oracle coarse explanation yh(x, G) (Sec. 4.1). Predicted coarse explanation probabilities ˆyh(x, G) ∈ [0, 1] are then used as soft attention over coarse units by weighting Ff’s and FNo-KG’s predictions with weights ˆyh(x, G) and 1 − ˆyh(x, G), respectively (Table 4; Fig. 3c). Here, Lsal(ˆyh(x, G), yh(x, G)) is cross-entropy loss. 6 Experiments 6.1 Evaluation Protocol
+We evaluate SALKG models on the CSQA [52], OBQA [39], and CODAH [6] multi-choice QA datasets (Sec. A.5). In addition to the baselines in Sec. 4.2, we consider two new baselines, RANDOM and HEURISTIC, which help show that coarse/fine saliency explanations provide strong learning signal for KG-augmented models to focus on useful KG features. We follow the same evaluation protocol in Sec. 4.2, except we now also report mean and standard deviation performance over multiple seeds. See Sec. A.4 for a more detailed description of the evaluation protocol.
+RANDOM RANDOM is a variant of SALKG where each unit’s explanation is random. RANDOM-Coarse is like SALKG-Coarse, but with each yc(x, G) uniformly sampled from {0, 1}. RANDOM-Fine is like SALKG-Fine, but randomly picking k% of units in G to set yf(u; x, G) = 1. RANDOM-Hybrid is like SALKG-Hybrid, but with each yh(x, G) uniformly sampled from {0, 1} as well as using
+RANDOM-Fine instead of SALKG-Fine.
+HEURISTIC Each G has three node types: question nodes (i.e., nodes in q), answer nodes (i.e., nodes in ai), and intermediate nodes (i.e., other nodes) [31]. Let QA nodes be nodes in q or ai.
+HEURISTIC is a variant of SALKG where each unit’s explanation is based on the presence of QA nodes in G. Let ¯N be the mean number of QA nodes per KG (in train set), and let N (G) be the number of QA nodes in G. HEURISTIC-Coarse is like SALKG-Coarse, except yc(x, G) = 1 if and only if N (G) > ¯N . HEURISTIC-Fine is like SALKG-Fine, but how yf(u; x, G) is set depends on whether the fine units are nodes or paths. For node units, yf(u; x, G) = 1 if and only if u is a QA node. For path units, yf(u; x, G) = 1 if and only if u consists only of QA nodes. HEURISTIC-Hybrid is like SALKG-Hybrid, but with yh(x, G) = 1 if and only if N (G) > ¯N , while HEURISTIC-Fine is used instead of SALKG-Fine. 6.2 Main Results
+Table 5 shows performance on CSQA, while Table 6 shows performance on OBQA and CODAH.
+Best performance is highlighted in green , second-best performance is highlighted in blue , and best non-SALKG performance is highlighted in red (if it is not already green or blue). For SALKG (unlike ORACLE), we find that Occl usually outperforms Grad, so we only report Occl performance in Tables 5-6. For a comparison of Grad and Occl on SALKG, see Table 8 and Sec. A.9. Being an ensemble, No-KG + KG tends to beat both No-KG and KG if both have similar performance.
+Otherwise, No-KG + KG’s performance is in between No-KG’s and KG’s.
+Across all datasets, we find that SALKG-Hybrid and SALKG-Coarse are consistently the two best models. On CSQA, SALKG-Hybrid has the highest performance on BERT+MHGRN, 7
+MHGRN
+PathGen
+RN
+CSQA Test Accuracy (%)
+Model
+No-KG
+KG
+No-KG + KG
+RANDOM-Coarse
+RANDOM-Fine
+RANDOM-Hybrid
+HEURISTIC-Coarse
+HEURISTIC-Fine
+HEURISTIC-Hybrid
+SALKG-Coarse
+SALKG-Fine
+SALKG-Hybrid
+BERT
+RoBERTa
+BERT
+RoBERTa
+BERT
+RoBERTa 53.13 (±2.34) 57.48 (±0.89) 56.14 (±2.28) 55.04 (±1.44) 54.69 (±2.54) 52.43 (±2.60) 55.55 (±2.29) 52.54 (±1.67) 56.35 (±0.81) 57.98 (±0.90) 54.36 (±2.34) 58.70 (±0.65) 69.65 (±1.06) 73.14 (±0.78) 72.15 (±0.67) 71.06 (±1.09) 73.09 (±1.06) 71.93 (±0.77) 72.15 (±0.84) 71.50 (±1.01) 72.58 (±0.32) 73.64 (±1.05) 70.00 (±0.81) 73.37 (±0.12) 53.13 (±2.34) 56.54 (±0.73) 57.29 (±1.30) 55.09 (±1.08) 54.66 (±0.97) 55.24 (±0.58) 56.92 (±0.18) 54.00 (±1.89) 56.83 (±0.48) 57.75 (±0.77) 54.39 (±2.03) 59.87 (±0.42) 69.65 (±1.06) 72.58 (±0.57) 72.44 (±0.72) 71.15 (±1.06) 71.26 (±3.19) 71.35 (±0.34) 72.57 (±0.49) 71.11 (±0.93) 71.33 (±0.87) 73.07 (±0.25) 72.12 (±0.91) 72.67 (±0.65) 53.13 (±2.34) 56.46 (±1.22) 55.98 (±1.98) 55.15 (±1.23) 49.88 (±1.75) 54.36 (±0.35) 56.42 (±1.11) 52.04 (±2.13) 54.38 (±3.30) 57.50 (±1.25) 54.30 (±1.41) 58.78 (±0.14) 69.65 (±1.06) 71.37 (±1.20) 71.15 (±0.81) 69.06 (±2.96) 69.08 (±1.95) 70.12 (±0.35) 71.18 (±0.77) 65.08 (±3.67) 65.07 (±2.02) 73.11 (±1.13) 71.64 (±1.51) 74.13 (±0.71)
+Table 5: SALKG Performance on CSQA
+OBQA Test Accuracy (%)
+CODAH Test Accuracy (%)
+Model (RoBERTa)
+MHGRN
+PathGen
+RN
+MHGRN
+PathGen
+No-KG
+KG
+No-KG + KG
+RANDOM-Coarse
+RANDOM-Fine
+RANDOM-Hybrid
+HEURISTIC-Coarse
+HEURISTIC-Fine
+HEURISTIC-Hybrid
+SALKG-Coarse
+SALKG-Fine
+SALKG-Hybrid 68.73 (±0.31) 68.87 (±2.16) 68.53 (±0.95) 68.11 (±1.12) 57.60 (±5.33) 68.33 (±0.40) 69.24 (±2.47) 57.27 (±3.76) 68.47 (±0.23) 69.93 (±0.56) 64.82 (±0.97) 70.20 (±0.69) 68.73 (±0.31) 68.40 (±1.59) 69.67 (±1.45) 67.18 (±4.13) 55.13 (±7.00) 69.53 (±0.31) 65.58 (±6.08) 51.80 (±2.95) 68.40 (±0.00) 70.02 (±0.55) 51.51 (±0.87) 69.80 (±0.49) 68.73 (±0.31) 66.80 (±4.73) 69.40 (±0.35) 65.02 (±2.57) 48.53 (±4.82) 69.27 (±0.12) 64.29 (±3.06) 50.53 (±3.51) 68.60 (±0.20) 71.29 (±0.57) 62.29 (±0.85) 70.47 (±0.91) 83.96 (±0.79) 84.02 (±1.27) 84.08 (±1.46) 83.48 (±0.91) 74.77 (±6.90) 83.86 (±0.69) 82.64 (±0.10) 82.25 (±1.43) 82.16 (±2.11) 85.79 (±1.83) 84.08 (±1.14) 85.17 (±0.54) 83.96 (±0.79) 84.02 (±1.62) 84.69 (±1.48) 84.68 (±1.65) 80.48 (±1.23) 83.75 (±0.60) 82.52 (±0.18) 82.55 (±2.03) 82.73 (±1.51) 85.43 (±1.88) 83.36 (±0.81) 84.42 (±0.64)
+Table 6: SALKG Performance on OBQA and CODAH
+BERT+PathGen, BERT+RN, and RoBERTa+RN, while SALKG-Coarse is the best on
+RoBERTa+MHGRN and RoBERTa+PathGen. In particular, on RoBERTa+RN, BERT+RN, and
+BERT+PathGen, SALKG-Hybrid beats max(No-KG, KG, No-KG + KG) by large margins of 2.76%, 2.58%, and 2.32%, respectively. Meanwhile, OBQA and CODAH, SALKG is not as dominant but still yields improvements overall. On OBQA, SALKG-Coarse is the best on RoBERTa+RN (beating max(No-KG, KG, No-KG + KG) by 1.89%) and RoBERTa+PathGen, while SALKG-Hybrid per-forms best on RoBERTa+MHGRN. On CODAH, SALKG-Coarse gets the best performance on both
+RoBERTa+MHGRN (beating max(No-KG, KG, No-KG + KG) by 1.71%) and RoBERTa+PathGen.
+SALKG-Coarse outperforming SALKG-Hybrid on OBQA and CODAH indicates that local KG supervision from fine explanations may not be as useful for these two datasets. On the other hand,
+SALKG-Fine is consistently weaker than SALKG-Hybrid and SALKG-Coarse, but still shows slight improvement for RoBERTa+RN on CSQA. These results show that learning from KG saliency explanations is generally effective for improving KG-augmented models’ performance, especially in
+CSQA when both coarse and fine explanations are used to provide complementary learning signals for SALKG-Hybrid. Furthermore, across all datasets, we find that SALKG outperforms RANDOM and HEURISTIC on every setting. This is evidence that explanations created from saliency methods can provide better learning signal than those created randomly or from simple heuristics.
+Comparison to Published CSQA Baselines To further demonstrate that SALKG models perform competitively, we also compare SALKG (using MHGRN and PathGen) to the many KG-augmented model baseline results published in [13, 56, 60], for the CSQA in-house split. The baselines we consider are RN [46], RN + Link Prediction [13], RGCN [47], GAT [55], GN [4], GconAttn [57],
+MHGRN [13], and PathGen [56]. For the non-SALKG versions of MHGRN, PathGen, and RN, we quote the published results. Since these published results average over four seeds (instead of three), we report SALKG results over four seeds in Table 7. We find that most of the listed SALKG variants can outperform all of the baselines. For MHGRN, SALKG-Coarse (MHGRN) performs the best overall, SALKG-Hybrid (MHGRN) beats vanilla MHGRN, and SALKG-Fine (MHGRN) is on par with vanilla MHGRN. For PathGen, SALKG-Hybrid (PathGen) and SALKG-Coarse (PathGen) both slightly outperform vanilla PathGen, while SALKG-Fine (PathGen) performs worse. 8
+CSQA Leaderboard Submission In addition to our experiments on the CSQA in-house split, we evaluated SALKG on the CSQA official split by sub-mitting SALKG to the CSQA leaderboard. Since the best models on the CSQA leaderboard use the AL-BERT [24] text encoder, and PathGen was the highest graph encoder on the leaderboard out of the three we experimented with, we trained SALKG-Hybrid (AL-BERT+PathGen), which achieved a test accuracy of 75.9%. For reference, a previously submitted AL-BERT+PathGen achieved a test accuracy of 75.6% on the CSQA leaderboard. This result suggests that the proposed SALKG training procedure can yield some improvements over baselines that do not use explanation-based regularization.
+Model (RoBERTa)
+CSQA Test Accuracy (%)
+RN [46]
+RN + Link Prediction [56]
+RGCN [47]
+GAT [55]
+GN [4]
+GconAttn [57]
+MHGRN [13]
+PathGen [56]
+SALKG-Coarse (MHGRN)
+SALKG-Fine (MHGRN)
+SALKG-Hybrid (MHGRN)
+SALKG-Coarse (PathGen)
+SALKG-Fine (PathGen)
+SALKG-Hybrid (PathGen) 70.08 (±0.21) 69.33 (±0.98) 68.41 (±0.66) 71.20 (±0.72) 71.12 (±0.45) 69.88 (±0.47) 71.11 (±0.81) 72.68 (±0.42) 74.01 (±0.14) 72.68 (±1.46) 73.87 (±0.48) 72.76 (±0.12) 71.21 (±1.31) 73.03 (±0.84)
+Table 7: Comparison of SALKG to Published
+CSQA Baselines. SALKG models that outper-form all baselines are shown in bold.
+Why does SALKG-Fine perform poorly? In general, SALKG-Fine does not perform as well as
+SALKG-Coarse and SALKG-Hybrid. Often, SALKG-Fine is noticeably worse than KG and No-KG.
+Recall that the KG model and SALKG-Fine model both assume that the KG should always be used to solve the given instance. Still, the success of SALKG-Coarse shows that the KG sometimes may not be useful. But why does SALKG-Fine almost always perform worse than the KG model?
+We believe it is because SALKG-Fine is more committed to the flawed assumption of universal KG usefulness. Whereas the KG model is trained to solve the task always using the KG as context, SalKG-Fine is trained to both solve the task always using the KG as context (i.e., global KG supervision) and attend to specific parts of the KG (i.e., local KG supervision). Since SALKG-Fine is trained with both global and local KG supervision, it is much more likely to overfit, as the KG is not actually useful for all instances. That is, for training instances where the KG should not be used, SALKG-Fine is pushed to not only use the KG, but also to attend to specific parts of the KG. This leads to a SalKG-Fine model that does not generalize well to test instances where the KG is not useful.
+To address this issue, we proposed the SALKG-Hybrid model, which is designed to take the best of both SALKG-Coarse and SALKG-Fine. For a given instance, SALKG-Hybrid uses its SALKG-Coarse component to predict whether the KG is useful, then uses its SALKG-Fine component to attend to the useful parts of the KG only if the KG is predicted to be useful. Indeed, we find that
+SALKG-Hybrid performs much better than SALKG-Fine and is the best model overall on CSQA.
+These results support our hypothesis about why SALKG-Fine performs relatively poorly. 6.3 Ablation Studies
+In Table 8, we validate our SALKG design choices with ablation studies. We report dev accuracy for
+BERT+MHGRN and BERT+PathGen on CSQA.
+Model (BERT)
+SALKG-Coarse
+- w/ Grad
+- w/ Occl
+CSQA Dev Accuracy (%)
+MHGRN
+PathGen 59.49 (±0.05) 56.84 (±2.27) 57.60 (±0.74) 60.72 (±0.58) 56.18 (±2.31) 56.32 (±1.66) 57.28 (±0.95) 56.05 (±1.03) 59.13 (±2.35) 58.80 (±1.08)
+SALKG-Fine (Occl)
+- w/ Grad
+SALKG-Hybrid (Occl)
+- w/ Grad
+Are ensemble-based coarse explanations effec-tive? By default, SALKG-Coarse uses our proposed ensemble-based coarse explanations (Sec. 3.1). Alter-natively, we consider using Grad and Occl to create coarse explanations. For Grad, we compute ϕ the same way as in Sec. 3.2, except using graph embed-ding g instead of node/path embeddings. Since a zero vector would have zero gradient, this is equivalent to comparing g to a zero vector baseline. For Occl, we compute ϕ as the decrease in pKG if g is replaced with a zero vector. For both Grad and Occl, we set sc = ϕ. In Table 8, we see that our default
+SALKG-Coarse significantly outperforms SALKG-Coarse with both Grad and Occl. In Sec. A.2, we further discuss why Grad and Occl are ill-suited for creating coarse explanations.
+Table 8: Ablation Studies. Best model in bold.
+SALKG-Fine (Occl)
+- w/ Random Prune
+- w/ Heuristic Prune 59.13 (±2.35) 54.10 (±2.13) 50.53 (±0.74) 57.28 (±0.95) 50.61 (±0.68) 50.72 (±0.46)
+SALKG-Fine (Occl)
+- w/ BCE Sal. Loss 59.13 (±2.35) 55.15 (±2.58) 60.88 (±0.05) 59.71 (±0.08) 59.92 (±0.31) 60.17 (±0.21) 57.28 (±0.95) 50.83 (±1.75)
+For SALKG, is Occl better than Grad? In Tables 5-6, we report SALKG-Fine and SALKG-Hybrid performance with Occl fine explanations. In Table 8, we compare Occl and Grad on SALKG-Fine and SALKG-Hybrid. Overall, Occl slightly outperforms Grad, although Grad beats Occl on MHGRN 9
+for SALKG-Hybrid. Their relative performance could also depend on the choice of top-k%, which we plan to explore later. In Sec. A.9, we further compare Occl and Grad on other settings.
+How does SALKG-Fine’s soft KG pruning compare to hard KG pruning? SALKG-Fine does soft pruning of unhelpful fine units via soft attention. We compare SALKG-Fine to two baselines where the KG is filtered via hard pruning, which cannot be easily incorporated into end-to-end training.
+For RANDOM Prune and HEURISTIC Prune, we respectively create RANDOM and HEURISTIC explanations, then hard prune all negative units from the KG. The KG-augmented model then uses the pruned KG as its KG input. In Table 8, we see that SALKG-Fine significantly outperforms the two baselines, showing the benefits of jointly training the model on saliency and QA prediction.
+Is it effective to train SALKG-Fine with KL divergence? We train SALKG-Fine’s explanation predictor (i.e., attention mechanism) using KL divergence as the saliency loss. Thus, within a KG, the distribution over attention weights constitutes a single prediction. Alternatively, we could treat each attention weight as a separate prediction and train the attention mechanism using binary cross entropy (BCE) loss. In Table 8, we find that using KL divergence yields much higher performance than using BCE loss. This suggests that the attention weights should not be trained separately, as each attention weight is highly dependent on other attention weights in the same KG. 6.4 Case Studies
+We visualize coarse/fine explanations created from BERT+PathGen on CSQA, with 1-hop or 2-hop paths as fine units. For coarse explanations, we show examples of positive (i.e., useful) and negative
+KGs. Since KGs are too large to show here, we uniformly sample three paths per KG. For the positive
+KG example, the question is James loved to play violin. He did it in his spare time because he found it what?, the answer choice is relaxing, and the target answer is relaxing. Its paths are: (1) play –[is related to]–> x <–[is used for]– relaxing , (2) violin –[is used for]–> x –[is used for]–> relaxing , and (3) time <–[has subevent]– x –[has subevent]–> relax . For the negative KG example, the question is
+Where do soldiers not deployed eat their food?, the answer choice is neighbor’s house, and the target answer is military base. Its paths are: (1) soldier <–[is related to]– x <–[is related to]– house , (2) eat –[is related to]–> x –[is at location of]–> house , and (3) food <–[is related to]– x –[is at location of]–> house . For fine explanations, we show examples of positive and negative paths from the same KG.
+Here, the question is Where can you find a bar before traveling a long distance?, the answer choice is airport, and the target answer is airport. The positive path is: bar –[is at location]–> airport . The negative path is: travel <–[is used for]– x –[is at location]– airport . We can roughly see that the positive KGs/paths are useful for predicting the correct answer, and vice versa. However, as shown in
+[45], the model’s judgment of KG/path usefulness may not always align with human judgment. See
+Sec. A.16 for more illustrative examples of coarse/fine explanations. 7

@@ -1,0 +1,83 @@
+Abstract
+It is well known that Winograd convolution algorithms speed up the widely used small-size convolutions. How-ever, the problem of quantization of Winograd convolutions is challenging – while quantization of slower Winograd al-gorithms does not cause problems, quantization of faster
+Winograd algorithms often leads to a significant drop in the quality of models. We introduce a novel class of Winograd algorithms that balances the filter and input channels in the
+Winograd domain. Unlike traditional Winograd convolu-tions, the proposed convolution balances the ranges of in-put channels on the forward pass by scaling the input ten-sor using special balancing coefficients (the filter channels are balanced offline). As a result of balancing, the inputs and filters of the Winograd convolution are much easier to quantize. Thus, the proposed technique allows us to obtain models with quantized Winograd convolutions, the quality of which is significantly higher than the quality of models with traditional quantized Winograd convolutions. More-over, we propose a special direct algorithm for calculat-ing the balancing coefficients, which does not require ad-ditional model training. This algorithm makes it easy to obtain the post-training quantized balanced Winograd con-volutions – one should just feed a few data samples to the model without training to calibrate special parameters. In addition, it is possible to initialize the balancing coefficients using this algorithm and further train them as trainable variables during Winograd quantization-aware training for greater quality improvement. 1.
+
+Introduction
+Lightweight architectural designs of Convolutional Neu-ral Networks (CNNs) together with quantization have paved the way for the deployment of demanding computer vision applications on mobile devices. Parallel to this, alternative formulations of the convolution operation, such as FFT or
+Winograd, have been adapted for the use in CNNs allowing further speedups. Winograd convolutions [28] (also known as Toom-Cook algorithm [7, 27]) are the fastest known al-gorithm for spatially small convolutions, but their use in a quantized context is often accompanied by a quality drop due to significant numeric errors. The significant speed and power consumption advantage of quantized Winograd convolutions motivates the research in this direction, see
+Tab. 1. As we can see, the quantized Winograd is 2.3× (50/21.5) faster than the float16 direct convolution. In prac-tice, speedups up to 4× (ARM CPUs) can be achieved [20].
+Implementation
+FP16, ms
+INT8, ms
+Direct conv
+Winograd conv 50 25 30 21.5
+Table 1. Inference time for ResNet-18 on 224 × 224 × 3 input,
+BOLT inference framework [11], ARM CPU: Kirin 990.
+Winograd convolutions Lavin et al. [15] generalized the
+Winograd’s minimal filtering algorithm [28] for filters with k × k kernels that are widely used in modern CNNs. This generalization is called Winograd 2D-convolution. Its main idea is based on the fact that the minimal filtering algorithm for computation of m outputs with k-tap FIR filter requires
+µ(F (m, k)) = m + k − 1 (1) multiplications, instead of mk multiplications required for the direct 1D-convolution. Further in the paper we will use the short form F (m, k) that denotes F (m × m, k × k) – a 2D-convolution with kernel size k × k producing m × m outputs. The parameter m is called the tile size.
+In this paper, we consider the most popular case of Winograd con-volutions – with 3 × 3 kernel and stride 1. Traditionally, the
+Winograd convolution algorithm is written in the following matrix form:
+Y = AT (cid:16) (cid:17) (BT XB) ⊙ (GWGT )
+A, (2) where the tensor indices are omitted for simplicity. Various versions of Winograd transformation matrices A, B, G are used for different tile sizes m. Our proposed method can be generalized to any m (including complex Winograd [22]).
+In this paper, we use traditional Winograd transformation matrices from [15] for F(4, 3) and F(6, 3) Winograd algo-rithms. The definitions of these matrices are presented in
+Appendix A.
+(a) Balanced Quantized Winograd algorithm. The relative complexity is noted in the bottom right corners. We add a new cheap operation to the prepossessing stage – the channel balanc-ing of Winograd-domain inputs and filters (highlighted in red). The weights transformation is done offline, therefore its complexity is not taken into account. ⌊·⌉ is a quantization operator defined by Eq. (3). (b) The dependence of the proportions of the algorithm stages complexity on the number of filters and channels (C = F ). Multiplication in Winograd domain is the heaviest stage for large C and F . Hence, its speedup by quantization (integer arithmetic) is very relevant. The results of the theoretical evaluation of the balancing overhead, as well as the results of the inference time measurements for our imple-mentation of the quantized Winograd convolutions (with and without balancing), can be found in Appendix C. The balancing overhead is small and shrinks fast with increasing C and F. The relative complexities on the left scheme (a) are written for
+F = C = 32.
+Figure 1. The scheme of Balanced Quantized Winograd convolution and computational complexity proportions for the case of 3 × 3 kernel and stride 1.
+Fig. 1a shows how the stages of the Winograd algo-rithm. Note that the standard Winograd convolution does not include the balancing and quantization/dequantization stages also shown in the figure.
+Initially, a sliding win-dow of size a × a with stride m is moved over the feature map, and a sub-tensor X of the corresponding size (please, see inscriptions in the figure) is cut out from the feature map tensor, where a = m + k − 1. Then, the c-th tile
+Xc ∈ Ra×a is mapped to the Winogard domain using ma-trix B: Xc → Vc, c = 1, 2, ..., C. The same procedure is performed for the weights (W → U), however, it is done off-line before the inference, hence, its computational complexity is not taken into account. After these steps, the mapped input V is convolved with the mapped weights U.
+Finally, an invert transformation of tensor M obtained on the previous step is made using matrix A. This procedure is performed in parallel for m × m output pixels and is more efficient than the direct convolution.
+Winograd computational bottleneck Winograd trans-formation matrices A and B have a simple structure, so they can be hard coded in the inference code to additionally increase the performance. To estimate the relative complex-ity of the algorithm stages, we calculate the number of sum and mul operations as if we used a direct matrix multipli-cation (instead of hard coded). Even though this estimate may be far from reality, as it strongly depends on the type of inference engine (CPU, GPU or DNN accelerator), let us consider it as an approximate estimation (see the percent-age in the bottom right corners of Fig. 1a). As you can see, the multiplication in the Winograd domain (obtaining ma-trix M ) is the most computationally intense stage: it takes 52.8% of all computations (calculated for C = F = 32).
+Moreover, as the number of filters F or/and the number of channels C increases, the ratio tends to 100% (see Fig. 1b).
+Therefore, acceleration of that stage by quantization is very desirable.
+Key problem As a rule, the smaller the tile size m, the less the quality drops during quantization of the Winograd convolution F(m, 3); however, acceleration of the quan-tized Winograd convolution also becomes lower. Using the
+Winograd algorithm with small tile size (m = 2) often al-lows quantization without a quality drop, while Winograd algorithms with bigger tiles (m ⩾ 4) are very difficult to quantize (see Tab. 3 or Tab. 4). There are many studies addressing this issue, however, oftentimes the quality drop still remains unacceptable. We found one of the reasons why the quality drop in the post-training quantization (PTQ) cannot be compensated by the quantization-aware training (QAT) – it is a significant disbalance of the data ranges in the Winograd domain (see Sec. 4). We propose a technique aimed at solving this problem: to equalize the ranges of the
+Winograd-domain input channels on the forward pass by scaling the input tensor using special balancing coefficients (the filter channels are balanced offline). As can be seen in
+Fig. 2a and Appendix C, the balancing is a very cheap op-eration, but it significantly decreases the accuracy drop, for example, by 1.8 times for ResNet-18 (ImageNet, F(6, 3), 8 bit, Tab. 4).
+Table 2. The summary of the main well-known works and frameworks that propose methods for quantization of Winograd convolutions.
+Work
+Quant Type
+Offset
+[17], IEEE-2020
+[11], ICLR-2019
+[22], ARM, 2019
+PTQ
+PTQ
+PTQ
+Dynamic
+Dynamic
+Dynamic
+[10], MLSyS-2020
+QAT
+Static
+[6], BOLT inference framework
+PTQ
+Dynamic,
+Static
+Yes
+No
+Yes
+No
+No
+BN fusing
+No
+Yes
+No
+Scale types scalar scalar tile
+Weights &
+Activations
+Winograd both both weighs only
+No scalar
+Yes tile, tile for act. both both
+F(2, 3)
+F(2, 3)
+F(2, 3), F(4, 3), complex Winorgad
+F(2, 3), F(4, 3), F(6, 3), trainable transforms
+F(4,3)
+Our contribution Contributions of this work can be sum-marized as follows: 1. We introduce a novel method for balancing of the channel ranges of the inputs and filters of the quantized
+Winograd convolutions. It is characterized by: (a) Lightweight: a small computational overhead; (b) Compatibility: compatible with any existing techniques for quantization of Winograd convo-lutions and works well for both PTQ and QAT (Ω is a trainable variable in that case); (c) Universality: does not depend on the type of
+Winograd algorithm. 2. Our experiments on super-resolution (SR) and image classification tasks conducted for various bitwidths (b = 4, 6, 8), tile sizes m (m = 4, 6), quantiza-tion types (dynamic/static) and scale types (scalar/tile) show that the proposed balancing technique signifi-cantly improves the quality of Winograd quantization.
+Our technique is not a panacea, but it extends the applica-tion area of the quantized Winograd convolutions substan-tially. We believe that it will have its rightful place in the standard quantization pipeline as an additional technique to further improve the quality of Winograd quantization. 2.

@@ -1,0 +1,411 @@
+Abstract
+Cross-Domain Recommendation (CDR) has been popularly studied to utilize differ-ent domain knowledge to solve the cold-start problem in recommender systems. In this paper, we focus on the Cross-Domain Cold-Start Recommendation (CDCSR) problem. That is, how to leverage the information from a source domain, where items are ‘warm’, to improve the recommendation performance of a target domain, where items are ‘cold’. Unfortunately, previous approaches on cold-start and CDR cannot reduce the latent embedding discrepancy across domains efﬁciently and lead to model degradation. To address this issue, we propose DisAlign, a cross-domain recommendation framework for the CDCSR problem, which utilizes both rating and auxiliary representations from the source domain to improve the recommen-dation performance of the target domain. Speciﬁcally, we ﬁrst propose Stein path alignment for aligning the latent embedding distributions across domains, and then further propose its improved version, i.e., proxy Stein path, which can reduce the operation consumption and improve efﬁciency. Our empirical study on Douban and Amazon datasets demonstrates that DisAlign signiﬁcantly outperforms the state-of-the-art models under the CDCSR setting. 1
+
+Introduction
+Data sparsity and cold-start are long-standing problems in recommender systems [15, 19]. With the development of internet techniques, most users always participant in many platforms or domains for different purposes. Therefore, Cross-Domain Recommendation (CDR) has emerged to utilise the relatively richer information from a source domain to improve the recommendation accuracy in a target domain [52, 53]. Most existing CDR models can tackle the data sparsity problem in the target domain by assuming the existence of overlapped users or items with similar tastes or attributions across domains [5].
+Instead of focusing on solving the data sparsity problem, we consider cold-start item recommendation under the CDR setting. Speciﬁcally, we concentrate on the Cross-Domain Cold-Start Recommenda-tion (CDCSR) problem, that is, two domains share the same user set but different items, and both domains have auxiliary representations such as item proﬁles or descriptions. The prime challenge is how to leverage the information from the source domain, where the items are ‘warm’, to improve the recommendation performance of the target domain, where the items are ‘cold’. The CDCSR problem popularly exists in practice, for instance, a movie marketing platform newly launches a book renting service where there is no user-book interaction yet, as shown in Figure 1.
+Existing researches on cold-start recommendation and CDR cannot solve the above problem well. On the one hand, existing cold-start recommendation models assume that the distributions of cold items should be consistent with the warm ones as they are homogeneous [54, 18, 12]. On the other hand,
+∗Corresponding Author 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+existing CDR models assume that both source and target domains have user-item interactions for learning the mapping functions [25]. Since the cold and warm items are heterogeneous with different latent embedding distributions in practice, and there is no user-item interaction in the target domain, conventional cold-start and CDR models cannot properly suitable to the CDCSR problem.
+Similar to the transfer learning task, the key to the CDCSR problem is to reduce the discrepancy between the latent embed-ding distributions across domains. However, both the warm and cold item representations are scattered and complicated due to the fact that the latent embeddings may represent diverse information. Thus, existing transfer learning based domain adaptation approaches [23, 45, 37] cannot achieve good align-ment results, which limits their performances.
+Figure 1: The CDCSR Problem.
+To address the aforementioned issue, in this paper, we propose
+DisAlign, a cross-domain recommendation framework for the CDCSR problem. In order to better align the complicated latent embedding distributions and make high quality of rating predictions, we utilize two modules in DisAlign, i.e., rating prediction module and embedding distribution alignment module, as will be shown in Figure 2. The rating prediction module aims to capture user and item collaborative preferences in the source domain, and we propose metric-based contrastive learning for modelling. The goal of distribution alignment module is to properly match the latent embedding distributions across domains, and we propose two techniques for it, i.e., Stein path alignment and its improved version called proxy Stein path alignment. Speciﬁcally, inspired by the particle-based inference algorithm Stein Variational Gradient Descent (SVGD) [21, 13, 20], we
+ﬁrst propose Stein path alignment to minimize the domain discrepancy through the particle-moving process, which can take both the source probability and target intra-domain structure into account.
+Although Stein path can obtain satisfying performance, it has to involve all the target samples during the training process, which is time consuming when data size is large. Thus, we further propose proxy Stein path alignment which only needs to exploit typical samples to represent the target data distribution, and thus can accelerate the operation speed. The comparison and visualization results in experiments will show the reliability and efﬁciency of DisAlign.
+We summarize the main contributions of this paper as follows: (1) We propose a novel framework, i.e., DisAlign, for the CDCSR problem, which can utilize both rating and auxiliary representations from the source domain to improve the recommendation performance of the target domain. (2) To our best knowledge, this is the ﬁrst attempt in literature to propose Stein path alignment for aligning the latent embedding distributions across domains, and we also propose its improved version, i.e., proxy
+Stein path, for higher efﬁciency. (3) Empirical studies on Douban and Amazon datasets demonstrate that DisAlign signiﬁcantly improves the state-of-the-art models under the CDCSR setting. 2 The proposed model 2.1 Framework of DisAlign
+First, we describe notations. We assume there are two domains, i.e., a source domain S and a target domain T . We assume both domains S and
+T have NU users, S has NS warm items, and T has NT cold items. Let RS ∈ RNU ×NS be the warm rating matrix in S and RT ∈ RNU ×NT be the cold rating matrix in T . In CDCSR setting,
+RT is absence during training and will be only used for test, since items are cold in T . We also assume that the warm items and the cold items have auxiliary representations X W ∈ RNS ×Z and X V ∈ RNT ×Z, respectively, with Z denoting the dimension of auxiliary representations. The auxiliary representations usually include useful side-information, e.g., themes, reviews, proﬁles in a movie domain. Our purpose is to predict the absent
+RT in T by leveraging RS in S and the auxiliary representations in both S and T .
+Figure 2: The Framework of DisAlign. 2
+Then, we introduce the overview of our proposed DisAlign framework, as is illustrated in Figure 2.
+DisAlign model mainly has two modules, i.e., rating prediction module and embedding distribution alignment module. To avoid the error superimposition problem [54], the rating prediction module in the source domain mainly provides end-to-end joint training of modelling user and item collaborative embeddings and matching the item collaborative embeddings with item auxiliary embeddings. The embedding distribution alignment module aligns the distributions between the warm and cold items across domains, minimizing the discrepancy between auxiliary latent feature embeddings in the source and target domains sufﬁciently. We will introduce these two modules in details later. 2.2 Rating prediction module
+We ﬁrst introduce the rating prediction module of DisAlign. For the i-th user and the j-th item in the source (warm) domain, we deﬁne their corresponding one-hot ID vectors as X U j , respectively.
+For the j-th warm item, we also deﬁne its auxiliary representation as X W j . The rating prediction module mainly has three purposes, including (1) exploiting user and item collaborative embeddings based on ratings, which is the prime purpose; (2) matching the item collaborative embeddings with item auxiliary embeddings; and (3) obtaining more discriminative item collaborative embeddings using unsupervised clustering method. i and X V
+First, user and item collaborative embeddings should accurately represent the corresponding rating interactions. We obtain the user and item collaborative embeddings by FU (X U ) = U ∈ RN ×D and FV (X V ) = V ∈ RN ×D, respectively. Here, FU and FV denote the user and item encoding networks respectively, N is batch size, and D is the dimension of collaborative embeddings. After that, we use pairwise ranking loss LBE based on metric-based contrastive learning [10, 14]: min LBE = − (cid:88) (Ui,Vj ,Vk)∈D log exp(cid:104)Ui, Vj(cid:105) exp(cid:104)Ui, Vj(cid:105) + exp(cid:104)Ui, Vk(cid:105)
+, (1) where D := {(Ui, Vj, Vk)|RS ik} denotes the original preference pairs [32], and (cid:104)·, ·(cid:105) denotes the inner product. The loss function LBE can pull the positive items close and push the negative items away for a certain user according to his/her preference. ij > RS
+Second, a item’s collaborative embedding should be similar to its auxiliary embeddings to avoid the error superimposition problem [54]. We utilize a network GV to translate the auxiliary representations into auxiliary embeddings as GV (X W ) = W ∈ RN ×D. After it, the item embedding matching loss is given by LBM = ||W − V ||2 2.
+Third, similar item collaborative embeddings should be clustered in order to obtain more discrimina-tive latent features. We adopt deep unsupervised K-Means clustering approach [24, 48] for this, and the corresponding loss is minF F T =I LBK = (cid:2)Tr(V V T ) − Tr(F V V T F T )(cid:3), where F ∈ RK×N is the cluster indicator matrix and K denotes the cluster number.
+In summary, the loss of the rating prediction module is a combination of the three losses, that is: min
+F F T =I
+LB = LBE + ηLBM + ζLBK, (2) where ζ and η represent the balance hyper-parameters. The optimization procedure is given as below: (1) Fixing the other variables except F , we update F through minF F T =I Tr(F V V T F T ) with singular value decomposition algorithm; (2) Fixing F , we update other variables through gradient descent methods for several iterations then go back to step (1) until it convergences. For the sake of stability, in practice, we update F every 15 iterations. 2.3 Embedding distribution alignment module 2.3.1 Overview
+We then introduce the embedding distribution alignment module of DisAlign. We use GV (X C j ) =
+C ∈ RN ×D to denote the auxiliary embeddings of the cold items in the target domain. Speciﬁcally,
+GV (·) is a two-stream siamese network with shared weights for encoding both warm item auxiliary representation X W and cold item auxiliary representation X C. We denote pW and pC as the warm and cold item auxiliary embedding probability distributions, respectively, and denote pV as the warm 3
+item collaborative embedding probability distribution. In CDCSR setting, pW (cid:54)= pC and pV (cid:54)= pC, because the embeddings generated from the source (warm) domain and the target (cold) domain are heterogeneous, which leads to the domain discrepancy problem. Let us consider a case where the source domain has user-book interactions while the target domain has user-movie interactions.
+Although books and movies share some similar characteristics, the auxiliary representations of the Book domain usually include authors and writing styles, while the auxiliary representations of the Movie domain include directors and actors, which brings discrepancy. Without embedding distribution alignment, a recommender system may recommend horror books instead of history books to a user who likes history movies rather than horror movies due to domain discrepancy, as illustrated in the left of Figure 3. After alignment, the history movies/books and horror movies/books are aligned, as is shown in the right of Figure 3, and thus the recommender system can provide more reliable results. In order to reduce the distribution discrepancy between the source and target domains, we introduce two approaches, i.e., Stein path alignment and Proxy stein path alignment. 2.3.2 Stein path alignment
+As mentioned in Section 1, since the latent em-beddings from two domains in CDCSR are scat-tered and complicated due to the fact that they may represent diverse information, previous do-main adaptation methods cannot be effectively utilized to solve the distribution discrepancy problem. Therefore, we propose a new distri-bution alignment approach, named Stein path alignment. Stein path alignment can prompt the target samples move to the source domain through proper paths, according to the target intra-domain structure and the probability distribution of the source domain. Stein path alignment relies on Stein Variational Gradient Descent (SVGD) [21, 42], a variational inference method that starts from a set of initial particles and iteratively updates them with an approximate steepest direction, whose main iteration process is:
+Figure 3: Demonstration of the necessity of em-bedding distribution alignment. zi,l = zi,l−1 + (cid:15)φp(zi,l−1), φp(z) = 1
+N
+N (cid:88) j=1
+[k(z, zj)∇z log p(z) + ∇zk(z, zj)] , (3) where zi,l denotes the i-th original target sample at the l-th iteration, p(z) denotes the source probability distribution, (cid:15) denotes the step size, and k(x, y) = exp (cid:0)−(||x − y||2 2)/σ2(cid:1) is the
+Gaussian kernel function with σ denoting the bandwidth. Existing researches [21, 7, 2] have proved that mean ﬁeld theory can guarantee the rigorous theoretical convergence of SVGD, that is, the gradient dynamics at particle level will approach to zero: limt→+∞(1/N × (cid:80)N i=0 φp(zi,t)) → 0.
+Stein path distance. We denote zi,t as the Stein mirror point of zi,0 when SVGD convergences at the t-th iteration. We propose Stein path distance as below:
+N (cid:88)
+N (cid:88)
+||zi,t − zi,0||2 2 =
+||zi,t−1 + (cid:15)φS (zi,t−1) − zi,0||2 2 . (4)
+PT →S (Z) := 1
+N i=0 1
+N i=0
+Stein path distance quantiﬁes the discrepancy between the source domain S and the target domain
+T by taking the average length of all paths from T to S through the t-th iteration. Stein path considers the source probability distribution and intra-domain structures, and thus can avoid negative transfer arisen from coarsely pairwise matching by traditional methods. Meanwhile Stein path is also explainable. Let zi,0 denote the auxiliary embedding of i-th book in the Book domain, zi,t could be taken as a similar movie in the Movie domain, e.g., the movie is based on the story of the book. The calculation of Stein path distance mainly has three steps. First, adopting kernel density estimation
+[30, 29, 39] with radial basis function kernel to estimate the probabilities of W and V . Second,
+ﬁnding the Stein mirror point of the cold item auxiliary embeddings through SVGD by Equation (3).
+Third, calculating the Stein path distance using Equation (4). The calculation details will be given in
+Appendix A.1.
+Stein path loss. In summary, the better the source and target domains are aligned, the smaller the
+Stein path distance. Therefore, we innovatively propose Stein path loss to align the cold item auxiliary 4
+embedding C with warm item collaborative preference V and auxiliary embedding W as below: min LSP = PC→W (C) + PC→V (C) + ||PC→W (C) − PC→V (C)||2 2, (5) where the ﬁrst two terms denote the Stein path distances from C to W and C to V , respectively, and the third term reinforces that these two distances should be similar. 2.3.3 Proxy Stein path alignment
+Although Stein path alignment achieves satisfying performance, it has scalability problem when facing large dataset. Because all the cold items in each batch need to be used for calculating Stein path distance. Therefore, it is urgent to reduce the computation cost to accelerate the optimization process. To do this, we propose proxy Stein path approach which only needs to choose the most typical cold item proxies to represent the global properties in order to speed up the alignment process through SVGD. We now describe the main steps for ﬁnding the proxies and the optimization procedure.
+Multiple-proxies algorithm. We ﬁrst introduce a highly efﬁcient multiple-proxies algorithm, which aims to ﬁnd typical proxy sam-ples in the target domain. Suppose there exists M ∈ RH×D typical proxies for the cold item auxiliary embeddings C, where
+H denotes the number of proxies. Let Ψ ∈ RN ×H be the simi-larity matrix between the cold items in the target domain and the proxies. Inspired by [1, 28], we formulate the multiple-proxies optimization problem as
+Figure 4: The main procedures of proxy Stein path alignment. min
+M ,ψi1=1,ψij ≥0
+N (cid:88)
+H (cid:88) i=1 j=1
+ψij||ci − mj||2 2 + α
+N (cid:88)
+H (cid:88) i=1 j=1
+ψij log ψij, (6) where ci denotes the i-th cold item auxiliary embedding and mj denotes the j-th corresponding proxy. The entropy norm regularization term (cid:80)N j=1 ψij log ψij is set to avoid trivial solution i=1 with α denoting the regularization strength. Compared with the square norm || · ||2, the entropy norm can not only obtain a nonnegative and nonlinearly representational similarity matrix but also reduce the computational cost [1]. In summary, the multiple-proxies optimization algorithm has two main steps, i.e., (1) updating Ψ, which has closed-form solution, and (2) updating M as mj = (cid:80)N i=1 ψij. The optimization could be done by repeating (1) and (2) until Ψ and
+M convergence. We will present the optimization details in Appendix A.2. i=1 ψijci/ (cid:80)N (cid:80)H
+Proxy Stein path distance. After ﬁnding the typical proxies M and setting Ψ as a constant, we propose proxy Stein path distance according to the original Stein path as below:
+P ∗
+T →S (M ) = 1
+H
+H (cid:88) i=0
+||mi,t − mi,0||2 2 = 1
+H
+H (cid:88) i=0
+||mi,t−1 + (cid:15)φS (mi,t−1) − mi,0||2 2 , (7) where mi,t denotes the i-th proxy mi at the t-th iteration. Notably, in each batch, proxy Stein path only needs to move the number of proxy samples (H) in the target domain rather than the total number of samples (N ). Since H < N , proxy Stein path can reduce the time consumption on calculating the
+Stein path distance.
+Proxy Stein path loss. Similarly to the Stein path loss, the proxy Stein path loss is given by: min LP SP = P ∗
+C→W (M ) + P ∗
+C→V (M ) + ||P ∗
+C→W (M ) − P ∗
+C→V (M )||2 2. (8)
+The optimization of proxy Stein path alignment mainly has four steps. The ﬁrst step is adopting the multiple-proxies algorithm to ﬁgure out the typical proxies M in the target domain. The following three steps are similar as Stein path alignment mentioned in the Section 2.3.2, except that we are moving proxies M rather than C. We will present the optimization details in Appendix A.3.
+Time complexity analysis. The time complexity of Stein path alignment is O(N 3t1), where t1 is the iteration number. The time complexities of the multiple-proxies algorithm and proxy Stein path 5
+Table 1: Experimental results on Douban and Amazon datasets. (Douban) Movie→Book (Douban) Movie→Music (Douban) Book→Movie (Amazon) Movie→Music
+HR
+Recall
+NDCG
+HR
+Recall
+NDCG
+HR
+Recall
+NDCG
+HR
+Recall
+NDCG
+DropoutNet
+LLAE
+Heater
+WCF
+ESAM
+DARec
+DisAlign-Base
+DisAlign-SP(I)
+DisAlign-SP
+DisAlign-PSP
+.2866
+.2914
+.2983
+.3028
+.3146
+.3139
+.2991
+.3375
+.3428
+.3401
+.1528
+.1744
+.1816
+.1920
+.2025
+.2149
+.1846
+.2373
+.2411
+.2405
+.0959
+.1078
+.1135
+.1266
+.1304
+.1356
+.1189
+.1466
+.1508
+.1482
+.2893
+.3105
+.3223
+.3376
+.3467
+.3350
+.3258
+.3650
+.3734
+.3795
+.1896
+.2039
+.2104
+.2177
+.2314
+.2196
+.2108
+.2485
+.2506
+.2528
+.1134
+.1278
+.1310
+.1385
+.1491
+.1389
+.1324
+.1587
+.1603
+.1623
+.2448
+.2511
+.2613
+.2704
+.2815
+.2749
+.2617
+.3023
+.3028
+.3102
+.0976
+.1104
+.1263
+.1385
+.1482
+.1407
+.1276
+.1682
+.1709
+.1711
+.0553
+.0618
+.0707
+.0796
+.0886
+.0824
+.0733
+.0979
+.1058
+.1076
+.2591
+.2643
+.2784
+.2867
+.2942
+.2981
+.2839
+.3102
+.3155
+.3281
+.1463
+.1504
+.1631
+.1744
+.1878
+.1910
+.1676
+.2096
+.2182
+.2276
+.0786
+.0850
+.0942
+.1103
+.1186
+.1229
+.1054
+.1303
+.1379
+.1395 (Douban) Book→Music (Douban) Music→Movie (Douban) Music→Book (Amazon) Music→Movie
+HR
+Recall
+NDCG
+HR
+Recall
+NDCG
+HR
+Recall
+NDCG
+HR
+Recall
+NDCG
+DropoutNet
+LLAE
+Heater
+WCF
+ESAM
+DARec
+DisAlign-Base
+DisAlign-SP(I)
+DisAlign-SP
+DisAlign-PSP
+.2584
+.2685
+.2724
+.2710
+.2837
+.2866
+.2712
+.2946
+.2983
+.3018
+.1215
+.1268
+.1289
+.1332
+.1398
+.1410
+.1303
+.1557
+.1581
+.1593
+.0686
+.0710
+.0742
+.0761
+.0803
+.0839
+.0745
+.0881
+.0905
+.0924
+.2595
+.2635
+.2701
+.2722
+.2876
+.2918
+.2684
+.3082
+.3107
+.3121
+.1310
+.1424
+.1472
+.1530
+.1709
+.1683
+.1490
+.1932
+.1948
+.1990
+.0767
+.0819
+.0833
+.0864
+.0935
+.0916
+.0858
+.1107
+.1156
+.1194
+.2632
+.2717
+.2834
+.2726
+.2868
+.2917
+.2746
+.2986
+.3073
+.3005
+.1196
+.1245
+.1342
+.1295
+.1486
+.1409
+.1305
+.1623
+.1692
+.1644
+.0603
+.0658
+.0733
+.0728
+.0847
+.0811
+.0697
+.0957
+.1015
+.0988
+.2662
+.2753
+.2848
+.2967
+.3273
+.3313
+.2913
+.3362
+.3428
+.3485
+.1743
+.1802
+.1876
+.2112
+.2204
+.2293
+.1928
+.2414
+.2505
+.2542
+.1005
+.1093
+.1115
+.1240
+.1415
+.1476
+.1181
+.1520
+.1609
+.1644 alignment are O(N Ht2) and O(H 2N t1), respectively, where t2 is the inner-loop iteration number.
+Therefore, the total time complexity of proxy Stein path alignment is O(N Ht2) + O(H 2N t1) =
+O(N Ht2 + H 2N t1). Since H < N , proxy Stein path alignment is much cheaper than Stein path alignment. Empirically, we set H ∗ = [ N 2 ]. 2.4 Putting together
+The total loss of DisAlign could be obtained by combining the losses of the rating prediction module and the embedding distribution alignment module. That is, the losses of DisAlign with Stein Path (DisAlign-SP) and Proxy Stein Path (DisAlign-PSP) are: min LDisAlign-SP = LB + λSP LSP , min LDisAlign-PSP = LB + λP SP LP SP , (9) where λSP and λP SP are hyper-parameters to balance the two types of losses. In testing phase, one can predict the missing rating in the target domain by taking the inner product of user embeddings U and cold item embeddings C. 3 Experiments 3.1 Experimental setup
+Datasets and Tasks. We conduct extensive experiments on two popuarly used real-world datasets, i.e., Douban and Amazon. First, the Douban dataset [50, 51] has three domains, i.e., Book, Music, and Movie, which contains ratings, reviews, tags, and item details. There are six CDCSR tasks on Douban by randomly choosing two domains as source domain and target domain respectively.
+Second, the Amazon dataset [49, 27] has two domains, i.e., Movies and TV (Movie), and CDs and
+Vinyl (Music). There are two tasks on Amazon, i.e., Amazon Movie → Amazon Music and Amazon
+Music → Amazon Movie. For both datasets, we binarize the ratings to 1 and 0. Speciﬁcally, we take the ratings higher or equal to 4 as positive and others as negative. We also ﬁlter the users and items with less than 5 interactions, following existing research [46, 51]. We list the detailed information on these datasets and tasks in Section B.1 of the supplementary material.
+Baselines. We compare our proposed DisAlign with the following state-of-the-art cold-start and
+CDR models. (1) DropoutNet [41] inputs both auxiliary representations and collaborative ﬁltering representations and randomly dropouts pre-trained collaborative ﬁltering representations for training. 6
+(a) Heater (b) ESAM (c) DARec (d) DisAlign-SP
+Figure 5: The t-SNE visualization of Douban Movie→Douban Book, where Douban Movie is the source domain with red dots and Douban Book is the target domain with blue dots. (2) LLAE [18] introduces semantic auto-encoder using the idea of zero-shot learning to solve the cold-start recommendation problem. (3) Heater [54] is the latest cold-start recommendation model which combines separate-training and joint-training framework to overcome the error superimposition issue. (4) WCF [26] is the ﬁrst attempt to apply Wasserstein distance optimal transport for item cold-start recommendation. (5) ESAM [4] adopts attribute correlation alignment to improve long-tail recommendation performance by suppressing inconsistent distribution between displayed and non-displayed items. (6) DARec [46] adopts adversarial training strategy to extract and transfer knowledge patterns for shared users across domains and achieves the state-of-the-art performance in CDR. For DropoutNet, LLAE, Heater, and WCF, we use the same setting as reported in their original papers. For DARec and ESAM, since they cannot be directly applied to cold-start tasks, we adopt the same rating prediction module as DisAlign. Note that, for a fair comparison, all the models use the same types of data and pre-processing methods during experiments.
+Implemented details. We provide the implemented details of our proposed model and baselines.
+The auxiliary representations for X W and X C across domains include genres, themes, reviews, item proﬁles, etc. We split auxiliary representations into each word and adopt directional skip-gram [33] on Douban for Chinese words and apply Glove [31] on Amazon for English words to obtain the average feature representations with dimension Z = 200. We use all the user-item rating interactions in the source domain, and all the items auxiliary representations in both the source domain and the target domain for training the model, following standard evaluation for unsupervised adaptation
+[22, 11]. For all the experiments, we perform ﬁve random experiments and report the average results.
+We choose Adam [16] as optimizer, and adopt Hit Rate@20 (HR@20), Recall@20, and NDCG@20
+[43] as the ranking evaluation metrics.
+Hyper-parameter settings. We set batch size N = 256 for both the source and target domains.
+The latent embedding dimension is set to D = 128. For the rating prediction module, we set the balance hyper-parameters as η = 0.01 and ζ = 0.01, and number of cluster K = 5 for item unsupervised clustering. For the stein path alignment module, we set the moving step size as (cid:15) = 0.01 and the kernel bandwidth as σ = 0.5. For the proxy stein path alignment module, we set α = 0.1 and H = 64 according to Section 2.3.3. Finally, for the balance parameters, λSP and λP SP are
+ﬁrst selected according to accuracy on Douban Movie → Douban Book and then ﬁxed as the best values, i.e., λSP = λP SP = 0.5. Although there are many hyper-parameters, we ﬁrst optimize the hyper-parameters of the rating prediction module, and then optimize the other hyper-parameters. 3.2 Recommendation performance
+Results and discussion. The comparison results on Douban and Amazon datasets are shown in
+Table 1. From it, we can ﬁnd that (1) Although Heater can get better results on conventional cold-start problem, it cannot achieve satisfying solutions on CDCSR problem since it cannot reduce the discrepancy across domains. (2) WCF obtains better performance than Heater in some tasks, but optimal transport with Wasserstein distance is easily affected by noisy samples, resulting in the over-adaptation errors in boundaries and limiting the transportation results. (3) ESAM and DARec provide correlated-attribution alignment and adversarial training to match source and target domains, while such coarsely matching methods lead to limited prediction enhancement. (4) DisAlign-SP or DisAlign-PSP consistently achieves the best performance, which proves that Stein path alignment strategy can signiﬁcantly improve the prediction accuracy. (5) DisAlign-PSP outperforms
+DisAlign-SP on several tasks, e.g., Music and Movie domains on both datasets, which demostrates 7
+Figure 7: Case study on the recommendation task of Douban Movie→Douban Book and Douban
+Book→Douban Movie. The left part are the user preferences in the source domain. The middle and right parts are the recommendation results of DisAlign-Base and DisAlign-SP, respectively. that typical proxies can ﬁlter out the outliers and improve model robustness. Besides, we further investigate the time consumption of each model on different tasks, and report the results in Figure 6.
+From it, we ﬁnd that DisAlign-SP is the slowest, because it has to transport the whole batchsize of samples from the target domain to the source domain. In contrast, DisAlign-PSP is much faster than DisAlign-SP, and also faster than WCF and DARec, since it only needs to transport typical target proxies.
+Visualization. To show the feature transferability, we visual-ize the t-SNE embeddings [17] of the source item auxiliary embeddings (W ) and the target item auxiliary embeddings (C). The results of Douban Movie→Douban Book are shown in Figure 5. From it, we can see that (1) Heater does not has the ability to bridge the gap across different domains, and thus the embeddings are separated in source and target do-mains, as shown in Figure 5(a); (2) ESAM and DARec have the tendency to draw the source and target embeddings closer, while they still have a certain distance, as shown in Figure 5(b) and Figure 5(c). This indicates that they can only align the marginal probability distribution; (3) DisAlign-SP in Figure 5(d) depicts that the embeddings trained through Stein path alignment achieves more closer gap between the source and target domains.
+The visualization on Amazon dataset shows similar result, and we present it in Section B.2 of the supplementary material.
+Figure 6: Comparison of running time on four tasks. 3.3 Analysis
+Ablation study. To study how does each module of DisAlign contribute on the ﬁnal performance, we compare DisAlign with its several variants, including DisAlign-Base and DisAlign-SP(I). (1) DisAlign-Base only consists of the rating prediction module with collaborative embeddings clustering. (2) DisAlign-SP(I) only aligns the warm item auxiliary embedding W and the cold item auxiliary embedding C. The comparison results are shown in Table 1. From it, we can observe that (1) DisAlign-Base without the Stein path distribution alignment module cannot transfer knowledge from the source domain to the target domain, resulting in poor performance, (2) DisAlign-SP(I) achieves better performance than DisAlign-Base, where we only align the distributions between
+W and C, and (3) By extra aligning C with V , DisAlign-SP can further promote the performance of DisAlign-SP(I). Overall, the above ablation study demonstrates that our proposed embedding distribution alignment module is effective in solving the CDCSR problem.
+Case study. In order to illustrate the domain discrepancy problem mentioned in the Section 2.3 (Figure 3), we visualize the cases on Douban Movie→Douban Book and Douban Book→Douban
+Movie. Figure 7 shows the recommendation results. The left part is the user-item interactions in the source domain where the blue and red frames indicate users like or dislike the items respectively.
+The middle part denotes the top-5 recommendation results for the corresponding users based on
+DisAlign-Base, where we can see that these users will probably dislike the recommended items in the target domain due to the lack of embedding distribution alignment. After applying Stein path alignment on the right part, the recommender system can effectively improve the results. The results indirectly demonstrate that Stein path can properly translate the items across different domains according to the latent probability distribution. 8
+Parameter sensitivity. We ﬁnally study the effects of hyper-parameters on model performance.
+First, we vary λSP and λP SP in {0.1, 0.3, 0.5, 0.7, 1, 3, 5, 10} and report the results in Section B.3 of the supplementary materials. From it, we see that, the embedding distribution alignment module cannot play a central role in the training process when λSP , λP SP → 0, bringing the discrepancy between the source and target domains. When λSP and λP SP become too large, the embedding distribution alignment module will suppress the rating prediction module, which also decreases the recommendation results. The above results indicate that choosing the proper hyper-parameters to balance the embedding distribution alignment loss and rating prediction loss can effectively improve the performance of DisAlign. Then, we study the effect of embedding dimension (D) on DisAlign, and report the results in Section B.4 of the supplementary materials. We ﬁnd that the recommendation accuracy of DisAlign-SP and DisAlign-PSP increase with D, indicating that larger embedding can represent user and item preferences more precisely. 4

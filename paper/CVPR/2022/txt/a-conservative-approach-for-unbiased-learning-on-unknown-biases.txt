@@ -1,0 +1,188 @@
+Abstract
+Although convolutional neural networks (CNNs) achieve state-of-the-art in image classification, recent works ad-dress their unreliable predictions due to their excessive de-pendence on biased training data. Existing unbiased mod-eling postulates that the bias in the dataset is obvious to know, but it is actually unsuited for image datasets includ-ing countless sensory attributes. To mitigate this issue, we present a new scenario that does not necessitate a pre-defined bias. Under the observation that CNNs do have multi-variant and unbiased representations in the model, we propose a conservative framework that employs this in-ternal information for unbiased learning. Specifically, this mechanism is implemented via hierarchical features cap-tured along the multiple layers and orthogonal regulariza-tion. Extensive evaluations on public benchmarks demon-strate our method is effective for unbiased learning.1 1.
+
+Introduction
+Recently, machine learning models (e.g., convolutional neural networks) achieve state-of-the-art performance on image classification. However, the model could be often biased, as it is trained overly dependent on the distribu-tion of the training dataset [17, 20, 21]. The biased model is vulnerable to unreliable generalization to unseen data.
+For instance, suppose we classify the gender of a person in an image. A naturally collected image dataset often con-tains significantly more examples with (female, long hair) and (male, short hair) than the other combinations, as seen in Fig. 1. Although the hair length is not biologically corre-lated to gender, the model is subject to be confused as if it is, due to the high correlation observed in the data. In this case, we call that this gender classification dataset is highly biased in hair length.
+For better generalization, it would be important to train the classifier unbiased, and a line of recent works is ded-icated to this problem. The easiest problem setting is the labeled bias, where we know what the bias is and each 1Source code: https://github.com/aandyjeon/UBNet
+Figure 1. Categorization of Data Bias Problems with an exam-ple of gender prediction biased in hair length. The most limited case, unknown bias, is what we address in this paper. training example is annotated not only with the actual la-bel but also with the bias. For example, we know the gen-der classification dataset is biased in hair length and each image is annotated with the hair length as well as the gen-der, corresponding to the row Labeled Bias in Fig. 1. As the bias can be easily quantified, several supervised learn-ing approaches [1, 2, 6, 8, 12] were proposed to unlearn the bias.
+However, not all classification datasets provide annota-tions for the bias variable even if we know what it is. For instance, it is more common that we know the gender clas-sification dataset may be biased in hair length, but each in-dividual is annotated only with the gender, not with the hair length. We call this known bias as in Fig. 1. It is more chal-lenging than labeled bias, since it is hard to unlearn the bias by training a supervised model directly taking advantage of the annotations. A style-transferred image dataset [7] and an adversarial training against structurally limited net-work [3] were proposed to address known bias in texture.
+A traditional image processing algorithm was employed as bias-robust filtering in the deep neural network [22].
+Although the listed methods above are robust on the tar-get (known) biases, they are limited in unlearning other un-expected biases. In fact, a collection of images is subject to dozens of biases, whether strongly or not, and thus the known bias may not be the only one to take into account.
+For example, the gender classification with hair length as its known bias can be also biased in age, skin tone, lighting condition, and more. The last setting in Fig. 1, namely un-known bias, formulates such a condition, where we do not know even what is a notable bias in the dataset. As this set-ting gives no information about the bias, the aforementioned existing methods are not applicable.
+To tackle this unknown bias condition, we aim to design a conservative learning framework. As its first step, we con-duct a motivating experiment to understand how biased rep-resentations are obtained. From a previous study [7], CNN models were observed to be over-confident in a certain fea-ture. We hypothesize that this tendency induces the classi-fier less robust on the biased conditions. That is, the model uses the biased feature as a strong candidate for learning, and thus its dependence on the bias gets higher than that of the other features. Utilizing the feature maps captured inside the CNN, we estimate the degree of bias of feature maps in the model, using a tool called norm activation [18] (Sec. 3). From this experiment, we find out that the features immediately before the prediction layers are significantly more biased than lower-level features.
+Based on these observations, we design a novel frame-work, namely unbiasing network (UBNet), that exploits hi-Instead erarchical features and orthogonal regularization. of classifying based only on the top-most layer of the net-work, our framework conservatively employs hierarchical features (Sec. 4.1) from multiple levels of the network, widening referred feature space as well as utilizing less bi-ased representations. Also, orthogonal regularization [23] (Sec. 4.2) is applied in the encoding phase to encourage in-dependence between hierarchical features. Extensive eval-uation on multiple biased datasets exhibits our proposed framework is effective in unbiased learning. Our main con-tributions are summarized as follows:
+• We present a new framework that addresses unknown bias, where no specific information about the bias is provided.
+• We propose a novel unbiased learning method with hi-erarchical features and orthogonal regularization, de-signed to conservatively employ the features already captured by the base model with only a few additional parameters.
+• Extensive experiments exhibit that UBNet contributes to the model’s robustness. Especially, it is remarkable to note that our UBNet generalizes even better than the competing models in the known bias setting (texture), significantly disadvantageous for our model. 2. Problem Statement
+Unbiased modeling. Consider a binary classification problem from a multivariate instance (e.g., image) x to a label {0, 1}. For a collection X = {xi : i = 1, ..., N } with N instances, consider a label space Y, a set of all pos-sible assignments of 0 or 1 to each instance in X . A label y ∈ {0, 1}N is a particular way of assigning either 0 or 1 to each instance. Some y ∈ Y may convey physical mean-ing, potentially ranging from fine details (e.g., the pixel at (0, 0) is black) to high-level semantics of the image (e.g., there is a horse). Binary classification is a task to learn the mapping from X to a particular ytarget ∈ Y, maximizing generalizability to unseen examples sampled from the same distribution with X .
+Now, consider another y′ ∈ Y which is y′
+̸= ytarget.
+Most y′ may be usually independent of the ytarget, but some might have significant but spurious correlation with the target. We call that the dataset X is biased in the vari-able y′, as y′ potentially can mislead the model at infer-In a face dataset, for instance, the label ygender = ence.
+{female(0), male(1)} or yhair = {long(0), short(1)} may be highly correlated unless the dataset is specially designed.
+Thus, when one of them is the target label, the dataset can be easily biased in the other.
+If we train a classifier f on a biased dataset, f may per-ceive the biased labels as important information for target prediction. As a consequence, f has a tendency to lean to-wards the biased labels; for example, it may bet the long hair on female and short hair on male. Therefore, the goal of the unbiased modeling is to learn unbiased representa-tions or reduce model’s feature dependence on biased la-bels, while maintaining the target label prediction perfor-mance.
+One might argue that unbiased modeling and domain adaptation tackle the same problem, as both of them aim at better generalizing to unseen test examples from a differ-ent distribution. However, they are indeed different prob-lems [3]. Specifically, domain adaptation is a task to gener-alize from a training set with skewed distribution on some variable y′ (but still it is independent of ytarget) to its oppo-site. For instance, a gender classification model is trained on a dataset with seniors only and evaluated for young people.
+The unbiased learning problem, on the other hand, tackles a circumstance that one or more variables have a strong corre-lation to the target variable ytarget. For example, the gender classification model is trained mostly on female + long hair and male + short hair combinations, then is expected to cor-rectly classify the gender of females with short hair or males with long hair.
+Our problem setting. We address the unknown bias in
+Fig. 1, where all about bias is opaque. That is, we do not know which y′ ∈ Y is highly correlated to ytarget ∈ Y in the dataset.
+One might claim it is impossible to completely debias the model from all unknown biases, since we do not know what they are, unlike a known bias which we can explicitly model not to rely on it. What we intend with the proposed ap-proach is making the model more robust and conservative, leading it to rely on more variety of cues, preventing it from over-committing to a specific cue. This is particularly de-sirable in practice, where a model is deployed for years and the query distribution changes. In this sense, under the def-inition of “bias” as a misleading feature, we mean by “un-biasing” regularizing the model from being over-dependent on any particular feature, instead of making it independent of any cue. In other words, we mean the opposite: making the model rely on more cues to be less biased. 3. Motivation
+In this section, we first investigate how a standard CNN model learns biased representations. We detail our observa-tion that CNN models tend to learn a few specific aspects from the training set, as opposed to learning a variety of features (in Sec. 3.1), and that their higher level features close to the classification head tend to be biased more (in
+Sec. 3.2). Combining with the fact that a standard CNN solely relies on the very last layer to classify, we are going to motivate to use multi-variant features learned from the entire hierarchy of the CNN model in the next section. 3.1. Feature Dependence in CNN
+Geirhos et al. [7] investigated the contributions of vari-ous attributes on the predictions by a standard CNN model pretrained on ImageNet. They distorted original test im-ages to intentionally rely on a specific attribute (correspond-ing to a y′ ∈ Y), as seen in Fig. 2. Then, they estimated the model’s performance on each distorted sample. Despite never being directly trained on any of these deformed im-ages, the model was able to classify texture images as ac-curately as the original images, while it failed to classify images with other types of distortion.
+We interpret this as over-credence towards a specific fea-ture. In other words, relying rarely on other features makes the model more vulnerable to biased learning. That is, if the correlation between the texture (bias) and target label ytarget is subtle at testing, the biased model loses the rationale for the discrimination. This observation hints us to mitigate im-balanced reference on certain dominating features in order to make the model more robust to bias. 3.2. Measuring Bias in CNN
+We further investigate how a multilayered convolutional network learns biased representations in detail. Specifically, we analyze the degree of bias in each layer using Norm ac-tivation [18] as a tool.
+Figure 2. Feature dependence of the CNNs. The accuracy on original, grey-scaled, silhouette, edges, and texture are estimated for ImageNet-pretrained CNN models. (from the Fig. 2 in [7])
+Norm activation. Norm activation [18] estimates the ro-bustness of a layer in a deep network on the dataset. Hence, the difference between activation norms on two reversely biased datasets in a specific feature represents how much the certain layer in the model is dependent on that bias. For an activation map A[l] c of the channel c at layer l, its spa-[l] c ∈ R. We tially averaged activation map is denoted as A denote its maximum across all channels as λ[l] ∈ R:
+λ[l] = max c (A
+[l] c ), (1) intuitively indicating the degree of maximal activation at layer l. We compute λ[l] at all layers in the network, and normalize across them:
+λ′[l] =
+λ[l] maxl λ[l]
+. (2)
+Now, suppose we train the exactly same model k times un-der the same condition except for weight initialization. The norm activation r[l] d for a biased test data d is defined as r[l] d = mini λ′[l](f (i) d ) maxi λ′[l](f (i) d )
+, (3) where f (i) denotes the ith model, wth i = 1, ..., k. Intu-itively, the r[l] d indicates how much the model’s decision changes for d across k learned models. r[l] d ≈ 1 if the model is robust, while r[l] d gets smaller towards 0 otherwise.
+How much each layer is biased. We investigate two standard CNN models, VGG11 [19] and ResNet18 [9]. We sample l whenever the size of the feature maps are halved, and set k = 5. For gender prediction, we design two test sets: d1 = {(female, long hair), (male, short hair)} and d2 = {(female, short hair), (male, long hair)}. The models are trained on training data close to d1.
+Figure 3 illustrates ∆r[l] ≡ r[l] d1
+, the difference of norm activations on the two test sets. The larger the gap is, the less the model is robust on the biased test set d2, in-dicating the layer’s activation is more biased in hair length.
+− r[l] d2
+Figure 3 shows the last layer is extensively biased compared to the other layers. This experiment exhibits that the use of features from lower layers potentially encourages the model to exploit less biased representations.
+Figure 3. Degree of Bias. The y-axis measures degree of bias by
+∆r[l], the difference of norm activations on two test sets. 4. UBNet: The Proposed Method
+In this section, we present the proposed model Unbias-ing Network (UBNet), illustrated in Fig. 4. Particularly, the hierarchical features and orthogonal regularization are the operative ideas to assist our motivation in Sec. 3. These two strategies are applied to a CNN-based model, which is referred to as the ‘base model’ henceforth. Then, hierarchi-cal features learned by the base model are concatenated and fed into an orthogonally regularized classifier, called Ortho-Block, for discrimination. This framework can be applied to an arbitrary CNN with minimal overhead, as it adds only a few parameters (e.g., in our experiment, 0.21% of parame-ters are added over the base model). 4.1. Hierarchical Features
+Most standard CNN models classify an image purely based on the activation from the top-most layer. How-ever, we illustrate in the previous section that 1) the CNN’s over-credence on certain features causes a biased classifier (Sec. 3.1) and 2) the last layer in the conventional CNN-based image classifier is much biased than the lower-level layers (Sec. 3.2). Thus, the standard CNN models relying solely on their highest-level representation are particularly vulnerable to being biased.
+For unbiased inference, we exploit hierarchical features captured inside the CNN. A CNN-based image classifier ex-tracts hierarchical features from simple patterns (e.g., cor-ners or edge/color conjunctions) in its lower layer to more complex high-level features (e.g., significant variation and class-specific features) in its higher layer because of the spa-tially limited convolution operation [24]. As all these fea-tures can be considered as more multifarious features than only the high-level features, the hierarchical features repre-sent multi-variant features. Hierarchical features also repre-sent less biased features, since the lower-level layers contain less skewed features as seen in the motivating experiment in
+Sec. 3.2.
+The set of hierarchical feature maps H of a CNN with
+L layers can be expressed as H = {h1, . . . , hL} , where hl ∈ RWl×Hl×Cl denotes the feature maps at layer l of size
+Wl × Hl with Cl channels, sequentially extracted from each layer in the base model. To enable concatenation of hl of different shapes for l = 1, ..., L, ftrans first converts the input feature map size at each layer to W × H × C. Specifically, it applies an average pooling to shrink the feature map to
+W × H and 1 × 1 convolution to adjust (either increase or decrease) the number of channels to C. Here, W , H, and C are hyperparameters, such that W ≦ Wl and H ≦ Hl for all l = 1, ..., L. The resulting feature maps gl = ftrans(hl) ∈ RW ×H×C, ∀l = 1, . . . , L (4) are then concatenated to G = [g1, . . . , gL] ∈ RL×W ×H×C, where [, ] denotes concatenation. We term each gl as a group feature at layer l, capturing semantics at different level (low to high) since they are originated from different layers. 4.2. Orthogonal Regularization
+Group Convolution.
+In spite of providing the hierar-chical semantic information, the high-level features might still dominate the others if the group features from multi-ple levels are freely fused, either by fully-connected or con-volutional layers, causing the encoded representations to be biased again following the same way of the base model. For this reason, the multivariate features need to be treated in-dependently on each group before making final prediction.
+Instead of fully-connected or regular convolution, we resort to use group convolution [10], where all the feature maps in the same group gl ∈ G are weight-connected but separated from the other group features. In other words, the interre-lation between hierarchical features is restricted, preserving distinct features respectively. Group convolution fg(G) per-forms convolution operations on each group gl ∈ G inde-pendently, producing S = [s1, . . . , sL] ∈ RL×W ×H×C.
+Afterwards, we apply channel-wise spatial fusion, again to avoid indiscreet fusion between group features. As in the
+Ortho-Trans box in Fig. 4, each channel s ∈ RL×W ×H in S is mapped to a scalar by a linear layer fs with weight Ws.
+The output from fs is denoted as O ∈ RL×1×1×C; that is,
+O = [o1, . . . , oL] = fs(S).
+Orthogonality. In addition, we apply orthogonal reg-ularization [23] to encourage the independence between group features. We define the group convolution layer and the spatial weighting layer in conjunction with orthogo-nal regularization as Ortho-Conv and Ortho-Trans, respec-tively, as shown in Fig. 4. We term the combination of these two layers as Ortho-Block. The Ortho-Block fo takes G as input and outputs activated values as where each ol ∈
+R1×1×C is made from each gl. When the convolutional filters and spatial weights of different group features are
+Figure 4. The architecture of the proposed model, UBNet. UBNet takes the hierarchical features captured by the base model as input.
+The Trans-layers set all the hl be the same size. Then, all the concatenated gl activated through the Ortho-block in which Ortho-Conv and
+Ortho-Trans layers encode multi-variant features. From the output of the Ortho-block, each classifier outputs confidence scores for each low-to-high feature. They are averaged for the final prediction. In this figure, we use L = 5 for simplicity. learned to be as orthogonal as possible, each hierarchical feature becomes decorrelated. The decorrelation improves the feature expressiveness, which contributes to distributing the feature dependence of the model. To impose the or-thogonality, we set the objective function with an additional regularization term: min
+θf
+Lc (ytarget, f (Xtrain; θf )) + λLo (θo) , (5) where f denotes the UBNet (from ftrans to prediction) parametrized by θf . Lo stands for the orthogonal regular-ization loss, defined as
+Lo(θo) = 1 2 (cid:13) (cid:13)θ⊤ o θo − I(cid:13) 2
+F , (cid:13) (6) where θo = [W1, · · · , WL] is the collection of weights in the Ortho-Block fo. Each Wl is the conv-parameters corresponding to the l-th group features gl. Two orthog-onal regularizations are applied here, one for Ortho-Conv and the other for Ortho-Trans, where Wl indicates Wg l ∈ l ∈ RFs×Fs×C for fs, respec-RFg×Fg×C for fg and Ws tively. Fg and Fs denote the size of conv-filters in fg and fs, respectively. The (i, j)-component [θ⊤ o θo ∈
+RL×L is the inner product of Wi and Wj, and hence the alternated loss term Lo measures the cosine similarity be-tween the weights of each group features. By forcing θ⊤ o θo to be close to the identity matrix, this regularization explic-itly forces the network so that the hierarchical features are maintained until the prediction layer, spanning the wider feature space of the image dataset. o θo]ij of θ⊤
+Following the Ortho-Block, fully-connected layers (clas-sifier fcls in Fig. 4) are attached to each activated feature group ol in order to attain confidence scores c1, . . . , cL ∈
+RK from each hierarchical features (corresponding to layer l) across K classes. We get our confidence scores c by taking average over cl, that is, c = (cid:80) l cl/L, where each group feature equally contributes. All the trainable parame-ters ftrans, fg, fs, and fcls are learned end-to-end. 5. Experiments
+In this section, we present our extensive experiments on multiple datasets, namely, CelebA-HQ [14], UTKFace [25], and 9-Class ImageNet [11] to empirically verify the effec-tiveness of the proposed method.
+Dataset Protocol.
+For CelebA-HQ and UTKFace datasets, we follow the ‘extreme bias’ setting, slightly mod-ified from [2]. Basically, we divide each dataset into two completely biased sets, referred to as ‘extreme bias (EB)’.
+On these two datasets, all images with {(female, long hair), (male, short hair)} belong to EB1, while the opposite im-ages with {(female, short hair), (male, long hair)} are as-signed to EB2. Then, we train on one and evaluate on the other to estimate the model’s generalizability.
+Under the unknown bias setting, however, this configu-ration does not work as intended, since the target and bias variables become exactly the same. In other words, from the model’s perspective, classifying the gender and the hair length becomes not distinguishable. Thus, we slightly mod-ify the extreme bias design to mix a small number of the
+opposite samples; namely, ‘utmost bias (UB)’ sets. UB1, for instance, consists of all the EB1 images and α × |EB1| number of randomly sampled EB2 images where |.| denotes the number of data. This scenario informs the model there are some cases that ‘long hair’ does not necessarily mean the target class 0 (female), for example. UB is closer to re-ality than EB since it is rare to have two variables of which distribution is completely identical in a dataset.
+In addition to these utmost biased sets, we also evaluate on an unbiased ‘test set’. The bias planting protocol [2] that originally proposed to randomly sub-sample for the bias at-tribute is not directly applicable to our unknown bias set-ting, so we modify it to uniformly distribute the samples.
+For ImageNet, we follow the evaluation protocol of [3].
+Specifically, they modified the 9-Class ImageNet [11] (203 classes sub-sampled from ImageNet grouped to 9 super-classes: dog, cat, frog, turtle, bird, primate, fish, crab, in-sect) to balance the ratios of sub-class images in each super-class. They adopted weighted unbiased accuracy, giving higher weight on rarer pairs of object and texture (e.g., turtle on highway).
+Competing models. Unbiased modeling methods under labeled bias setting are not comparable, since they require exhaustive labeling on biased variables. In contrast, unbi-ased models under known bias might be applied to unknown bias. Therefore, for the CelebA-HQ and UTKFace dataset, we compare the robustness of the proposed method to that of unbiased models, HEX [22], Rebias [3], and LfF [16].
+On ImageNet, we compare against StyleisedIN [7],
+LearnedMixin [5], RUBi [4], Rebias [3], and LfF [16]. Al-though LearnedMixin and RUBi are designed to unlearn bias for visual question answering task, their object func-tions were applied in Rebias [3]. We follow the setup in [3] for our comparison.
+We use VGG11 [19] as base model for CelebA-HQ and
+ResNet18 [9] for UTKFace and 9-Class ImageNet. We firstly train the base model then optimize UBNet with the base model’s parameters frozen. The layer l is sampled whenever the size of the feature maps is halved (L = 5 for both base models). For each experiment, we use Adam op-timizer [13] and grid search learning rate (initial value and decay schedule), stopping criterion, and batch size. More implementation details are provided in the supplementary material. For hyperparameters in the competing models, we follow the same setting as presented in the original paper and only apply our data pre-processing for a fair compari-son. We repeat each experiment three times and report the average score, unless noted otherwise. 5.1. CelebA-HQ
+Dataset and Experimental Settings.
+CelebA-HQ dataset [14] is composed of 30K high-resolution face im-In addition, we manually an-ages, labeled with gender. notated another binary attribute ‘hair length’, {short, long} for all samples. We excluded 4,518 images (15.06 %) if the hair length is not seen or intermediate. To collect more samples with rarer combinations (male + long hair, female + short hair), we supplement samples from CelebA [15]. The constructed biased dataset consists of 26,851 images in to-tal, where 1,369 of them are from CelebA. Fig. 5 illustrates the two extreme datasets created from CelebA-HQ.
+We randomly split the EB1 to train-EB1 and val-EB1.
+Then, we mix a small portion of images from EB2 (with
+α = 0.005) to create UB1, and use the remainder of EB2 as val-EB2. We train the model on UB1, then evaluate on val-EB1 and val-EB2. More details about the biased CelebA-HQ and concrete train-validation configuration are in the supplementary material.
+Figure 5. Extreme bias sets on CelebA-HQ. EB1 consists of female + long hair and male + short hair, while EB2 consists of male + long hair and female + short hair.
+Results and Discussion. In Tab. 1, we report classifica-tion accuracy on the val-EB1/2 as well as the test set. The proposed method exhibits more robust results than other models. Mitigating the model’s over-reliance on the bias,
+UBNet shows slightly degraded accuracy on biased val-EB1.
+Method
+Base Model
+HEX
+Rebias
+LfF
+UBNet
+Acc (EB1)
+Acc (EB2)
+Acc (test) 99.38(±0.31) 51.22(±1.73) 75.30(±0.93) 92.50(±0.67) 50.85(±0.37) 71.68(±0.50) 99.05(±0.13) 55.57(±1.43) 77.31(±0.71) 93.25(±4.61) 56.70(±6.69) 74.98(±4.16) 99.18(±0.18) 58.22(±0.64) 78.70(±0.24)
+Table 1. Results on CelebA-HQ. Classification accuracy on val-idation set of EB1 and EB2, and on Test set, respectively, for the model trained on UB1 training set. 5.2. UTKFace
+Dataset and Experimental Settings. UTKFace [26] consists of 20K face images annotated with age, gender, and skin tone. We evaluate 1) skin tone prediction with gender bias and 2) gender prediction with skin tone bias. Age is not used since the annotation pairs for age is imbalanced.
+For the details of the overall data distribution of UTKFace, consult with the supplementary material.
+For skin tone prediction with gender bias, we split the images into extremely biased sets, illustrated in Fig. 6.
+Then, we add EB2 image samples (with up to α = 0.2) to EB1, and name it UB1. UB2 is created in a similar manner. We train either on UB1 or on UB2, and evalu-ate on the other. Also, we evaluate both models on an un-biased test set, composed of 300 images for each pair of
+{gender, skin tone}, thereby 1,200 images in total. The gender prediction with skin tone bias scenario is performed in the same way.
+Figure 6. Extreme bias sets on UTKFace. EB1 consists of female
++ bright skin tone and male + dark skin tone and EB2 consists of male + bright skin tone and female + dark skin tone.
+Results and Discussion. Table 2 summarizes the exper-imental results on UTKFace. On the evaluation for the skin tone prediction with the gender bias, UBNet outperforms all other competing models. The proposed method also ex-hibits the most satisfactory accuracy compared to compet-ing models for gender prediction with skin tone bias.
+Figure 7. Textually biased and unbiased ImageNet. The exam-ples are sampled from 9-Class ImageNet [11]. samples with unusual texture-class combinations. The bi-ased accuracy is the regular accuracy, the number of correct samples divided by the total number of samples.
+Surprisingly, we observe that the proposed method achieves the state-of-the-art. This is unexpectedly notable, since it even outperforms Rebias, which was specially de-signed to tackle texture bias, under the experimental setting and on the dataset they designed. This verifies that UBNet is capable of discovering unknown bias effectively enough to compete with a model designed for known bias settings.
+Metric
+Base model
+SI
+LM RUBi
+Rebias
+LfF
+UBNet
+Trained on UB1
+Trained on UB2
+UB2
+Test
+UB1
+Test
+Biased
+Unbiased 90.8 88.8 88.4 86.6 64.1 62.7 90.5 88.6 91.9 90.5 89.0 88.2 91.9 91.5
+Skin tone Prediction with Gender Bias
+Base
+HEX
+Rebias
+LfF 77.46(±0.55) 79.35(±0.17) 78.70(±0.62) 77.08(±0.71) 82.97(±0.39) 85.07(±0.46) 83.39(±1.22) 81.67(±0.14) 80.58(±0.37) 80.82(±0.15) 80.06(±1.46) 78.16(±0.97) 85.44(±0.32) 85.88(±0.27) 85.41(±1.23) 84.00(±1.00)
+UBNet 83.67(±1.05) 87.25(±0.82) 84.29(±1.24) 87.94(±0.80)
+Gender Prediction with Skin tone Bias
+Base
+HEX
+Rebias
+LfF 80.97(±0.79) 80.69(±0.80) 82.02(±0.84) 78.82(±0.31) 86.67(±0.38) 86.51(±0.56) 86.24(±0.31) 83.67(±0.73) 81.43(±0.11) 81.01(±1.57) 82.02(±0.90) 82.14(±1.37) 85.94(±0.77) 86.75(±1.57) 86.39(±0.51) 85.36(±0.99)
+UBNet 82.07(±1.55) 87.75(±0.58) 82.69(±0.80) 87.36(±0.46)
+Table 2. Results on UTKFace. Skin tone prediction with gender bias and gender prediction with skin tone bias results. 5.3. ImageNet
+One might argue that the experiments on CelebA-HQ and UTKFace are designed unfavorably to HEX and Re-bias, since they are specially designed for texture bias. For this reason, we conduct experiments on texture bias, follow-ing the same setting by Rebias [3].
+Dataset. We evaluate the generalizability of our model on the balanced 9-Class ImageNet, presented by Rebias [3].
+Figure 7 illustrates a few examples, frequent cases (e.g., a frog in a swamp) in the top row and less common images (e.g., a frog on a hand) in the bottom row. Rebias [3] de-signed this dataset, arguing this correlation between back-ground and object makes texture bias in the train set.
+Results and Discussion. Table 3 summarizes the biased and unbiased classification accuracy for the same valida-tion set. The unbiased accuracy [3] puts higher weights on
+Table 3. Results on 9-class ImageNet. The results except for
+UBNet are referenced from [3]. SI denotes StyleisedIN and LM denotes LearnedMixin. 5.4. Ablation Study
+We conduct 4 ablation studies to display the significance of all the sub-components exploited in UBNet. Experimen-tal settings are the same as Sec. 5.1 unless noted otherwise.
+Ablation Study on Sub-components. We conduct ab-lation studies to see the effects of hierarchical features, group convolution, and orthogonal regularization presented in Sec. 4. Table 4 exhibits the performance on an unbiased test set, incrementally adding each component. The hierar-chical features contribute the most, although other compo-nents also improve the performance notably.
+Hierarchical feature
+Group convolution
+Othogonal regularization
+✓
+✓
+✓
+✓
+✓
+✓
+Acc (EB1)
+Acc (EB2)
+Acc (test) 99.35 52.87 76.11 99.30 56.13 77.72 99.08 56.78 77.93 99.18 58.22 78.70
+Table 4. Ablation Study on Sub-components.
+The sub-components presented in Sec. 4 are applied step by step. The model with none of them applied is the last phase in Fig. 4 from hL to cL in the absence of orthogonal regularization.
+Ablation Study on fg. We conduct an ablation study with and without fg. Table 5 exhibits Ortho-Conv fg con-tributes to performance improvement. Some lower-level
+features might function just as intermediate representations needed for making high-level features and hence be less useful to understand the image. fg gives more attention to meaningful features for inferring the target label.
+Method
+Acc (EB1)
+Acc (EB2)
+Acc (test)
+UBNet (w/o fg)
+UBNet (with fg) 99.32(±0.08) 99.18(±0.18) 51.80(±1.39) 58.22(±0.64) 75.56(±0.73) 78.70(±0.24)
+Table 5. Ablation study on fg. UBNet (with fg) is UBNet in
+Tab. 1 and UBNet (w/o fg) denotes the model is Ortho-Conv.
+Ablation Study on Hierarchical Features. We com-pare the results by excluding the lowest-level features one by one from the five hierarchical features extracted from
+VGG11. According to Fig. 8, it is obvious that the multi-level features contribute to the performance on the unbiased test set. The number of parameters slightly increases as more hierarchical features are used, but it is difficult to see that the parameters are the main factor for performance im-provement because the difference is subtle.
+Figure 8. Ablation Study on Hierarchical Features. The line plot denotes the accuracy on the uniformly distributed test set, and the bar plot denotes the ratio of the number of parameters relative to the base model.
+Degree of Bias (DoB) ∆r[l] after fg and fs. The lower-level features could be biased after additional layers, al-though originally unbiased. We evaluate every difference between DoB of hn and that of on (n = 1, . . . , 5) of Fig. 3.
+The subtle difference of each pair in Tab. 6 indicates that the lower-level features still remain the DoB as expected.
+Layer depth 1 2 3 4 5
+∆DoB 0.024 0.012 0.027 0.021
+-0.0005
+Table 6. Degree of Bias. ∆DoB = DOB(hn) - DOB(on). 6.

@@ -1,0 +1,126 @@
+Abstract
+We present a slot-wise, object-based transition model that decomposes a scene into objects, aligns them (with respect to a slot-wise object memory) to maintain a consistent order across time, and predicts how those objects evolve over successive frames. The model is trained end-to-end without supervision using transition losses at the level of the object-structured representation rather than pixels. Thanks to the introduction of our novel alignment module, the model deals properly with two issues that are not handled satisfactorily by other transition models, namely object persistence and object identity. We show that the combination of an object-level loss and correct object alignment over time enables the model to outperform a state-of-the-art baseline, and allows it to deal well with object occlusion and re-appearance in partially observable environments. 1
+
+Introduction
+In spite of their well-documented ability to learn complex tasks, today’s deep reinforcement learning agents are still far from matching humans at out-of-distribution generalisation or few-shot transfer
+[6, 21, 23]. Two architectural features commonly proposed to remedy this are (1) transition models that enable the agent to internally explore paths through state space that it has never experienced
+[29, 25, 12], and (2) compositionally structured representations that enable the agent to represent meaningful states that it has never encountered [7]. These two features are not exclusive; transition models that operate on compositionally structured representations are a potent combination, and these are the subject of the present paper. Speciﬁcally, our focus is on transition models that operate at the level of objects, which are the most obvious candidates for the structural elements of representations likely to be useful for artiﬁcial agents inhabiting 3D worlds such as our own [28].
+While there has been progress in object-based transition models [34, 32, 35, 20], current models do not deal satisfactorily with object persistence (the concept that objects typically continue to exist when they are no longer perceptible [24]) or with object identity (the concept that a token object at one time-step is the same token object at a later time-step [1]). As we show, transition models that neglect object persistence tend to perform badly in complex, partially observable environments, while models that neglect object identity are unable to integrate information about a single object (and its interactions) over time in a way that generalises to future time-steps. By proposing and incorporating a novel module for aligning objects across time using a slot-based memory, our model handles both these concepts, and exhibits better performance as a result. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: Comparing our model to baselines. Each model was trained with four input steps and to unroll for six steps, here we unroll for 15 steps. Our model, OAT, performs signiﬁcantly better than
+OT (our model without the AlignNet) and current state-of-the-art model, OP3 [32]. See Figure 17 in the Appendix for additional OP3 roll-outs.
+An important feature of our transition model is that it makes predictions and computes losses in a representation space that is divided into objects. This contrasts with existing models that make predictions in an unstructured representation space
+[13, 12]. Making predictions and com-puting losses in an object-structured rep-resentation space facilitates learning, not only because the representation space is lower dimensional than pixel space, but also because the model can exploit the fact that dynamics tend to apply to objects as a whole, which simpliﬁes learning. How-ever, to compute prediction losses directly over distinct object representations (rather than ﬁrst mapping predictions back to pix-els [34, 32]), the objects in a predicted rep-resentation must be matched with those in the target representation, which again re-quires a proper treatment of object persis-tence and identity. The result is a model that can roll-out accurate predictions for signiﬁcantly more steps than seen during training, outperforming state-of-the-art for comparable models.
+⇥
+⇥
+⇥
+⇥
+H
+K
+W
+M
+Figure 2: Encoding steps. The scene decomposition and representation module extracts K object represen-3.
+F , from images, xt 2 < tations, zt 2 <
+These are aligned using the alignment module to obtain
+F . Aligned objects are fed to the slot-wise za t 2 < transition model with the action, at, and hidden state,
+H , to predict the object representa-ht(= ha
+M t ) 2 <
+F , as well as the tions at the next time-step, zd
+M
+⇥ t 2 <
+F . We also depict the
+M updated memory, mt+1 2 <
+⇥ transition model loss, lTransition model, computed between t and za zd
+To achieve this, our model, Objects-Align-Transition (OAT), combines (1) a scene decomposition and representation module,
+MONet [2], that transforms a raw image into a slot-wise object-based representation, (2) an novel alignment module which, with the aid of a slot-wise memory, ensures that each object is represented in the same slot across time, even if it has temporarily disap-peared from view, and (3) a novel slot-wise transition model that operates on the object representations to predict future states. All three components are differentiable, and the whole model is trained end-to-end without supervision.
+We evaluate the model on two sequential image datasets. The ﬁrst is collected from a pre-trained agent moving in a simulated 3D environment, where we show that our model outperforms the current state-of-the-art object-based transition model (OP3 [32]). The second dataset is collected from a real t (shown as LOSS in the ﬁgure).
+⇥ 2
+robot arm interacting with various physical objects, where we demonstrate accurate roll-outs over signiﬁcantly longer periods than used in training. An ablation study shows that the model’s success depends on the combination of correct object alignment across time and the use of a transition loss over object-level representations instead of over pixels. 2 Our Model: Objects-Align-Transition
+Our model, Objects-Align-Transition (OAT), combines a scene decomposition and representation module, in this case MONet, with our slot-wise transition module, via our alignment module, which ensures that each slot in the transition model receives objects corresponding to the same token object (or identity) across time. The whole model is trained end-to-end. We now provide details of each of these modules (see Figure 2). 2.1 Scene Decomposition and Representation Module 3, with T time-steps, width,
+The input to OAT is a sequence of RGB images, x
+W , and height, H. We leave out the batch dimensions for simplicity. Each image in the sequence, xt, is passed through a scene decomposition and representation module1, in this case MONet, to
+F is an object obtain a slot-wise object representation, [zt,k]1:K, occupying K slots, where zt,k 2 < representation vector with F features.
+[0, 1]T 2
+W
+H
+⇥
+⇥
+⇥
+⇥
+⇥
+⇥
+H
+W
+[0, 1]T
+MONet consists of an attention module (a U-net [27]) — which predicts object segmentation masks, 1, for each slot — and a slot-wise VAE. The encoder of the slot-wise VAE is fed
+µt,k 2 the predicted object segmentation masks and the input image, xt, and outputs object representations,
+F . The decoder reconstructs the masks, ˜µk,t, and each object’s pixels, ˜xt,k. MONet’s zt 2 < computations can be summarised by the following equations: µk,t = Attention_Network(xt), zk,t =
+MONet_encoder(xt, µk,t) and ˜µk,t, ˜xt,k = MONet_decoder(zk).
+K
+⇥
+It may be tempting to feed the slot-wise object representations, [zt,k]k=1:K, at time, t, directly to a slot-wise transition model. However, MONet’s representations [2] are not stable across time, meaning that a speciﬁc object may appear in different slots at different times [35] (see Figure 3). This leads to two major problems when training slot-wise transition models on slot-wise object-based representations. Firstly, it is difﬁcult to compute losses between predicted and target object slots.
+Computing a slot-wise object-level loss requires us to know how the previous object representations (and thus the predicted object representations) correspond with the target object representations.
+Secondly, if object representations do not occupy consistent slots it makes it harder to integrate information about a single object (and its interactions with other objects) across time [35], and makes it harder to predict the reappearance of that object (as show in Section 4.2). To address the issue of slot stability we introduce Memory AlignNet, an alignment module. 2.2 Alignment Module
+Our alignment module, Memory AlignNet, must play two key roles. The ﬁrst is to align objects across time, enabling us to compute slot-wise object-level losses for training. The second is to learn a slot-wise memory that encodes the history of each slot across time, allowing our transition model to operate effectively in partially observable environments by keeping track of objects as they go in and out of view. This is especially important for embodied agents that take actions in 3D environments, where the agent’s looking around frequently causes objects to move in and out of its ﬁeld-of-view.
+F , with M
+K
+We propose Memory AlignNet, which takes a slot-wise memory, mt 2 <
+ 
+F ,
+K slots and the (stacked) output of the scene decomposition and representation module, zt 2 <
+⇥
+F . To perform alignment, the Memory returning the aligned object representations, za t 2 <
+K, that aligns objects, zt, with the memory, mt.
+M
+AlignNet predicts an adjacency matrix, At 2 <
+⇥
+This adjacency matrix allows us to compute a soft alignment za,sof t = Atzt or a hard alignment, za t throughout the rest of the paper.
+) denotes the application of the Hungarian algorithm, a non-differentiable algorithm
+Hungarian( which computes a permutation matrix given an adjacency matrix. The soft version of the alignment is
+, za,hard = Hungarian(At)zt. We will refer to za,hard as za
+M
+M
+⇥
+⇥
+· t 1We tried some variants where zt depended on zt results. 1. However these did not yield signiﬁcantly beneﬁcial
+  3
+used to train the Memory AlignNet while the hard version of the alignment is passed to the slot-wise transition model, which has the same number of slots, M , as the memory. Further details can be found in Section A.2 of the Appendix.
+The hard-aligned objects may also be used to update the memory using a recurrent slot-wise model.
+), to predict deltas for both the object representations,
+For simplicity we use our transition model, za t , and the memory, mt. We will detail this in the next section.
+T✓(
+· 2.3 Slot-Wise Transition Module
+The transition model operates in both an encoding and an unrolling phase. During the encoding phase the transition model is fed aligned, observed object representations, za t , and actions, at, to predict aligned object representations at the next time-step, zd
+F . During the unroll phase, the transition model is fed the predictions, zd t , and actions, at, from the current time-step to predict the object representations, zd t+1, at the next time-step. t+1 2 <
+M
+⇥
+M t , and a hidden state, ha
+More concretely in the encoding steps, our transition model, tions, za and memory, mt. The output of our transition model is given by [ a
+The memory and the object representations are then updated as follows: mt+1 = mt +  m t+1 = za zd t . In the unroll steps, next step predictions are given by zd
+[ d t ,  m default and does not need to be re-aligned when unrolling the model.
+), takes aligned object representa-H , and predicts deltas for both the object representations, za t , t , at, ha
+T✓(za t ). t and t +  d t where t is aligned by t+1 = zd t ). By using the transition model to predict deltas, zd t +  a t+1 = t , at, ha
+T✓(zd t ], ha t ], ha t ,  m t 2 < t+1 =
+T✓(
+⇥
+·
+A key feature of our transition model is that weights are shared across object slots and can be instantiated in many different ways. One simple option is to use a SlotLSTM; an LSTM applied independently to each slot, sharing weights between slots. An alternative, novel instantiation which we found to work well is to ﬁrst apply a transformer [33, 31] and then the SlotLSTM (see Figure 10 and Section A.3). This allows the model to capture interactions with other objects (via the transformer) and integrate that information over time (via the SlotLSTM). Further details are in Section A.2 of the
+Appendix. 2.4 Training
+When training OAT, we jointly learn the parameters of the scene decomposition and representation module, the alignment module and the transition module. Each module has its own losses that contribute to downstream gradients and updates. For example, both the transition model and the alignment module losses can inﬂuence the scene decomposition and representation module’s updates.
+Let us deﬁne the losses for each module.
+Scene decomposition and representation module losses (MONet). We train MONet using stan-dard MONet losses, lMONet, see Equation 3 in [2]. The ﬁrst term in the MONet loss is a scene reconstruction term. This is a spatial mixture loss parameterised by  bg and  f g, which are the standard deviation used for each slot’s component likelihood (for the ﬁrst slot and remaining slots, respectively) that go into the mixture loss. The remaining terms are regularisation terms that 1) induce a latent information bottleneck needed for good representation learning (scaled by  , the latent KL loss weight), and 2) ensure that predicted and target masks are similar (scaled by  , the mask KL loss weight). MONet losses are computed only in the encoding phase and are not used in the unroll phase.
+Additionally, MONet loss gradients do not affect the transition module or the alignment module weights.
+Alignment module losses (Memory AlignNet). The Memory AlignNet is trained on a recon-struction loss between the softly aligned object representations, za,sof t
+, and the output of the transition model, zd t , for the corresponding time-step. There are also regularisation losses includ-ing an entropy loss, H(
+), on the adjacency matrix, At, which encourages values towards zero and one; and a loss that penalises columns that sum to more that one, avoiding the case where multiple objects are assigned to the same memory slot. The AlignNet loss, lAlignNet is deﬁned as lAlignNet = 1)), where T is the total number of encoding and unroll steps. We use   = 0.01 for all experiments presented in this
+P paper. k=1 At,k,j   2 2 +  H(At) +
+M j=1 max(0, (
+T t=1 || za,sof t t zd t  
+P
+P
+||
+K
+· t 4
+Slot-wise transition module losses. The slot-wise transition model is trained with a reconstruction loss between the outputs of the transition model, zd t , and the aligned observations for the same time-step, za t . The slot-wise transition model loss, lTransition model is deﬁned as lTransition model = za 2 2. Importantly, we compute a loss directly between object representations without t || the need for decoding them to obtain pixels.
+P
+OAT is trained end-to-end to minimise lMONet + lAlignNet + ⇣lTransition model, using ⇣ = 10 for all experiments presented in this paper.
+T t=1 || zd t   3

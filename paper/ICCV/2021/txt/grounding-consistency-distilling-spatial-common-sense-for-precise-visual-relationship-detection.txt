@@ -1,0 +1,156 @@
+Abstract
+Scene Graph Generators (SGGs) are models that, given an image, build a directed graph where each edge repre-sents a predicted subject predicate object triplet.
+Most SGGs silently exploit datasets’ bias on relationships’ context, i.e. its subject and object, to improve recall and neglect spatial and visual evidence, e.g. having seen a glut of data for person wearing shirt, they are overconﬁ-dent that every person is wearing every shirt. Such imprecise predictions are mainly ascribed to the lack of negative examples for most relationships, which obstructs models from meaningfully learning predicates, even those that have ample positive examples. We ﬁrst present an in-depth investigation of the context bias issue to showcase that all examined state-of-the-art SGGs share the above vulnerabilities. In response, we propose a semi-supervised scheme that forces predicted triplets to be grounded con-sistently back to the image, in a closed-loop manner. The developed spatial common sense can be then distilled to a student SGG and substantially enhance its spatial reason-ing ability. This Grounding Consistency Distillation (GCD) approach is model-agnostic and beneﬁts from the superﬂu-ous unlabeled samples to retain the valuable context infor-mation and avert memorization of annotations. Further-more, we demonstrate that current metrics disregard unla-beled samples, rendering themselves incapable of reﬂecting context bias, then we mine and incorporate during evalu-ation hard-negatives to reformulate precision as a reliable metric. Extensive experimental comparisons exhibit large quantitative - up to 70% relative precision boost on VG200 dataset - and qualitative improvements to prove the signif-icance of our GCD method and our metrics towards refo-cusing graph generation as a core aspect of scene under-standing. Code available at https://github.com/ deeplab-ai/grounding-consistent-vrd. 1.
+
+Introduction
+*Work done while N. Gkanatsios was with deeplab.ai.
+†This is funded by deeplab.ai
+“Multiple people wearing the same shirt, sitting on the same chair and having the same hand”. Embarrass-scene understanding problems. 2. Experimental Evidence on Context Bias
+As a springboard for our investigation we examine the level of understanding models have for wear, a head class in most popular datasets. Human common sense dictates that for a subject to wear an object spatial proximity must apply, i.e. subject’s and object’s boxes should be intersect-ing. Most state-of-the-art models achieve close to 100% re-call on wear but do they possess the aforementioned spatial common sense? Fig. 2 proves that ignoring predictions on unlabeled samples falsely leads us to believe that they do.
+In fact, even when keeping only high conﬁdence predictions (p > 0.7) 10% of them appear to be wrong.
+Intrigued to further probe the detectors’ incapability of interpreting visual predicates, we contrive a toy sliding box experiment: for a given subject-predicate-object triplet, we slide the object’s bounding box upon the image to extract a binary map indicating whether the predicate wear is pre-dicted in that position. Fig. 3 depicts three alarming facts.
+First, a state-of-the-art model [54] that aggregates visual, semantic and spatial information, predicts the person is wearing the shirt regardless of the latter’s location and appearance. Second, a baseline using only visual features
+[12] also suffers from these limitations and predicts wear when the shirt’s box is placed upon any person. Third, an even weaker spatial baseline [12], aware only of the two bounding boxes, is the most precise and predicts wear when the two boxes overlap. These observations indicate that semantic and visual features are both responsible for the memorization of the context bias and the lack of spatial common sense, e.g. wearing a shirt while having zero intersection with its box is not plausible [6].
+Nonetheless, context information is itself a measure of a relationship’s plausibility. Considering a person and a chair, humans have an instinctively high prior for sitting on, before even viewing the image. Sub-sequently, human annotators “apply their own subjective judgments on what to ignore and what to mention” [28], causing a reporting bias [38]. Relations that are more use-ful for scene understanding are far more likely to be anno-tated, e.g. we rarely expect a person next to shirt to be a salient concept, despite being equally observable to a person wearing shirt.
+Towards validating this, we illustrate predicate distribu-tions for different subject-object labels in Fig. 4a,b for two popular datasets, VRD [25] and VG200 [47]. For the man-chair case, most of the annotations concern sitting on and its synonyms in, on which share the same meaning in this context [12]. Under these constraints, a frequency baseline achieves a deceptively high recall score [54]. Frus-tratingly, state-of-the-art models only slightly deviate from
+- or even build on - this frequency baseline [23] and, as we
+Figure 2. Objects’ location distribution relative to their subject (green box) for all subject-wear-object triplets. When using ground truth (a) or a state-of-the-art model’s [11] predicted high conﬁdence (p > 0.7) triplets on labeled samples (b), only 1% of objects lies outside the subject’s box. Incorporating unlabeled samples in evaluation (c) unveils an important misalignment be-tween predictions and ground truth that was previously unobserv-able. Dimensions are normalized w.r.t. the subject’s box. ingly, as Fig. 1 implies, this is how a current state-of-the-art
+Scene Graph Generator (SGG) perceives our world. Per-forming inference on unlabeled object pairs reveals that all architectures, simple or sophisticated, lack a fundamental level of understanding of relationships. Instead, they heav-ily rely on dataset context bias, i.e. the statistical priors between predicates and subject-object categories, to overﬁt a handful of frequent predicates and minimally improve re-call metrics that are unable to capture this fragile behavior.
+Previous approaches [36, 32, 41] attribute bias to the long-tail distribution of predicates: the frequent ones over-shadow the rare. Thus, they develop techniques that aim to boost recall on the tail-classes. However, Fig. 1 reveals an other implication of bias: models seem to seriously lack spatial common sense, even for some of the head classes commonly found in popular datasets such as wear and on.
+Our work explores the effect and origin of context bias as well as the most suffering classes. To mitigate it, we then introduce a semi-supervised distillation training scheme called Grounding Consistency Distillation (GCD). In GCD, a teacher SGG network is further constrained to predict rela-tionships that can be grounded back to the image, through a pretrained grounding network. The spatial common sense knowledge developed by the teacher is then distilled to a student SGG model. This model-independent scheme forces models to additionally reason for unlabeled samples, supplying out-of-distribution examples that challenge the network’s perception of the dominant classes. We further contribute two negative graph completion rules used dur-ing testing to generate negative labels for unlabeled samples and support metrics that are more reﬂective of the models’ ability to interpret predicates. Lastly, we re-implement and evaluate six state-of-the-art models, that demonstrate pro-found gains when adopting our scheme, even over related alternatives. Our experiments emphasize the importance of precision as a long sidelined aspect of scene graph gener-ators that would encourage their deployment in real-world
+Figure 3. Sliding box experiment for three models: we ﬁx the person’s box, slide the shirt’s box upon the image and visualize a binary heatmap representing whether wear is predicted. Motifs-Net [54] seems to neglect visual and spatial evidence, predicting wear almost everywhere. The visual baseline from [12] confuses different instances of person. Unaware of the classes of the referred objects, the spatial baseline from [12] employs common sense: the two boxes should intersect to predict wear.
+Figure 4. (a) and (b): Context bias is a result of reporting bias. Most subject-object pairs are not annotated with a predicate, only those that the annotators subjectively consider signiﬁcant in the scene’s description. This results in biased conditional predicate distributions where a cluster of synonyms, e.g. wear, has and in in the case of person-shirt, dominates other classes. (c) If we measure the mean entropy for the contexts at which a class is prevailing, we observe that predicates which demand a spatial proximity between the involved objects, e.g. has, have lower entropy values, meaning that they create stronger bias. will show in section 5, achieve disconcertingly low preci-sion scores. On the other hand, there are many unlabeled samples (97% of VG and 87% of VRD) that could serve as negative examples, yet they remain unexploited.
+The limited cognition of scene graph generators, even for predicates with copious examples, underlines the need to re-evaluate which are the most problematic classes. In response, we measure the entropy of predicate distributions per context and then, for each class, we average the entropy for the contexts at which this class is the most prevalent. A detailed formulation of entropy ranking is presented in the suppl. material. This entropy ranking analysis (Fig. 4c) un-veils that proximal predicates, i.e. predicates that demand a spatial pixel-wise proximity for the subject and the object (e.g. wear, on, has), tend to lead to higher context bias (lower entropy). The three aforementioned classes capture more than 40% of VRD’s samples, fact that completely dis-proves prior belief that only tail-classes suffer from biases
+[36, 32]. Instead, it is the proximal predicates that display the most severe lack of spatial common sense. 3. Grounding Consistency Distillation
+The above analysis highlights three key properties our solution has to incorporate: (1) use unlabeled samples to create a distribution shift against context bias, (2) resolve conﬂicts between entities of the same category that con-fuse the network to predict the dominant class, e.g. two persons holding the same umbrella, (3) be model-agnostic. We address these challenges with a semi-supervised distillation training scheme utilizing three dif-ferent networks: a Grounder, a teacher SGG and a student
+SGG. Both the teacher’s spatial common sense acquisition as well as its infusion to the student are the result of two losses Lt and Ls respectively that complement the standard cross-entropy. First, the teacher is trained with Lt forcing its predictions to be accurately grounded back to the im-age. Then, during the student’s training, Ls distills [15] this knowledge from the teacher.
+Inspired by CycleGANs [60], we call this scheme
+Grounding Consistency Distillation (GCD), since predicted relationships have to be consistent with the grounder’s abil-ity to relocate them. GCD is indifferent to the teacher or student model peculiarities and is applicable to unlabeled samples, that serve as out-of-distribution negatives for the per-context dominant classes.
+Teacher training As the teacher SGG we employ
+ATR-Net [11] and assume an existing trained and frozen grounder, i.e. a model that, given a relationship triplet, lo-calizes the bounding boxes of the referring subject-object entities. Training now obtains a closed-loop form, with the teacher predicting a predicate for a pair of entities and the grounder re-estimating their spatial conﬁguration
+sure high-quality grounding of the referring entities. On the other hand, a spatially implausible predicate causes a mismatch between the estimated heatmaps hs, ho and the ground-truth boxes that imposes a penalty on the detection.
+Our total objective is the sum of the standard cross-entropy loss with Lt:
+Ltotal t
+= Lce + α(t)Lt (3) where α(t) is a time-dependent regularizer which increases over time to balance between memorization (recall) Lce and generalization (precision) Lt.
+Student training employs the standard cross-entropy accompanied by Ls: the Kullback-Leibler divergence from pt to ps (student’s output distribution) regularized by a con-stant hyperparameter λ. The student’s total objective is:
+Ltotal s
+= Lce + λDKL(pt (cid:107) ps) (4)
+Since labeled samples already provide training information, both Lt and Ls are only applied on unlabeled pairs.
+The crux of avoiding directly using the teacher for rela-tionship detection and instead employing distillation is that
+Lt is not equally sensitive to all types of misclassiﬁcation.
+In fact, since the quality q is not a distribution on P but rather an isolated plausibility score for r, any class ensur-ing a high-quality grounding is going to be rewarded. This means that occasionally q may be an overestimate of the prediction probability pr t inducing noise that, as we show in section 5, has a negative effect on models’ Recall. The student-teacher scheme attenuates this misbehavior by us-ing the teacher to ﬁlter out that noise while doing a better job in distilling its developed spatial common sense to the student. That ﬁltering is a result of KL divergence penaliz-ing ps proportionally to its deviation from pt.
+Grounding methodology The classic setup for ground-ing referring relationships [20] matches a subject-predicate-object triplet to the image by detecting both the subject and the object. However, we ﬁnd that this setup does not handle ambiguous cases where the input triplet can be grounded to more than one pair of entities, e.g. grounding person wearing hat on an image showing two persons both wearing hats. Since we use grounding as a scaffold for learning precise relationships and not to compare to prior literature, we modify the task to resolve such ambiguities by conditioning the object’s localization to the subject’s ground-truth bounding box and vice versa, thus solving two independent grounding problems.
+We break the grounding of each entity into two steps.
+The ﬁrst step estimates a plausible box that suits the image scale: “how big should an elephant be given that this person is riding it?”. We tackle this question as a re-gression problem on the box’s dimensions. The second step regresses a H ×W heatmap assessing the spatial probability distribution of the position of the estimated box’s center.
+Figure 5. Teacher and Student training pipelines. Teacher: an un-labeled object pair is given as an input (1) to predict a relationship triplet (2), then a Grounder attempts to locate the referring entities, i.e. the subject and the object, back to the image (3). A misguided grounding, e.g. predicting the person (blue) is wearing the shirt (red), leads to a grounding inconsistency (4) that penalizes the relationship classiﬁcation (5). Student: predictions on unla-beled samples are used to distill knowledge from a trained teacher while standard cross-entropy is applied when labels are available. (Fig. 5). Based on the grounding quality we penalize or reward a detected relationship, e.g. in Fig. 5, a spatially-inconsistent prediction back-propagates the grounding error to the teacher.
+Formally, let f (S, O) → pt be the teacher relation-ship detector that maps subject S = (sv, ssem, ssp) and object O = (ov, osem, osp) information (visual, semantic, spatial) to a probability distribution on predicates P.
+If r = argmax(pi t) then, inversely, the grounder is a func-tion g deﬁned as g(ssem, r, osem) → (hs ∈ RH×W , ho ∈
+RH×W ), that spatially grounds a relationship r to heatmaps measuring the conﬁdence of the localization of each entity upon a H × W image representation.
+We quantify the grounding quality q ∈ [0, 1] by aver-aging the maximum conﬁdence value predicted inside the subject’s and object’s bounding boxes: q = max(hs (cid:12) ms) + max(ho (cid:12) mo) 2 (1) where ms, mo are H × W binary masks that are non-zero inside the ground-truth boxes, (cid:12) is the Hadamard product.
+Lt is the cross-entropy between the grounding quality q and the probability pr t of the predicted predicate r: t + (1 − q) log (1 − pr
+Lt = −[q log pr t )]
+Note, that error backpropagates only through pr
+Intu-t . itively, highly probable predicate predictions should en-(2)
+The GCD formulation is invariant to the exact choice of grounder. Therefore, a more detailed presentation is out of our scope and we refer the reader to our suppl. material. 4. Reorientation of Evaluation with Negatives
+As already shown (Fig. 1, Fig. 2, Fig. 4a,b), only when examining unlabeled samples we are able to ascertain the effects of context bias, underscoring the importance of their inclusion in evaluation. However, the most commonly used metric Recall@k (R@k) [25], which measures the portion of true positive relations in the top-k detections, does not pe-nalize mispredictions on the unlabeled pairs. On the other hand, precision metrics that regard unlabeled samples as negatives are pessimistic, since they may penalize correctly predicted relationships that are not annotated [25]. Further-more, we experimentally prove that measuring precision this way is not insightful. This urges to reexamine how to utilize unlabeled samples in evaluation.
+Negative Graph Completion We propose a method to mine and incorporate unlabeled samples into meaningful metrics that reﬂect context bias and spatial common sense by introducing two negative graph completion rules that generate negative labels for proximal predicates. Proximal predicates, which suffer the most from context bias, can be divided in two sets: possessive and belonging. Possessive predicates denote a possession passing from the subject to object, e.g. having and eating. Belonging predicates have an inverse meaning, with the subject being a part of or living on the object, e.g. of and sitting on. In gen-eral, subjects in relations with possessive predicates do not
+“share” the objects, e.g. in person has hand, the hand belongs only to the referred person. Similarly, subjects connected to objects with belonging predicates are not to be
+“shared”, e.g. a person lying on sofa most probably cannot be simultaneously lying on another sofa. With Rp,
+Rb denoting the sets of possessive and belonging predicates respectively, r(s, o) the relationship between the subject s, object o with predicate r, we obtain the following rules:
+• Possessive:∀r ∈ Rp, ∀s, o, s(cid:48) : r(s, o) =⇒ ¬r(s(cid:48), o)
+• Belonging:∀r ∈ Rb, ∀s, o, o(cid:48) : r(s, o) =⇒ ¬r(s, o(cid:48))
+Examples for these rules are depicted in Fig. 6. Full list of
+Possessive/Belonging relationships in our supp. material.
+The negative labels enrich datasets’ test set with targeted and challenging examples that demand models to be more precise, e.g. a model predicting on each time it encounters a jacket and a person would now miss a multitude of negative examples for on. At the same time, precision is not prone to incomplete annotations and can be safely measured on the samples that have a positive or a negative label.
+Why not simply rank background edges? Past ap-proaches [54, 56] employ a “background” class and con-sider the unlabeled samples as negatives for all classes.
+Figure 6. Annotated relationships (green) are used to generate neg-ative edges (red) following speciﬁc rules. Possessive: since a person (yellow) is wearing the shirt, other persons can-not wear it. Belonging: since the shirt is on a person, it cannot be on another person.
+This approach is inherently ﬂawed, as all the unlabeled samples in fact belong to existing classes. Moreover, the two most prominent pruning strategies manually ﬁlter non-intersecting pairs of object boxes as “background” [54] or learn a separate “relatedness” task [11]. Although they partly ameliorate ranking of edges, they conceal the lack of spatial common sense: networks still classify the person (blue box) of Fig. 6 as wearing the shirt (cyan box). Fi-nally, arguing that mispredictions on unlabeled pairs show-case low probability is disproved by Fig. 2c where a large portion of mispredictions is overconﬁdent (p > 0.7). 5. Experiments and Results
+We evaluate a plethora of state-of-the-art scene graph (1) quantitatively generators on two datasets aiming to: show the context bias effects and validate GCD’s efﬁcacy for all tested models, (2) qualitatively explicate GCD’s ef-fect towards more precise scene graphs and improved spa-tial common sense, (3) exhibit the improved ability of our metrics to capture context bias, (4) demonstrate GCD’s su-periority against other alternatives.
+Models, Datasets and Metrics Our model zoo com-prises of six re-implemented models, VTransE [57], Motifs-Net [54], RelDN [59], ATR-Net [11], UVTransE [16] and
+HGAT-Net [27], all employing various feature types and architectures.
+Implementation details are included in our suppl. material. We train and test all models on VRD
+[25] and VG200 [47] for predicate detection (PredDet) [25] and predicate classiﬁcation (PredCls) [47] respectively. In
+PredCls object categories and boxes are considered known, while in PredDet the additional information of objects inter-acting is given. We choose those tasks so as to avoid inter-ference with object detection errors. a(t) (eq. 3) is empiri-cally set a unit step function that rises after the ﬁrst epoch and λ (eq. 4) equal to 80. We report R@50, micro Pre-cision (mP) measured only on labeled samples, mP+ and f-mP+ where + denotes additional evaluation on our mined negative labels and f- focusing measurements only on prox-Models
+VRD (PredDet)
+VG200 (PredCls)
+VTransE [57]
+Motis-Net [54]
+RelDN [59]
+ATR-Net [11]
+UVTransE [16]
+HGAT-Net [27]
+VTransE + GCD
+Motifs-Net + GCD
+RelDN + GCD
+ATR-Net + GCD
+UVTransE + GCD
+HGAT-Net + GCD
+Teacher ATR-Net
+R@50 53.17 55.06 55.02 57.69 56.88 57.00 54.01 55.12 53.97 57.59 56.72 56.24 57.21 mP 13.11 13.31 13.66 13.99 13.46 13.84 12.92 13.06 12.89 13.93 13.72 13.34 13.98 mP+ 17.42 20.67 22.94 23.87 21.63 22.46 20.46 25.58 25.22 28.98 28.2 25.8 29.43 f-mP+ HarMean 26.95 32.38 36.63 38.78 34.69 36.26 36.62 42.43 41.44 48.33 46.77 42.66 48.97 35.77 40.78 43.98 46.38 43.10 44.32 43.65 47.95 46.88 52.56 51.26 48.52 52.77
+R@50 mP mP+ 4.57 2.21 61.16 4.50 2.32 62.54 4.93 2.03 57.83 5.82 2.25 63.02 4.60 2.24 62.69 5.40 2.32 63.30 7.18 2.28 60.64 7.36 2.27 63.30 7.33 1.99 55.49 7.34 2.32 63.35 7.70 2.28 62.36 7.42 2.31 62.83 7.15 2.52 62.78 f-mP+ HarMean 15.60 17.98 16.82 20.01 15.57 16.82 24.63 25.28 25.32 25.17 26.45 25.50 25.55 24.72 27.70 25.89 30.30 24.88 26.56 34.79 36.08 34.43 35.92 37.04 36.28 35.58
+Table 1. Results of re-implemented models with and without GCD. We measure Recall@50 (R@50), micro Precision (mP), mP+, f-mP+ and the Harmonic Mean of R@50 and f-mP+. + indicates additional evaluation on mined negative labels, f- focusing evaluation only on proximal predicates. Teacher included for reference. We conduct experiments for ﬁve random initializations. Maximum standard deviation for VRD: R@50 ±0.42, mP ±0.18, mP+ ±0.66, f-mP+ ±1.16. For VG200: R@50 ±0.04, mP ±0.02, mP+ ±0.22, f-mP+ ±0.39. contains the results when the same models are additionally semi-supervised using the proposed scheme (+GCD). We notice large improvements on mP+ and f-mP+ (up to 35% relative on VRD and 70% on VG200 for UVTransE) with non-substantial R@50 sacriﬁce.
+In total, HarMean is in-creased, up to 22% relative on VRD and 49% on VG200.
+Spatial common sense and sparser graphs Models semi-supervised by GCD are able to generate sparser graphs (Fig. 8) and develop a basic level of spatial common sense (Fig. 7). Note, for instance, how ATR-Net (Fig. 8 upper left) is able to perfectly resolve conﬂicts between all persons and clothes, indicating an improved understanding of predicates’ meanings. For more qualitative results refer to our supp. material.
+What do models predict in place of the most frequent predicate? A model that penalizes a predicate in favor of a synonym [12], e.g. predicting person on chair in-stead of sit on for a sample where on is false, is equiv-alently ignorant of predicate interpretations. Visualizing all edges and predictions upon the graph (top and middle right column of Fig. 8) indicates that models trained with GCD harness implicit spatial features and give reasonable predic-tions for all samples, e.g. a person falsely being on skis is now next to them (Fig. 8 top right).
+Metric comparisons Despite the above qualitative evi-dence, R@50 or mP do not captivate a quantitative improve-ment. On the other hand, mP+ clearly quantiﬁes GCD’s beneﬁts for all models, due to the employment of targeted negatives in evaluation that penalize relentless biased pre-dictions based on context. We further validate that f-mP+ better captures the models’ behavior compared to mP+, without signiﬁcantly altering the ranking. This can be at-tributed to the nature of non-proximal predicates: most of
+Figure 7. Top: GCD manages to focus the distribution of objects on the subject for ATR-Net’s wear predictions. Bottom: Slid-ing box experiment for the phrase person wearing shirt.
+Originally, Motifs-Net predicts wear even if the shirt is located in background regions. When trained with GCD, it acquires a ba-sic level of spatial common sense and predicts wear only upon or very close to the subject. imal predicates. Lastly, we compute the Harmonic Mean (HarMean) of R@50 and f-mP+ as an overall metric.
+Context bias and Grounding Consistency The results for all re-implemented baselines are included in the upper half of Table 1. HarMean changes the ranking between models on both datasets, since models with similar R@50, e.g. UVTransE-Net and HGAT-Net, display signiﬁcantly different precision gains. The lower half of the Table 1
+Figure 8. Qualitative comparison of three models’ predictions on images with proximal predicates trained with standard cross-entropy (CE) and with our method (GCD). With the exception of top and middle of right column, non-proximal predicates are ﬁltered out for clarity.
+GCD creates graphs with sparse connected components. Most edges incorrectly classiﬁed as proximal predicates are now associated to a reasonable geometric predicate. Best viewed in color.
+R@50
++0.50
+-2.41
+-0.33
+Method
+GCD-G
+GCD-D
+GCD f-mP+ HarMean
++6.24
++20.53
++26.19 mP+
++5.23
++16.36
++19.28
+Table 2. Ablation on GCD’s structure reporting the average rel-ative gains for R@50, mP+, f-mP+ and HarMean across the six baselines of Table 1. Removing grounding (GCD-G) or distillation (GCD-D) will respectively cancel out Precision gains and restrict models from optimally developing spatial common sense.
++4.03
++10.22
++14.61
+Method
+Spatial Baseline*
+Oracle Teacher*
+SpatDistill
+GraphL
+GCD (Ours) oracle with NCE (Ours)
+R@50 47.08 56.44
+-0.09
++0.27
+-0.33
+-0.09 mP+ 20.09 33.13
++12.67
++17.95
++19.28
++39.03 f-mP+ HarMean 32.87 55.61
++15.10
++23.25
++26.19
++45.47 38.71 56.02
++8.82
++13.35
++14.66
++24.03
+Table 3. Average relative performance gains across the six base-lines of Table 1. GCD outperforms other approaches in distilling spatial common sense and is comparable to the oracle NCE that uses ruled-based negatives. For models with * the absolute results are reported for reference only. them are geometric and alternatively used for each other, e.g. next to, near and adjacent to. [12] show that in such cases, models tend to predict the most frequent syn-onym per context. Resolving that type of bias is a hard prob-lem and outside the scope of this work. Instead, proximal predicates clearly beneﬁt from GCD, as f-mP+ reﬂects.
+Ablation study Combining grounding and knowledge distillation is key to effectively acquiring spatial common sense. To validate this, we perform an ablation study with two structural variations of GCD: removing the Grounder (GCD-G) and applying Lt directly on the baseline models without an intermediate distillation step (GCD-D).
+Table 2 showcases the mean relative performance gain across the six baselines presented in Table 1. GCD-D in-troduces a high relative Recall drop while having inferior
+Precision boost in comparison to GCD which manages to both maximize Precision and retain minimal Recall penalty.
+GCD-D proves that simply using the teacher’s soft-labels on unlabeled samples to distill knowledge is not able to im-prove models’ spatial reasoning ability.
+Comparison to other approaches While retaining the teacher-student part of GCD we experiment with alterna-tive sources of spatial common sense besides a Grounder.
+Motivated by our analysis that networks biased to context neglect spatial features, we employ the spatial baseline of
+Fig. 3. We call this approach SpatDistill. A second ap-proach is to directly use the oracle negatives derived from our rules and apply the Negative Cross-Entropy loss (NCE) of [18] to the teacher (Oracle Teacher). Distillation from the
+Oracle Teacher serves as an upper bound of GCD since net-works do not have to reason, using an imperfect grounder, about whether an example is a negative. Lastly, we com-pare GCD to the graphical contrastive losses (GraphL) of
+[59], that learn to rank negative samples based on rules.
+The resulting mean relative performance gains are pro-vided in Table 3, where GCD has an obvious advantage over SpatDistill and GraphL. Although precise, the spatial baseline is naive (Table 3) and constrains models’ ability to
+learn the good context prior. GraphL deteriorates precision gains as it incorrectly regards all unlabeled pairs as nega-tives for all classes, yet these do belong to a class; in fact, there are many unlabeled positives even for proximal predi-cates. Lastly, targeted negatives (NCE) have a great impact on the precision metrics. Note, that, in contrast to GCD,
+GraphL and NCE depend on rules that, although valid on
+VRD and VG200, may not generalize for all datasets. See supplementary for the expanded versions of Tables 2, 3.
+Limitations of GCD The grounder employed by our pipeline is not perfect: it can be confused by instances that lie too close (Fig. 8 bottom right), while incorrect predicate predictions may result in correct grounding. Nevertheless, our experiments prove that GCD achieves a basic level of spatial common sense and is comparable to the oracle NCE while being semi-supervised. 6.

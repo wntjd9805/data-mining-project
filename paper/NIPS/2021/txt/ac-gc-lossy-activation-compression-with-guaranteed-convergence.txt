@@ -1,0 +1,196 @@
+Abstract
+Parallel hardware devices (e.g., graphics processor units) have limited high-bandwidth memory capacity. This negatively impacts the training of deep neural networks (DNNs) by increasing runtime and/or decreasing accuracy when reducing model and/or batch size to ﬁt this capacity. Lossy compression is a promising approach to tackling memory capacity constraints, but prior approaches rely on hyperparameter search to achieve a suitable trade-off between convergence and compression, negating runtime beneﬁts. In this paper we build upon recent devel-opments on Stochastic Gradient Descent convergence to prove an upper bound on the expected loss increase when training with compressed activation storage.
+We then express activation compression error in terms of this bound, allowing the compression rate to adapt to training conditions automatically. The advantage of our approach, called AC-GC, over existing lossy compression frameworks is that, given a preset allowable increase in loss, signiﬁcant compression without signiﬁcant increase in error can be achieved with a single training run. When combined with error-bounded methods, AC-GC achieves 15.1× compression with an average accuracy change of 0.1% on text and image datasets. AC-GC functions on any model composed of the layers analyzed and, by avoiding compression rate search, reduces overall training time by 4.6× over SuccessiveHalving. 1
+
+Introduction
+Stochastic Gradient Descent (SGD) has proven efﬁcient and effective for optimizing Deep and Con-volutional Neural Networks (DNNs and CNNs). However, due to deeper and automatically generated networks [20, 22, 44, 52], improvement of accuracy has caused a rapid increase in training memory requirements, which are dominated by the temporary storage of activations between the forward and backward pass of the back-propagation algorithm [45, 48]. Reducing memory consumption leads to faster training and, thus, more effective research of DNN models and applications. However, doing this by decreasing the batch size has many drawbacks. On parallel processors, such as GPUs, a small batch size can lead to poor compute saturation, and reduced training throughput [47]. Smaller batch sizes also introduce errors that impact convergence and accuracy [18]. Over 50GB of memory is required to train some networks, e.g., GPIPE [22].
+Many works have examined reducing activation storage overheads. Lossy compression of activations in memory can reduce memory footprint without network modiﬁcations [6, 14, 25, 27]. Error bounded lossy compression (EBC) [27] has bounded activation error, however, it uses an empirical study to select an error target. Activations can also be ofﬂoaded to an external memory (e.g. CPU DRAM), using either an uncompressed link [31, 45] or compressed link [14, 46]. Activation compression and ofﬂoading have performance overheads from 5% to 60% [7, 14, 25, 27, 45]. Reduced precision 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+training has the side effect of reducing activation size [9, 51, 57]. Finally, restructuring networks to be reversible [17] or efﬁcient scheduling of network layers [8] can reduce memory use.
+Prior lossy and reduced precision approaches [6, 9, 14, 25, 51, 57] utilize automated searches or hand-tuning to determine compression rates, which increase training time and have the potential to select poor compression/accuracy trade-offs. Ideally, an activation compression method has high compression and minimal decrease in trained accuracy. Tuning to achieve this is pro-hibitively expensive. For instance, selecting a
+ﬁxed-point integer (ﬁxpoint) compression rate for ImageNet/ResNet50 using Grid Search uses 16 training runs (Figure 1). Using Successive-Halving [26] can decrease training time, how-ever even with aggressive resource allocations (e.g. 24 GPU-days, Figure 1) total training time is still high. With low resource settings, meth-ods such as SuccessiveHalving [26] and Hyper-band [36] allocate little time to some conﬁgura-tions, increasing the likelihood that compression artifacts [6, 25] can be missed, resulting in poor accuracy. Additionally, when tuning hyperparameters, lossy compression makes it difﬁcult to determine the cause of degraded accuracy. Finally, prior compression methods have an unknown impact on convergence behavior.
+Figure 1: Activation compression rate search cost for ImageNet/ResNet50 [20]. Each box indicates a different compression from 1- to 16-bit ﬁxpoint.
+In this work, we present a framework for lossy Activation Compression with Guaranteed Convergence (AC-GC). To our knowledge, our work is the ﬁrst to prove convergence bounds on SGD with activation compression. AC-GC involves allowing an increase in the bound on the expected loss, which we trade-off for increased compression. We formulate this as a constrained optimization problem: maximizing compression subject to a bounded increase in loss. Doing so allows using a single hyperparameter to correlate convergence bounds with the activation error, which creates compression methods that are iteration, network, and dataset agnostic. Having convergence bounds known a priori allows a user to set a tolerable error rate before training, avoiding compression rate search cost entirely. Our contributions:
+• We prove convergence bounds on SGD under error bounded activation compression with weak assumptions on convexity.
+• We express activation compression and convergence as a constrained optimization problem and analyze the activation error tolerance of common DNN layers within this framework.
+• We combine these error bounds with ﬁxpoint, image, and error bounded compression, to create methods with guaranteed convergence and a compression/accuracy trade-off known prior to training. 2 Preliminaries
+DNNs are commonly used on problems involving a sum, for instance, minimize the total error on a set of training images. The loss L for such a problem takes the form
+L(θ) = (cid:88) n f (θ, Xn) (1) where f represents the loss of one example input Xn with weights θ.
+Stochastic Gradient Descent (SGD) is typically used to optimize these ﬁnite sums, using the iteration
+θ(t+1) = θ(t) − α∇θf (θ(t), Xnt) (2) where α is the learning rate, t is the iteration, ∇θf represents the gradient of f with respect to
+θ, and nt is a randomly chosen training example index from the distribution over n such that
+E[∇θf (θ(t), Xnt)] = ∇θL(θ(t)).
+Figure 2a shows the computation graph for the back-propagation [48] algorithm for a single DNN layer without compression. Back-propagation is often used as it allows efﬁcient calculation of 2
+Figure 2: Computation graph for training of a DNN layer. Activations are a) stored between the forward (left) and backward pass (right) or b) compressed (C) in the forward pass, and decompressed (D) in the backward pass. Red indicates paths potentially affected by compression errors. parameter gradients at the expense of storing activations [48]. A DNN layer is any linear or non-linear function, e.g., a convolution or ReLU activation. The functions fwd, bwd_param, bwd_act are algorithmic implementations of the layer function and the gradients w.r.t. θ and X. In the forward pass, each layer calculates an output activation Y = fwd(X) which is fed to subsequent layers. These activations are temporarily stored after use to avoid a performance penalty from recalculating them in the backward pass. To our knowledge, all frameworks opt to store activations [42, 53]. In the backward pass, parameter gradients and activation gradients are calculated using bwd_param and bwd_act. Parameter gradients are used to update the parameters (Eqn. (2)), and activation gradients are sent downward to the next layer. Depending on the layer type and its derivatives, the bwd_param and bwd_act functions may require activations to be stored. For example, it is computationally efﬁcient to store the input X for convolution layers [42, 53]. The many layer types place a diverse set of constraints on the activation storage.
+Activation compression addresses one of the most signiﬁcant contributors to memory consumption in DNNs. In the forward pass, an activation can be lazily compressed after its last usage (C, Figure 2b). Eagerly compressing activations would require storing both a compressed and uncompressed copy until its last use. In the backward pass, activations are decompressed before their ﬁrst use (D,
+Figure 2b). The backward pass begins only after the forward pass is completed for all layers, resulting in a large reuse distance for stored activations. Compression can thus be performed off the critical path in parallel with compute, with low performance overheads from 4%-30% [7, 25], provided that sufﬁcient resources are available.
+We denote the uncompressed activation as X = (xnchw) ∈ RN ×C×H×W , where N , C, H, and W represent the batch size, channel, height and width, respectively. In the uncompressed backward pass, gradients are calculated from the saved activations, parameters, and gradients from the upward layer (Figure 2 with a); we write this as ∇θf (θ, X) = bwd_param(X, θ, ∇Y f (θ, X)).
+Lossy compression involves discarding some information of the activation to increase the compression rate. In information theory, this is referred to as the rate-distortion trade-off. In our model, the rate refers to the activation error, and the distortion refers to resulting impacts on gradient error and thus accuracy after training. We model lossy compression between the forward and backward pass as an independent perturbation on each value in the activation, ∆X ∈ RN ×C×H×W . Thus, in the compressed backward pass, the perturbed activation is X + ∆X. We denote the approximate gradient resulting from lossy error as ˆ∇θf (θ, X) := bwd_param(X + ∆X, θ, ∇Y f (θ, X)), and the corresponding gradient error as ∆∇θf (θ, X) := ˆ∇θf (θ, X) − ∇θf (θ, X). 3 Guaranteed Convergence
+This section details how gradient error ∆∇θf (θ, X) impacts convergence of SGD. Following this, the lossy compression error ∆X can be expressed in terms of the gradient error, and the compression rate for many methods can be determined. For example, the bitwidth b of ﬁxpoint compression of an activation with range (−1, 1) is b ≥ − log2 |∆xnchw| + ... (3) 3
+Figure 3: SGD convergence behavior. a) and b) without compression, c) this work, and d) ResNet50 training with α = 0.25 and ﬁxpoint activation compression (average over ﬁve runs, shaded indicates the minimum and maximum training loss). where the remaining terms are constants determined by the rounding mode, sign, etc. Any compres-sion method with bounded activation error for a given rate can be combined with the error bounds from this work to guarantee convergence (Sections 3.2 and 4). 3.1 SGD Convergence
+We will brieﬂy summarize uncompressed convergence of SGD from Karimi et al. [28]. Consider training using t iterations of SGD with loss L(θ(t)), with a constant learning rate α and initial point
+θ(0). We assume that L has an optimal point θ(∗) and satisﬁes E[(cid:107)∇θf (θ, Xnt)(cid:107)2] ≤ V 2 for all θ and some V 2. We refer to V 2 as the variance. With some assumptions and problem-deﬁned constants
+C1 and C2 (Appendix A), Karimi et al. [28] demonstrate that the expected error at iteration t is
+E[L(θ(t)) − L(θ(∗))] ≤ (1 − C1α)t(L(θ(0)) − L(θ(∗))) + C2αV 2 (4)
+Initially when training, fast convergence occurs as (1 − C1α)t approaches zero (Figure 3a). Later in training, C2αV 2 dominates, resulting in an approximately constant expected error (Figure 3b). The key observation of this result is that the ﬁnal loss scales with gradient variance, E[L(θ(∞))] ∝ V 2.
+Many DNN classes fall under this progress bound as it uses relatively weak assumptions and does not require a convex f . DNNs using ReLU activations are Lipschitz continuous [55]. Furthermore, those with an L2 loss are piecewise strongly convex, which implies that the required Polyak-Łojasiewic condition is satisﬁed locally [40]. Networks this does not apply to could use another progress bound [3, 28, 41]. 3.2 Compressed Convergence
+Lossy compression trades accuracy for compression. This trade-off can be empirically observed with
+ﬁxpoint compression on CIFAR10/ResNet50 (Figure 3d and Section 6). Our method functions by allowing the loss to increase by some multiplicative error (1 + e2), where e2 ≥ 0, and determining how much compression can be extracted from the change (Figure 3c). The error 1 + e2 is chosen such that the compressed loss converges to the uncompressed loss as e2 → 0.
+Our process for translating the loss bound into maximum activation errors is illustrated in Figure 4a.
+This section outlines how the loss can be bounded by bounding the gradient error or using an intermediate bounding function D(∆X) to simplify the problem. We follow this in Section 4 by deriving an activation error ∆X (∗) for each network layer that satisﬁes this bound. e2 becomes the sole hyperparameter in our method, and selection determines the maximum increase in loss and the compression rate.
+Compressed convergence with increased loss can be viewed as an uncompressed problem with an increased gradient variance bound, (1 + e2)V 2. To determine the activation error which satisﬁes this gradient variance, we must express the variance in terms of a bound on the gradient error (cid:107)∆∇θf (θ, X)(cid:107)2. Theorem 1 demonstrates that a maximum gradient error of e2V 2 satisﬁes the (1+e2) loss bound. There may be multiple regions where the gradient error is below e2V 2 (Figure 4b), which would require iterative solvers to determine suitable activation errors. To apply our technique in practice we introduce a convex function D(∆X) ≥ (cid:107)∆∇θf (θ, X)(cid:107)2, which provides a ﬂexible 4
+Figure 4: a) Flowchart of derivations for obtaining the maximum activation error ∆X (∗) as a function of the loss bound 1 + e2. b) 1D Example for the relationship between the error bound, bounding function, and gradient error for an activation error ∆x. Shaded area satisﬁes the loss bound, and the hatched area satisﬁes D(∆x) ≤ e2V 2. proxy for the gradient error (Figure 4b). Using D(∆X) allows deﬁning the problem so that it has a unique solution. The gradient variance bound, bounding function, and gradient error are related in
+Theorem 1.
+Theorem 1. Given f which obeys (4), and a convex function D(∆X) which bounds the gradient error from above for all X, θ, and ∆X: (cid:107)∆∇θf (θ, X)(cid:107)2 ≤ D(∆X) then any activation error ∆X (∗) where D(∆X (∗)) ≤ e2V 2 satisﬁes
+E[(cid:107) ˆ∇θf (θ, Xnt)(cid:107)2] ≤ (1 + e2)V 2 (5) (6) assuming that E[(cid:107)∆∇θf (θ, Xnt)(cid:107)] = 0 for all θ, with positive value e2, and variance V 2 satisfying
+E[(cid:107)∇θf (θ, Xnt)(cid:107)2] ≤ V 2. All expectations are taken over the training examples nt.
+Proof: See Appendix A.
+Figure 4b demonstrates the relationship between the various bounds, as well as the motivation for the bounding function. The gradient error is derived from per-layer equations, and in many cases is highly non-convex. Due to this, local minima can cause difﬁculties when optimizing with the constraint (cid:107)∆∇θf (θ, X)(cid:107)2 ≤ e2V 2 (Figure 4b). D(∆X) is deﬁned to be convex, making the region deﬁned by the constraint a closed region (hatched, Figure 4b). Although the original constraint could tolerate a higher activation error (and thus compression), using a bounding function provides favorable conditions for obtaining a closed-form solution for the activation error. 4 Framework for Activation Compression
+For our evaluation of AC-GC, we develop activation error bounds for various commonly used
+DNN layers and apply them to several recent networks. This section summarizes bounds for common layers, and derivations and additional layer bounds are provided in Appendix B. Calculating compression error from the gradient error bound e2V 2 requires expressing and solving for the compression/convergence trade-off. We tackle this by formulating the trade-off as a constrained optimization problem: maximizing the compression subject to bounded gradient error. The problem must be solved once per layer type and can be formally deﬁned as
+∆X ∗ = argmax s.t. D(∆X) = e2V 2
+B(∆X) (7)
+∆X where D(∆X) ≥ (cid:107)∆∇θf (θ, X)(cid:107)2 (8) where B(∆X) is a continuous convex function that measures compression rate as a function of the activation error ∆X ∈ RN ×C×H×W . A closed-form solution can be found for many systems of this type using the method of Lagrange multipliers. The constraint D(∆X) ≤ e2V 2 deﬁnes a convex region of potential activation errors where the convergence constraint is satisﬁed (hatched, Figure 4b). 5
+However, as both the B(∆X) and D(∆X) functions are convex, the maximum value must occur along the boundary, hence the equality constraint D(∆X) = e2V 2 in (7) (∆x(∗), Figure 4b). The convexity of D(∆X) also implies that ∆X (∗) is the maximum activation error, i.e., any error (∆X)2 ≤ (∆X (∗))2 also satisﬁes the variance bound (6).
+Many compression methods use a variation of ﬁxpoint. Hence, we select B to measure the number of bits removed from the activation when compressed with reduced precision ﬁxpoint (9). Rounding mode and sign are constant factors that do not affect the result, however, we ignore clipping. The target compression method loosely inﬂuences the objective, hence, non-ﬁxpoint methods may fare better with another error objective.
+B(∆X) :=
+N,C,H,W (cid:88) n,c,h,w log |∆xnchw| (9)
+To derive AC-GC error bounds for DNN layers not presented in this work, one can: 1. Derive (cid:107)∆∇θf (θ, X)(cid:107)2 for the layer type 2. Choose a suitable convex bounding function, D(∆X) ≥ (cid:107)∆∇θf (θ, X)(cid:107)2 3. Obtain the maximum error ∆X (∗) by solving (7) using the method of Lagrange multipliers
+For the sake of brevity, we will summarize the notation, assumptions, and AC-GC error bounds for fully connected, convolution, and batch normalization layers (Table 1). We aim to locate closed-form solutions with low computation overheads, although tighter bounding functions likely exist.
+Henceforth we omit arguments of f and use the following deﬁnitions: Batch size N , input channels
+C, output channels K, input and output activations X and Y , and compression error ∆X.
+A) Fully Connected: Table 1A relates the error for guaranteed convergence with compression error for a fully connected layer, with weights θ = (θkc) ∈ RK×C, input activation X = (xnc) ∈ RN ×C, and output activation gradient ∇Y f = (∂f /∂ynk) ∈ RN ×K. As the error bound (e2V 2/2) decreases, the compression must decrease to compensate. All activations for a fully connected layer have the same error tolerance.
+B) Convolution: Convolution with no padding follows a similar trend to linear layers, with the addition of stride T , a ﬁlter size of R × S, and increased dimensions X = (xnchw) ∈ RN ×C×H×W and ∇Y f = (∂f /∂ynkhw) ∈ RN ×K×H×W . We assume an average usage of activations due to stride, as uneven usage leads to uneven compression, which would require tracking per-element compression rates. Comparing linear and convolution reveals that convolutions have a lower error tolerance due to the increased number of activations (HW ) and weights (RS).
+To fully cover cases encountered in CNNs, we also derive error bounds for cases where activation errors affect multiple convolution layers (e.g., in ResNets [20]).
+C) Batch Normalization: Batch normalization [24] re-normalizes the activation from per-channel standard deviation σ ∈ RC to a learned γ ∈ RC. There is a different dependence on activation error from convolution and linear layers. Instead of causing errors in the parameter gradient ∇γf exclusively, activation error propagates to the activation gradient ∇X f and then to all subsequent layers in the network. To avoid bounding all weights in the network, we isolate the layer and bound the convergence of the batch normalization activations using (cid:107)∆∇X f (cid:107)2 ≤ e2V 2 (10)
+Arriving at a closed-form solution further requires a bound on the parameter gradient error within the c ) ≥ ( ˆ∇γf )2 (Appendix B). Although not observed for the networks layer using positive values (g2 in this work, as network parameter gradients are not directly bounded, the convergence bounds on networks with batch normalization may be violated.
+Layer Normalization: This layer type is similar to batch normalization and requires a similar set of assumptions and derivations (Appendix B).
+ReLU, Dropout, Max Pooling, and Summation: Summation does not require storage of any activation, and the remaining layers (Dropout, Max Pooling, and ReLU) only require a bitmask to calculate their respective gradients. For instance, ReLU requires the storage of the bitmask
+X ≥ 0 [14, 25], and Max Pooling requires a bitmask of the locations of maximal values. As these layers have an efﬁcient lossless high compression method available, we do not analyze them. 6
+Table 1: Guaranteed convergence equations for common network layers. See Appendices for full derivations and assumptions. Empty sums are over all indicies, i.e. (cid:80) := (cid:80)N,C,H,W n,c,h,w . M := N HW
+QUANTITY
+A) FULLY
+CONNECTED
+D(∆X) := (cid:107)∇Y f (cid:107)2(cid:107)∆X(cid:107)2
+∆x(∗)2 nchw = e2V 2 2N C(cid:107)∇Y f (cid:107)2
+B) CONVOLUTION
+RS
+T 2 (cid:107)∇Y f (cid:107)2(cid:107)∆X(cid:107)2 e2V 2T 2 2RSM C(cid:107)∇Y f (cid:107)2
+C) BATCH
+NORMALIZATION c g2 (cid:88) 2γ2 c
+M 2σ4 c e2V 2M σ4 c
+Cγ2
+∆x2 nchw c g2 c 5 Practical Automatic Lossy Compression
+Using the AC-GC error bounds, we create convergence bounded compression methods with auto-matic compression rates, collectively referred to as AutoX. The ﬁrst two methods (AutoQuant and
+AutoCuSZ) adapt scaled ﬁxpoint [14] and error-bounded compression [27], which have bounded errors for a given compression rate. The errors for these methods are unbiased provided that unbiased rounding to ﬁxpoint is used [5, 27]. The third method (AutoJPEG) uses lossy JPEG compression
+[14]. We bound JPEG error using an empirical error-compression relationship using activations sampled from uncompressed training of CIFAR10/ResNet50 [20]. Samples are used ofﬂine with
+JPEG compression to establish the compression-error relationship. This empirical compression-error relationship is used to calculate the JPEG compression levels, which approximately satisfy the error bounds in Table 1. We chain quantization and JPEG with lossless Zero Value Compression [46] to compress sparse activations better, creating AutoQuantZ and AutoJPEGZ.
+As all AutoX used some form of ﬁxpoint, we can express activation error in terms of bits. For any layer type, the relationship between bitwidth b and the convergence bound can be described as (11) b ≥ − log2 |∆xnchw| + ... = − log2 |e| − log2(cid:107)∇θf (cid:107) + ...
+Using the results from Table 1, it can be seen that the bitwidth scales additively with the batch size as
++ log2(N ) for convolution layers, and − log2(N ) for normalization layers.
+Two issues with using AC-GC in a compression method are: 1) the various norms required are computationally expensive, and 2) the formulation assumes exact gradient information is available during the forward pass. We address both issues by statistically estimating activation error bounds.
+Instead of evaluating at every iteration, statistics are calculated at the end of every recalculation interval, speciﬁed in iterations. In the forward pass, a summary (mean or maximum) of the last ten recalculations is used when calculating the errors. This also allows approximating V 2 ≈ (cid:107)∇θf (cid:107)2.
+Although some quantities are available in the forward pass, we estimate all of the activations, parame-ters, and gradients to avoid performing norm calculations at every iteration. Despite norms being estimated, we do not observe that the convergence bound (6) is violated for any network examined. A few training iterations can be used to verify correctness of the norm estimates (Figure 5c). 6 Evaluation
+We examine activation compression by modifying the Chainer framework [53] to compress and decompress activations during training. We measure compression rates every 100 iterations, and otherwise perform paired compression/decompression to maintain the highest performance for our experiments. We focus our analysis on CNNs with image and text datasets, as they have large activation memory requirements, but avoid the largest networks [22, 52] due to limited resources. We create a performance implementation based off Chen et al. [7] to measure throughput.
+For ImageNet [11], CIFAR10 [2] and Div2K [1], we use SGD and 0.9 momentum for VGG16 [50],
+ResNets (RN18 and RN50) [20], Wide ResNet (WRN) [59], and VDSR [29]. IMDB [39] and Text
+Copy [4] are trained using ADAM with CNN [53], RNN [53], and transformer heads [54]. All image datasets are augmented with random sizing, ﬂip, and crop, as well as whitening and PCA for
+ImageNet [30], and 8 × 8 cutout for CIFAR10 [12]. Learning rates, batch sizes, and epochs are 0.05, 128, 300 (CIFAR10, [49]), 0.1, 64, 105 (ImageNet, [58]), 0.1, 32, 110 (Div2K, grid search), 2.0, 64, 100 (Text Copy, [4]), and 0.001, 64, 20 (IMDB, [53]). 7
+Figure 5: a-b) Average loss over the 10th epoch on MNIST/LeNet, where shaded regions indicate the min/max loss over ﬁve runs. a) Loss as function of e. Under compression, the empirical loss (AQ max: AutoQuant with a maximum summary) falls below the theoretical loss bound (1 + e2)L. b) Loss where statistics are calculated every recalculation interval iterations. The max or mean of the last ten intervals is used to calculate the bitwidth. c) Ratio of compressed to uncompressed gradients for the ﬁrst convolution for ImageNet/ResNet18, where the compressed gradient is used to update the parameters. Clusters indicate the ﬁrst 50 iterations of every ten epochs.
+All forward and backward pass calculations use ﬂoating-point, using activations that have been compressed and decompressed between the two passes. Baseline refers to uncompressed training, i.e., 32-bit ﬂoating-point activations. GridQuantZ uses the same implementation of AutoQuantZ, however, it uses grid search over eight bit-widths of 2, 3, 4, 6, 8, 10, 12 and 16 bits, and then chooses the lowest with accuracy within 0.1% of the baseline. These grid points were selected to give good coverage of low and medium bit-widths, and are approximately logarithmic-spaced. SuccessiveHalving [26] and Hyperband [36] produce similar accuracy/compression to grid search but take less time. Unless otherwise stated, all experiments use e2 = 0.5, parameter estimates from the mean of a ten entry window, and a recalculation interval of 100 iterations. A value of e2 = 0.5 allows a small increase in loss over the baseline (+50%), but other values could be chosen depending on the desired error tolerance. Appendices C and D contain additional detail on hyperparameters and implementations. 6.1 Parameter Sensitivity
+We isolate the impacts of parameter estimation and e selection by training LeNet [33] on MNIST
+[32], and RN18 [20] on ImageNet [11]. We train MNIST to convergence by using SGD with no momentum, a learning rate of 0.001, a batch size of 64, and 10 epochs.
+The effect of e, recalculation interval, and summary method are evaluated by training MNIST/Lenet with different conﬁgurations of AutoQuant (AQ) (Figures 5a and 5b). Decreasing e (which increases bitwidth) causes the loss to increase, however, the average loss does not violate the bound in Theorem 1 (Figure 5a). In general, all networks examined with e2 = 0.5 have loss changes below 2% and validation score changes below 0.5% (Sections 6.2 and 6.3), which demonstrates that AC-GC error bounds are not violated. Both interval and summary method have a minimal impact on the training loss for MNIST (Figure 5b). As there is an insigniﬁcant change in loss, we use the mean for AC-GC as it has higher compression.
+We evaluate ImageNet/ResNet18 using a dual training approach to ensure the correctness of parameter estimation (Figure 5c). This involves training using AutoQuant, while evaluating the true weight gradients ∇θf ofﬂine and comparing against their compressed counterpart ˆ∇θf . The ratio is ≈ 1 for the duration of training, and does not violate the bound for e2 = 0.5 (i.e., ≤ 1.5). The mean ratio is less than one, likely due to decreased activation variance from compression to a discrete set of values.
+We observe similar behavior for the other layers in the network (not shown). 6.2 CIFAR10, Div2K and IMDB
+We compare the AutoX methods with ﬁxpoint grid search (GridQuantZ), and with prior works on lossy JPEG compression [14] (Table 2). Grid search requires oracle knowledge of the baseline, and 8× the training iterations of any other method in Table 2. Compared to GridQuantZ, AutoQuantZ uses a single run of training, and provides a similar compression rate of 7.5×. AutoCuSZ has a 8
+Table 2: Test/validation score and compression rate (bracketed) for ﬁxpoint with grid search (GridQuantZ), AutoX methods, and JPEG-ACT (optL5H from [14]), averaged over 3 runs (Im-ageNet) or 5 runs (remainder). The highest accuracy and compression are bolded. Trained using 900
+GPU-days (RTX 2080 Ti). N/A indicates either not run in [14], or lack of spatial activations.
+MODEL
+BASE
+AUTO
+QUANTZ
+AUTO
+CUSZ
+AUTO
+JPEGZ
+JPEG-ACT[14]
+GRID
+QUANTZ 35.8 (25.2×) 93.5 ( 7.4×) 95.0 ( 4.2×) 95.9 ( 6.5×) 93.5 ( 9.4×) 94.7 (15.5×) 95.8 (14.6×)
+CIFAR10 % TOP-1 TEST ACCURACY 93.6
+VGG 94.9
+RN50
+WRN 95.8
+DIV2K BEST VAL. PSNR 36.1 ( 5.1×)
+VDSR 36.1
+IMDB % BEST VAL. ACCURACY 61.6 (12.2×)
+CNN 60.1 (10.0×)
+LSTM
+TEXT COPY % BEST TEST ACCURACY 98.6 ( 7.1×)
+TRANS
+IMAGENET % TOP-1 CENTER CROP VAL. ACCURACY 68.5 ( 4.2×)
+RN18 72.7 ( 4.8×)
+RN50
+AVERAGE %-POINT CHANGE AND COMPRESSION RATIO
+ALL 61.8 (19.3×) 60.9 ( 8.8×) 68.1 ( 6.8×) 72.5 (10.1×) 98.3 (12.7×) 68.6 72.3 61.4 60.3 98.8 0 92.9 (12.5×) 94.3 ( 9.2×) 95.3 (11.7×) 36.1 ( 7.9×) 61.4 (11.2×)
+N/A 92.4 (11.9×) 94.4 ( 7.5×) 94.2 (10.9×) 93.5 ( 6.3×) 95.0 ( 5.7×) 96.0 ( 7.6×) 35.4 ( 9.1×) 36.0 ( 6.7×)
+N/A
+N/A 61.7 (16.5×) 60.4 (14.7×)
+N/A
+N/A 98.9 ( 5.1×) 68.1 ( 8.1×) 71.5 ( 8.5×) 67.3 ( 7.2×) 71.6 ( 5.9×) 68.5 ( 2.9×) 72.5 ( 4.9×)
++0.0 ( 7.5×) −0.1 (15.1×) −0.6 (10.5×) −1.0 ( 7.4×) +0.1 ( 7.8×) compression 2.0× higher than JPEG-ACT, while maintaining accuracy to within 0.1 of the baseline on average. With a suitable error bound, CuSZ can extract signiﬁcant compression from zeros and spatial information. On non-spatial data and non-image datasets (Text Copy and IMDB, Table 2) we observe that AutoCuSZ extracts similarly high compression with little accuracy change. Finally,
+AutoJPEGZ vs. JPEG-ACT demonstrates that using AC-GC error bounds gives higher accuracy and compression than using heuristics to select JPEG hyperparameters. In general, we ﬁnd that using e2 > 0.5 decreases accuracy, leaving little reason to modify it. 6.3
+ImageNet
+On ImageNet training with ResNets (Table 2), the AutoX methods obtain a high accuracy. Our
+ImageNet accuracies are lower than other works as we do not use random scaling (which improves performance), and we report 1-crop accuracy. Our 10-crop accuracy for the ResNet50 baseline is 75.2%. Reduced compression rates on ResNet18 vs. ResNet50 are due to a lower sparsity in
+ReLU activations, which we hypothesize is caused by the different bottleneck structures of the two networks [20]. The higher-than-baseline accuracy of AutoQuantZ (Table 2) is caused by a large standard deviation for the ImageNet baseline (±0.21). On ImageNet, AutoCuSZ gives a high compression in exchange for a small decrease in accuracy, 0.15%-points. AutoQuantZ provides high accuracy, at a moderate compression rate of 0.7×, with a 1.2%-point better accuracy than JPEG-ACT.
+However, the primary advantage of AutoX methods is that the pre-training bound on loss increases. 6.4 Overheads
+The AutoX methods require error bound calculation (common to all methods) and compression.
+Our unoptimized AutoQuantZ implementation achieves throughput of 1.66× (N = 128) vs. naive swapping to the CPU (N = 128), and 0.64× vs. uncompressed training (N = 32) (ImageNet/
+ResNet50). Our primary contribution, AC-GC error bound calculation, uses 0.4% of total training time. This is negligible when compared to compression overhead, e.g., 4% for ﬁxpoint [14, 25], 17% for CuSZ [27], 33% for ActNN-L3 [7], or 13% for hardware accelerated JPEG [14]. Unoptimized
+AutoQuantZ is 23% slower compared to ActNN-L3 [7]. Compression rate search time is decreased by 4.6× when compared to SuccessiveHalving (Figure 1). 9
+Table 3: Comparison with prior works on CIFAR10 (C10) and ImageNet (IN). ± indicates standard deviation, if available. Accuracy is presented relative to the baseline accuracy of each work. ∗ Does not include 2×memory reduction from recalculating activations, which is orthogonal to this work.
+DATASET
+MODEL
+METHOD
+AUTO
+CUSZ
+IN
+RN50
+AUTO
+-CUSZ
+WAGE
+[57]
+C10
+VGG16 8-BIT
+ACC. (%) −0.2±0.2
+COMPR. 10.1×
+−0.3 4×
+BAA∗
+[6]
+JPEG-ACT[14]
+IN
+RN152 4-BIT
++RECALC.
+−0.5 8×
+IN
+RN50
+JPEG
++ZVC
+−0.1 5.9×
+ULP
+[51]
+IN
+RN50 4-BIT
+−0.3 8×
+EBC
+[27]
+IN
+RN50
+CUSZ
+−0.9 11.0×
+ACTNN
+-L3[7]
+IN
+RN152 2-BIT
+MIX. PREC.
+−0.2 12× 7

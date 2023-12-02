@@ -1,0 +1,97 @@
+Abstract
+Intermediate features of a pre-trained model have been shown informative for making accurate predictions on downstream tasks, even if the model backbone is kept frozen.
+The key challenge is how to utilize these intermediate fea-tures given their gigantic amount. We propose visual query tuning (VQT), a simple yet effective approach to aggregate intermediate features of Vision Transformers. Through in-troducing a handful of learnable “query” tokens to each layer, VQT leverages the inner workings of Transformers to “summarize” rich intermediate features of each layer, which can then be used to train the prediction heads of downstream tasks. As VQT keeps the intermediate features intact and only learns to combine them, it enjoys memory efﬁciency in training, compared to many other parameter-efﬁcient ﬁne-tuning approaches that learn to adapt features and need back-propagation through the entire backbone.
+This also suggests the complementary role between VQT and those approaches in transfer learning. Empirically,
+VQT consistently surpasses the state-of-the-art approach that utilizes intermediate features for transfer learning and outperforms full ﬁne-tuning in many cases. Compared to parameter-efﬁcient approaches that adapt features, VQT achieves much higher accuracy under memory constraints.
+Most importantly, VQT is compatible with these approaches to attain even higher accuracy, making it a simple add-on to further boost transfer learning. Code is available at https://github.com/andytu28/VQT. 1.
+
+Introduction
+Transfer learning by adapting large pre-trained models to downstream tasks has been a de facto standard for competi-tive performance, especially when downstream tasks have limited data [37, 59]. Generally speaking, there are two ways to adapt a pre-trained model [15, 27]: updating the model backbone for new feature embeddings (the output of the penultimate layer) or recombining the existing fea-*Equal contributions. ture embeddings, which correspond to the two prevalent ap-proaches, ﬁne-tuning and linear probing, respectively. Fine-tuning, or more speciﬁcally, full ﬁne-tuning, updates all the model parameters end-to-end based on the new dataset. Al-though ﬁne-tuning consistently outperforms linear probing on various tasks [54], it requires running gradient descent for all parameters and storing a separate ﬁne-tuned model for each task, making it computationally expensive and pa-rameter inefﬁcient. These problems become more salient with Transformer-based models whose parameters grow ex-ponentially [17, 26, 46]. Alternatively, linear probing only trains and stores new prediction heads to recombine features while keeping the backbone frozen. Despite its computa-tional and parameter efﬁciency, linear probing is often less attractive due to its inferior performance.
+Several recent works have attempted to overcome such a dilemma in transfer learning. One representative work is by
+Evci et al. [15], who attributed the success of ﬁne-tuning to leveraging the “intermediate” features of pre-trained models and proposed to directly allow linear probing to access the intermediate features. Some other works also demonstrated the effectiveness of such an approach [14,15]. Nevertheless, given numerous intermediate features in each layer, most of these methods require pooling to reduce the dimensionality, which likely would eliminate useful information before the prediction head can access it.
+To better utilize intermediate features, we propose Vi-sual Query Tuning (VQT), a simple yet effective approach to aggregate the intermediate features of Transformer-based models like Vision Transformers (ViT) [13]. A Transformer usually contains multiple Transformer layers, each starting with a Multi-head self-attention (MSA) module operating over the intermediate feature tokens (often > 100 tokens) outputted by the previous layer. The MSA module trans-forms each feature token by querying all the other tokens, followed by a weighted combination of their features.
+Taking such inner workings into account, VQT intro-duces a handful of learnable “query” tokens to each layer, which, through the MSA module, can then “summarize” the intermediate features of the previous layer to reduce the di-mensionality. The output features of these query tokens af-ter each layer can then be used by linear probing to make predictions. Compared to pooling which simply averages the features over tokens, VQT performs a weighted combi-nation whose weights are adaptive, conditioned on the fea-tures and the learned query tokens, and is more likely to capture useful information for the downstream task.
+At ﬁrst glance, VQT may look superﬁcially similar to
+Visual Prompt Tuning (VPT) [23], a recent transfer learn-ing method that also introduces additional learnable tokens (i.e., prompts) to each layer of Transformers, but they are fundamentally different in two aspects. First, our VQT only uses the additional tokens to generate queries, not keys and values, for the MSA module. Thus, it does not change the intermediate features of a Transformer at all. In contrast, the additional tokens in VPT generate queries, keys, and values, and thus can be queried by other tokens and change their intermediate features. Second, and more importantly, while our VQT leverages the corresponding outputs of the addi-tional tokens as summarized intermediate features, VPT in its Deep version disregards such output features entirely. In other words, these two methods take fundamentally differ-ent routes to approach transfer learning: VQT learns to leverage the existing intermediate features, while VPT aims to adapt the intermediate features. As will be demonstrated in section 4, these two routes have complementary strengths and can be compatible to further unleash the power of trans-fer learning. It is worth noting that most of the recent meth-ods towards parameter-efﬁcient transfer learning (PETL), such as Preﬁx Tuning [30] and AdaptFormer [10], all can be considered adapting the intermediate features [19]. Thus, the aforementioned complementary strengths still apply.
+Besides the difference in how to approach transfer learn-ing, another difference between VQT and many other PETL including VPT, is memory usage in training. methods,
+While many of them freeze (most of) the backbone model and only learn to adjust or add some parameters, the fact that the intermediate features are updated implies the need of a full back-propagation throughout the backbone, which is memory-heavy. In contrast, VQT keeps all the intermedi-ate features intact and only learns to combine them. Learn-ing the query tokens thus bypasses many paths in the stan-dard back-propagation, reducing the memory footprint by 76% compared to VPT.
+We validate VQT on various downstream visual recog-nition tasks, using a pre-trained ViT [13] as the backbone.
+VQT surpasses the SOTA method that utilizes intermedi-ate features [15] and full ﬁne-tuning in most tasks. We fur-ther demonstrate the robust and mutually beneﬁcial compat-ibility between VQT and existing PETL approaches using different pre-trained backbones, including self-supervised and image-language pre-training. Finally, VQT achieves much higher accuracy than other PETL methods in a low-memory regime, suggesting that it is a more memory-Head l c s
+...
+...
+Transformer Layer LM
+...
+Transformer Layer L2 l c s
+...
+...
+...
+Transformer Layer L1 l c s
+...
+Z0
+...
+P0
+Add & Norm
+MLP
+Add & Norm
+MSA
+V 
+V'
+K 
+K'
+Q 
+Q'
+Wv
+Wk l c s
+...
+Zm
+Wq
+......
+Pm (a) VPT: Visual Prompt Tuning (deep version) [23]
+Head l c s
+...
+...
+Transformer Layer LM
+...
+Transformer Layer L2 l c s
+...
+...
+...
+Transformer Layer L1 l c s
+...
+Z0
+...
+P0
+Add & Norm
+MLP
+Add & Norm
+MSA
+K 
+Wk
+V 
+Wv l c s
+...
+Zm
+Q  Q'
+Wq
+......
+Pm
+Forward 
+Pass 
+Backward 
+Pass 
+Tunable 
+Parameters 
+Frozen 
+Parameters 
+Intermediate 
+Features 
+Unmodified w.r.t  
+Tunable Parameters  
+Modified w.r.t  
+Tunable Parameters   (b) Our VQT: Visual Query Tuning
+Figure 1. Our Visual Query Tuning (VQT) vs. Visual Prompt
+Tuning (VPT) [23]. Our VQT allows linear probing to directly access the intermediate features of a frozen Transformer model for parameter-efﬁcient transfer learning. The newly introduced query tokens in VQT (marked by the red empty boxes in the red shaded areas) only append additional columns (i.e., Q0) to the Query fea-tures Q, not to the Value features V and the Key features K.
+Thus, VQT keeps the intermediate features intact (gray empty boxes), enabling it to bypass expensive back-propagation steps in training (hence memory efﬁcient). In contrast, VPT modiﬁes the intermediate features (gray solid boxes) and needs more memory to learn its prompts. Please see section 3 for details. efﬁcient method.
+To sum up, our key contributions are 1. We propose VQT to aggregate intermediate features of
+Transformers for effective linear probing, featuring pa-rameter and memory efﬁcient transfer learning. 2. VQT is compatible with other PETL methods that adapt intermediate features, further boosting the performance. 3. VQT is robust to different pre-training setups, including self-supervised and image-language pre-training.
+2.

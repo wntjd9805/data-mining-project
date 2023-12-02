@@ -1,0 +1,195 @@
+Abstract
+We propose a simple interpolation-based method for the efﬁcient approximation of gradients in neural ODE models. We compare it with the reverse dynamic method (known in the literature as “adjoint method”) to train neural ODEs on classiﬁcation, density estimation, and inference approximation tasks. We also propose a theoreti-cal justiﬁcation of our approach using logarithmic norm formalism. As a result, our method allows faster model training than the reverse dynamic method that was conﬁrmed and validated by extensive numerical experiments for several standard benchmarks. 1
+
+Introduction
+We propose a novel method to train neural ordinary differential equations (neural ODEs) [1]. This method performs stable and memory-efﬁcient backpropagation through the solution of initial value problems (IVP). Throughout the study, we use the term neural ODEs for all neural networks with so-called ODE blocks. An ODE block is a continuous analog of a residual neural network [2] that can be considered as Euler discretization of ordinary differential equations. Neural ODEs have already been successfully applied to various machine learning problems, including classiﬁcation, generative modeling, and time series prediction [1, 3, 4].
+ODE block is a neural network layer that takes the activations z0 from the previous layer as input, solves the initial value problem (IVP) described as (cid:26) dz dt = f (z(t), t, θ), z(t0) = z0, t ∈ [t0, t1] (1) and solved by any ODE solver. Note, the right-hand side in IVP (1) depends on set of parameters θ which is gradually updated during training. Therefore, during the backward pass in neural ODEs, the loss function L, which depends on the solution of the IVP, should be differentiated with respect to parameter θ. A direct application of backpropagation to ODE solvers require a huge memory, since for every time step τk, the output z(τk) must be stored as a part of the computational graph.
+However, the approach based on the adjoint method [5, 6] helps to propagate gradients through the initial value problem with a relatively small memory footprint. Originally adjoint method has been actively used in mathematical modeling, for example, in seismograph and climate studies [7, 8].
+In the
+It was used to investigate the sensitivity of the model output with respect to the input. context of training neural ODEs, the adjoint method is modiﬁed to combine it with the standard backpropagation [1]. We refer to this modiﬁed adjoint method as reverse dynamic method (RDM). 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+This method yields solving the augmented initial value problem backward-in-time. We call this IVP as the adjoint IVP. One of the components of the adjoint IVP is IVP that deﬁnes z(t), t ∈ [0, 1].
+Therefore, the numerical solving of the adjoint IVP does not require storing intermediate activations z(τk) during the forward pass. As a result, the memory footprint becomes smaller.
+However, Gholami et al. [9] showed that the RDM might lead to catastrophic numerical instabili-ties. To address this issue, the authors introduce a method called ANODE. This method exploits checkpointing idea [10], i.e., propose to store checkpoints z(τk) at intermediate selected time points
+τk during the forward pass. As result of this, in the backward pass, ANODE performs additional
+ODE solver steps forward-in-time in each interval between sequential checkpoints. The intermediate activations are stored to compute the target gradient. The main disadvantage of ANODE is that it requires intermediate activations storage and need to perform additional ODE solver steps.
+To address the instability of the reverse dynamic method and limitations of ANODE, we propose interpolated reverse dynamic method (IRDM), which is described in detail in Section 2. This method is based on a smooth function interpolation technique to approximate z(t) and exclude the IVP that deﬁnes z(t) from the adjoint IVP. Thus, we do not reverse IVP (1) and avoid the instability problem of the reverse dynamic method. Under mild conditions on the right-hand side f (z(t), t, θ), function z(t) is continuously differentiable as a solution of IVP, i.e. z(t) ∈ C 1[t0, t1]. Therefore, it can be approximated with the barycentric Lagrange interpolation (BLI) [11] on a Chebyshev grid.
+This technique is widely used for interpolation problems [11]. To construct such approximation, one has to store activations z(t) in the point from the Chebyshev grid during the forward pass.
+These activations can be computed with DOPRI5 adaptive ODE solver without additional right-hand side evaluations [12]. After that, in the backward pass, stored activations are used to approximate z(t) during the adjoint IVP solving. The main requirement for our method to work correctly and efﬁciently is that z(t) can be approximated by BLI with sufﬁcient accuracy. This can only be veriﬁed experimentally. However, the accuracy of such approximation is inherently related to the smoothness of the solution, which is also one of the main motivations behind using neural ODEs.
+Our main contributions are the following.
+• We propose interpolated reverse dynamic method to train neural ODEs. This method uses approxi-mated activations z(t) in the backward pass and reduces the dimension of the initial value problem, that is used to compute the gradient. Thus, the training becomes faster.
+• We present the error bound for the gradient norm under small perturbation of the activations z(t) induced by using interpolated values.
+• We have evaluated our approach on density estimation, inference approximation, and classiﬁcation tasks and showed its effectiveness in terms of test loss-training time trade-off compared to the reverse dynamic method. 2
+Interpolated Reverse Dynamic Method
+Deep learning problems are usually solved by minimizing a loss function L with respect to model parameters using gradient-based methods. To compute the gradient ∂L
+∂θ without saving computational graph from the forward pass, the adjoint method can be used [13, 14].
+Adjoint method. The main idea of the adjont method is to derive gradients of the loss function L from the ﬁrst-order optimality conditions (FOOC) for a constrained optimization problem. In our case, the optimization problem is formulated as the loss minimization with ODE constraint in the form of (1).
+To construct the corresponding Lagrangian, the adjoint variable a(t) is introduced
+L(z(t), θ, a(t)) = L(z(t1), θ) + (cid:90) t1 t0 a(t) (cid:18) dz dt (cid:19)
+− f (z(t), t, θ) dt, 2
+and the FOOC can be written in the following form
+δL
+δa(t)
+δL
+δz(t)
+= 0 →
+= 0 →
+δL
+δθ
+= 0 →
+∂L
+∂θ
+− f (z(t), t, θ) = 0 dz dt (cid:40) da dt = −a(t)(cid:62) ∂f (z(t),t,θ)
+∂z a(t1) − ∂L
+∂z(t1) = 0 a(t)(cid:62) ∂f (z(t), t, θ) (cid:90) t1
+=
+∂θ t0 (2) (3) (4) dt.
+Hence, the target gradient ∂L
+∂θ can be computed in the following way: ODE (2) gives the activation dynamic z(t), ODE (3) gives the adjoint variable a(t) based on z(t) and ﬁnally the target gradient
+∂L
+∂θ is computed with the integral in (4). The adjoint method assumes that activations z(t0) = z0 are known in the backward pass. Thus, IVP (1) is solved forward-in-time, IVP (3) is solved backward-in-time and integral (4) is computed based on the derived a(t) and z(t). The adjoint method requires storing gradients ∂f
+∂z in intermediate activations z(t), t ∈ [t0, t1]. Therefore, to reduce its memory consumption, the checkpointing idea is used.
+∂θ and ∂f
+Checkpointing in the adjoint method. ANODE method [9] exploits checkpointing idea to get the target gradient ∂L
+∂θ . This method stores some intermediate activations z(t) in the forward pass.
+These activations are called checkpoints. In the backward pass, ANODE considers intervals between sequential checkpoints from the right side to the left side. In every interval, ODE (2) with an initial condition equal to the checkpoint on the left is solved forward-in-time, IVP (3) is solved backward-in-time and the integral is updated. This approach is illustrated in Figure 1d. This approach still requires additional memory to store checkpoints and gradients ∂f
+∂θ . Also, it solves ODE (2) with multiple initial conditions equal to checkpoints. These drawbacks are ﬁxed in reverse dynamic method [1].
+Reverse dynamic method. This method is used in [1], where the neural ODE model is proposed, under the name “adjoint method”. The reverse dynamic method assumes that activations z(t1) = z1 are known and do not store any checkpoints during the backward pass. Therefore, in the backward pass, the following IVP is solved backward-in-time and deﬁnes activaions: (cid:26) dz dt = f (z(t), t, θ) z(t1) = z1, (5)
+IVP (3) is solved backward-in-time and integral (4) is computed as the solution of the following IVP: (cid:40) d (cid:0) ∂L dt
+∂θ
+∂L
+∂θ (t1) = 0. (cid:1) = −a(t)(cid:62) ∂f (z(t),t,θ)
+∂θ (6)
+Thus, IVPs (3),(5) and (6) can be composed in the augmented IVP that is solved backward-in-time.
+This method is illustrated in Figure 1a. The study [9] demonstrates that this method can be unstable due to the reverse IVP (1). To get the right trade-off between stability and memory consumption, we propose interpolated reverse dynamic method (IRDM).
+In the proposed interpolated reverse dynamic method
+Interpolated reverse dynamic method. (IRDM), we suggest to eliminate (5) from the adjoint IVP. Instead of using IVP (5) to get activations z(t), the IRDM approximates them through the barycentric Lagrange interpolation (BLI) on a
+Chebyshev grid [11]. This method is summarized in Figure 1c. We urge readers not to confuse the
+Lagrange interpolation, which is mostly of theoretical interest, with the BLI, that is widely used in practice for polynomial interpolation [15].
+Denote by ˆz(t) the interpolated activations with the BLI technique that are used in the backward pass.
+As described in [15], ˆz(t) can be computed with the following equation: (cid:32) N (cid:33) (cid:88) (cid:33) (cid:30) (cid:32) N (cid:88)
+ˆz(t) = wn t − τn
+ˆzn n=0 n=0 wn t − τn
+, (7) where the sequence {τn}N n=0 form the Chebyshev grid, and t0 = τ0 < τ1 < . . . < τN = t1,
+ˆzn (cid:44) z(τn) are exact activations computed in the Chebyshev grid during the forward pass and stored 3
+to be used in the backward pass. To get these activations during the forward pass, we explore features of DOPRI5 adaptive solver [12] to compute activations in given time points (e.g., in Chebyshev grid) without additional right-hand side evaluations. Thus, we store z(τn) and solve IVP (1) simultaneously.
+The weights wn are computed as follows once for the entire training process wn = (−1)n sin (cid:18) (2n + 1)π 2N + 2 (cid:19)
+.
+The computational complexity of computing ˆz(t), as well as additional memory usage, is O(N ).
+Since we approximate z(t), only (3) and (6) have to be solved backward-in-time during the backward pass. Thus, the dimension of the backward IVP is reduced by the size of the activations z(t).
+From the theory of polynomial interpolation, it is known, that if z(t) is analytic function, then the following bound on the BLI approximation error holds max t∈[0,1] (cid:107) ˆz(t) − z(t)(cid:107)∞ ≤ O(M −N ), (8) where M > 1 depends on the region where the activation dynamic z(t) is analytic, more details see in [15, 16, 17]. The solution of IVP (1) is analytic if the right-hand side f (z(t), t, θ) is analytic [18]. (a) Reverse dynamic method (RDM) [1], [3] (b) Standard backpropagation (c) Interpolated reverse dynamic method (IRDM) (d) Checkpointing (ANODE)
+Figure 1: Comparison of different schemes to make forward and backward passes through the
+ODE block. Red circles indicate that the activations are stored at these time points. Red arrows indicate that during ODE steps, the outputs of the intermediate layer are stored to propagate gradients.
+Green arrows correspond to the steps with ODE solvers. Blue arrows correspond to the steps with automatic differentiation through the stored computational graph. Activations in Chebyshev grid points (t0, τ1, τ2 and t1 in Figure 1c) are stored in the interpolation approach during the forward pass.
+Chebyshev grid points do not necessarily coincide with time steps of ODE solver, but activations in these points can be recovered from the computed activations with ODE solver. The stored activations are used to approximate activations in the backward pass. The dotted arrows in Figure 1c shows that activations in t0, τ1, τ2 and t1 are used to interpolate activations in the backward pass. 3 Upper Bound on the Gradient Error Induced by Interpolated Activations
+The proposed method excludes IVP that deﬁnes z(t) from the adjoint IVP and uses approximation
+ˆz(t) given by the barycentric Lagrange interpolation formula (7). Therefore, the dimension of the adjoint IVP is reduced, but the error in gradient ∂L
+∂θ appears since the activations are not exact. In this section, we present the upper bound on the gradient error norm and the factors that affect the 4
+magnitude of this error. By the gradient error norm, we mean the norm of the difference between gradients computed with exact activations z(t) and interpolated ones ˆz(t).
+According to (4) we have to estimate the following error norm, where the 2-norm is used
+E = (cid:13) (cid:13) (cid:13) (cid:13) (cid:90) t1 t0 (cid:20)
+˜a(t)(cid:62) ∂f ( ˜z(t), t, θ)
+∂θ
+− a(t)(cid:62) ∂f (z(t), t, θ)
+∂θ (cid:21) dt (cid:13) (cid:13) (cid:13) (cid:13)
+, (9) where ˜a(t) and ˜z(t) are adjoint variables and activations obtained with interpolation technique and a(t) and z(t) are exact ones. Now we derive the upper bound estimate of E and show what factors affect this upper bound. Introducing perturbations ∆z(t) and ∆a(t) such that ˜a(t) = a(t) + ∆a(t) and ˜z(t) = z(t) + ∆z(t) and using the ﬁrst-order expansion of ∂f
+∂θ at z(t) we can re-write terms from (9) with perturbed adjoint variables and activations as follows
+˜a(t)(cid:62) ∂f ( ˜z(t), t, θ)
+∂θ
+= (a(t)+∆a(t))(cid:62) (cid:18) ∂f (z(t), t, θ)
+∂θ
++
+∂2f (z(t), t, θ)
+∂θ∂z
+∆z(t) + O((cid:107)∆z(t)(cid:107)2) (cid:19)
+Substitution this equality in (9) and applying standard inequalities lead to the following upper bound
+E ≤ (cid:90) t1 t0 (cid:107)a(t)(cid:107)(cid:107)∆z(t)(cid:107) (cid:90) t1 t0 (cid:107)∆a(t)(cid:107)(cid:107)∆z(t)(cid:107) (cid:13)
+∂2f (z(t), t, θ) (cid:13) (cid:13)
+∂θ∂z (cid:13) (cid:13)
+∂2f (z(t), t, θ) (cid:13) (cid:13)
+∂θ∂z (cid:13) (cid:13) (cid:13) (cid:13) (cid:13) (cid:13) (cid:13) (cid:13) (cid:13) dt + (cid:90) t1 t0 (cid:107)a(t)(cid:107) (cid:13) (cid:13) (cid:13) (cid:13)
+∂f (z(t), t, θ)
+∂θ (cid:13) (cid:13) (cid:13) (cid:13) dt+ dt + Mz (cid:90) t1 t0 ((cid:107)a(t)(cid:107) + (cid:107)∆a(t)(cid:107))(cid:107)∆z(t)(cid:107)2dt, (10) where Mz > 0 is a constant hidden in big-O notation. In order to estimate the error norm, we have to analyze bounds for all terms in (10). The norm of activations perturbation (cid:107)∆z(t)(cid:107) is bounded according to the upper bound on the interpolation error (8). At the same time, the gradient ∂f (z(t),t,θ) and the second partial derivative ∂2f (z(t),t,θ) are not bounded a priori, so we need to consider them additionally. The remaining terms are (cid:107)a(t)(cid:107) and (cid:107)∆a(t)(cid:107) and to bound them we need the following
+Lemma [19].
+∂θ∂z
+∂θ
+Lemma 3.1 ([19], see Lemma 1)
+Let x(t) be a solution of the following non-autonomous linear system
+
+
+ dx dt x(t0) = x0.
+= x(t)(cid:62)A(t) + b(t),
+Then (cid:107)x(t)(cid:107) ≤ ξ(t), where the scalar function ξ satisﬁes the IVP
+
+
+ dξ dt
+ξ(t0) = (cid:107)x0(cid:107),
+= µ[A(t)]ξ + (cid:107)b(t)(cid:107), (11) (12) where µ[A] (cid:44) lim h→0+ (cid:107)I+hA(cid:107)−1 h is a logarithmic norm of matrix A [20].
+If the 2-norm is used in deﬁnition of the logarithmic norm, then
+µ[A] = λmax (cid:18) A + A(cid:62) 2 (cid:19)
+, where λmax(A) is the maximum eigenvalue of a matrix A.
+In our case, IVP (11) is equivalent to IVP (3). Therefore, this lemma helps to estimate (cid:107)a(t)(cid:107). In particular, (cid:107)a(t)(cid:107) ≤ ξ(t), where ξ(t) is a solution of the following IVP:
+
+
+ dξ dt
+ξ(t1) =
+= µ[J (t)]ξ, (cid:13) (cid:13) (cid:13) (cid:13) (cid:13) , (cid:13)
+∂L
+∂z1 5 (13)
+where J (t) (cid:44) ∂f (z(t),t,θ)
+∂θ solution of IVP (13):
+. Hence, the upper bound on the adjoint variable norm is written with the (cid:107)a(t)(cid:107) ≤ ξ(t1) exp (cid:19)
+µ[J (τ )]dτ
+. (cid:18)(cid:90) t t1 (14)
+The upper bound for (cid:107)∆a(t)(cid:107) can be also obtained with Lemma 3.1. To derive this upper bound, we compose an auxiliary IVP that deﬁnes a dynamic of ∆a(t). Consider the following IVPs corresponding to exact and perturbed activations: (cid:40) da (cid:40) d˜a dt = a(t)(cid:62) ∂f (z(t),t,θ) a(t1) = ∂L
+∂z(t1)
+∂z dt = ˜a(t)(cid:62) ∂f ( ˜z(t),t,θ)
+˜a(t1) = ∂L
+∂z(t1) .
+∂z (15)
+Subtracting one IVP from the other, we get the IVP that deﬁnes dynamic of ∆a(t) = ˜a(t) − a(t):
+
+
+
+= ∆a(t)(cid:62)J (t) + ˜a(t)( ˜J (t) − J (t)) d∆a(t) dt
+∆a(t1) = 0.
+Note that IVP (16) satisﬁes assumption in Lemma 3.1. Therefore, the following estimate holds where ξ(t) is a solution of the following IVP: (cid:107)∆a(t)(cid:107) ≤ ξ(t),
+
+
+
+= µ[J (t)]ξ + (cid:107)˜a(t)( ˜J (t) − J (t))(cid:107), dξ dt
+ξ(t1) = 0.
+The solution of IVP (18) is given by the following formula
+ξ(t) = φ(t) (cid:90) t t1
+φ−1(τ )(cid:107)˜a(τ )( ˜J (t) − J (t))(cid:107)dτ, (16) (17) (18) (19) (cid:16)(cid:82) t where φ(t) = exp t1 bounds for all terms in the inequality (10).
+µ[J (τ )]dτ (cid:17) is a fundamental solution of IVP (19). Thus, we get the upper
+Thus, we can list the factors that affect the accuracy of gradient approximation with interpolated activations. These factors are constants that bound ∂f (z(t),t,θ) for t ∈ [t0, t1] (10), logarithmic norm µ[J (t)] (14), (17), (19), and smoothness of J (t) (19). and ∂2f (z(t),t,θ)
+∂θ∂z
+∂θ 4 Numerical Experiments
+In this section, ﬁrstly, we compare the proposed the IRDM with the RDM on the density estimation and variational inference tasks (for the RDM baselines, we use FFJORD [3] implementation). Secondly, we show the beneﬁts of the IRDM on the CIFAR10 classiﬁcation task (RDM implementation is similar to [1]). We demonstrate that during training, the IRMD requires less computational time to achieve convergence and a smaller number of evaluations of the right-hand side function comparing to the baselines. The source code of the proposed method can be found at GitHub1.
+Also, as the number of Chebyshev grid points N is an important hyperparameter in our method, we study how it affects the gain in considered tasks. Our method is implemented on top of torchdiffeq2 package. The default ODE solver in our experiments is the DOPRI5. The values of optimized hyperparameters are in the supplementary materials. Mostly we follow the strategies from [3] and [9]. Every separate experiment is conducted on a single NVIDIA Tesla V100 GPU with 16Gb of memory [21]. We conducted all experiments with three different ﬁxed random seeds and reported the mean value. Experiments were tracked using the “Weights & Biases” library [22]. 1https://github.com/Daulbaev/IRDM 2https://github.com/rtqichen/torchdiffeq/ 6
+Improvement in stability of gradient computations. We perform experiments on the reconstruc-tion trajectory of the dynamical system that collapses in zero. As a result, we observe that the reverse dynamic method (RDM) and our method (IRDM) solve this problem with approximately the same accuracy. However, the RDM requires at least 10 times more right-hand side evaluations to solve adjoint IVP in every iteration than the IRDM. We use RDM implementation from the torchdiffeq package. Thus, in such a toy problem the IRDM and the RDM compute similar gradients, but the
+IRDM computes them much faster. To illustrate the stability of the IRDM, we show the plot of test loss vs. training time in density estimation problem, see Figure 3a.
+How gradient approximation depends on the tolerance in adaptive solver and size of the Cheby-shev grid.
+In Section 3, we provide theoretical bounds on the gradient approximation and list the main factors that affect it. However, tolerance in the adaptive solver and number of nodes in the
+Chebyshev grid can also signiﬁcantly affect the quality of gradient approximation. To illustrate this inﬂuence empirically, we consider the toy dynamical system in 2D with the right-hand side Ay3 and train neural ODE model to approximate trajectories of this dynamical system. We consider the range of tolerances in the DOPRI5 adaptive solver and the range of nodes quantities in the Chebyshev grid.
+The result of this experiment is presented in Figure 2. This plot shows that the smaller tolerance, the more accurate gradients approximation for all considered number of nodes in the Chebyshev grid. At the same time, the larger number of nodes leads to decreasing the approximation quality.
+Figure 2: The dependence of the IRDM gradients error in (cid:96)1-norm with respect to the number of nodes in the Chebyshev grid and the tolerance of the DOPRI5 method. The output of the standard backpropagation performed for the DOPRI5 with 1e-7 tolerance was used as a ground truth. 4.1 Density Estimation
+The problem of density estimation is to reconstruct the probability density function using a set of given data points. We compared the proposed IRDM with the RDM (FFJORD3 [3] baseline) that exploits the reverse dynamic method to density estimation problem. We tested these methods on four toy datasets (2spirals, pinwheel, moons and circles) and tabular miniboone dataset [23]. This tabular dataset was used in our experiments since it is large enough and allows considered methods to converge for a reasonable time. According to [3] setting, we stopped the training process if, for the sequential 30 epochs, the test loss does not decrease. Therefore, we excluded test loss values given by the last 30 epochs from the plots. The model for miniboone was slightly different from the model from [3]; it includes 10 ODE blocks instead of 1. We used Adam optimizer [24] in all tests on the density estimation problem. For toy datasets, we used the following hyperparameters: learning rate equals 10−3, the number of epochs was 10000, the batch size was 100, absolute and relative tolerances in the DOPRI5 solver were 10−5 and 10−5.
+Figure 3 shows that the test loss decreases more rapidly with our method than with the RDM. To make ﬁgures more clear, we plot convergence only for one value of N for every dataset. This value of N gives the best result among the tested values. Similar graphs for toy datasets can be found in
+Supplementary materials.
+The number of nodes in the Chebyshev grid signiﬁcantly affects the performance of the proposed method. If this number is small, then the interpolation accuracy is not enough, and the training takes a long time. If this number is large, then the computing of intermediate activations is too costly, and training is relatively slow. In supplementary materials, we provide graphs with empirical results on 3https://github.com/rtqichen/ffjord 7
+(a) miniboone: test loss (b) miniboone: train loss (c) miniboone: total number of f (z(t), t, θ) evaluations
+Figure 3: Comparison of the IRDM with the RDM (baseline from FFJORD) on density estimation problem for tabular dataset miniboone. The number of points in the Chebyshev grid N used in the
+IRDM is given in the legend. how the number of points in the Chebyshev grid affects the convergence rate. On Figure 4, the total number of the right-hand side f (z(t), t, θ) evaluations per training iteration is shown. (a) 2spirals (b) pinwheel (c) moons (d) circles
+Figure 4: Total number of f (z(t), t, θ) evaluations for density estimation datasets. 4.2 Variational Autoencoder
+We also compare the RDM (baselines from FFJORD) and the IRDM on the training variational autoencoder [25]. We use datasets caltech and freyfaces. The test negative ELBO loss and test bits per dim loss are reported for caltech and freyfaces datasets, respectively. Figure 5 illustrates a minor acceleration of convergence provided by the IRDM compared to the RDM. However, the
+IRDM gives the same ﬁnal test loss with the same training time as the RDM. We suppose that the reason for such convergence degradation near the optimum is the same as for the density estimation models. (a) caltech (b) freyfaces
+Figure 5: Comparison of the number of right-hand side evaluations for the IRDM and the RDM in training variational autoencoder. 8
+(a) Comparison of the IRDM with the RDM in CIFAR10 classiﬁcation task. IRDM even with N = 8 nodes trains faster than RDM. (b) Comparison of BLI and piecewise-linear interpolation used in the IRDM (8 nodes) in
+MNIST classiﬁcation problem.
+Figure 6: Experiments results in the image classiﬁcation task. The reported values are averaged over three trained models corresponding to the considered tasks. 4.3 Classiﬁcation
+We test the proposed method on the classiﬁcation problem with the CIFAR10 dataset. The model with a single convolution, a single ODE block, and a linear layer is considered. For this model, the
+IRDM with 16 points in the Chebyshev grid gives 0.867 test accuracy with the batch size 512 and tolerance 1e-3 in the DOPRI5. We compare the IRDM with the RDM in terms of test loss versus training time. Figure 6a demonstrates that the IRDM gives higher test accuracy and requires less training time.
+Another experiment is investigating whether other interpolation techniques can be used in the IRDM.
+We compare the Barycentric Lagrange Interpolation (BLI), which is a default method used in the
+IRDM, with the piecewise-linear interpolation. We perform 50 epochs in the MNIST classiﬁcation problem with constant learning rate 1e-1 and without data augmentation. Figure 6b conﬁrms our choice of BLI since already after 40 epochs piecewise-linear interpolation provides less stable test accuracy behaviour. 5

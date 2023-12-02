@@ -1,0 +1,59 @@
+Abstract
+Vision Transformers (ViTs) are built on the assumption of treating image patches as “visual tokens” and learn patch-to-patch attention. The patch embedding based to-kenizer has a semantic gap with respect to its counterpart, the textual tokenizer. The patch-to-patch attention suffers from the quadratic complexity issue, and also makes it non-trivial to explain learned ViTs. To address these issues in
+ViT, this paper proposes to learn Patch-to-Cluster atten-tion (PaCa) in ViT. Queries in our PaCa-ViT starts with patches, while keys and values are directly based on clus-tering (with a predeﬁned small number of clusters). The clusters are learned end-to-end, leading to better tokenizers and inducing joint clustering-for-attention and attention-for-clustering for better and interpretable models. The quadratic complexity is relaxed to linear complexity. The proposed PaCa module is used in designing efﬁcient and in-terpretable ViT backbones and semantic segmentation head networks. In experiments, the proposed methods are tested on ImageNet-1k image classiﬁcation, MS-COCO object de-tection and instance segmentation and MIT-ADE20k se-mantic segmentation. Compared with the prior art, it ob-tains better performance in all the three benchmarks than the SWin [32] and the PVTs [47, 48] by signiﬁcant mar-gins in ImageNet-1k and MIT-ADE20k.
+It is also signiﬁ-cantly more efﬁcient than PVT models in MS-COCO and
+MIT-ADE20k due to the linear complexity. The learned clusters are semantically meaningful. Code and model checkpoints are available at https://github.com/ iVMCL/PaCaViT. 1.
+
+Introduction
+A picture is worth a thousand words. Seeking solu-tions that can bridge the semantic gap between those words and raw image data has long been, and remains, a grand challenge in computer vision, machine learning and AI.
+Deep learning has revolutionized the ﬁeld of computer vi-sion in the past decade. More recently, Vision Transform-ers (ViTs) [13, 45] have witnessed remarkable progress in
+*T. Wu is the corresponding author. i) Vanilla Patch-to-Patch Attention iii) The Proposed PaCa:  Patch-to-Cluster Attention
+" patches patches
+!
+Quadratic complexity:  (%×')!
+Patch-based
+Q ueries
+Patch-based
+K ey & Value ii) Patch-to-Reduced-Patch Attention
+Reduced-Patch-based 
+K ey & Value
+$ patches
+Reduced complexity:
+%×' ×(ℎ×*) patches
+ℎ
+Cluster-based
+K ey & V alue
+Linear complexity:
+%×' ×!
+! cluster heatmaps  (e.g., ! = 100) 
+Simple forward interpretability by  directly visualizing the cluster heatmaps
+…
+…
+Figure 1. i) The vanilla patch-to-patch self-attention [13, 45] di-rectly leverages image patch embeddings as visual tokens and suf-fers from its quadratic complexity. Every Query (e.g., the patches in the blue grid) needs to interact with every Key. ii) To address the quadratic complexity, one popular method is to leverage spa-tial reduction (e.g., implemented via a convolution with a stride r > 1) in computing the Key and the Value [47, 48]. It still per-forms patch-to-patch attention, but enjoys a reduced complexity. iii) We propose Patch-to-Cluster attention (PaCa) in this paper.
+A predeﬁned number of M cluster assignments is ﬁrst learned and then used in computing the Key and Value, resulting in not only linear complexity, but also more meaningful visual tokens. computer vision. ViTs are built on the basis of treating image patches as “visual tokens” using patch embedding and learning patch-to-patch attention throughout. Unlike the textual tokens that are provided as inputs in natural lan-guage processing, visual tokens need to be learned ﬁrst and continuously reﬁned for more effective learning of ViTs.
+The patch embedding based tokenizer is a workaround in practice and has a semantic gap with respect to its counter-part, the textual tokenizer. On one hand, the well-known issue of the quadratic complexity of vanilla Transformer models and the 2D spatial nature of images create a non-trivial task of developing ViTs that are applicable for many vision problems including image classiﬁcation, object de-tection and semantic segmentation. On the other hand, explaining trained ViTs requires non-trivial and sophisti-cated methods [4] following the trend of eXplainable AI (XAI) [18] that has been extensively studied with convolu-tional neural networks.
+To address the quadratic complexity, there have been
+Attention
+Attention
+Spatial reduction, e.g.,  (a) Spatial-Reduction based Self-Attention (b) The Proposed Patch-to-Cluster based Self-Attention
+Figure 2.
+Illustration of (a) the spatial reduction based self-attention and (b) the proposed PaCa module in vision applications, where (HW ) represents the number of patches in the input with
+H and W the height and width respectively, and M a predeﬁned small number of clusters (e.g., M = 100). See text for details.
+⇥ two main variants developed with great success: One is to exploit the vanilla Transformer model locally using a predeﬁned window size (e.g., 7 7) such as the SWin-Transformer [32] and the nested variant of ViT [62]. The other is to exploit another patch embedding at a coarser level (i.e., nested patch embedding) to reduce the sequence length (i.e., spatial reduction) before computing the keys and values (while keeping the query length unchanged) [47, 48, 52], as illustrated in Fig. 1 (left-bottom) and Fig. 2 (a).
+Most of these variants follow the patch-to-patch attention setup used in the vanilla isotropic ViT models [13]. Al-though existing ViT variants have shown great results, patch embedding based approaches may not be the best way of learning visual tokens due to the underlying predeﬁned sub-sampling of the image lattice. Additionally, patch-to-patch attention does not account for the spatial redundancy found in images due to their compositional nature and reusable parts [15]. Thus, it is worth exploring alternative meth-ods towards learning more semantically meaningful visual tokens. A question arises naturally: Can we rethink the patch-to-patch attention mechanism in vision tasks to hit three “birds” (reducing complexity, facilitating better vi-sual tokenizer and enabling simple forward explainability) with one stone?
+·
+As shown in Fig. 1 (right) and Fig. 2 (b), this pa-per proposes to learn Patch-to-Cluster attention (PaCa), which provides a straightforward way to address the afore-mentioned question: Given an input sequence XN,C (e.g.,
+N = H
+W ), a light-weight clustering module ﬁnds mean-ingful clusters by ﬁrst computing the cluster assignment,
+CN,M (Eqn. 4 and Eqn. 5) with a predeﬁned small number of clusters M (e.g., M = 100). Then, M latent “visual tokens”, ZM,C are formed via simple matrix multiplication
+T
+N,M (transposed) and XN,C. In inference, we can between
+CN,M as heatmaps to reveal directly visualize the clusters what has been captured by the trained models (Fig. 1, right-bottom). The proposed PaCa module induces jointly learn-ing clustering-for-attention and attention-for-clustering in
+C
+ViT models. We study four aspects of the PaCa module:
+• Where to compute the cluster assignments? Consider the stage-wise pyramidical architecture (Fig. 3) of assem-bling ViT blocks [47, 48], a stage consists of a number of blocks. We test two settings: block-wise by comput-ing the cluster assignment for each block, or stage-wise by computing it only in the ﬁrst block in a stage and then sharing it with the remaining blocks. Both give compa-rable performance. The latter is more efﬁcient when the model becomes deeper.
+• How to compute the cluster assignment? We also test two settings: using 2D convolution or Multi-Layer Perceptron (MLP) based implementation. Both have similar perfor-mance. The latter is more generic and sheds light on ex-ploiting PaCa for more general Token-to-Cluster attention (ToCa) in a domain agnostic way.
+• How to leverage an external clustering teacher? We in-vestigate a method of exploiting a lightweight convolu-tion neural network (Fig. 4) in learning the cluster assign-ments that are shared by all blocks in a stage. It gives some interesting observations, and potentially pave a way for distilling large foundation models [3].
+• What if the number of clusters is known? We further ex-tend the PaCa module in designing an effective head sub-network for dense prediction tasks such as image seman-tic segmentation (Fig. 5) where the number of clusters M is available based on the ground-truth number of classes and the learned cluster assignment
+CN,M has direct su-pervision. The PaCa segmentation head signiﬁcantly im-proves the performance with reduced model complexity.
+In experiments, the proposed PaCa-ViT model is tested on the ImageNet-1k [12] image classiﬁcation, the MS-COCO object detection and instance segmentation [31] and the MIT-ADE20k semantic segmentation [64]. It ob-tains consistently better performance across the three tasks than some strong baseline models including the Swin-Transformers [32] and the PVTv2 models [47]. 2.

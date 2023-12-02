@@ -1,0 +1,196 @@
+Abstract
+Bayesian meta-learning enables robust and fast adaptation to new tasks with un-certainty assessment. The key idea behind Bayesian meta-learning is empirical
+Bayes inference of hierarchical model. In this work, we extend this framework to include a variety of existing methods, before proposing our variant based on gradient-EM algorithm. Our method improves computational efﬁciency by avoid-ing back-propagation computation in the meta-update step, which is exhausting for deep neural networks. Furthermore, it provides ﬂexibility to the inner-update opti-mization procedure by decoupling it from meta-update. Experiments on sinusoidal regression, few-shot image classiﬁcation, and policy-based reinforcement learning show that our method not only achieves better accuracy with less computation cost, but is also more robust to uncertainty. 1
+
+Introduction
+Meta-learning, also known as learning to learn, has gained tremendous attention in both academia and industry, especially with applications to few-shot learning[3]. These methods utilize the similar nature of multi-task setting, such that learning from previous tasks helps mastering new tasks faster.
+The early fast meta-learning algorithm was gradient-based and deterministic, which may cause overﬁtting on both inner-level and meta-level [15]. With growing interests in prediction uncertainty evaluation and overﬁtting control, later studies explored probabilistic meta-learning methods [6, 27, 4].
+It has been agreed that Bayesian inference is one of the most convenient choices because of its
+Occam’s Razor property [14] that automatically prevents overﬁtting, which happens in deep neural network (DNN) very often. It also provides reliable predictive uncertainty because of its probabilistic nature. This makes Bayesian methods important to DNN, which as [8] shows, unlike shallow neural networks, are usually poorly calibrated on predictive uncertainty.
+The theoretical foundation of Bayesian meta-learning is hierarchical Bayes (HB) [5] or empirical
+Bayes (EB) [22], where the former can be seen as adding a hyper-prior over the latter [20]. For simplicity, in this paper we focus on EB to restrict the learning of meta-parameters to point estimates.
+A common solution of EB is a bi-level iterative optimization procedure [20, 13], where the “inner-update” refers to adaptation to a given task, and the “meta-update” is the meta-training objective.
+Starting with a generalized meta learning setting, we propose our general Bayesian framework and claim its optimality under certain metrics. This framework extends the original optimization framework for train/val split in the inner-update procedure to mitigate in-task overﬁtting which is important for NN based ML. We also hypothesize a mechanism of how EB framework achieves fast-adaptation (few inner-update gradient steps) under Gaussian parameterization, along with empirical evidences. What’s more, we successfully adapt this EB framework to RL both theoretically and empirically which has not been done before.
+We show that many important previous works in (Bayesian) meta-learning [20, 4, 27, 3, 17] can be included to this extended framework. However in these previous works, the meta-update step requires backpropagation through the inner optimization process [18] which imposes large computation 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+and memory burden as the increase of inner-update gradient steps. This puts limits on possible applications, especially those require many inner-update gradient steps or involves large dataset (Appendix C.2). Motivated by the above observations, we propose a gradient-based Bayesian algorithm inspired by Gradient-EM algorithm. By designing a new way to compute gradient of meta loss in Bayesian MAML, we come up with an algorithm that decouples meta-update and inner-update and thus avoids the computation and memory burden of previous methods, making it scalable to a large number of inner-update gradient steps. In addition, it enables large ﬂexibility on the choice of inner-update optimization method because it only requires the value of the result of the inner-update optimization, instead of the optimization process (for example in experiments we use Adam in classiﬁcations and Trust Region Policy Optimization in RL). The separability of meta-update and inner-update also makes it a potentially useful scheme for distributed learning and private learning.
+In experiments, we show our method can quickly learn the knowledge and uncertainty of a novel task with less computation burden in sinusoidal regression, image classiﬁcation, and reinforcement learning. 2 Problem Formulation and Framework 2.1 General Meta-learning Setting
+We set up the K-shot meta-learning framework upon reinforcement learning(RL) with episode length
+H as in [3], where supervised learning is a special case with H = 1. With a decision rule (policy) f we can sample rollout data D = {xt, at, rt}H t=1 from the task environment. A decision rule (policy) f can be evaluated on D with loss function L(D, f ). We assume each task τ to be i.i.d. sampled from the task space T , following some task distribution P (τ ). During meta-training phase we are given a set of training tasks T meta-train. For each task τ (cid:48) of this set, we collect K samples rollout of current policy f denoted as Dtr
+τ (cid:48) and another K samples rollout after 1 policy gradient training of f denoted as Dval
+τ (cid:48) (f is not needed in generating samples in supervised learning). At meta-testing phase, for a randomly sampled task τ, Dtr
+τ is ﬁrstly provided. We are then required to return fτ based on {Dtr
+τ and evaluate its expected loss lτ = EDτ ∼τ L(Dτ , fτ ) on more
+τ (cid:48) samples generated from that task. The objective is to come up with an algorithm that produces a decision rule fτ that minimize the expected test loss over all tasks Eτ ∼P (τ )lτ .
+: τ (cid:48) ∈ T meta-train} ∪ Dtr (cid:83) Dval
+τ (cid:48) (a) (b)
+Figure 1: (a) Minimal A(cid:63). Each dot (in a vector space) represents the weights making the NN model perform well for certain task. Different colors are used to represent different tasks. This ﬁgure demonstrates that many good solutions(local optimums of NN loss function) exist for each task. The area within dotted circle is the small neighboring zone A∗ where each color has at least one point inside. (b) Graphical Model 2.2 Extended Empirical Bayesian Meta-learning Framework
+We consider parameterized decision rule fθ and construct a corresponding generative model log P (D|θ) = −L(D, fθ) (We leave the detail of this construction in RL to Appendix B.1). For each task
+τ, denote the best policy parameter as well as the best ﬁtted underlying generative model parameter to be θτ = arg min EDτ ∼τ L(Dτ , fθ) = arg max EDτ ∼τ log P (Dτ |θ). In general such maximum is not unique, which is discussed in Section 2.3. With θτ uniquely deﬁned, we have a distribution P (θτ ) induced by P (τ ) (change of variable). We summarize the graphical model in Figure 1(b). Under per-fect approximation, the ground-truth generator matches our generative model: P (Dτ |τ ) = P (Dτ |θτ ), resulting in the following proposition (proof in Appendix A.1):
+Proposition 1. Suppose a data generator is represented by the hierarchical model P (Dτ |θτ ) and
+P (θτ ), and deﬁne L(Q; D) = log Eθ∼Q P (D|θ) for distribution Q over θ. Let (Dtr
+τ ) be independent
+τ , Dval 2
+samples from task τ, and consider Q determined by Dtr
+P (θτ |Dtr
+τ ; P (θτ )) = arg max g
+τ via Q = g(Dtr
+Eτ L(g(Dtr
+τ ), Dval
+τ )
+τ ). Then (1) where P (θτ |Dtr
+τ ; P (θτ )) is the posterior given the prior as P (θτ ) and observations Dtr
+τ . (cid:80)
+Two observations are made here. First, this theorem guarantees the best decision rule we can come up with during meta-testing, i.e., through computing posterior P (θτ |Dtr
+τ ; P (θτ )). Second, this theorem sug-τ ; P (θτ )); Dval gests an estimation method for P (θτ ) during meta-training: arg maxP (θτ )
+τ ).
+We prove in Appendix A.2 that this estimator is not only asymptotic consistent but also with good asymptotic normality which means it quickly converge to true value with small variance as number of tasks increases. We further parameterize P (θτ ) by P (θτ ; Θ), and introduce short nota-τ ) = L(P (θτ |Dtr
+τ ; Dval tion L(Θ, Dtr
+τ ), then the optimization in meta-training can be written as (cid:80)
+τ ; Dval
+τ L(Θ, Dtr
+τ ∪ Dval
+τ ) , arg maxΘ
+[1]
+[2]
+τ . Then the estimation method of P (θτ ; Θ) becomes arg maxΘ L[2].
+τ , L[2] = Eτ L and also L[1] = Eτ L
+This is an extension of the popular MLE approach in empirical Bayes, which maximize (marginal) log-likelihood L[1] as the special case of L[2] when |Dtr
+τ | = 0. There is a bias/variance trade-off between L[1] and L[2]. Using L[2] as the meta loss function improves in-task overﬁtting problem while
+L[1] extracts more information from the data.
+τ ). For clarity we denote L
+[2]
+τ = L(Θ, Dtr
+[1]
+τ = L(Θ; Dtr
+τ L(P (θτ |Dtr
+τ , Θ); Dval
+τ ) and L
+τ ; Dval
+Combining the above two observations, a stochastic gradient descent (SGD) approach to meta-training
+[i] is provided in Algorithm 1: at iteration t, gradient ∇ΘL
+τ for each task in the t-th meta-training batch is computed by subroutine Meta-Gradient, then gradient ascent on Θ is performed. A variational inference (VI) approach to meta-testing is also included, where posterior P (θτ |Dtr
+τ ; Θ) is estimated with ﬁxed (cid:98)Θ learned during meta-training. Detailed discussion of these subroutines are presented in
+Session 3. 2.3 non-uniqueness and fast-adaptation
+For neural networks fθ, there exists many local optimums that achieves similarly good performance for each task. We observe from empirical study (Appendix C.3) that the key to fast-adaptation for gradient-based algorithm is to ﬁnd a small neighbouring zone A(cid:63) where most tasks have at least one good parameter inside it (Figure 1(a)). The intuition is that when {θτ } are close enough they can be learned within a few gradient steps starting from any points within that neighbouring zone (our experiment shows that a perturbation of initial points within that area would still have good performance at meta-test). The existence of this small neighbouring zone A(cid:63) depends on the parametric model fθ and the task distribution P (τ ). We further demonstrate (Appendix C.3) its existence with neural networks as the parametric model and Gaussian parameterization of P (θτ ; Θ) for uni-modal task distribution like sinusoidal functions. Even if we fail to ﬁnd a single small neighbouring zone A(cid:63) (e.g. multi-modal task distribution like mixture of sinusoidal, linear and quadratic functions), solution may be provided by extension to mixture Gaussian [7, 19]. In this work we focus on the uni-modal situation and leave the extension to future work. 1 Algorithm Meta-train() 2 randomly initialize Θ t = 0 while not done do 3 4 5 6 7 8 9 10 11 12
+Sample batch of tasks Tt ∼ P (τ ) for each task τ ∼ Tt do
+Sample Dtr
+τ , Dval
+Compute ∇ΘL[i]
+Meta-Gradient(Θ(t),{Dtr
+τ ∼ τ
+τ by Subroutine
+τ , Dval
+τ }) end
+Θ(t+1) = Θ(t) − β (cid:80) t = t + 1
+∇ΘL[i]
+τ
+τ ∈Tt end 1 Algorithm Meta-test() 2
+τ from new task τ
+Require: learned Θ, Dtr
+Compute posterior λτ =VI(Θ, Dtr
+Sample θτ ∼ P (θ; λτ ) return f (; θτ ) for evaluation
+τ ). 5 1 Subroutine VI(Θ,Dτ ) 2
+Initialize λτ at Θ. while not done do
+Sample ˜(cid:15) from (cid:15) ∼ p((cid:15)).
+λτ = λτ + α∇λτ [log P (Dτ |g(λτ , ˜(cid:15)))
+- KL(P(θτ ; λτ ) (cid:107) P (θτ |Θ))] end return λτ 3 4 3 4 5 6 7 8
+Algorithm 1: Extended Empirical Bayes Meta-learning Framework. VI: reparameterize ˜θτ ∼ P (θτ ; λτ ) using a differentiable transformation g(λτ , (cid:15)) of an auxiliary noise variable (cid:15) such that ˜θτ = g(λτ , (cid:15)) with (cid:15) ∼ p((cid:15)) [12] 3
+3 Method
+In this section, we ﬁrst introduce the gradient-based variational inference subroutine VI related to a variety of existing methods, then present our proposed subroutine Meta-Gradient inspired by
+Gradient-EM algorithm and compare it with the mostly used existing methods for this subroutine. 3.1 Variational Inference
+Notice that this framework requires computing posterior on complex models such as neural networks.
+To achieve this, we approximate the posterior with the same parametric distribution P (θτ ; λτ ) as we approximate the prior P (θτ ; Θ) and use Variational Inference to compute the parameters, as has been done in previous work [20]. Let P (θτ ; λτ (Dτ ; Θ)) be the approximation of the posterior P (Dτ , θτ ; Θ) by minimizing their KL distance. Since
+L(Θ; Dτ ) = log P (Dτ ; Θ) = KL[P (θτ ; λτ ) (cid:107) P (θτ |Dτ ; Θ)] + EP (θτ ;λτ )[log P (Dτ , θτ ; Θ) − log P (θτ ; λτ )] (2) is constant in terms of λτ , we have λτ (Dτ ; Θ) = arg minλτ
+KL[P (θτ ; λτ ) (cid:107) P (θτ |Dτ ; Θ)] = arg maxλτ
+EP (θτ ;λτ )[log p(Dτ |θτ )] −
+EP (θτ ;λτ )[log P (Dτ , θτ ; Θ) − log P (θτ ; λτ )]
+KL[P (θτ ; λτ ) (cid:107) p(θτ ; Θ)]. So the inference process is to ﬁnd λτ to maximize the Evidence
+Lower Bound ELBO(τ )(λτ ; Θ) = EP (θτ ;λτ )[log p(Dτ |θτ )] − KL[P (θτ ; λτ ) (cid:107) p(θτ ; Θ)] via mini-batch gradient descent[20]. The gradient of KL-divergence terms are calculated analytically in Gaussian case whereas the gradient of expectations can be computed by monte-carlo with reparameterization along with some variance reduction tricks [11, 28]. Due to the above analysis in Section 2.3, only a few gradient steps are needed for this process with well learned Θ by our framework. We summarize the subroutine VI in Algorithm 1. arg maxλτ
+=
+A special case worth mentioning is when we use delta function for the posterior approximation 2)], which is
+P (θτ ; λτ ) = δµλτ (θτ ), we have λτ (Dτ ; Θ) = arg max[log P (Dτ |µλτ actually the inner-update step of iMAML [18], MAML [3], and reptile [17] (if we replace the l2 regularization term with choosing µΘ as initial point for gradient based optimization: µλτ (µΘ) =
+µΘ − ∇θ log P (Dτ |θ)|θ=µΘ).
+− µΘ (cid:107)2 /(2ΣΘ
+)− (cid:107) µλτ 3.2 Meta-Gradient
+[i]
+The essential part of this meta-learning framework is to compute the gradient ∇ΘL
+τ . We show below that this problem can be reduced as computing ∇ΘL(Θ; Dτ ) = ∇Θ log P (Dτ ; Θ) given Dτ and Θ. For
+L[1], this is direct. For L[2], there are two approaches. The ﬁrst approach is to compute λτ (Dτ ; Θ) as stated above, then
+∇ΘL
+[2]
+τ = ∇ΘL(Θ, Dtr
+τ ; Dval
+τ ) = ∇ΘL(λτ (Dtr
+τ ; Θ); Dval
+τ ) = ∇ΘL(Θ; Dval
+τ )|Θ=λτ (Dtr
+τ ;Θ) ∗ ∇Θλτ (Dtr
+τ ; Θ) (3)
+τ ; Θ) can be computed by auto-gradient (if λτ (Dtr
+, where ∇Θλτ (Dtr
+τ ; Θ) is computed by gradient based algorithms). This approach is widely used in previous work such as [3], [4], [27], [6]. The second approach is proposed by us as shown in subroutine Meta-Gradient:GEM-BML+ below. We utilize a property L(Θ, Dtr
+τ ) (proof in Appendix A.4) such that
+[2] (cid:83) Dval
+τ ) can be expressed by the difference of two L[1] terms, thus
+τ = ∇ΘL(Θ; Dtr
+∇ΘL
+τ is reduced to computing ∇ΘL(Θ; Dτ ) terms.
+Gradient-EM Estimator
+We propose an efﬁcient way to compute ∇ΘL(Θ; Dτ ) through gradient of the complete log likelihood.
+This is guaranteed by the following Gradient-EM Theorem inspired by the observation in [23].
+τ ; Dval
+τ ) − ∇ΘL(Θ; Dtr
+τ ) = L(Θ; Dtr
+τ
+τ ) − L(Θ; Dtr (cid:83) Dval
+Theorem 1. ∇ΘL(Θ; D) = Eθ∼P (θ|D;Θ)∇Θ log[P (D, θ; Θ)] 4
+Proof.
+∇ΘL(Θ; D) =
+∂
+∂Θ log P (D|Θ)
+P (D, θ|Θ)dθ
+= (cid:90)
+∂ 1
+∂Θ
+P (D|Θ) (cid:90) P (D, θ|Θ)
+P (D|Θ) (cid:90)
+= log P (D, θ|Θ)dθ
+∂
+∂Θ
+∂
+∂Θ
+= Eθ∼P (θ|D;Θ)∇Θ log[P (D, θ; Θ)] log P (D, θ|Θ)dθ
+P (θ|D, Θ)
+=
+Under hierarchical modeling structure, we have ∇Θ log P (Dτ , θτ |Θ) = ∇Θ log[P (Dτ |θτ ) ∗ P (θτ ; Θ)] =
+∇Θ log[P (θτ ; Θ)]. Combining with Theorem 1 we have ∇ΘL(Θ; Dτ ) = Eθτ ∼P (θ|Dτ ;Θ)∇Θ log[P (θτ ; Θ)].
+After using VI to compute the approximate posterior parameter λτ (Dτ , Θ), the above estimator becomes ˆg = Eθτ ∼P (θτ ;λτ (Dτ ,Θ))∇Θ log[P (θτ ; Θ)] which can be calculated analytically in Gaussian case as we show in Appendix B.7. This gives us two Meta-Gradient subroutines GEM-BML and
+GEM-BML+ for ∇ΘL respectively. We name Algorithm 1 with these two subroutines as our algorithms GEM-BML and GEM-BML+.
+[2]
+[1]
+τ and ∇ΘL
+τ 1 Subroutine 1 Subroutine
+Meta-Gradient:GEM-BML(Θ,{Dtr, Dval})
+Compute posterior λtr =VI(Θ, Dtr).
+Compute posterior λtr⊕val =VI(λtr, Dval). return ˆg = Eθ∼P (θ;λtr⊕val)∇Θ log[P (θ; Θ)] 2 3 4 2 3 4
+Meta-Gradient:GEM-BML+(Θ,{Dtr, Dval})
+Compute posterior λtr =VI(Θ, Dtr).
+Compute posterior λtr⊕val =VI(λtr, Dval). return
+ˆg = Eθ∼P (θ;λtr⊕val)∇Θ log[P (θ; Θ)] −
+Eθ∼P (θ;λtr)∇Θ log[P (θ; Θ)]
+ELBO Gradient Estimator
+As comparison, one of the most widely used methods to optimize L[i] in Bayesian meta-learning is optimizing ELBO [20](see Appendix B.6 for other existing methods and com-paring analysis). Here we show it is actually another way to estimate ∇ΘL(Θ; Dτ ). Ac-cording to equation (2), when VI approximation error KL[P (θτ ; λτ (Dτ ; Θ)) (cid:107) P (θτ |Dτ ; Θ)] is small enough, we have L(Θ; Dτ ) (cid:39) EP (θτ ;λτ (Dτ ;Θ))[log P (Dτ , θτ ; Θ) − log P (θτ ; λτ (Dτ ; Θ))] =
+[EP (θτ ;λτ (Dτ ;Θ)) log P (Dτ |θτ )] − KL[P (θτ ; λτ (Dτ ; Θ)) (cid:107) P (θτ |Θ)] = ELBO(τ )(λτ (Dτ ; Θ); Θ). So the gradient can be computed by
+∇ΘL(Θ; Dτ ) (cid:39) ∇ΘELBO(τ )(λτ (Dτ ; Θ); Θ)
+=
+∂
+∂λτ
+ELBO(τ )(λτ ; Θ)|λτ =λτ (Dτ ;Θ) ∗ ∇Θλτ (Dτ ; Θ) +
+∂
+∂Θ
+ELBO(τ )(λτ ; Θ)|λτ =λτ (Dτ ;Θ) (4)
+. The ﬁrst partial gradient term can be computed by the same method in Section 3.1 and the second one can be calculated analytically in Gaussian case.
+In fact, Gradient-EM(GEM) can also be reviewed as an co-ordinate descent algorithm to optimize
+ELBO as a variant of EM as we show in Appendix B.3. Comparing to ELBO gradient, GEM avoids the backProps computation of ∇Θλτ (Dτ ; Θ) which gives it a series of advantages as we specify in Section 4.2. Both GEM and ELBO gradient has estimation error arise from the discrepancy of estimated posterior by VI and the true posterior. We show empirical results in Appendix C.1 that GEM has stably lower estimation error than ELBO gradient. We also show in Appendix
+A.3 that our method has a theoretical bound of estimation error in terms of the VI discrepancy (cid:107) ˆg − ∇ΘL(Θ; Dτ ) (cid:107)≤ M (cid:112)DKL(P (θ|Dτ ; Θ) (cid:107) P (θ; λτ (Dτ , Θ))) where M is a bounded constant. 4 Analysis
+Matrix of

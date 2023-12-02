@@ -1,0 +1,107 @@
+Abstract
+In this paper1, we improve Generative Adversarial Net-works by incorporating a manifold learning step into the discriminator. We consider locality-constrained linear and subspace-based manifolds2, and locality-constrained non-linear manifolds. In our design, the manifold learning and coding steps are intertwined with layers of the discrimina-tor, with the goal of attracting intermediate feature repre-sentations onto manifolds. We adaptively balance the dis-crepancy between feature representations and their mani-fold view, which is a trade-off between denoising on the manifold and reﬁning the manifold. We ﬁnd that locality-constrained non-linear manifolds outperform linear mani-folds due to their non-uniform density and smoothness. We also substantially outperform state-of-the-art baselines. 1.
+
+Introduction
+Generative Adversarial Networks (GANs) [13] are pow-erful models for image generation [5,19,22], sound genera-tion [11], image stylization [32] and destylization [46–49], super-resolution [62], feature generation [60, 65], etc. The original GAN learns to generate images [5,19,21,22,56] by performing the following min-max game: (D|θD , G|θG ), (1) min
+θG max
+θD J
+J
+) = Ex∼px(x)log(D(x; θD)) + Ez∼pz(z)log(1 (
+· where
+−
+D(G(z))). Eq. (1) updates parameters θD of discriminator
+D(x; θD) to discriminate between samples from the data distribution px(x) and generative distributions pg(G). Si-multaneously, parameters θG of generator G(z; θG) are up-dated to fool the discriminator D. Thus, the noise distribu-tion pz(z) becomes mapped to px(x) via generator G.
+However, GANs typically suffer from three problems: 1) the training instability [25], 2) the so-called mode collapse
+[44], and 3) overﬁtting of the discriminator [58].
+∗Equal contribution.
+♣ Brain team (richardnock@google.com). 1Code: https://github.com/MaxwellYaoNi/LCSAGAN. 2The coding spaces considered in this paper are loosely termed man-ifolds.
+In most cases they are not manifolds in the strict mathematical sense, but rather topological spaces such as varieties, or simplicial com-plexes. The word will be used only in an informal sense.
+Figure 1. Our GAN pipeline. We equip the discriminator with residual blocks B1, · · · , BL, each containing standard CNN oper-ations, e.g. convolutions, ReLU, downsampling, residual link etc., and the manifold learner Ml. Metaparameter β controls the de-gree of mixing block conv. features with their view recovered from the manifold. The ‘overﬁt?’ detector increases β when overﬁtting to xreal is suspected, which boosts the impact of manifold learners.
+The training instability is an imbalanced competition of the generator and the discriminator due to non-overlapping support between the model distribution and the data distri-bution [6, 19, 25], leading to poor quality of generated data.
+Mode collapse has to do with sharply rising gradient around undesirable local equilibria [25, 44], resulting in generation of the same image. Finally, discriminator overﬁtting leads to excessive memorization and poor generalization.
+Indeed, with an excessive number of parameters, the dis-criminator may memorize the training data instead of learn-ing a meaningful distribution, leading to a high real/fake classiﬁcation accuracy on the training dataset and a low ac-curacy on the validation split [5, 20, 66]. Webster et al. [58] argue such a phenomenon mainly affects the discriminator and is undetectable in the generator, with the exception of hybrid adversarial and non-adversarial methods [4] which impose the so-called consistency loss on a generator.
+We also observed discriminator overﬁtting in baseline models e.g., doubling the number of parameters of discrim-inator resulted in training and validation FID scores of base-line GANs diverging at some intermediate training stage.
+Thus, to reduce overﬁtting of the discriminator, we pro-pose a data-driven feature manifold-learning step and inter-twine it with layers of the discriminator. In this way, the discriminator learns the feature manifold at different lev-els of object abstraction, from ﬁne to coarse, which limits
+the complexity of parameter space and separates the signal from noise as both generated and real data are expressed on a common manifold. As a result, the generator diversiﬁes the generated patterns according to their view on the man-ifold, on which the discriminator operates. The min-max game operates on a gradually learnt manifold (see Fig. 1).
+Our contributions are threefold: i. We intertwine locality-constrained and subspace-based feature encoding and dictionary learning steps [29, 34] with blocks of the GAN discriminator to exploit mani-fold learning in an end-to-end scenario. ii. We employ a balancing term to help blocks of the dis-criminator learn the data-driven manifold from the en-coder intertwined with them, while permitting some de-gree of freedom in the vicinity of that manifold ( 2).
+§ iii. We show that locality-constrained soft assignment cod-ing (the best coder in our experiments) acts as a lo-cally ﬂexible denoiser [1] due to its Lipschitz conti-nuity which we control to vary its operating mode be-tween the ordinary k-means quantization and locality-constrained linear coding. This setting admits quanti-zation of some feature space parts while approximately preserving linearity of other feature space parts (
+§ 5).
+For contribution (i), we investigate Sparse Coding (SC)
+[31, 61], Non-negative Sparse Coding (SC+) [16], Orthog-onal Matching Pursuit (OMP) [8, 42], Locality-constrained
+Linear Coding (LLC) [55], Soft Assignment (SA) [3, 54], and Locality-constrained Soft Assignment (LCSA) [26–29, 34], and Hard Assignment (HA) [7,51]. We provide formu-lations and discussion on properties of each coder in 4.
+§ 2. Problem Formulation
+Figure 1 shows our pipeline (we skip conditional cues for brevity). We build on BigGAN [5], OmniGAN [69], MSG-StyleGAN [18], StyleGAN2 [22] but we equip the discrim-inator with the manifold learner which is metacontrolled to
+C of the supplementary material, we reduce overﬁtting. In also study the combination of our method with DA [66],
+ADA [20] and LeCamGAN [53] in limited data scenario.
+§
+The discriminator D(x; θD) of the GAN in Eq. (1) clas-siﬁes input images as real or fake. Many architectures ex-ist in the literature e.g., GAN [13] uses the discriminator based on a convolutional network, whereas recent architec-tures e.g., BigGAN [5], OmniGAN [69], MSG-StyleGAN
+[18] and StyleGAN2 [22] use residual discriminators with
+L residual blocks e.g., see BigGAN [5] (their Fig. 16).
+R|θB |
+Let3 f : Rd×N is the
+→ size of the set of parameters θB) be a function realized by a single discriminator block with parameters θB, where d and d(cid:48) are the number of input/output channels, N = W H and (where
+Rd(cid:48)×N (cid:48)
+θB
+×
+|
+| 3Our notations are explained in §A of the supplementary material.
+Figure 2. Blocks B1, · · · , BL of our discriminator contain a stan-dard block denoted by f intertwined with the manifold learner.
+Metaparameter β controls the mixing balance between f and h.
+N (cid:48) = W (cid:48)H (cid:48) are the number of input/output spatial locations in feature maps of the block. Often, N (cid:48) may equal N .
+We introduce an encoding function h : Rd(cid:48)×N (cid:48)
+Rd(cid:48)×N (cid:48) that maps Rd(cid:48)×N (cid:48) into a subset, usually nowhere dense or of small volume in Rd(cid:48)×N (cid:48)
+, which we sometimes refer to as the feature space. In the cases we consider this mapping derives from a mapping Rd(cid:48) applied independently and equally over the second dimension RN (cid:48)
+. The encoding (cid:15) where
+X h(X) introduces an error, measured by (cid:107) (cid:15) is called the reconstruction error.
+Rd(cid:48)
+→
+→
+−
+≤ (cid:107)
+F
+· · ·
+In dictionary-based encoding, the function h relies on
+Rd(cid:48)×k containing k
+, mk] a dictionary M = [m1, column vectors, the so-called dictionary atoms (sometimes called anchors), deﬁning the underlying manifold
+, and d(cid:48) ensures the dictionary is overcomplete. Then, after k solving the optimization problem,
+M (cid:48)α(cid:48) (α, M ) = arg min
+M (cid:29)
+X
+∈
+F +κ Ω(α(cid:48), M (cid:48), X), (2) 2 (cid:107)
+Rk×N (cid:48)
+≡
+· · ·
+[α1, where α
+, the function h is de-∈
+ﬁned by h(X) = M α. Since α depends on X, we shall commonly write it as α(X). The mapping h maps Rd(cid:48) into of Rd(cid:48) a subset
+, that we will call the feature manifold (or
+M simply manifold).
+The choice of Ω(α(cid:48), M (cid:48), X) realizes some desired constraints via regularization (with κ > 0) for exam-ple, Ω(α(cid:48), M (cid:48), X) =
+α(cid:48) 1 encourages sparsity of α, (cid:107) (cid:107) while Ω(α(cid:48), M (cid:48), X) = (cid:80) 2 2, n[ 2]T ]αn 2 mk (cid:107)
+Span(m1, est neighbors of xn.
+−
+· · ·
+− encourages locality to express each αn w.r.t.
+, mk(cid:48) are the k(cid:48) near-, mk(cid:48)), where m1, xn (cid:107) xn (cid:107)
+|
+· · · m1
+· · · (cid:107)
+,
+We intertwine the encoding step with blocks of the dis-criminator as follows:
+−
+β) ˜X l + β hl( ˜X l)
+X l+1 = (1 (3) where ˜X l = f (X l; θBl ) and hl is the encoding func-tion introduced just above, expressed in terms of a dictio-L
+L nary M l, whereas l=1 are parameters l=1 and of blocks of the discriminator and dictionaries for layers 1, . . . , L respectively. Figure 2 illustrates Eq. (3) applied
+, BL of the discriminator. to blocks B1,
+θBl }
+M l
+{
+}
+{
+· · ·
+α(cid:48),M (cid:48) (cid:107)
+−
+, αN (cid:48)]
+We opt for such a design as (i) f may reﬁne h if the dis-criminator loss spotting real/fake inputs deems it useful, (ii) h is preferred when overﬁtting is detected, whereas f in-troduces reﬁned patterns otherwise, (iii) f is encouraged to learn from the piecewise-smooth h (see 5).
+§ 3.

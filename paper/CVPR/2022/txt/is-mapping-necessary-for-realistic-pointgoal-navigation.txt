@@ -1,0 +1,232 @@
+Abstract
+Can an autonomous agent navigate in a new environment without building an explicit map?
+For the task of PointGoal navigation (‘Go to ∆x, ∆y’) under idealized settings (no RGB-D and actuation noise, perfect GPS+Compass), the answer is a clear ‘yes’ – map-less neural models composed of task-agnostic components (CNNs and RNNs) trained with large-scale reinforcement learning achieve 100% Success on a standard dataset (Gib-son [24]). However, for PointNav in a realistic setting (RGB-D and actuation noise, no GPS+Compass), this is an open question; one we tackle in this paper. The strongest published result for this task is 71.7% Success [39].1
+First, we identify the main (perhaps, only) cause of the drop in performance: absence of GPS+Compass. An agent with perfect GPS+Compass faced with RGB-D sensing and actuation noise achieves 99.8% Success (Gibson-v2 val).
+This suggests that (to paraphrase a meme) robust visual odometry is all we need for realistic PointNav; if we can achieve that, we can ignore the sensing and actuation noise.
+With that as our operating hypothesis, we scale dataset size, model size, and develop human-annotation-free data-augmentation techniques to train neural models for visual odometry. We advance state of the art on the Habitat Re-alistic PointNav Challenge – SPL by 40% (relative), 53 to 74, and Success by 31% (relative), 71 to 94. While our ap-proach does not saturate or ‘solve’ this dataset, this strong improvement combined with promising zero-shot sim2real transfer (to a LoCoBot robot) provides evidence consistent with the hypothesis that explicit mapping may not be neces-sary for navigation, even in a realistic setting. 1.
+
+Introduction
+The ability to navigate in a novel environment solely from egocentric perception is an essential requirement for
+*Correspondence to partsey@ucu.edu.ua 1According to Habitat Challenge 2020 PointNav benchmark held annu-ally. A concurrent as-yet-unpublished result has reported 91% Success on 2021’s benchmark, but we are unable to comment on the details because an associated report is not available.
+Figure 1. PointNav. The agent is tasked with navigating from its starting location (blue square) to a goal location (red square) specified as coordinates relative to its initial place. It must do so from solely an RGB-D camera. The blue line shows the agent’s trajectory, and the green line indicates the oracle path. building intelligent and helpful robots. To make progress on this long-term vision, the task of PointGoal navigation (PointNav) [1], i.e. asking a robot to ‘go to (∆x, ∆y)’ rela-tive to its starting location), has become a core task.
+We are interested in the question – can an agent navigate in a new environment without building an explicit map?2
+This question is of deep scientific interest. Decades of research in intelligent animal navigation show that various animals build ‘cognitive maps’ [21, 31] of their environ-ment. For decades, robotics research has treated explicit mapping and localization [2, 20, 27, 30] as integral compo-nents in a navigation robot. There are many good reasons to develop mapping technology, but we simply don’t know whether mapping is necessary for navigation. One way to resolve this is to refute the contrapositive – if we demon-strate a map-less approach that can navigate, that will imply that explicit mapping is not necessary for successful navi-gation.
+Under idealized settings – perfect localization via a noise-free GPS+Compass sensor, egocentric sensing via 2We distinguish an explicit mapping mechanism from implicit spatial understanding that may emerge from building task-specific end-to-end-learned representations. The former is designed, the latter is emergent.
+a noise-free RGB-D sensor, and absence of any actua-tion noise – map-less navigation models composed of task-agnostic neural components (CNNs and RNNs) trained with large-scale reinforcement learning achieve 100% Suc-cess [24, 33] on a standard dataset (Gibson [35]). How-ever, under realistic settings – where the agent must self-localize (i.e. no GPS+Compass sensor), and must contend with RGB-D sensing noise and actuation noise – this is an open question; one we tackle in this paper. The strongest published result for this task is 71.7% Success [39].
+To make systematic progress, we first study a simpler version of the realistic setting where the agent is given ground-truth GPS+Compass, isolating localization diffi-culties from the ability to deal with noisy perception and control. While prior work in this setting [39] reported fairly a high success rate (97%), we significantly sharpen this and demonstrate near-perfect performance again (99.8% Suc-cess rate on Gibson val split). Our results leave no room for doubt and confirm that the only performance-limiting factor is the agent’s ability to self-localize.
+With this limiting-factor identified, we study the local-ization, or visual odometry (VO) module. It takes as input two successive observations Ot−1 and Ot and outputs the relative pose change (∆x, ∆y, ∆z, ∆θ), that is then used to update the location of the goal relative to the robot, which is consumed by the navigation policy.
+◦
+◦
+We present a series of broadly-applicable modifications that improve agent navigation performance considerably, from 64% Success/52% SPL to 96% Success/77% SPL on the Habitat Challenge 2021 setting. These modifications are all motivated by the need for robust visual odometry in ser-vice of navigation, specifically: 1. Action conditioning via action embeddings. It is im-portant to recognize that our goal is not visual odome-try in isolation but in the context of navigation. Specif-ically, we know what action (move forward 0.25m, turn left 30 or turn right 30
+) was executed and should use this information; this observation is not new and has been made in prior work [39]. We find that converting a 1-hot representation of the actions into con-tinuous embeddings and concatenating them to the last two fully-connected layers in the VO network signifi-cantly improves performance by +8 Success/+5 SPL. 2. Training-time data augmentation. Data augmenta-tion is one of the most successful methods for regu-larizing learning techniques [17, 37, 38]. We construct navigation- and odometry-specific augmentations – e.g. when an agent rotates in-place to produce observations
+Ot−1 and Ot, we can create a new training image that relates Ot and Ot−1 via the inverse pose and turning ac-tion. We also propose a new augmentation called Flip (described in Sec. 4.2). Cumulatively, they improve per-formance by +2 Success/+1 SPL. 3. Test-time data augmentation for ensembling. To im-prove robustness we perform all augmentations at test-time and aggregate predictions across all combinations.
+This improves performance by +3 Success/+3 SPL. 4. Increased dataset size and model size. Finally, we study the effects of increased dataset size from 500k to 1.5M observation pairs (+8 Success/+7 SPL), larger model size (+3 Success/+3 SPL), and a further dataset increase from 1.5M to 5M (+8 Success/+6 SPL). 2. Preliminaries: PointGoal Navigation
+In PointNav (illustrated in Fig. 1), an agent is initialized in previously unseen environment and is tasked to reach the goal specified relative to its starting location. The ac-tion space is discrete and consists of four types of actions: stop (to end the episode), move forward by 0.25m, turn left and turn right by angle α3.
+The agent is evaluated via three primary metrics. 1) Suc-cess, Si, where an episode i is considered successful if the agent issues the stop command within 0.36m (2×agent radius) of the goal. 2) Success weight by (inverse normal-ized) Path Length (SPL) [1], where success is weighted by the efficiency of the agent’s path. Formally, for episode i, let Si be a binary indicator of success, pi be the length of the agent’s path, and li be the length of the shortest path (geodesic distance), then for N episodes
+SPL = 1
+N
+N (cid:88) i=1
+Si · li max(pi, li)
+. (1) 3) SoftSPL [9], where binary success is replaced by progress towards goal. Formally, for episode i, let d0i be the initial distance to goal and dTi be the distance to goal at the end of the episode (on both successes and failures), then
+SoftSPL = 1
+N
+N (cid:88) (cid:18) 1 − i=1 dTi d0i (cid:19) (cid:18) li max(pi, li) (cid:19)
+. (2)
+Embodiment. Driven by experiments in reality the agent’s specification matches the LoCoBot’s 4 specification. The agent is equipped with an RGB-D camera mounted at a height of 0.88m and tilted −20 (angled downwards to-wards the floor; pitch or camera azimuth angle). Camera’s resolution is 360 × 640 pixels with 70 horizontal field of view. Base radius is 0.18m. 2.1. PointNav-v1: Idealized (Noise-less) Setting
+◦
+◦
+In idealized setting (named ‘v1’), the agent was equipped with noise-free RGB-D camera, given access to ground-truth localization (via an GPS+Compass sen-sor), and movement was deterministic/noise-free (meaning turn right 10
+). always turned the agent exactly 10
+◦
+◦ 3In PointNav-v1 α = 10 4LoCoBot is a low-cost mobile manipulator suitable for both navigation
+, in PointNav-v2 α = 30
+.
+◦
+◦ and manipulation (http://www.LoCoBot.org).
+The agent could also ‘slide’ along walls – a commonplace behavior in video games that improves human control but was later found to degrade sim-to-real performance [14].
+State-of-the-art approaches for this task rely on large-scale reinforcement learning and have begun to saturate the available datasets: e.g. Wijmans et al. [33] reported 99% Success/94% SPL on Gibson test, Ramakrishnan et al. [24] sharpened this result to 100% Success/94% SPL on Gibson test, 94% Success/83 SPL on MP3D test, and 99% Success/92% SPL on HM3D test. Overall, PointNav-v1 is largely considered satured or ‘solved’. 2.2. PointNav-v2: Realistic (Noisy) Setting
+Noiseless sensing and actuation simply do not yet ex-ist. Different lightning conditions, surface properties (such as friction), and other sources of error cause actuation and sensing noise that introduce significant drift over a long tra-jectory. Moreover, high-precision localization in indoor en-vironments can not be assumed in realistic settings.
+The so-called ‘realistic’ (or v2) setting of PointNav ad-dresses these shortcomings of the v1 by introducing ac-tuation noise (modeled by benchmarking the LoCoBot robot [19]), removing GPS+Compass, and adding noise to the RGB-D camera. To simulate real-world camera RGB and Depth, noise models from [8] were used (Gaussian noise model for RGB and Redwood noise model for Depth).
+Initial attempts to directly apply PointNav-v1 techniques to PointNav-v2 were largely unsuccessful (≈5% Suc-cess [9]). More recent methods [9, 39] train a navigation policy with access to ground-truth localization and then re-place ground-truth localization with estimated localization by integrating the egomotion estimates from a visual odom-etry module. The strongest published result for this task is 71.7% Success and 53% SPL [39], indicating that navi-gation with noisy actuation and sensing continues to be an open frontier for research. 3. Navigation Policy
+Our pipeline consists of two components: a navigation policy (nav-policy) that given observations Ot at time step t decides which action to take to reach the goal and a visual odometry (VO) module that given two consecutive obser-vations (Ot−1, Ot) estimates relative pose change (egomo-tion) that is further used to update the goal coordinates after each step (see Fig. 2). This decoupling of roles is a natural choice. It builds upon the results in the idealized setting that has been used in prior work and is used in the previous state of the art [9, 39]. In this section we describe our navigation policy and show that it is capable of near-perfect navigation with noisy actuations and noisy RGB-D sensing when given ground-truth localization, demonstrating that visual odom-etry is the bottleneck. We describe the details of our visual odometry module in the next section (Sec. 4). We use the
+Habitat platform [25] to simulate navigation experiments.
+Figure 2. Agent architecture for Realistic PointGoal navigation consisting of an RNN-based RL navigation policy and CNN-based visual odometry (VO) module. Inputs are gt−1 - goal coordinates wrt. previous pose, at−1 - previous action, Ot−1 - observations at previous timestep, and Ot - current observations. First, VO predicts the change between t − 1 and t and then update the goal to be wrt. current pose. The updated goal location is given to the navigation policy along with Ot to predict the next action at. The initial goal location estimate is equal to ground truth goal location (as per the task specification). 3.1. Architecture
+We train the navigation assuming perfect odometry (use ground-truth localization provided by GPS+Compass sen-sor) and then use VO module estimates as a drop-in replace-ment of ground-truth localization sensor without fine-tuning (idea introduced by Datta et al. [9]; also used by Zhao et al. [39]). This also allows us to evaluate the policy’s perfor-mance in isolation of the visual odometry module.
+We use the same navigation policy as Wijmans et al. [33], consisting of a two-layer Long Short-Term Mem-ory (LSTM) [12] and a half-width ResNet50 [11] en-the policy is given the out-coder. At each timestep, put from the noisy Depth sensor (following common practice for the navigation policy, we discard RGB) and idealistic GPS+Compass sensor (ground-truth localiza-that is replaced by the visual odometry estimates tion, during evaluation).
+Before passing through the fea-ture encoder, visual observations are transformed using
+ResizeShortestEdge and CenterCrop observation transforms; the former resizes the shortest edge of the in-put to 256 pixels while maintaining aspect ratio, the latter center crops the input to 256 × 256 pixels. 3.2. Training Details
+We use the train split of the full Gibson data (scans with ratings of 0 or higher) [35]. We leverage Decentralized Dis-tributed Proximal Policy Optimization (DD-PPO) [33] and
+Figure 3. Visual odometry module. At inference the input pair of observations (Ot−1, Ot) is transformed by applying Swap and
+Flip augmentations. In total the visual odometry model receives two observation pairs for move forward (original and flipped) and four observation pairs for turn {left,right} actions (original, flipped, swapped(original), swapped(flipped)). In the aggregation stage outputs are transformed back to original coordinate frame by applying the inverse transformation for each augmentation and then averaging to produce the final egomotion estimate (details in Sec. 4.3).
+Wijmans et al.’s reward structure to train the policy. backtracking or dislodging and adding to its path length.
+For an episode i, the agent receives a ‘terminal’ reward of rT = 2.5 · Successi (rT = 2.5 · SPLi in later experi-ments) that encourages it to stop at the correct location (and take an efficient path), and a shaped reward rt(at, st) =
+−∆geo dist − 0.01, that encourages it to take steps towards the goal (while being efficient), where ∆geo dist is the change in geodesic distance to the goal by performing action at in state st. Note that reward is not available at test-time. We train with 64 GPUs (workers). Throughout our experimen-tation we never discarded the weights of a trained naviga-tion policy. We trained for 2.5 billion steps on Gibson 4+, then for another 2.5 billion steps on Gibson 0+, and finally for another 2.5 billion steps on Gibson 0+ with the termi-nal reward weighted by SPL. We started each stage with the best (by val performance) agent from the previous stage. 3.3. Ground-Truth Localization Performance
+To isolate the performance of the navigation policy from the visual odometry module, we examine performance of our agent with access to ground-truth GPS+Compass. On the Gibson val dataset, our agent achieves 99.8% Success and 80 %SPL in the PointNav-v2 setting. This result shows that near-perfect success, even with noisy observations and actuations, is achievable without building an explicit map.
+To answer if near-perfect SPL is also achievable, we need a tight upper-bound on SPL in the realistic setting. Re-call that in the realistic setting actuations are noisy. Thus, even an oracle agent with full knowledge of the environ-ment may not be able to follow the shortest path and achieve 100% SPL. This particular problem is exacerbated because
+‘sliding’ is disabled, meaning that if an agent is traveling close to an obstacle (as shortest path typically do), noisy ac-tuation may bring it into contact with the obstacle, requiring
+To determine a tighter upper-bound on SPL, we imple-ment a heuristic planner that uses the ground-truth map to choose motion primitives (turn {left,right} ×N, then move forward). The planner selects the primitive that best reduces distance to goal using the ground-truth geodesic distance (thereby using the ground-truth map), ex-ecutes the first action in the selected primitive, and then re-runs the selection process until the goal is reached. On
+Gibson validation, the oracle achieves 84% SPL. Thus, we shouldn’t expect 100% SPL in the realistic setting.
+We then further tighten the upper-bound by accounting for the privileged information (the ground-truth map) given to the oracle. Consider the idealized setting, in this set-ting the challenge for the agent is path-planning in unknown environments, not additionally contenting with noisy ac-tuations and observations. This setting is also considered
+‘solved’ on the Gibson dataset, making it an ideal set-In ting the quantify the impact of the ground-truth map. the idealized setting, on Gibson val, the oracle achieves 99% SPL while the best known result for a learned agent is 97% SPL [33]. Using either the absolute or relative dif-ference, we would expect approximately 82% SPL to be achievable by a learned agent in the realistic setting as the oracle achieves 84% SPL. While 80% is not quite 82%, this indicates that visual odometry is the limiting factor (the best result with visual odometry is 63% SPL) and we turn our focus towards this component for the rest of the paper. 4. Visual Odometry
+The visual odometry model takes a pair of 180×360
+RGB-D frames stacked channel-wise as input and predicts the relative pose change between the two camera positions,
+∆pose = (∆x, ∆y, ∆z, ∆θ) , where ∆x, ∆y, ∆z refer to
+Figure 4. Augmentations. An input pair of observations (Ot−1, Ot) are transformed by applying Swap (returns (Ot, Ot−1) and
+Flip (flips observations about their vertical axis) augmentations, producing two transformed pairs as output for move forward ac-tion (original and flipped) and four transformed pairs as output for turn {left,right} actions (original, flipped, swapped(original), swapped(flipped)) (details in Sec. 4.2). the 3D translation of the camera center and ∆θ refers to the rotation about the gravity vector (‘yaw’ or robot heading). is
+The visual represented odometry model as
+ResNet [11] encoder followed by a compression block and two fully connected (FC) layers. We replace Batch-Norm [13] with GroupNorm [34] (we found it to work better) and use half of the width. The compression block consists of 3×3 Conv2d+GroupNorm+ReLU. We apply
+DropOut [28] with 0.2 probability between fully connected layers. Full VO pipeline is illustrated in Fig. 3. 4.1. Action Embedding
+Actuation noise and collisions affect agent translation and rotation for each action type differently (the agent may rotate while moving forward and move while rotat-ing in place [19]). This motivated us to study incorporat-ing knowledge of the action taken between two consecutive observations as an additional input. We represent the ac-tion taken as an embedding – fixed action-specific vector of length 16 that is concatenated to the flattened output from the feature encoder. We do not apply a DropOut to action embedding as we find this harms performance. To further increase the importance of the action, we concatenated the embedding to the input of all fully connected layers. 4.2. Train-Time Augmentations
+Given a pair of observations, (Ot−1, Ot), the action taken between them, at−1, and their relative change in pose
+∆pose, we use the following augmentations.
+Swap. For every training tuple (Ot−1, Ot, at−1, ∆pose) where at−1 is a rotation action we create an extra train-ing example (Ot, Ot−1, aSwap t−1 is the effective action taken (turn left → turn right and turn right → turn left) and ∆Swap is the change in pose pose ) where aSwap t−1 , ∆Swap pose after swapping (negation of all components). As in
+Zhao et al. [39], this augmentation leverages the order in-variance of turn {left,right} actions.
+Flip. In architecture and indoor design, it is common to prepare mirror-image floor plans (e.g. kitchen on the left, living on the right and vice versa) to increase the number of options. As shown in Fig. 4, we simulate the robot navigating in a mirror-image house by flipping its cam-era image about the vertical axis. Specifically, for ev-ery training tuple (Ot−1, Ot, at−1, ∆pose) we generate an additional training example (OFlip pose ), where OFlip t−1 , OFlip are the RGB-D observations flipped t along their vertical axis, aFlip is the effective action af-t−1 ter the flip (turn left → turn right, turn right
+→ turn left, and move forward remains the same), and ∆Flip pose = (−∆x, ∆y, ∆z, −∆θ). t−1 , OFlip t−1 , ∆Flip
+, aFlip t
+We also apply the composition of Flip and Swap (sim-ilar to torchvision.transforms.Compose [22]).
+Note that Flip then Swap is the same as Swap then Flip.
+All four combinations of Flip and Swap are shown in Fig. 4. 4.3. Test-Time Augmentations
+We adapt the common practice of test-time augmenta-tion in image classification to visual odometry. Specif-ically, we apply Flip and Swap augmentations during the test time (i.e. during navigation) then aggregate pose-predictions. The aggregation consists of two steps: first we transform egomotion estimates for transformed input pairs back to original coordinate system, Flip−1(∆pose) = (−∆x, ∆y, ∆z, −∆θ), Swap−1(∆pose) = −∆pose, and then take the average (illustrated in Fig. 3).
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17
+Dataset
+VO
+Embedding
+Train time
+Test time
+Navigation metrics (×102) size(M)
+Encoder
+Size(M) 1FC 2FC Flip
+Swap
+Flip
+Swap
+Success
+SPL
+SoftSPL 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 1.5 1.5 1.5 1.5 5
+ResNet18
+ResNet18
+ResNet18
+ResNet18
+ResNet18
+ResNet18
+ResNet18
+ResNet18
+ResNet18
+ResNet18
+ResNet18
+ResNet18
+ResNet18
+ResNet18
+ResNet50
+ResNet50 4.2 4.2 4.2 4.2 4.2 4.2 4.2 4.2 4.2 4.2 4.2 4.2 4.2 4.2 7.6 7.6
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓ 64.0±0.9 70.6±1.9 72.1±1.0 69.5±1.3 71.0±1.3 73.5±1.8 75.7±0.8 73.7±0.3 75.5±1.2 76.2±0.9 77.0±0.8 77.0±1.3 80.0±0.9 85.2±0.5 51.9±1.0 56.5±1.7 57.5±0.4 55.6±1.1 57.0±1.2 58.7±1.3 60.7±0.8 58.8±0.6 60.3±0.9 60.6±0.8 61.5±0.5 62.0±1.0 64.1±0.9 68.4±0.2 72.6±0.3 73.3±0.3 73.4±0.5 72.5±0.2 72.5±0.5 74.0±0.1 74.1±0.2 72.8±0.2 73.5±0.2 73.3±0.3 73.9±0.3 74.3±0.3 73.8±0.4 74.9±0.4 dG 57.7±2.5 43.7±1.7 42.7±2.6 50.6±1.7 53.6±2.4 39.7±1.9 37.1±2.3 45.2±2.9 40.3±1.9 39.2±2.0 37.2±1.0 38.0±0.9 37.8±0.7 31.5±1.5 88.0±0.6 70.6±0.2 75.5±0.2 26.8±1.7 96.0±0.5 76.6±0.4 76.4±0.3 20.1±0.8
+Ground-Truth Odometry 99.8±0.1 79.8±0.2 77.0±0.2 16.2±1.1
+Table 1. Evaluation on the Gibson v2 4+ validation split. Results are reported as an average of four evaluations with different seeds.
+Navigation metrics Success, SPL, SoftSPL, dG (distance to goal) are subject to ×102 multiplication. Tick in a column indicate whether a particular option is turned on. For instance, in row 6 ResNet18 is the VO encoder, action embedding is concatenated to 1-st fully connected and 2-nd fully connected layer, flip augmentation is turned on during training, and navigation metrics are reported with no augmentations during evaluation. 4.4. Training Details
+We train the visual odometry model decoupled from the navigation policy – on a static dataset D =
+{(Ot−1, Ot, at−1, ∆pose)}. This dataset is created by us-ing the oracle to unroll trajectories from which the pairs of
+RGB-D frames with meta-information about actions taken and egomotions are uniformly sampled (similar dataset col-lection protocol were used by [9, 39]). We use Gibson 4+ scenes (and Gibson-v2 PointGoal navigation episodes) to generate the VO dataset. We collect the training dataset by uniformly sampling 20% of pairs of observations from train scenes (500k to 5M total training examples) and the valida-tion dataset by sampling 75% of pairs of observations from validation scenes (34k total).
+The model is trained with batch size 32, Adam optimizer with learning rate 10−4 and mean squared error (MSE) loss for both translation and rotation. 4.5. Dataset and Model Size
+We vary the dataset that the VO module is trained on from 500k to 5M observation tuples and replace ResNet18 encoder with ResNet50 encoder.
+As the training time increases linearly to the dataset size, we also implemented the distributed VO training pipeline that allows for multi node multi GPU scaling and signifi-cantly reduces experiment time. Training on 8 nodes (with 8 GPUs each) runs 6.4 × faster that training on 1 node. 5. Experiments
+We report experiments results in Tab. 1. Experiments in rows 1-15 were run for 50 epochs and 90 epochs for row 16
+- best HC 2021 PointNav agent. We perform early-stopping via validation loss. To study the impact of different visual odometry modules we fixed the navigation policy (used the same network weights) across all experiments. 5.1. Ablations
+In this section we study the importance of proposed additions over a baseline VO model: incorporating meta-information available to the agent by adding action embed-dings, Flip and Swap, and larger datasets. We start from a baseline ResNet18 model (Tab. 1, row 1).
+Action embedding. We analyze two possible ways of in-corporating meta-information: concatenating the embed-ding to the first FC layer that goes after encoder (Tab. 1, row 2) and concatenating the embedding to all FC layers (row 3). Concatenating action embedding to first FC layer improves performance by +7 Success/+5 SPL compared to a baseline (row 2 vs row 1). Concatenating action em-bedding to all FC layers improves performance further by
++1 Success/+1 SPL (row 3 vs row 2). We believe this allows the FC layers to receive more context to learn more accurate egomotion for each action type using shared encoder.
+Train-time augmentations. Enriching the VO dataset diversity by applying Flip improves performance by
++2 Success/+1 SPL (row 6 vs row 3).
+Interestingly we found Swap hurts performance by -2 Success/-2 SPL (row 4 vs row 3) while Flip +Swap achieves performance equiv-alent to Flip (row 8 vs row 6).
+Test-time augmentations. The biggest performance boost from augmentations comes when they are also applied at test-time (navigation). At inference Swap and Flip are applied (turned no/off) independently. Turning Flip on at test-time improves performance by +2 Success/+2 SPL compared to a model with Flip on only at train-time (row 10 vs row 6). With Swap on at train- and test-time, perfor-mance is still worse than achieved by model without Swap,
+-1 Success/-1 SPL (row 5 vs row 3). However, when both
+Swap and Flip are on at train- and test-time performance improves further by +1 Success/+1 SPL compared to model with Flip (row 11 ws row 10). That is a total improve-ment of +5 Success/+4 SPL compared to a model trained and evaluated without augmentations (row 11 vs row 3).
+Larger dataset. To study the impact of large scale train-ing we increased the training dataset size 3× (from 500k to 1.5M training pairs) following the same dataset collec-tion protocol, described in Sec. 4.4). Without augmen-tations, increasing dataset size 3× improves performance by +5 Success/+4 SPL (row 12 vs row 3) and by +8 Suc-cess/+4 SPL(row 14 vs row 11) with augmentations.
+We also examine the impact of augmentations with this larger dataset. Surprisingly, we find that they are more in-fluential with a larger training dataset. At train-time, Swap
++Flip improve performance by +2 Success/+1 SPL with a small dataset (row 8 vs row 3) while they improve per-formance by +3 Success/+2 SPL (row 13 vs row 12) with a large dataset. A test-time, Swap +Flip improve per-formance by +3 Success/+3 SPL (row 11 vs row 8) with a small dataset while they improve performance by +5 Suc-cess/+4 SPL (row 14 vs row 13) with a large dataset.
+Deeper encoder. We find that training with more sophisti-cated encoder architecture (ResNet50 instead of ResNet18) improves navigation performance further by +3 Suc-cess/+3 SPL (row 15 vs row 14). Given the additional rep-resentational capacity of ResNet50, we further increase the training dataset size to 5M pairs. This improves perfor-mance by +8 Success/+6 SPL (row 16 vs row 15).
+Dataset transfer. We examine how the two components of our agent transfer from their training dataset, Gibson, to the Matterport3D dataset [5]. We find that while the per-formance of the agent with ground-truth localization is re-duced by only a small amount, -6 Succes/-6 SPL (Tab. 2,
+Dataset
+Policy
+Navigation metrics (×102)
+Success
+SPL
+SoftSPL dG 1 Gibson 2 Gibson 3 Gibson 98.6±0.1
+Oracle 99.8±0.1
+Learned+GT
+Learned+VO 96.0±0.5 98.7±0.4 4 MP3D 5 MP3D Learned+GT 94.4±0.6 6 MP3D Learned+VO 79.4±1.7
+Oracle 84.5±0.1 79.8±0.2 76.6±0.4 85.4±0.4 71.8±0.7 60.9±1.3 80.5±0.2 77.0±0.2 76.4±0.3 83.2±0.2 70.7±0.6 69.1±0.3 30.6±1.5 16.2±1.1 20.1±0.8 34.3±0.9 123.5±8.7 142.9±16.6
+Table 2. Dataset transfer. We evaluate how well the components of our agent transfer from its training dataset (Gibson v2) to the validation dataset of Matterport3D v2. We find that while the pol-icy transfers well, visual odometry performance suffers.
+Rank
+Participant team
+Navigation metrics (×102)
+Success
+SPL SoftSPL 1 2 3 4
+VO for Realistic PointGoal (Ours) inspir.ai robotics
+VO2021 (Zhao et al. [39])
+Differentiable SLAM-net ( [15]) 94 91 78 65 74 70 59 47 76 71 69 60 dG 21 70 53 174
+Table 3. Habitat Challenge 2021 benchmark test-standard split (retrieved 2021-Nov-16). The work of ‘inspir.ai robotics’ is con-current unpublished work. row 5 vs row 2), the performance of the agent with visual odometry is reduced by considerably more, -19 Success/-18 SPL (row 6 vs row 3). This is inline with observed in the idealized case where Depth-only agents (like our agent with ground-truth) transfer from Gibson to Matterport3D well, agents with RGB-D (like our agent with VO) transfer poorly [24, 25]. This leaves the question – is there a univer-sal (cross-dataset) VO module? We anticipate creating one will require training on multiple large-scale datasets. 5.2. Habitat Challenge 2021 PointNav Track
+We evaluate our most performant agent (Tab. 1, row 16) on the Habitat Challenge 2021 benchmark test-std split.
+Our agent achieves 94% Success and 74% SPL (Tab. 3) on the test-std split. This is an increase of +16% Suc-cess/+15% SPL over prior published state-of-the-art, Zhao et al. [39]. An unpublished concurrent work increased per-formance to 91% Success/70% SPL and our method im-proves upon that further.
+While our results do not effectively ‘solve’ PointGoal navigation under realistic settings, they improve perfor-mance significantly and add more evidence that navigation without building an explicit map is possible, even under harsh realistic conditions. 6. Real-World Transfer
+We perform an initial exploration of our method in re-ality and deploy our learned agent on a LoCoBot with no sim2real adaptation. Across 9 episodes, it achieves 11% Success, 71% SoftSPL, and makes it 92% of the way to the goal (SoftSuccess). Based on the navigation videos
+provided on the website 5 the agent does a good job avoid-ing obstacles. These initial results show promise, and adap-tation methods may improve the performance. 7.

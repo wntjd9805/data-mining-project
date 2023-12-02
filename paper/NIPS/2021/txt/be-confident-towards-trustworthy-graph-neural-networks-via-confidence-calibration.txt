@@ -1,0 +1,174 @@
+Abstract
+Despite Graph Neural Networks (GNNs) have achieved remarkable accuracy, whether the results are trustworthy is still unexplored. Previous studies suggest that many modern neural networks are over-conﬁdent on the predictions, however, surprisingly, we discover that GNNs are primarily in the opposite direction, i.e.,
+GNNs are under-conﬁdent. Therefore, the conﬁdence calibration for GNNs is highly desired. In this paper, we propose a novel trustworthy GNN model by designing a topology-aware post-hoc calibration function. Speciﬁcally, we ﬁrst verify that the conﬁdence distribution in a graph has homophily property, and this ﬁnding inspires us to design a calibration GNN model (CaGCN) to learn the calibration function. CaGCN is able to obtain a unique transformation from logits of GNNs to the calibrated conﬁdence for each node, meanwhile, such transformation is able to preserve the order between classes, satisfying the accuracy-preserving property. Moreover, we apply the calibration GNN to self-training framework, showing that more trustworthy pseudo labels can be obtained with the calibrated conﬁdence and further improve the performance. Extensive experiments demonstrate the effectiveness of our proposed model in terms of both calibration and accuracy. 1
+
+Introduction
+Graphs are ubiquitous in the real world, including social networks, e-commerce networks, trafﬁc networks, and so on. Recently, Graph Neural Networks (GNNs), which are able to effectively learn the node representations based on the message-passing manner, have attracted considerable attention in dealing with graph data [16, 33, 39, 44, 15, 2, 34]. To date, GNNs have been applied to various applications and achieved remarkable accuracy, e.g., node classiﬁcation [16, 33], link prediction [41] and graph classiﬁcation [9].
+However, it is well established that a model with good accuracy is not the only goal, but a trustworthy model is highly desired in many applications, especially in safety-critical ﬁelds [1]. Usually, a trustworthy model implies that it should know when it is likely to be incorrect, in other words, the probability, i.e., the conﬁdence, associated with the predicted class label should reﬂect its ground truth correctness likelihood [12]. For example, in the scene of autonomous driving, the system will adopt the prediction given by the model only when the model has high conﬁdence for its prediction.
+Otherwise, the decision-making power will be returned to the driver or the system adopts other safer strategies. Recently, the conﬁdence calibration has attracted considerable attention in deep learning
+[12, 40, 19], which reveals that many modern neural network models are over-conﬁdent on the predictions, i.e., the prediction accuracy is lower than its conﬁdence. However, it has not been studied
+∗Corresponding author 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+in GNNs on the semi-supervised scenario, which gives rise to one fundamental question: will the current GNNs follow the same over-conﬁdent property as other neural networks? A well-informed answer can help us better understand GNNs and enable GNNs to be applied to various areas in a more reliable manner.
+As the ﬁrst contribution of this study, we present experiments assessing the relationship between the conﬁdence and the accuracy of Graph Convolutional Networks (GCNs) [16] and Graph Attention Net-works (GAT) [33] in the node classiﬁcation task (more details can be seen in Section 2), respectively.
+Surprisingly, we discover that existing GNNs are far distant from being well-calibrated, and more importantly, GNNs tend to be under-conﬁdent in their predictions, which is very different from other modern deep learning models that are often over-conﬁdent [12, 19]. GNNs being under-conﬁdent means that many predictions are distributed in the low-conﬁdence range, and therefore, fewer predic-tions are available for safety-critical applications. Once the weakness is identiﬁed, another natural question is: how can we calibrate the conﬁdence on predictions given by GNNs so as to make them more trustworthy?
+Essentially, the conﬁdence calibration is to calibrate the outputs (also known logits) of original models (e.g., GNNs), therefore, a straightforward manner is to employ temperature scaling (TS) [12],
+OP-families [25] to learn calibration function using a held-out dataset in a post-hoc way. However, when being applied to graphs, they all ignore the effect of topology, which will inevitably make mistakes during calibration. For example, considering that the logits of two nodes a and b are the same, but node a is similar to its neighbors while node b is not. Apparently, the predictions of GCNs for a should be more conﬁdent than b, while the traditional calibration methods, e.g., TS, will learn the same conﬁdence for a and b, because it does not consider the effect of topology.
+Moreover, most of them explore calibration functions only in the linear space [12, 18] while it is well known that non-linear space contains more complex function transformation which is able to calibrate networks with complicated landscapes well. Even if some works have explored the non-linear space such as Matrix Scaling [12], they generally degrade the classiﬁcation accuracy of the original classiﬁer, while a good accuracy is still a basic requirement by many applications.
+In this paper, we introduce a topology-aware post-hoc calibration method for GNNs. Speciﬁcally, for the logits given by the original classiﬁcation GNNs, we employ another calibration GCN (CaGCN) to propagate conﬁdence, naturally enabling that the conﬁdence of topologically adjacent nodes becomes similar. CaGCN learns a unique temperature t for each node for temperature scaling, thus preserving the accuracy of the original classiﬁcation GCN. In addition, based on our ﬁnding that large numbers of high-accuracy predictions are distributed in the low-conﬁdence range, we design a calibrated self-training model CaGCN-st in which the conﬁdence is ﬁrstly calibrated then used to generate pseudo labels with high conﬁdence. The contributions of this paper are three-fold:
+• We study the trustworthy problem of GNNs, and discover one unique characteristic of GNNs, i.e., the predictions made by GNNs are usually under-conﬁdent.
+• We propose a novel trustworthy GNN model based on the conﬁdence calibration. Our proposed calibration function has three features: topology-aware, non-linear, and accuracy-preserving. We further design a calibrated self-training GNN model, which can effectively utilize the predictions with high conﬁdence.
+• Extensive experiments demonstrate the effectiveness of our proposed models in terms of both calibration and accuracy. 2 Notation and Preliminary Study
+In this paper, we focus on the calibration of semi-supervised node classiﬁcation in an undirected attributed graph G = (V, E) with the adjacent matrix A ∈ RN×N and the node feature matrix X =
+[x1, . . . , xN]T. V is a set of nodes and E ⊆ V × V is a set of edges between nodes. N = |V | is the number of nodes. Here we give the deﬁnition of perfect calibration of GNNs as follows:
+Deﬁnition 1. Given random variables A, X, Y ⊆ {1, . . . , K} and a GNN model fθ where θ is the learnable parameters, for node i with label yi ∈ Y, zi = fθ (xi, A) = [zi,1, . . . , zi,K]T is the output of
+GNNs (i.e., the prediction probability), and ˆyi = arg maxk zi,k and ˆpi = maxk zi,k are the prediction and the conﬁdence respectively. Then we deﬁne fθ to be perfectly calibrated as:
+P( ˆyi = yi| ˆpi = p) = p, ∀p ∈ [0, 1]. (1) 2
+Figure 1: Reliability diagrams for GCN (top) and GAT (bottom) without conﬁdence calibration.
+The diagram is expected to plot an identity function of accuracy with respect to conﬁdence. Any deviation from a perfectly diagonal (i.e., the difference between blue and red histogram) represents the miscalibration.
+Figure 2: Conﬁdence distribution before calibration.
+According to Deﬁnition 1, GNN is perfectly calibrated only when the conﬁdence ˆpi is exactly equal to the true probability of getting a correct prediction for every node.
+Next, we take two representative GNNs (GCN [16] and GAT [33]) as examples to analyze whether they are perfectly calibrated. Speciﬁcally, we apply GCN and GAT to four widely used datasets Cora
+[29], Citeseer [29], Pubmed [29], CoraFull [3], and examine whether their results satisfy Deﬁnition 1. To provide more results, we select three label rates for training set (i.e., 20, 40, 60 labeled nodes per class). All the experimental settings follow [16, 33]. Since the true probability p cannot be exactly known, we take an approximate way to evaluate the calibration as in [12]. In particular, we
+ﬁrst partition the [0,1] range of conﬁdence into 20 equal bins and then we group the nodes into corresponding bins according to their conﬁdence. After that we calculate the average accuracy of each bin. We expect the average accuracy is equal to the average conﬁdence of each bin, which means the model is approximately perfectly calibrated. For example, if the average conﬁdence of nodes in the bin [0.95, 1.0] is 0.96, and then the classiﬁcation accuracy in this bin should be 96%.
+We illustrate the results of label rate being 20 in Fig. 1 using Reliability Diagrams [23] here, where the x-axis is the conﬁdence in 20 bins of equal size and y-axis is the average accuracy in each bin.
+The blue represents the classiﬁcation accuracy of GCN and GAT while the red is our expectation.
+More results of label rate being 40, 60 and other GNN models can be seen in Fig. 8, Fig. 9, Fig. 12,
+Fig. 13 and Fig. 14 in the appendix. We can see that in all the datasets, the average accuracy of most bins is higher than the average conﬁdence. In other words, these GNNs actually achieve remarkable 3
+performance, but they all output low conﬁdence, i.e., the GNNs are usually under-conﬁdent. Please note that this phenomenon of GNNs is very different from other modern neural networks, which are generally known to be over-conﬁdent [12, 19]. Moreover, as shown in Fig. 2, we also visualize the conﬁdence distribution of test nodes, where the x-axis is the conﬁdence and y-axis is the density
+[28]. The histogram height multiplied by the width is equal to the frequency. The blue represents the conﬁdence distribution of correct predictions while the yellow represents that of incorrect predictions.
+More results of label rate being 40 and 60 can be seen in Fig. 10 and Fig. 11 in the appendix. We can see that a large quantity of correct predictions are distributed in the low conﬁdence range. The results above indicate that the current GNNs are far from perfect calibration, leading to unreliable conﬁdence. 3 Conﬁdence Calibration on GCNs
+In this section, we propose our method to calibrate current GNNs. Given A and X, for a l-layer GCN
+[16], the output of the GCN before the softmax layer can be obtained by:
+V = Aσ (· · · Aσ (AXW(1))W(2) · · · )W(l) = [v1, · · · , vN]T, (2) where W(l) is the weight matrix of l-th layer in GCN and σ (·) is the activation function. For each node i ∈ {1, · · · , N}, our goal is to learn a calibration function which is fed with vi (often known as the logit of node i) and outputs a calibrated conﬁdence using a held-out dataset in a post-hoc way. The calibration function should satisfy three points below: (1) taking the network topology into account (2) non-linear (3) preserving the classiﬁcation accuracy of the GCNs. 3.1 CaGCN: GCNs as Calibration Function
+Table 1: Summary of total variation of con-ﬁdence before and after calibration (Bold: is short for uncalibrated and best). Uncal.
+TS is short for temperature scaling.
+Dataset
+Cora
+Citeseer
+Pubmed
+CoraFull
+Uncal. 240.267 128.145 1299.33 6014.32
+GCN
+TS 172.346 112.212 1266.68 4698.20
+Ours 164.651 108.684 1113.41 4500.30
+Figure 3: The illustration of the conﬁdence propagation. Different colors indicate differ-ent classes.
+We assume that the ground-truth conﬁdence distribution in a graph has homophily property, i.e., the conﬁdence of neighboured nodes given by well-calibrated models should be similar, and thus we conduct an experiment to verify this. We employ the classic temperature scaling method [12] as our calibration function and use the total variation [27] of conﬁdence as our evaluation, which sums the difference of conﬁdence between all the neighboured nodes. We compare the total variation of conﬁdence before and after conﬁdence calibration, where the results are shown in Table 1. We can
+ﬁnd that the total variation of conﬁdence does decrease after temperature scaling, which veriﬁes our assumption. This inspires us that if a GCN model is well-calibrated, then the conﬁdence between neighbors should be more similar than before.
+To this end, we ﬁnd that GCN itself can play the role of calibration function that meets above require-ment since GCN is able to propagate node features along the network topology and smooth similar information between neighboured nodes. Therefore, we can employ another l-layer GCN (CaGCN) as our calibration function to propagate the conﬁdence along the network topology. Speciﬁcally, given the output V of the classiﬁcation GCN, the logit v(cid:48) i and conﬁdence ˆpi for node i after calibration can be obtained by:
+V(cid:48) = Aσ (· · · Aσ (AVW(1))W(2) · · · )W(l) = [v(cid:48) zi = [σSM(v(cid:48) i,K)]T, ˆpi = max i,1), · · · , σSM(v(cid:48) zi,k, 1, · · · , v(cid:48)
+N]T, k (3) where σSM(v(cid:48) surely become lower and the original classiﬁcation GCN will be calibrated. Please note that although is the softmax operation. Then the total variation of conﬁdence will i, j) i,·) = exp(v(cid:48) i,·)
+∑K j=1 exp(v(cid:48) 4
+temperature scaling can be directly applied here, compared with GCN, it does not take the network topology into account, which may cause mistakes mentioned in Section 1. Moreover, temperature scaling only employs a linear transformation, and GCN is able to learn a non-linear calibration function.
+For a comprehensive understanding of conﬁdence propagation, we make a detailed and visible illustration here. As shown in Fig. 3, the logits of two nodes a and b are the same, but node a is similar to its neighbors while node b is not. Apparently, the predictions of GCNs for a should be more conﬁdent than b. Suppose that a, b and their neighbours are under-conﬁdent based on the observation above. If we continue to propagate their logits along the topology using another GCN, the logits of a and its neighbors will tend to be the same. Therefore, if one or more of these nodes are calibrated during the calibration process, all of them will be calibrated as well. The conﬁdence is propagated in this way. On the other hand, looking at another node b, it is as difﬁcult even for manual classiﬁcation as it is for GCNs. Consequently, the conﬁdence of b should stay still even be lower. However, it will become higher because of the inﬂuence from a if we use the traditional calibration method without considering the network topology. Instead, when the network topology is taken into account, the logit of b will be averaged by its neighboured and each dimension tends to 1/K. It will be correctly calibrated when other nodes in the same situation are well-calibrated. 3.2 The Accuracy-Preserving Property
+Until now, we have proposed a non-linear calibration model CaGCN which can take the network topology into account, but the accuracy-preserving property cannot be satisﬁed. To address this problem, we ﬁrstly study the general accuracy-preserving calibration function.
+Proposition 1. Let h : RK → RK be a calibration function, s : R → R be a 1-D function and vi = [vi,1, · · · , vi,K]T be the logit of node i. The calibration function h preserves the classiﬁcation accuracy of the original model if s is a strictly isotonic function and h satisﬁes: h(vi) = [s(vi,1), . . . , s(vi,K)]T, ∀i ∈ {1, · · · , N}. (4)
+Proof We set vi,1 < vi,2 < · · · < vi,K without loss of generality. Since [s(vi,1), . . . , s(vi,K)]T shares the same order with vi as a result of the strictly isotonicity of s, the order between classes of the logit vi (cid:4) is unchanged, hence the accuracy of the prediction is preserved.
+Temperature scaling [12] is the simplest accuracy-preserving calibration method using a scalar parameter t called temperature for all classes. Given the logit vi of node i, the conﬁdence of the prediction is ˆpi = maxk σSM(vi,k/t)(t > 0). In temperature scaling, h(vi) = [vi,1/t, · · · , vi,K/t]T is the calibration function and s(x) = x/t is the strictly isotonic function.
+However, we can ﬁnd that temperature scaling (TS) [40] only performs the same linear transformation for all the nodes using the same t. As mentioned in Eq. 3, we propose to use CaGCN as our calibration function, while CaGCN is generally not isotonic, i.e., the order between classes of vi and v(cid:48) i is not the same, implying that after calibration by CaGCN, the accuracy of original GCN cannot be preserved.
+Instead, here we propose an improved CaGCN. Given the output V of the classiﬁcation GCN, we
+ﬁrstly use a l-layer GCN to learn a unique temperature ti for each node i, then get a calibrated logit v(cid:48) i by transforming its original logit vi using ti in a temperature-scaling way, and ﬁnally obtain calibrated conﬁdence ˆpi as follows: t = σ +(Aσ (· · · Aσ (AVW(1))W(2) · · · )W(l)) = [t1, · · · ,tN]T(ti > 0, ∀i ∈ {1, · · · , N}), i = h(vi,ti) = [vi,1/ti, · · · , vi,K/ti]T, zi = [σSM(v(cid:48) zi,k, i,K)]T, ˆpi = max i,1), · · · , σSM(v(cid:48) v(cid:48) k (5) where ti ∈ R is a scalar greater than zero and σ +(x) = log(1 + exp(x)) is an element-wise softplus activation [8]. The model proposed in Eq. 5 does not change the order between classes of vi and v(cid:48) i, implying that the accuracy of original GCN is preserved. Compared Eq. 5 with Eq. 3, we can ﬁnd that Eq. 5 makes the same transformation on all the dimensions of vi, which will limit the learnable calibration function space. However, we will prove that actually Eq. 5 is the same with the model proposed in Eq. 3 on conﬁdence calibration using the Proposition 2. Considering that for any logit vi, our expectation is in fact that the calibration model can output any conﬁdence ˆpi ∈ ( 1
+K , 1). Please note that ˆpi ≥ 1
+K , or the prediction will be changed. Since Eq. 3 has no limitation on the learnt calibration model, its output ˆpi can take any value from 1
+K to 1. Therefore, if we can prove the output ˆpi in Eq. 5 can also traverse the interval ( 1
+K , 1) for any vi, the equality between Eq. 3 and Eq.5 can be proved. 5
+Proposition 2. Given the original logit vi = [vi,1, · · · , vi,K]T of node i, assume vi, j not approaching inﬁnity for each j ∈ {1, · · · , K}. The calibrated conﬁdence ˆpi in Eq. 5 can traverse the interval ( 1
+K , 1) for node i.
+Proof We set vi,1 > vi,2 > · · · > vi,K without loss of generality. For any vi ∈ RK, with the assumption of vi not approaching inﬁnity, we have that lim t→0
+ˆpi = lim t→0 exp(vi,1/ti) j=1 exp(vi, j/ti)
+∑K
+= lim t→0 exp((vi,1 − vi,2)/ti) exp((vi,1 − vi,2)/ti) + ∑K j=2 exp((vi, j − vi,2)/ti)
+= 1 (6) and lim t→+∞
+ˆpi = lim t→+∞ exp(vi,1/ti) j=1 exp(vi, j/ti)
+∑K
+= 1
+K
+. (7)
+Obviously, both σSM(vi,k) and vi/ti are continuous, thus σSM(vi,k/ti) is continuous. Therefore, (cid:4)
+ˆpi = maxk zi,k = maxk σSM(vi,k/ti) can traverse the interval (1/K, 1).
+The assumption about vi is easy to be satisﬁed since the L2-norm in GCN drives the weight matrix W approaching zero matrix and each element in node feature matrix X is not inﬁnity. Therefore, based on Eq. 2, each element vi, j in V cannot approach inﬁnity. From Proposition 2 we know that for any vi, there exactly exists such a unique temperature ti that ˆpi can take any value from 1/K to 1. In other words, the model can be perfectly calibrated. 3.3 Optimization Objective
+Since NLL loss [10] can be decomposed into calibration loss and reﬁnement loss [21], minimizing
+NLL loss beneﬁts for conﬁdence calibration. Therefore, we employ the NLL loss as our objective function with an additional regularization term. We use the prediction probability zi ∈ RK in Eq. 5 to calculate the NLL loss. Denote the K-class one-hot label for node i as yi = [yi,1, · · · , yi,K]T and suppose the size of the validation set is |Dval|. Then the NLL loss over all validation nodes is represented as Lnll where:
+K
+∑ k=1
+Due to the under-conﬁdence of GCNs, our goal is to increase the conﬁdence of correct predictions while decreasing that of incorrect predictions. Considering that for incorrect predictions, the NLL loss cannot directly reduce their conﬁdence, therefore, we design a regularization term for NLL loss as follows: yi,klog(zi,k).
+Lnll = −
+|Dval |
+∑ i=1 (8)
+Lcal = 1 n
+|cor|
+∑ ( i=1
+|inc|
+∑ i=1 1 − z(cor) i,m + z(cor) i,s + i,m − z(inc) z(inc) i,s
+), (9) where |cor| and |inc| are the number of nodes correctly and incorrectly predicted and zi,m and zi,s are the max and submax prediction probability. Intuitively, the conﬁdence of incorrect predictions is decreased by reducing the gap between the max and the submax value of zi and vice versa. Combining
+Lnll and Lcal, we have the following overall objective function:
+L = Lnll + λ Lcal, (10) where λ is the parameter of the regularization term. With the guide of labeled data, we can optimize
+CaGCN via back propagation and learn the calibrated conﬁdence. The overall framework of CaGCN is shown in Fig. 4. 4 Self-training with Conﬁdence Calibration
+Here we propose a practical application of conﬁdence calibration to improve the performance of self-training in GCNs. Self-training is to predict the labels for unlabeled data, and then add them to the training set, so as to achieve better performance. When applying self-training to GCN, we ﬁrstly obtain the predictions ˆyi and the conﬁdence ˆpi given by GCN and then add the most conﬁdent nodes to the training set with pseudo labels ˆyi based on ˆpi. We continue to train until convergence. However, existing self-training methods perform not as expected with higher label rates [30]. Considering the under-conﬁdence of existing GCNs, motivated by [26], we argue that the under-performance of 6
+Figure 4: The overall framework of CaGCN. Solid lines represent that we can backpropagate gradient here while dashed lines represent we cannot. We ﬁrstly train a classiﬁcation GCN using the training set to obtain the logit V of all the nodes. Then we feed V to CaGCN to get the temperature t and transform V using t into V(cid:48). Finally, the loss can be obtained using V(cid:48) after softmax according to Eq. 10 and CaGCN can be optimized with the guide of the validation set.
+Table 2: ECE (M=20) on different models and citation networks of various label rate (L/C) with and without calibration. Uncal. represents the uncalibrated model, (-) denotes this method cannot converge to a meaningful result and bold denotes the best result, the subscript of each result refers to the standard deviation (×10−3) while the superscript refers to the results of paired t-test ( * for 0.05 level and ** for 0.01 level).
+Dataset L/C
+Cora
+Citeseer
+Pubmed
+CoraFull 20 40 60 20 40 60 20 40 60 20 40 60
+GCN
+GAT
+Uncal.
+TS
+MS
+CaGCN 0.13476.3 0.04885.5 0.04145.7 0.04016.7 0.11344.7 0.04177.2 0.03724.6 0.04075.4 0.09374.9 0.03555.4 0.03646.1 0.03764.4 0.12487.1 0.06418.7 0.06443.7 0.0595∗ 7.2 0.09577.7 0.06014.2 0.05385.7 0.05455.5 0.08066.4 0.05595.0 0.05216.4 0.05463.4 0.05867.7 0.05413.8 0.04764.2 0.0405∗ 6.0 0.04445.5 0.04466.3 0.04366.3 0.0402∗ 4.0 0.04459.7 0.03676.0 0.03186.4 0.03114.8 0.0776∗∗ 6.4 0.0701∗∗ 3.9 0.0768∗∗ 3.4 0.19866.1 0.10136.1 0.23215.4 0.11176.5 0.23374.0 0.09813.8
+---TS
+MS
+Uncal.
+CaGCN 0.15588.9 0.07179.8 0.05449.4 0.0450∗∗ 5.6 0.13405.4 0.04857.7 0.04916.0 0.0365∗∗ 5.6 0.12013.3 0.03936.1 0.04115.3 0.0313∗∗ 3.2 0.15345.0 0.09168.7 0.06339.8 0.05726.8 0.12528.7 0.07973.1 0.05905.4 0.0532∗ 5.4 0.10905.9 0.06487.1 0.05199.1 0.05257.6 0.08353.1 0.06564.6 0.05013.7 0.0356∗∗ 6.3 0.08694.6 0.06586.5 0.05396.0 0.0308∗∗ 5.4 0.09934.1 0.06696.3 0.04835.7 0.0308∗∗ 5.2 0.0788∗∗ 0.21193.6 0.11015.1 6.0 0.0738∗∗ 0.24384.2 0.11338.3 4.8 0.0849∗∗ 0.24971.8 0.11335.2 6.9
+---existing self-training methods originals from large numbers of high-accuracy predictions distributing in low-conﬁdence intervals as shown in Fig. 2, causing that they cannot be added to the training set.
+Consequently, we design a self-training model CaGCN-st where conﬁdence is ﬁrstly calibrated then employed to generate pseudo labels for unlabeled nodes. Speciﬁcally, given an unlabeled dataset DU and a labeled dataset DL which has been divided into three parts Dtrain, Dval and Dtest , we ﬁrstly train a classiﬁcation GCN using Dtrain to get the logit of each node. Then all the logits will be fed into a
+CaGCN to train and we get a calibrated conﬁdence for each node. It should be noted that instead of
+Dval, we still employ Dtrain to train our CaGCN. After that, the most conﬁdent predictions of DU will be adopted as the pseudo labels according to a threshold τ and added to the label set. The Dtrain is enlarged in this way. The process above will be repeated s stages until convergence. Please note that our classiﬁcation GCN and CaGCN are re-initialized in each stage. 5 Experiments
+In this section, we evaluate the performance of CaGCN on conﬁdence calibration and CaGCN-st on self-training respectively. We choose the commonly used citation networks Cora [29], Citeseer [29],
+Pubmed [29] and CoraFull [3] for evaluation, and more detailed descriptions are in Appendix B. 7
+Table 3: Node classiﬁcation accuracy and the standard deviation on GCN and its self-training variants.
+Dataset
+L/C
+Cora
+Citeseer
+Pubmed
+CoraFull 20 40 60 20 40 60 20 40 60 20 40 60
+Orig. 81.630.24 83.990.26 84.440.29 71.640.32 72.250.32 73.200.35 79.570.33 80.650.39 83.380.34 60.450.43 65.770.37 66.520.25
+St. 82.270.33 83.590.34 84.980.32 73.240.44 74.700.33 75.080.29 80.320.18 82.200.32 83.350.28 60.870.28 65.830.45 66.620.30
+Ct. 81.510.30 83.660.25 84.630.31 74.220.29 72.120.39 73.210.36 79.670.32 81.620.40 83.400.36 60.120.45 64.220.35 66.640.29
+Methods
+Union 81.850.68 83.330.41 85.030.30 74.600.38 74.790.36 75.530.30 81.120.29 81.840.23 83.320.35 60.520.35 64.330.42 66.780.29
+Inter. 81.410.28 83.380.33 84.880.18 72.250.45 73.660.32 75.230.23 79.590.29 80.460.55 83.310.17 61.010.53 65.840.37 66.820.32
+TS-st 82.680.20 84.440.35 85.600.24 74.200.24 75.620.19 75.870.24 80.950.18 82.280.39 83.260.39 61.730.41 66.110.60 66.950.45
+CaGCN-st 83.11∗ 0.52 84.370.38 85.790.27 74.90∗∗ 0.40 75.480.50 76.43∗∗ 0.20 81.16∗ 0.36 83.08∗ 0.21 84.47∗∗ 0.23 62.19∗ 66.30∗ 67.60∗ 0.49 0.31 0.40 5.1 Conﬁdence Calibration Evaluation
+Baselines. Since our CaGCN is a general calibration model for GNNs, here we choose GCN [16] and
+GAT [33] as our classiﬁcation models. For comparison, we choose the classic post-hoc calibration methods temperature scaling (TS) [12] and matrix scaling with off-diagonal regularization (MS) [18] as our baselines.
+Experimental settings. For the base model GCN and GAT, i.e., the uncalibrated model, we follow parameters suggested by [16] and [33] and further carefully tune them to get optimal performance.
+For the post-hoc calibration technique, we follow the ofﬁcial implementation [12, 18]. For our
+CaGCN, we train a two-layer GCN with the hidden layer dimension to be 16. We set λ = 0.5 for all datasets, weight decay to be 5e-3 for Cora, Citeseer, Pubmed and 0.03 for CoraFull. Other parameters of CaGCN follows [16]. We evaluate the performance of conﬁdence calibration by ECE [22], NLL
+[10] and Brier Score (BS) [4], which we expect are smaller, and we set the bin number M = 20 for
+ECE (more details can be seen in Appendix A). For all methods, we randomly run 10 times and report the average results. More detailed experimental settings can be seen in Appendix B.
+Results. Table 2 reports calibration results evaluated by ECE (more results on NLL and Brier Score are in Appendix C.1). We have the following observations: (1) Compared with uncalibrated models and other baselines, CaGCN is statistically signiﬁcantly better at the * 0.05 level and ** 0.01 level. (2) The ECE values on uncalibrated models are generally the highest, implying that GCN and GAT are poorly calibrated. (3) MS behaves badly on datasets with many classes, e.g., CoraFull. This is because the number of parameters for matrix scaling scales quadratically with the number of classes while the size of the validation set keeps unchanged. Therefore, it will over-ﬁt to the small validation set when dataset has a great number of classes. However, CaGCN does not have this problem.
+Additional analysis. In Section 2 we visualize the under-conﬁdence problem of existing GNNs using reliability diagrams. Here we utilize the same visualization method to make a comparison before and after conﬁdence calibration. As shown in Fig. 8, Fig. 9, Fig. 10 and Fig. 11 in the appendix, we can
+ﬁnd that the conﬁdence is well-calibrated after calibration. 5.2 Classiﬁcation Evaluation of Self-Training
+Baselines. Since self-training can be applied to any models, here we choose GCN and GAT as our base models, i.e., the original models (Orig.) without self-training, and we choose self-training (St.), co-training (Ct.), Union, Intersection (Inter.) methods proposed in [20] for comparison, which are commonly used as the baselines in self-training. Furthermore, we employ TS as the conﬁdence calibration function in CaGCN-st as another baseline and we denote it by TS-st.
+Experimental settings. We set the learning rate lr = 0.001 for CaGCN-st and train our CaGCN-st 200 epochs for Cora, 150 epochs for Citeseer, 100 epochs for Pubmed and 500 epochs for CoraFull.
+We set the threshold τ ∈ {0.8, 0.85, 0.9, 0.95, 0.99} and the maximum number of stage s = 10. As 8
+for baselines, all the parameters follow [20] and we further carefully tune them to get optimal performance. For all methods, we randomly run 10 times and report the average results.
+Results. Table 3 summarizes the node classiﬁcation accuracy on GCN and its self-training variants.
+More results on GAT can be seen in Appendix C.2. We have the following observation: (1) CaGCN-st consistently outperforms all the baselines on all the datasets and label rates at the * 0.05 level. (2)
+Compared with the base model, self-training methods generally achieve better results, which proves their effectiveness. (3) Self-training methods with conﬁdence calibration (i.e., TS-st and CaGCN-st) have better performance, which implies that conﬁdence calibration scales more correct predictions to the high conﬁdence range while keeps incorrect predictions basically unchanged, which we believe is beneﬁcial for self-training.
+Ablation study. CaGCN-st generates pseudo labels based on the calibrated conﬁdence.
+Here we study the effectiveness of the conﬁ-dence calibration function CaGCN in CaGCN-st. We propose a variant GCN-st of CaGCN-st, where CaGCN is removed from CaGCN-st while other parts are kept unchanged. All the experimental settings of GCN-st are the same as CaGCN-st. We report the results in
+Table 4, and we can observe that CaGCN-st consistently outperforms GCN-st on all the datasets, implying that self-training with cal-ibrated conﬁdence can generate more correct pseudo labels.
+Table 4: Abaltion study on self-training
+GAT
+GCN
+Dataset L/C
+Cora
+Citeseer
+Pubmed
+CoraFull
+GCN-st CaGCN-st GCN-st CaGCN-st 82.28 84.10 85.16 74.13 75.28 75.85 81.01 82.90 83.44 61.32 65.96 66.43 84.08 85.63 86.26 74.34 75.62 76.08 81.17 83.47 83.95 65.46 66.86 67.45 83.11 84.37 85.79 74.90 75.48 76.43 81.16 83.08 84.47 62.19 66.30 67.60 84.08 85.50 85.57 73.73 75.07 75.13 80.34 82.75 83.46 62.09 65.92 66.54 20 40 60 20 40 60 20 40 60 20 40 60
+Additional analysis. We also investigate the changing trends of accuracy with respect to the threshold τ in CaGCN-st in Appendix C.2 and study why GCNs are poorly calibrated in Appendix D. 6

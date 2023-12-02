@@ -1,0 +1,166 @@
+Abstract
+Finetuning image-text models such as CLIP achieves state-of-the-art accuracies on a variety of benchmarks.
+However, recent works (Kumar et al., 2022; Wortsman et al., 2021) have shown that even subtle differences in the finetuning process can lead to surprisingly large differences in the final performance, both for in-distribution (ID) and out-of-distribution (OOD) data. In this work, we show that a natural and simple approach of mimicking contrastive pretraining consistently outperforms alternative finetuning approaches. Specifically, we cast downstream class labels as text prompts and continue optimizing the contrastive loss between image embeddings and class-descriptive prompt embeddings (contrastive finetuning).
+Our method consistently outperforms baselines across 7 distribution shift, 6 transfer learning, and 3 few-shot learn-ing benchmarks. On WILDS-iWILDCam, our proposed ap-proach FLYP outperforms the top of the leaderboard by 2.3% ID and 2.7% OOD, giving the highest reported accu-racy. Averaged across 7 OOD datasets (2 WILDS and 5 Im-ageNet associated shifts), FLYP gives gains of 4.2% OOD over standard finetuning and outperforms current state-of-the-art (LP-FT) by more than 1% both ID and OOD. Simi-larly, on 3 few-shot learning benchmarks, FLYP gives gains up to 4.6% over standard finetuning and 4.4% over the state-of-the-art. Thus we establish our proposed method of contrastive finetuning as a simple and intuitive state-of-the-art for supervised finetuning of image-text models like
+CLIP. Code is available at https://github.com/ locuslab/FLYP. 1.
+
+Introduction
+Recent large-scale models pretrained jointly on image and text data, such as CLIP (Radford et al., 2021) or ALIGN (Jia et al., 2021), have demonstrated exceptional perfor-mance on many zero-shot classification tasks. These mod-els are pretrained via a contrastive loss that finds a joint em-bedding over the paired image and text data. Then, for a new classification problem, one simply specifies a prompt for all classnames and predict the class whose text embed-ding has highest similarity with the image embedding. Such
+“zero-shot” classifiers achieve reasonable performance on downstream tasks and impressive robustness to many com-mon forms of distribution shift. However, in many cases, it is desirable to further improve performance via supervised finetuning: further training and updates to the pretrained pa-rameters on a (possibly small) number of labeled images.
+In practice, however, several studies have found that standard finetuning procedures, while improving in-distribution performance, come at a cost to robustness to distribution shifts. Subtle changes to the finetuning process could mitigate this decrease in robustness. For example,
+Kumar et al. (2022) demonstrated the role of initialization of the final linear head and proposed a two-stage process of linear probing, then finetuning. Wortsman et al. (2021) showed that ensembling the weights of the finetuned and zero-shot classifier can improve robustness. Understanding the role of these subtle changes is challenging, and there is no simple recipe for what is the “correct” modification.
+A common theme in all these previous methods is that they are small changes to the standard supervised training paradigm where we minimize a cross-entropy loss on an im-age classifier. Indeed, such a choice is natural precisely be-cause we are finetuning the system to improve classification performance. However, directly applying the supervised learning methodology for finetuning pretrained models without considering pretraining process can be sub-optimal.
+In this paper, we show that an alternative, straightfor-ward approach reliably outperforms these previous meth-ods. Specifically, we show that simply finetuning a classi-fier via the same pretraining (contrastive) loss leads to uni-formly better performance of the resulting classifiers. That is, after constructing prompts from the class labels, we di-rectly minimize the contrastive loss between these prompts and the image embeddings of our (labeled) finetuning set.
+We call this approach finetune like you pretrain (FLYP ) and
+Figure 1. Finetune Like You Pretrain (FLYP ): Given a downstream classification dataset, standard finetuning approaches revolve around using the cross-entropy loss. We show that simply using the same loss as the pretraining i.e. contrastive loss, with “task supervision” coming from the text-description of labels, consistently outperforms state-of-the-art approaches like LP-FT (Kumar et al., 2022) and
+WiseFT (Wortsman et al., 2021). For example, on ImageNet, FLYP outperforms LP-FT + weight ensembling by 1.1% ID and 1.3% OOD, with a ID-OOD frontier curve (orange curve) dominating those of the baselines, i.e. lies above and to the right of all the baselines. summarize in Figure 1. FLYP results in better ID and OOD performance than alternative approaches without any addi-tional features such as multi-stage finetuning or ensembling.
+When ensembling, it further boosts gains over ensembling with previous methods. This contrastive finetuning is done entirely “naively”: it ignores the fact that classes within a minibatch may overlap or that multiple prompts can corre-spond to the same class.
+We show that on a variety of different models and tasks, this simple FLYP approach consistently outperforms the existing state-of-the-art finetuning methods. On WILDS-iWILDCam, FLYP gives the highest ever reported accuracy, outperforming the top of the leaderboard (compute expen-sive ModelSoups (Wortsman et al., 2022) which ensembles over 70+ finetuned models) by 2.3% ID and 2.7% OOD.
+On CLIP ViT-B/16, averaged across 7 out-of-distribution (OOD) datasets (2 WILDS and 5 ImageNet associated shifts), FLYP gives gains of 4.2% OOD over full finetun-ing and of more than 1% both ID and OOD over the cur-rent state-of-the-art, LP-FT. We also show that this advan-tage holds for few-shot finetuning, where only a very small number of examples from each class are present. Arguably, these few-shot tasks represent the most likely use case for zero-shot finetuning, where one has both an initial prompt, a handful of examples of each class type, and wishes to build the best classifier possible.
+The empirical gains of our method are quite intriguing.
+We discuss in Section 5 how several natural explanations and intuitions from prior work fail to explain why the pre-training loss works so well as a finetuning objective. For example, one could hypothesize that the gains for FLYP come from using the structure in prompts or updating the language encoder parameters. However, using the same prompts and updating the image and language encoders, but via a cross-entropy loss instead performs worse than FLYP.
+Furthermore, when we attempt to correct for the overlap in classes across a minibatch, we surprisingly find that this de-creases performance. This highlights an apparent but poorly understood benefit to finetuning models on the same loss which they were trained upon, a connection that has been observed in other settings as well (Goyal et al., 2022).
+We emphasize heavily that the contribution of this work does not lie in the novelty of the FLYP finetuning procedure itself: as it uses the exact same contrastive loss as used for training, many other finetuning approaches have used slight variations of this approach (see Section 6 for full discussion of related work). Rather, the contribution of this paper lies precisely in showing that this extremely naive method, in fact, outperforms existing (and far more complex) finetun-ing methods that have been proposed in the literature. While the method is simple, the gains are extremely surprising, presenting an interesting avenue for investigating the fine-tuning process. In total, these results point towards a simple and effective approach that we believe should be adopted as the “standard” method for finetuning zero-shot classifiers rather than tuning via a traditional supervised loss.
+2. Preliminaries
+Task. Consider an image classification setting where the goal is to map an image I ∈ I to a label y ∈ Y. We use image-text pretrained models like CLIP that learn joint embeddings of image and text. Let f : I (cid:55)→ Rd denote the image encoder that maps an image to a d−dimensional image-text embedding space. f is parameterized by param-eters θimg. Let T be the space for text descriptions of im-ages. Analogously, g : T (cid:55)→ Rd is the language encoder with model parameters θtext.
+Contrastive pretraining with language supervision.
+The backbone of the pretraining objective is contrastive learning, where the goal is to align the embedding f (Ii) of an image close to the embedding g(Ti) of its corre-sponding text description, and away from other text em-beddings g(Tj) in the batch. Given a batch with B images with their corresponding text descriptions D =
+{(I1, T1), . . . (IB, TB)}, pretraining objective is as follows:
+Lpre(D, θ) :=
+B (cid:88) i=1
+B (cid:88) i=1
+− log
+− log exp (cid:0) ¯f (Ii) · ¯g(Ti)(cid:1) j=1 exp (cid:0) ¯f (Ii) · ¯g(Tj)(cid:1) + exp (cid:0) ¯f (Ii) · ¯g(Ti)(cid:1) j=1 exp (cid:0) ¯f (Ij) · ¯g(Ti)(cid:1) , (cid:80)B (cid:80)B (1) where θ = [θimg, θtext] are image and text encoder parame-ters, and ¯f and ¯g are the ℓ2 normalized f and g.
+Finetuning pretrained models. Given downstream train-ing samples {(x1, y2), . . . (xn, yn)} ∼ Pid, standard meth-ods of finetuning pretrained image-text models are: 1. Zero-shot (ZS): Since the pretrained image embed-dings are trained to be aligned with the text embed-dings, we can perform zero-shot classification with-out updating any weights. Given k classes (names)
+{c1, c2, . . . ck}, we construct corresponding text de-scriptions {T1, . . . Tk} using templates (for e.g.
+“a photo of a ci”). The zero-shot prediction correspond-ing to image I is arg maxi ¯g(Ti)⊤ ¯f (I), where ¯g and ¯f are the normalized text and image embeddings. This
+¯f (I))i where hzs ∈ can be written as arg maxi(h⊤ zs
+Rd×k is the zero-shot linear head with columns corre-sponding to text descriptions of the classes Tk. 2. Linear probing (LP): We learn a linear classifier hclass ∈ Rd×k on top of frozen image embeddings ¯f (I) by minimizing the cross-entropy on downstream data. 3. Full finetuning (FFT): In full finetuning, we update both a linear head hclass ∈ Rd×k and the parameters of the image encoder θimg (initialized at the pretrained value) by minimizing the cross-entropy loss on labeled downstream data. Rather than initializing randomly, we use the zero-shot weights hzs to initialize the linear head, similar to Wortsman et al. (2021). 4. LP-FT (Kumar et al., 2022): Here, we perform a two-stage finetuning process where we first perform linear probing and then full finetuning with hclass initialized at the linear-probing solution obtained in the first stage. 5. Weight-ensembling (Wortsman et al., 2021): We en-semble the weights by linearly interpolating between the weights of the zero-shot model and a finetuned model. Let θimg denote the pretrained weights of the image encoder, and θ′ img denote the finetuned weights.
+Then weights of weight ensembled model are given as:
+θwe = αθ′ img + (1 − α)θimg, where α ∈ [0, 1] (2) 3. FLYP: Finetune like you pretrain
+Recall that we are interested in using a pretrained model like CLIP to improve performance on a classification task given access to labeled data. Here, we describe our method
+FLYP which is essentially to continue pretraining, with
+“task supervision” coming from text descriptions of the cor-responding target class names in the dataset. The algorithm is the most natural extension of pretraining. a of batch
+Given
+Given a label y, let Ty denote a set of possible text de-scriptions of the class. Let Ptext(· | y) denote the uniform distribution over text descriptions. For example, these de-scriptions could include different contexts such as “a photo of a small {class}” as considered in (Radford et al., 2021).
+=
+{(I1, y1), . . . (IB, yB)}, we construct a corresponding batch D′ of image-text pairs and update the model parame-ters via stochastic gradient descent on the same pretraining objective (Equation 1). We summarize this in Algorithm 1.
+Inference using the finetuned encoders f ′ and g′ is per-formed in the same way as zero-shot prediction, except us-ing the finetuned encoders f ′ and g′. Precisely, the predic-tion for an image I is again given by arg maxi ¯g′(Ti)⊤ ¯f ′(I). samples D labeled
+FLYP vs. standard finetuning. The finetuning loss pre-sented above is the most natural extension of the pretrain-ing objective to incorporate labeled downstream data. How-ever, this differs from what is currently the standard prac-tice for finetuning CLIP models. We remark on the main differences (details in Section 5) to determine the effect of various contributing factors. (1) FLYP updates the language encoders: Standard fine-tuning methods typically only update the image encoder, while FLYP essentially continues pretraining which updates both the image and language encoders. However, we show in Section 5 that FLYP’s gains are not simply from updating
+Algorithm 1 FLYP : Contrastive Finetuning (One batch)
+Given: Pretrained parameters θimg and θtext,
+Labeled batch D = {(x1, y1), . . . (xB, yB)},
+Distribution over text descriptions Ptext(y), y ∈ Y
+Learning rate α
+Training step: 1. Create text/image paired data via labels
+D′ = {(I1, T1), . . . (IB, TB)}, where Ti ∼ Ptext(yi) 2. Update parameters via contrastive loss
+θ := θ − α∇Lpre(D′, θ) (Equation 1). the language encoder—using the cross-entropy loss but up-dating the language encoder gets lower accuracy than FLYP. (2) The linear head in FLYP incorporates structure from the text embeddings of corresponding labels (e.g., some classes are closer than others). We simulate this effect for cross-entropy finetuning by using the embeddings of text-description of classnames as the linear head (detailed in
+Section 5). However, we find that it still performs worse than FLYP, highlighting that choice of loss function matters.
+In summary, FLYP includes some intuitively favorable factors over standard finetuning, but via our ablations, these do not fully explain the success of FLYP . It appears that fine-tuning in exactly the same way as we pretrain is impor-tant for FLYP ’s success. 4. Experiments
+FLYP outperforms other finetuning methods on 8 stan-dard datasets across 3 settings. We show results for distri-bution shift benchmarks, which was the focus of the origi-nal CLIP paper (Radford et al., 2021) and recent finetuning innovations (Kumar et al., 2022), in Section 4.1. We then show results for few-shot learning in Section 4.2, and stan-dard transfer learning tasks in Section 4.3. Finally in Sec-tion 5, we talk about various possible explanations to effec-tiveness of FLYP .
+Datasets: 1. ImageNet (Russakovsky et al., 2015): We finetune on
+ImageNet as the ID dataset and evaluate all five stan-dard OOD datasets considered by prior work (Kumar et al., 2022; Radford et al., 2021; Wortsman et al., 2021): ImageNetV2 (Recht et al., 2019), ImageNet-R (Hendrycks et al., 2020), ImageNet-A (Hendrycks et al., 2019), ImageNet-Sketch (Wang et al., 2019), and ObjectNet (Barbu et al., 2019). ages. The ID and OOD datasets differ in the camera used and factors like background, illumination, etc. 3. WILDS-FMoW (Christie et al., 2018; Koh et al., 2021) consists of remote sensing satellite images. The
+ID and OOD datasets differ in the time of their collec-tion and location, i.e., continent. 4. Caltech101 (Li et al., 2022) is a 101 class classifica-tion with categories like “watch”, “umbrella”, etc. 5. StanfordCars (Krause et al., 2013) has images of 196 categories of cars differing in models, make, and years. 6. Flowers102 (Nilsback and Zisserman, 2008): 102 cat-egories of flowers like “lily” or “hibiscus”. 7. PatchCamelyon (Veeling et al., 2018) is a binary clas-sification dataset consisting of pathology images. The goal is to detect the presence of tumor tissues. 8. Rendered SST2 (Radford et al., 2021) is an optical character recognition dataset, where the goal is to clas-sify the text sentiment into “positive” or “negative”.
+Baselines. We compare with two most standard ways of adapting pretrained models: linear probing (LP) and end-to-end full finetuning (FFT), using the cross-entropy loss.
+We also compare with recently proposed improvements to finetuning: L2-SP (Li et al., 2018) where the finetuned weights are regularized towards the pretrained weights, and LP-FT (Kumar et al., 2022) where we first do linear probe followed by full finetuning. Additionally, we com-pare all methods with weight ensembling as proposed in
+WiseFT (Wortsman et al., 2021).
+Models. We consider three models: CLIP ViT-B/16 and a larger CLIP ViT-L/14 from OpenAI (Radford et al., 2021), and a CLIP ViT-B/16 trained on a different pretraining dataset (public LAION dataset (Schuhmann et al., 2021)) from Ilharco et al. (2021). The default model used is the
+CLIP ViT-B/16 from OpenAI unless specified otherwise.
+Experiment protocol. We use a batch-size of 512 for Im-ageNet and 256 for all other datasets. We sweep over learn-ing rate and weight decay parameters and early stop using accuracy ID validation set. OOD datasets are used only for evaluation and not for hyperparameter sweeps or early stop-ping. We report 95% confidence intervals over 5 runs. For few-shot learning, we use a validation set that is also few-shot and report accuracy over 50 repeated runs due to in-creased variance caused by a small validation set. We use the same text-templates as used in CLIP (Radford et al., 2021) and WiseFT (Wortsman et al., 2021). For details on hyperparameter sweeps, see Appendix C. 4.1. Evaluation Under Distribution Shifts 2. WILDS-iWILDCam (Beery et al., 2020; Koh et al., 2021) is a 182 class classification dataset of animal im-FLYP outperforms baselines on ImageNet, iWildCam and FMoW, and associated distribution shifts both ID and
+(a) OpenAI CLIP ViT-B/16 finetuned on
+ImageNet (b) LAION-400M CLIP ViT-B/16, finetuned on
+ImageNet (c) CLIP ViT-B/16 finetuned on
+WILDS-iWILDCam (d) CLIP ViT-B/16 finetuned on WILDS-FMoW (e) Legend for all the subplots (f) Ablation of FLYP , details in Section 5
+Figure 2. Our proposed approach FLYP outperforms the baselines both ID and OOD, with or without weight ensembling (Wortsman et al., 2021). Here we show the ID-OOD frontier curves obtained by linearly interpolating the finetuned model weights with the zeroshot weights.
+The curves for FLYP completely dominate (lies above and to the right) those of the baselines on ImageNet, giving higher OOD accuracy for any ID accuracy. Comparing with ensembling corresponding to the best ID validation accuracy(stars), FLYP outperforms the current state-of-the-art LP-FT by an average of 1.3% OOD and 1.1% ID and outperforms WiseFT (weight ensembled finetuning, Wortsman et al. (2021)) by an average of 2% OOD and 1.6% ID. We report exact numbers in Table 1.
+OOD. Infact, FLYP outperforms the highest previously reported accuracy on iWILDCam by 2.3% ID and 2.7%
+OOD, using ViT-L/14@336px. On ViT-B/16, averaged across 7 out-of-distribution (OOD) datasets, FLYP gives gains of 4.2% over full finetuning and 1.3% with weight en-sembling over the current state-of-the-art LP-FT. Note that these gains in OOD accuracy do not come at the cost of ID accuracy— averaged over the same datasets, FLYP outper-forms full finetuning by 1.8% ID and LP-FT by 1.2% ID.
+Weight ensembling curves: WiSE-FT (Wortsman et al., 2021) shows that a simple linear interpolation between the weights of the pretrained and the finetuned model gives the best of both ID and OOD performance. Hence, we compare the baselines and FLYP while interpolating their weights with 10 mixing coefficients α ∈ [0, 1] (Eqation 2). The resultant ID-OOD “frontier” curves are then evaluated by comparing their ID-OOD accuracy at the coefficient which gives the highest ID validation accuracy.
+Evaluation:
+In Table 1, for all the baselines and FLYP , we report the ID-OOD accuracy with and without weight ensembling at the mixing coefficient having the highest ID validation accuracy. We observe that FLYP outperforms the baselines with and without weight ensembling.
+Improves accuracy on ImageNet and shifts. We show that for any ID accuracy, FLYP obtains better OOD accu-racy than baselines. In particular, Figure 2a compares FLYP (orange curve) with various baselines on ImageNet—we plot the average OOD accuracy on 5 ImageNet-shift bench-marks against the ID accuracy on ImageNet. The weight ensembling curve for FLYP dominates (lies entirely above and to the right) those of the baselines. When choosing the mixing coefficient which gives the best ID validation ac-curacy (stars on the respective curves and Table 1), FLYP outperforms WiseFT(weight ensembled finetuning) by 2%
+OOD and the current state-of-the-art LP-FT 1.4% OOD.
+Even without weight ensembling, as shown in Table 1,
+FLYP outperforms full finetuning by 1.2% ID and 5.4%
+OOD and similarly gives ID accuracy gains over LP-FT with almost the same OOD accuracy.
+Figure 2b shows that the same observations hold when we use a ViT-B/16 from Ilharco et al. (2021) (trained on a different dataset). Here, FLYP slightly outperforms LP-FT on OOD even without weight ensembling. In Appendix B
+Imagenet iWILDCam
+FMoW
+Methods
+Zeroshot
+LP
+FT
+L2-SP
+LP-FT
+Without Ensembling
+With Ensembling
+Without Ensembling
+With Ensembling
+Without Ensembling
+ID
+OOD
+ID
+OOD
+ID
+OOD
+ID
+OOD
+ID
+OOD 68.3 (-) 79.9 (0.0) 81.4 (0.1) 81.6 (0.1) 81.8 (0.1) 58.7 (-) 57.2 (0.0) 54.8 (0.1) 57.9 (0.1) 60.5 (0.1) 68.3 (-) 80.0 (0.0) 82.5 (0.1) 82.2 (0.1) 82.1 (0.1) 58.7 (-) 58.3 (0.0) 61.3 (0.1) 58.9 (0.1) 61.8 (0.1) 8.7 (-) 44.5 (0.6) 48.1 (0.5) 48.6 (0.4) 49.7 (0.5) 11.02 (-) 31.1 (0.4) 35.0 (0.5) 35.3 (0.3) 34.7 (0.4) 8.7 (-) 45.5 (0.6) 48.1 (0.5) 48.6 (0.4) 50.2 (0.5) 11.02 (-) 31.7 (0.4) 35.0 (0.5) 35.3 (0.3) 35.7 (0.4) 20.4 (-) 48.2 (0.1) 68.5 (0.1) 68.6 (0.1) 68.4 (0.2) 18.66 (-) 30.5 (0.3) 39.2 (0.7) 39.4 (0.6) 40.4 (1.0)
+FLYP 82.6 (0.0) 60.2 (0.1) 82.9 (0.0) 63.2 (0.1) 52.2 (0.6) 35.6 (1.2) 52.5 (0.6) 37.1 (1.2) 68.6 (0.2) 41.3 (0.8)
+Table 1. FLYP outperforms the baselines both with and without ensembling. When ensembling, we choose the mixing coefficient (Equa-tion 2) with the highest ID validation accuracy. For ImageNet, we report the mean OOD accuracy on 5 associated distribution shifts and share individual numbers in the Appendix B. FLYP outperforms all the baselines in 9 out of 10 various experiment settings. Without weight ensembling, averaged over all the datasets, FLYP outperforms full finetuning by 4.24% OOD and 1.8% ID. Similarly, FLYP outperforms
+LP-FT by 1.2% ID and gives similar OOD performance averaged over all the datasets. we give results for all the 5 OOD datasets, and show that
+FLYP consistently outperforms on all of them.
+SOTA accuracy on WILDS To verify if the gains using our proposed approach FLYP can be observed even when using large CLIP models, we evaluate on ViT-L/14@336px.
+Table 5 (Appendix B) compares FLYP with the leaderboard on iWILDCam benchmark (Koh et al.). FLYP gives gains of 2.3% ID and 2.7% OOD over the top of the leader-board, outperforming compute heavy ModelSoups (Worts-man et al., 2022), which ensemble more than 70+ models trained using various augmentations and hyper-parameters.
+Even using the smaller architecture of ViT-B/16, FLYP out-performs the baselines both with and without ensembling, as shown in Table 1 and Figure 2c. Similarly, on WILDS-FMOW (Table 1), FLYP outperforms baselines. We did not observe gains using weight ensembling on FMOW.
+PatchCamelyon
+SST2 k (shots) 4 16 32 4 16 32
+Zeroshot 56.5 (-) 56.5 (-) 56.5 (-) 60.5 (-) 60.5 (-) 60.5 (-)
+LP
+FT 60.4 (4.0) 64.4 (3.7) 67.0 (4.4) 60.8 (1.8) 61.9 (1.4) 62.9 (1.3) 63.1 (5.5) 71.6 (4.6) 75.2 (3.7) 61.1 (0.7) 62.4 (1.6) 63.4 (1.9)
+LP-FT 62.7 (5.3) 69.8 (5.3) 73.9 (4.6) 60.9 (2.4) 62.9 (1.9) 63.6 (1.4)
+FLYP 66.9 (5.0) 74.5 (2.0) 76.4 (2.4) 61.3 (2.7) 65.6 (2.1) 68.0 (1.7)
+Table 2. In binary few-shot classification, FLYP performs remark-ably well. For example, FLYP outperforms LP-FT by 4.4% and full finetuning by 4.6% in 32-shot classification on SST2. We ob-serve similar gains when using a much larger CLIP architecture of
+ViT-L/14, as detailed in Appendix B. 4.2. Few-shot classification
+In the challenging setting of few-shot classification,
+FLYP performs impressively well, giving gains as high as 4.4% on SST2 and 3.8% on PatchCamelyon. Few-shot clas-sification is arguably one of the most likely use case sce-narios for zeroshot models, where one has access to a few relevant prompts (to get the zeroshot classifier) as well as a few labeled images, and would want to get the best possible classifier for downstream classification. 4.2.1 Binary few-shot classification
+In few-shot binary classification, the total number of train-ing examples is small, making this a challenging set-ting. We experiment on 2 datasets: PatchCamelyon and
+Rendered-SST2.
+FLYP gives impressive gains across 4, 16 and 32 shot classification, as shown in Table 2. For ex-ample, on 16-shot classification on PatchCamelyon, FLYP outperforms LP-FT by 4.7%. Appendix B shows results when using a larger architecture of CLIP ViT-L/14. 4.2.2 Few-shot classification on Imagenet
+Figure 3 plots the average OOD accuracy on 5 Imagenet-shifts datasets versus the ImageNet ID accuracy, under 4, 16, and 32 shot classification. FLYP outperforms the baselines under all the 3 settings. For example, FLYP has 1.5% higher OOD accuracy compared to LP-FT in 4-shot classification and 0.8% higher OOD accuracy under 16-shot classification, with weight ensembling. 4.3. Transfer Learning
+FLYP generalizes well across various transfer learning datasets, giving consistently strong empirical performance.
+Transfer learning is a more general setup where we are given a downstream labeled dataset to finetune and the goal is to achieve a high in-distribution performance. Table 3 compares FLYP with baselines on 6 transfer datasets. FLYP gives gains as high as 2.5% over the most competitive base-line on iWILDCam and 1.2% on CalTech101.
+(a) 4-shot classification (b) 16-shot classification (c) 32-shot classification (d) Legend
+Figure 3. We evaluate FLYP on few-shot classification on ImageNet, where it outperforms all the baselines with weight ensembling, giving gains of 1.5% in 4-shot classification and 0.8% in 16-shot classification over LP-FT.
+Methods
+PCAM
+CalTech
+Cars
+Flowers
+ImageNet iWILD
+Zeroshot 56.49 (-) 87.7 (-) 64.4 (-) 71.2 (-) 68.3 (-) 8.7 (-)
+LP
+FT 82.6 (0.1) 94.8 (0.0) 83.1 (0.0) 95.9 (0.0) 79.9 (0.0) 44.5 (0.6) 89.1 (1.3) 97.2 (0.1) 84.4 (0.3) 90.4 (0.5) 81.4 (0.1) 48.1 (0.5)
+LP-FT 89.0 (0.6) 96.9 (0.6) 89.4 (0.1) 97.9 (0.1) 81.8 (0.1) 49.7 (0.5)
+FLYP 90.3 (0.3) 97.6 (0.1) 89.6 (0.3) 97.7 (0.1) 82.6 (0.0) 52.2 (0.6)
+Table 3. We evaluate our proposed approach FLYP on 6 transfer learning datasets. FLYP gives consistently strong empirical perfor-mance, outperforming the baselines on 5/6 datasets considered. 5. Ablations: Why does FLYP improve perfor-mance?
+In this section, we attempt to shed light on what makes
+FLYP work so well? Our hypothesis is that this is because
+FLYP’s finetuning objective exactly matches the pretraining objective. We attempt to test this hypothesis and rule out a few alternate candidate hypotheses below.
+First, we observe that correcting the class collisions in FLYP’s finetuning process (which apriori seems like it should improve performance), does not really give any gains and actually slightly hurts the performance. This sug-gests that it is indeed important that the finetuning process matches the pretraining process.
+Next, when compared to standard finetuning methods,
+FLYP has three important changes: (i) FLYP updates both the image and language encoders while incorporating struc-ture from the text embeddings of the corresponding labels (e.g., some classes are closer than others), (ii) FLYP uses the contrastive loss rather than the cross-entropy loss, and (iii) FLYP samples prompts from a distribution which adds additional stochasticity in the finetuning process compared to other approaches. We perform experiments to tease out the role of each of these components below and see if any of them in isolation can account for all the gains.
+Removing class collisions in FLYP’s contrastive loss.
+FLYP uses contrastive loss to finetune CLIP, which pushes representations of every image away from those of the text-descriptions of other examples in mini-batch. However, a mini-batch can potentially have multiple samples from the same class (especially so when we have a small number of classes)—the loss thus has terms that contrast an image from the text description corresponding to the correct class, which seems wasteful. First, we note that despite collisions,
+FLYP outperforms baselines on both the binary classifica-tion datasets (PatchCamelyon and SST2) we considered, as shown in Table 2 and Table 3.
+Furthermore, we attempted to resolve this “collision” by simply masking out such terms in the loss. However, we ob-served that on the transfer learning task of PatchCamelyon (with 2 classes), FLYP + masking performs 1.3% worse than naive FLYP which does not correct for class collisions.
+This shows that it is important to exactly match the pretrain-ing process and subtle changes that seem like they should improve performance don’t really give any gains.
+Replacing contrastive loss of FLYP with cross-entropy.
+Vanilla full finetuning (FFT) does not update the language encoder and hence does not incorporate structure from the text-embeddings of the corresponding classnames. One might wonder if FLYP’s gains are entirely due to updat-ing the language encoder? Consider a version of our ap-proach FLYP-CE, where we simply replace the FLYP’s ob-jective with cross-entropy loss. Specifically, the embedding of text-descriptions for all the classes is used as the linear head, projecting image embeddings to the class predictions.
+We then use cross-entropy loss to finetune both encoders.
+On Imagenet, as shown in Figure 2f (pink curve), FLYP-CE performs much worse than FLYP , which uses the con-trastive loss. On iWILDCam, FLYP-CE is 2% worse ID and 0.6% worse OOD than FLYP. This highlights that the choice of loss function used matters indeed.
+Updating image embeddings via contrastive loss. Are the gains simply due to contrastive loss? We find that it is important to also update the language encoder. Keeping the language encoder frozen when using FLYP , deteriorates the performance on both ImageNet (Figure 2f, dark blue curve) and iWILDCam (drop of 2.5% ID and 1.3% OOD).
+Number of prompt templates. Finally, we observe that
+FLYP’s performance isn’t affected by the number of prompt templates. We tried finetuning on ImageNet using a single prompt template instead of 80 and observed similar down-stream performance (see Appendix A).
+To summarize, FLYP’s gains seem to come from exactly matching the pretraining process—no individual change ac-counts for all the gains. In Appendix A, we talk about some more variations of FLYP like jointly optimizing both cross-entropy loss and contrastive loss and effect of batch size. 6.

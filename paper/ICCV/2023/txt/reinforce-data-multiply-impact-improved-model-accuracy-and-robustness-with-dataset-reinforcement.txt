@@ -1,0 +1,335 @@
+Abstract
+We propose Dataset Reinforcement, a strategy to improve a dataset once such that the accuracy of any model archi-tecture trained on the reinforced dataset is improved at no additional training cost for users. We propose a Dataset
+Reinforcement strategy based on data augmentation and knowledge distillation. Our generic strategy is designed based on extensive analysis across CNN- and transformer-based models and performing large-scale study of distilla-tion with state-of-the-art models with various data augmen-tations. We create a reinforced version of the ImageNet training dataset, called ImageNet+, as well as reinforced datasets CIFAR-100+, Flowers-102+, and Food-101+. Mod-els trained with ImageNet+ are more accurate, robust, and calibrated, and transfer well to downstream tasks (e.g., seg-mentation and detection). As an example, the accuracy of ResNet-50 improves by 1.7% on the ImageNet valida-tion set, 3.5% on ImageNetV2, and 10.0% on ImageNet-R.
+Expected Calibration Error (ECE) on the ImageNet vali-dation set is also reduced by 9.9%. Using this backbone with Mask-RCNN for object detection on MS-COCO, the mean average precision improves by 0.8%. We reach similar gains for MobileNets, ViTs, and Swin-Transformers. For
+MobileNetV3 and Swin-Tiny, we observe significant improve-ments on ImageNet-R/A/C of up to 20% improved robust-ness. Models pretrained on ImageNet+ and fine-tuned on
+CIFAR-100+, Flowers-102+, and Food-101+, reach up to 3.4% improved accuracy. The code, datasets, and pretrained models are available at https://github.com/apple/ml-dr. 1.
+
+Introduction
+With the advent of the CLIP [47], the machine learning community got increasingly interested in massive datasets whereby the models are trained on hundreds of millions of samples, which is orders of magnitude larger than the conven-tional ImageNet [15] with 1.2M samples. At the same time,
+*Correspondence to fartash@apple.com.
+Figure 1: Reinforced ImageNet, ImageNet+, improves ac-curacy at similar iterations/wall-clock. ImageNet valida-tion accuracy of ResNet-50 is shown as a function of training duration with (1) ImageNet dataset, (2) knowledge distilla-tion (KD), and (3) ImageNet+ dataset (ours). Each point is a full training with epochs varying from 50-1000. An epoch has the same number of iterations for ImageNet/ImageNet+.
+Model
++Data
+Augmentation
++Reinforced
+Dataset(s)
+ImageNet CIFAR-100 Flowers-102 Food-101
+MobileNetV3-Large
+ResNet-50
+SwinTransformer-Tiny
+✗
+✗
+RandAugment
+AutoAugment
+TrivialAugWide
+✗
+RandAugment
+✗
+✗
+✓
+✗
+✗
+✗
+✓
+✗
+✓ 75.8 77.9 80.4 80.2 80.4 82.0 81.3 84.0 84.4 87.5 88.4 87.9 87.9 89.8 90.7 91.2 92.5 95.3 93.6 95.1 94.8 96.3 96.3 97.0 86.1 89.5 90.0 89.0 89.3 92.1 92.3 92.9
+Table 1: Training/fine-tuning on reinforced datasets im-prove accuracy for a variety of architectures. We re-inforce each dataset once and train multiple models with similar cost as training on the original dataset. For datasets other than ImageNet, we fine-tune ImageNet/ImageNet+ pre-trained models. Dataset reinforcement significantly benefits from efficiently reusing the knowledge of a teacher. models have gradually grown larger in multiple domains [1].
+In computer vision, the state-of-the-art models have upwards of 300M parameters according to the Timm [63] library (e.g.,
+BEiT [3], DeiT III [60], ConvNeXt [39]) and process inputs
+Figure 2: Illustration of Dataset Reinforcement. Data augmentation and knowledge distillation are common approaches to improving accuracy. Dataset reinforcement combines the benefits of both by bringing the advantages of large models trained on large datasets to other datasets and models. Training of new models with a reinforced dataset is as fast as training on the original dataset for the same total iterations. Creating a reinforced dataset is a one-time process (e.g., ImageNet to ImageNet+) the cost of which is amortized over repeated uses. at up to 800 × 800 resolution (e.g., EfficientNet-L2-NS [65]).
+Recent multi-modal vision-language models have up to 1.9B parameters (e.g., BeiT-3 [62]).
+On the other side, there is a significant demand for small models that satisfy stringent hardware requirements. Addi-tionally, there are plenty of tasks with small datasets that are challenging to scale because of the high cost associated with collecting and annotating new data. We seek to bridge this gap and bring the benefits of large models to any large, medium, or small dataset. We use knowledge from large models [47, 16, 7] to enhance the training of new models.
+In this paper, we introduce Dataset Reinforcement (DR) as a strategy that improves the accuracy of models through reinforcing the training dataset. Compared to the original training data, a method for dataset reinforcement should satisfy the following desiderata:
+• No overhead for users: Minimal increase in the com-putational cost of training a new model for similar total iterations (e.g., similar wall-clock time and CPU/GPU utilization).
+• Minimal changes in user code and model: Zero or mini-mal modification to the training code and model architec-ture for the users of the reinforced dataset (e.g., only the dataset path and the data loader need to change).
+• Architecture independence: Improve the test accuracy across variety of model architectures. tration in Fig. 2 compares these methods and our strategy for dataset reinforcement.
+Data augmentation is crucial to the improved performance of machine learning models. Many state-of-the-art vision models [21, 27, 25] use the standard Inception-style augmen-tation [57] (i.e., random resized crop and random horizontal flipping) for training. In addition to these standard augmenta-tion methods, recent models [59, 38] also incorporate mixing augmentations (e.g., MixUp [72] and CutMix [70]) and auto-matic augmentation methods (e.g., RandAugment [14] and
+AutoAugment [13]) to generate new data. However, data augmentation fails to satisfy all the desiderata as it does not provide architecture independent generalization. For example, light-weight CNNs perform best with standard
+Inception-style augmentations [25] while vision transform-ers [59, 38] prefer a combination of standard as well as advanced augmentation methods.
+Knowledge distillation (KD) refers to the training of a stu-dent model by matching the output of a teacher model [35].
+KD has consistently been shown to improve the accuracy of new models independent of their architecture significantly more than data augmentations [59]. However, knowledge distillation is expensive as it requires performing the infer-ence (forward-pass) of an often significantly large teacher model at every training iteration. KD also requires modi-fying the training code to perform two forward passes on both the teacher and the student. As such, KD fails to satisfy minimal overhead and code change desiderata.
+To understand the importance of the DR desiderata, let us discuss two common methods for performance improve-ments: data augmentation and knowledge distillation. Illus-This paper proposes a dataset reinforcement strategy that exploits the advantages of both knowledge distillation and data augmentation by removing the training overhead of KD
+and finding generalizable data augmentations. Specifically, we introduce the ImageNet+ dataset that provides a balanced trade-off between accuracies on a variety of models and has the same wall-clock as training on ImageNet for the same number of iterations (Fig. 1 and Tab. 1). To train models using the ImageNet+ dataset, one only needs to change a few lines of the user code to use a modified data loader that reinforces every sample loaded from the training set.
+Summary of contributions:
+• We present a comprehensive large scale study of knowl-edge distillation from 80 pretrained state-of-the-art models and their ensembles. We observe that ensembles of state-of-the-art models trained on massive datasets generalize across student architectures (Sec. 2.1).
+• We reinforce ImageNet by efficiently storing the knowl-edge of a strong teacher on a variety of augmentations.
+We investigate the generalizability of various augmenta-tions for dataset reinforcement and find a tradeoff con-trolled by the reinforcement difficulty and model complex-ity (Sec. 2.2). This tradeoff can further be alleviated using curriculums based on the reinforcements (Appendix C.4).
+• We introduce ImageNet+, a reinforced version of Ima-geNet, that provides up to 4% improvement in accuracy for a variety of architectures in short as well as long train-ing. We show that ImageNet+ pretrained models result in 0.6-0.8 improvements in mAP for detection on MS-COCO and 0.3-1.3% improvement in mIoU for segmentation on
+ADE-20K (Sec. 3.1).
+• Similarly, we create CIFAR-100+, Flowers-102+, and
+Food-101+, and demonstrate their effectiveness for fine-tuning (Sec. 2.3). ImageNet+ pretrained models fine-tuned on CIFAR-100+, Flowers-102+, and Food-101+ show up to 3% improvement in transfer learning on CIFAR-100,
+Flowers-102, and Food-101.
+• To further investigate this emergent transferablity we study robustness and calibration of the ImageNet+ trained mod-els. They reach up to 20% improvement on a variety of OOD datasets, ImageNet-(V2, A, R, C, Sketch), and
+ObjectNet (Sec. 3.2). We also show that models trained on ImageNet+ are well calibrated compared to their non-reinforced alternatives (Sec. 3.3).
+Our ImageNet+, CIFAR-100+, Flowers-102+, and Food-101+ reinforcements along with code to reinforce new datasets are available at https://github.com/apple/ml-dr. 2. Dataset Reinforcement
+Our proposed strategy for dataset reinforcement (DR) is efficiently combining knowledge distillation and data aug-mentation to generate an enhanced dataset. We precompute and store the output of a strong pretrained model on multiple augmentations per sample as reinforcements. The stored out-puts are more informative and useful for training compared with ground truth labels. This approach is related to prior works, such as Fast Knowledge Distillation (FKD) [55]) and
+ReLabel [71], that aim to improve the labels. Beyond these works, our goal is to find generalizable reinforcements that improve the accuracy of any architecture. First we perform a comprehensive study to find a strong teacher (Sec. 2.1) then find generalizable reinforcements on ImageNet (Sec. 2.2).
+To demonstrate the generality of our strategy and findings, we further reinforce CIFAR-100, Flowers-102, and Food-101 (Sec. 2.3).
+The reinforced dataset consists of the original dataset plus the reinforcement meta data for all training samples. During the reinforcement process, for each sample a fixed number of reinforcements is generated using parametrized augmen-tation operations and evaluating the teacher predictions. To save storage, instead of storing the augmented images, the augmentation parameters are stored alongside the sparsified output of the teacher. As a result, the extra storage needed is only a fraction of the original training set for large datasets.
+Using our reinforced dataset has no computational overhead on training, requires no code change, and provides improve-ments for various architectures. 2.1. What is a good teacher?
+Knowledge distillation (KD) refers to training a student model using the outputs of a teacher model [9, 2, 35]. The training objective is as follows: min
+θ
+Ex∼D, ˆx∼A(x)L(fθ( ˆx), g( ˆx)) , (1) where, D is the training dataset, A is augmentation function, fθ is the student model parameterized with θ, g is the teacher model, and L is the loss function between student and teacher outputs. Throughout this paper, we use the KL loss without a temperature hyperparameter and no mixing with the cross-entropy loss. We teach the student to imitate the output of the teacher on all augmentations consistent with [6].
+It is common to use a fixed teacher because repeating ex-periments and selecting the best teacher is expensive [6, 19].
+The teacher is often selected based on the state-of-the-art test accuracy of available pretrained models. However, it has been observed that most accurate models do not nec-essarily appear to be the best teachers [12, 43]. Ensemble models on the other hand, have been shown to be promising teachers from the early work of [9] until recent works in var-ious domains [10, 68, 54, 56] and with techniques to boost the their performance [52, 17, 41]. None of these works have comprehensively studied finding the best teacher along with the necessary augmentations that result in consistent improvements over multiple student architectures.
+To understand what makes a good teacher to reinforce datasets, we perform knowledge distillation with a variety of
+(a) Light-weight CNN (MobileNetV3) (b) Heavy-weight CNN (ResNet-50) (c) Transformer (ViT-Small)
+Figure 3: Knowledge Distillation with models and ensembles from Timm library. We observe the validation accuracy of students saturates or drops as the accuracy of teachers within an architecture family increases. We also observe that ensembles (marked by asterisks) are better teachers. Ensemble of IG-ResNext models performs best as teachers across student architectures. ERM (Empirical Risk Minimization) is standard training without knowledge distillation. Similar results for 150 epoch training in Fig. 7. pretrained models in the Timm library [63] distilled to three representative student architectures MobileNetV3-large [25],
+ResNet-50 [21], and ViT-Small [16]. MobileNetV3 rep-resents light-weight CNNs that often prefer easier train-ing. ResNet-50 represents heavy-weight CNNs that can benefit from difficult training regimes but do not heavily rely on it because of their implicit inductive bias of the architecture. ViT-small represents the transformer architec-tures that have less implicit bias compared with CNNs and learn better in the presence of complex and difficult datasets.
+We consider various families of models as teachers includ-ing ResNets (34–152 and type d variants) [21], ConvNeXt family pretrained on the ImageNet-22K and fine-tuned on
+ImageNet-1K [39], DeiT-3 pretrained on the ImageNet-21K and fine-tuned on ImageNet-1K, IG-ResNext pretrained on the Instagram dataset [40], EfficientNets with Noisy Student training [65], and Swin-TransformersV2 pretrained with and without ImageNet-22K and fine-tuned on ImageNet-1K [37].
+This collection covers a variety of vision transformers and
+CNNs pretrained on a wide spectrum of dataset sizes. We train all students with 224 × 224 inputs and follow [6] to match the resolution of teachers optimized to take larger inputs by passing the large crop to the teacher and resize it to 224 × 224 for the student.
+We present the accuracies of students trained for 300 epochs as a function of the teacher accuracy in Fig. 3. Focus-ing first on the single (non-ensemble) networks (marked by circles), consistent with prior work, we observe that the most accurate models are not usually the best teachers [43]. For
+CNN model families (ResNets, EfficientNets, ResNexts, and
+ConvNeXts), the student accuracy is generally correlated with the teacher accuracy. When increasing the teacher ac-curacy, the student first improves but then it starts to saturate or even drops with the most accurate member of the family.
+Vision Transformers (Swin-Transformers, and DeiT-3) as teachers do not show the same trend as the accuracy of the students flattens across different teachers. Recently,[36] sug-gested that temperature tuning can help in KD from larger teachers. We do not adopt such hyperparameter tuning strate-gies in favor of architecture-independence and generalizabil-ity of dataset reinforcement.
+On the other side, ensembles of state-of-the-art models (marked by asterisks) are consistently better teachers com-pared with any individual member of the family. We create 4-member ensembles of the best models from IG-ResNexts,
+ConvNeXts, and DeiT3 to cover CNNs, vision transform-ers, and extra data models. We find IG-ResNext teacher to provide a balanced improvement across all students. IG-ResNext models are also trained with 224×224 inputs while, for example, the best teacher from EfficientNet-NS family,
+EfficientNet-L2-NS, performs best at larger resolutions that is significantly more expensive to train with.
+One of the benefits of dataset reinforcement paradigm is that the teacher can be expensive to train and use as long as we can afford to run it once on the target dataset for reinforce-ment. Also, the process of dataset reinforcement is highly parallelizable because performing the forward-pass on the teacher to generate predictions on multiple augmentations does not depend on any state or any optimization trajectory.
+For these reasons, we also considered significantly scaling knowledge distillation to super large ensembles with up to 128 members. We discuss our findings in Appendix B.2.
+Full table of accuracies for this section are in Appendix B.1. 2.2. ImageNet+: What is the best combination of reinforcements?
+In this section, we introduce ImageNet+, a reinforcement of ImageNet. We create ImageNet+ using the IG-ResNext ensemble (Sec. 2.1). Following [55], we store top 10 sparse probabilities for 400 augmentations per training sample in the ImageNet dataset [15]. We consider the following aug-mentations: Random-Resize-Crop (RRC), MixUp [72] and
+CutMix [70] (Mixing), and RandomAugment [14] and Ran-domErase (RA/RE). We also combine Mixing with RA/RE
+Sparse teacher prob.
+Random Resize Crop
++ Horizontal Flip
+Random Augment
++ Random Erase
+MixUp + CutMix
+ImageNet+ variant
+Apply probability
+Parameters
+Storage space (in bytes)
+Total storage space (400 samples per image)
+All 1 10× (Index, Prob) 10 × (2 × 4) 38 GB
+All 1, 0.5 4× Coords + Flip bit 4 × 4 + 1 8 GB
++RA/RE, +M*+R* 1, 0.25 2× (Op Id, Magnitude) + 4× Coords 2 × 2 × 4 + 4 × 4 15 GB
++Mixing, M*+R* 0.5, 0.5 (Img Id, λ) + (Img Id, 4× Coords) 2 × 4 + (1 + 4) × 4 13 GB
+Table 2: Additional storage in ImageNet+ variants. Total additional storage for ImageNet+ (RRC+RA/RE) is 61 GBs.
+MobileNetV1
+MobileNetV2
+MobileNetV3
+ImageNet+ Variants
+ResNet
+EfficientNet
+ViT
+SwinTransformer (a) Light-weight CNNs (b) Heavy-weight CNNs (c) Transformers
+Figure 4: Improvements across architectures with ImageNet+ variants compared with ImageNet. Top-1 accuracy of different models on the ImageNet validation set consistently improves when trained with the proposed datasets as compared to the standard ImageNet training set (Epochs=150). Our proposed dataset variant with RRC+RA/RE, ImageNet+, provides balanced improvements of 1-4% across architectures. Further improvements with longer training (300-1000 epochs) in Tab. 4. and refer to it as M∗+R∗. We add all augmentations on top of RRC and for clarity add + as shorthand for RRC+. We provide a summary of the reinforcement data stored for each
+ImageNet+ variant in Tab. 2.
+Models We study light-weight CNN-based (MobileNetV1
+[26]/ V2 [50]/ V3[25]), heavy-weight CNN-based (ResNet
+[21] and EfficientNet [58]), and transformer-based (ViT [16] and SwinTransformer [38]) models. We follow [42, 64] and use state-of-the-art recipes, including optimizers, hyperpa-rameters, and learning schedules, specific to each model on the ImageNet. We perform no hyperparameter tuning specific to ImageNet+ and achieve improvements with the same setup as ImageNet for all models.
+Better accuracy We evaluate the performance of each model in terms of top-1 accuracy on the ImageNet validation set. Figure 4 compares the performance of different models trained using ImageNet and ImageNet+ datasets. Fig. 4a shows that light-weight CNN models do not benefit from difficult reinforcements. This is expected because of their limited capacity. On the other side, both heavy-weight CNN (Fig. 4b) and transformer-based (Fig. 4c) models benefit from difficult reinforcements (RRC+Mixing, RRC+RA/RE, and RRC+M∗ +R∗). However, transformer-based models deliver best performance with the most difficult reinforce-ment (RRC+M∗ +R∗). This concurs with previous works that show transformer-based models, unlike CNNs, benefit from more data regularization as they do not have inductive biases [16, 59].
+Overall, RRC+RA/RE provides a balanced trade-off be-tween performance and model size across different models.
+Therefore, in the rest of this paper, we use RRC+RA/RE as our reinforced dataset and call it ImageNet+. In the rest of the paper, we show results for three models that spans dif-ferent model sizes and architecture designs (MobileNetV3-Large, ResNet-50, and SwinTransformer-Tiny).
+We note that our observations are consistent across differ-ent architectures and recommend to see Appendix A for comprehensive results on 25 architectures. We provide expanded ablation studies in Appendix C using a cheaper teacher, ConvNext-Base-IN22FT1K. For example, we find 1) The number of stored samples can be 3× fewer than in-tended training epochs, 2) Additional augmentations on top of ImageNet+ are not useful. 3) Tradeoff in reinforcement difficulty can be further reduced with curriculums. 4) Cur-riculums are better than various sample selection methods at the time of reinforcing the dataset. We provide all hyperpa-rameters and training recipes in Appendix G.
+Pretraining Dataset
+CIFAR-100
+Flowers-102
+Food-101
+Orig.
++
+Orig.
++
+Orig.
++
+None
+ImageNet
+ImageNet+ (Ours) 80.2 84.4 86.0 83.6 87.2 87.5 68.8 92.5 93.7 87.5 94.1 95.3 85.1 86.1 86.6 88.2 89.2 89.5
+Table 3: Pretraining and fine-tuning on reinforced datasets is up to 3.4% better than using non-reinforced datasets. Top-1 accuracy on the test set for MobileNetV3-Large is shown. On Food-101, 86.1% is improved to 89.5%, demonstrating composition of reinforced datasets. 2.3. CIFAR-100+, Flowers-102+, Food-101+: How to reinforce other datasets?
+We reinforced ImageNet due to its popularity and effec-tiveness as a pretraining dataset for other tasks (e.g., object detection). Our findings on ImageNet are also useful for reinforcing other datasets and reduce the need for exhaustive studies. Specifically, we suggest the following guidelines: 1) use ensemble of strong teachers trained on large diverse data 2) balance reinforcement difficulty and model complexity.
+In this section, we extend dataset reinforcement to three other datasets, CIFAR-100 [31], Flowers-102 [45], and Food-101 [8], with 50K, 1K, and 75K training data respectively.
+We build a teacher for each dataset by fine-tuning ImageNet+ pretrained ResNet-152 that reaches the accuracy of 90.6%, 96.6%, and 91.8%, respectively. By repeating fine-tuning 4 times, we get three teacher ensembles of 4xResNet-152.
+Next we generate reinforcements using similar augmenta-tions to ImageNet+, that is RRC+RA/RE. We store 800, 8000, and 800 augmentations per original sample. After that, we train various models on the reinforced data at similar training time to standard training. To achieve the best perfor-mance, we use pretrained models on ImageNet/ImageNet+ and fine-tune on each dataset for varying epochs up to 1000, 10000, and 1000 (for CIFAR-100, Flowers-102, and Food-101, respectively) and report the best result.
+Table 3 shows that MobileNetV3-Large pretrained and fine-tuned with reinforced datasets reaches up to 3% better accuracy. We observe that pretraining and fine-tuning on reinforced datasets together give the largest improvements.
+We provide results for other models in Appendix D. 3. Experiments
+Baseline methods We compare the performance of mod-els trained using ImageNet+ with the following baseline methods: (1) KD [35, 6] (Online distillation): A standard knowledge distillation method with strong teacher mod-els and model-specific augmentations, (2) MEALV2 [54] (Fine-tuning distillation): Distill knowledge to student with good initialization from multiple teachers, (3) FunMatch [6] (Patient online distillation): Distill for significantly many epochs with strong augmentations, (4) ReLabel [71] (Offline
+Model
+Dataset
+Training Epochs 150 300 1000
+MobileNetV3-Large
+ResNet-50
+SwinTransformer-Tiny
+ImageNet
+ImageNet+ (Ours)
+ImageNet
+ImageNet+ (Ours)
+ImageNet
+ImageNet+ (Ours) 74.7 76.2 77.4 79.6 79.9 82.0 74.9 77.0 78.8 80.6 80.9 83.0 75.1 77.9 79.6 81.7 80.9 83.8
+Table 4: ImageNet+ models consistently outperform Im-ageNet models when trained for longer. Top-1 accuracy on the ImageNet validation set is shown. An epoch has the same number of iterations for ImageNet/ImageNet+. label-map distillation): Pre-computes global label maps from the pre-trained teacher, and (5) FKD [55] (Offline distilla-tion): Pre-computes soft labels using multi-crop knowledge distillation. We consider FKD as the baseline approach for dataset reinforcement.
+Longer training Recent works have shown that models trained for few epochs (e.g., 100 epochs) are sub-optimal and their performance improves with longer training [64, 16, 59].
+Following these works, we train different models at three epoch budgets, i.e., 150, 300, and 1000 epochs, using both
+ImageNet and ImageNet+ datasets. Table 4 shows models trained with ImageNet+ dataset consistently deliver better accuracy in comparison to the ones trained on ImageNet.
+An epoch of ImageNet+ consists of exactly one random reinforcement per sample in ImageNet. time Table 4 shows
+Training and reinforcement
+ImageNet+ improves the performance of various models.
+A natural question that arises is: Does ImageNet+ in-troduce computational overhead when training models?
+On average, training MobileNetV3-Large, ResNet-50, and
+SwinTransformer-Tiny is 1.12×, 1.01×, and 0.99× the total training time on ImageNet. The extra time for MobileNetV3 is because there is no data augmentations in our baseline.
+ImageNet+ took 2205 GPUh to generate using 64xA100
+GPUs, which is highly parallelizable. For comparison, train-ing ResNet-50 for 300 epochs on 8xA100 GPUs takes 206
+GPUh. The reinforcement generation is a one-time cost that is amortized over many uses. The time to reinforce other datasets and the storage is discussed in Appendix F.
+Comparison with state-of-the-art methods Table 5 com-pares the performance of models trained with ImageNet+ and existing methods. We make following observations: (1)
+Compared to the closely related method, i.e., FKD, models trained using ImageNet+ deliver better accuracy. (2) We achieve comparable results to online distillation methods (e.g., FunMatch), but with fewer epochs and faster training (Fig. 1). (3) Small variants of the same family trained with
+ImageNet+ achieve similar performance to larger models trained with ImageNet dataset. For example, ResNet-50
+(81.7%) with ImageNet+ achieves similar performance as
+ResNet-101 with ImageNet (81.5%). We observe similar phenomenon across other models, including light-weight
+CNN models. This enables replacing large models with smaller variants in their family for faster inference across de-vices, including edge devices, without sacrificing accuracy. 3.1. Transfer Learning
+To evaluate the transferability of models pre-trained using
+ImageNet+ dataset, we evaluate on following tasks: (1) se-mantic segmentation with DeepLabv3 [11] on the ADE20K dataset [74], (2) object detection with Mask-RCNN [20] on the MS-COCO dataset [34], and (3) fine-grained clas-sification on the CIFAR-100 [31], Flowers-102 [45], and
+Food-101 [8] datasets.
+Tables 6 and 8 show models trained on the ImageNet+ dataset have better transferability properties as compared to the ImageNet dataset across different tasks (detection, seg-mentation, and fine-grained classification). To analyze the isolated impact of ImageNet+ in this section, the fine-tuning datasets are not reinforced. We present all combinations of training with reinforced/non-reinforced pretraining/fine-tuning datasets in Appendix D.
+Model
+Dataset
+Offline Random
+KD?
+Init.?
+Epochs Accuracy
+MobileNetV3
+-Large
+ResNet-50
+ImageNet [25]
+FunMatch [6]*
+MEALV2 [54]
+ImageNet+ (Ours)
+ImageNet [64]
+ReLabel [71]
+FKD [55]
+MEALV2 [54]
+ImageNet+ (Ours)
+ImageNet+ (Ours)
+FunMatch [6]*
+ResNet-101
+ImageNet [64]
+ViT-Tiny
+ViT-Small
+ViT-Base↑384
+ImageNet [59]
+DeiT [59]
+FKD [55]
+ImageNet+ (Ours)
+ImageNet [59]
+DeiT [59]
+ImageNet+ (Ours)
+ImageNet [59]
+DeiT [59]
+ImageNet+ (Ours)
+NA
+✗
+✗
+✓
+NA
+✓
+✓
+✗
+✓
+✓
+✗
+NA
+NA
+✗
+✓
+✓
+NA
+✗
+✓
+NA
+✗
+✓
+✓
+✓
+✗
+✓
+✓
+✓
+✓
+✗
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓ 600 1200 180 300 600 300 300 180 300 1000 1200 1000 300 300 300 300 300 300 300 300 300 300 75.2 76.3 76.9 77.0 80.4 78.9 80.1 80.6 80.6 81.7 81.8 81.5 72.2 74.5 75.2 75.8 79.8 81.2 81.4 83.1 83.4 84.5
+Table 5: Comparison with state-of-the-art methods on the
+ImageNet validation set. Models trained with ImageNet+ dataset deliver similar or better performance than existing methods. Importantly, unlike online KD methods (e.g., Fun-Match or DeiT), ImageNet+ does not add computational overhead to standard ImageNet training (Fig. 1). Here,
+NA denotes standard supervised ImageNet training with no online/offline KD. ↑384 denotes training at 384 reso-lution. An epoch has the same number of iterations for
+ImageNet/ImageNet+.
+Model
+Pretraining dataset
+MobileNetV3-Large
+ResNet-50
+SwinTransformer-Tiny
+ImageNet
+ImageNet+ (Ours)
+ImageNet
+ImageNet+ (Ours)
+ImageNet
+ImageNet+ (Ours)
+Task
+ObjDet
+SemSeg 35.5 36.1 42.2 42.5 45.8 46.5 37.2 38.5 42.8 44.2 41.2 42.5
+Table 6: Transfer learning for object detection and se-mantic segmentation. For object detection (ObjDet), we re-port standard mean average precision on MS-COCO dataset while for sementic segmentation (SemSeg), we report mean intersection accuracy on ADE20K dataset. Task datasets are not reinforced. 3.2. Robustness analysis
+To evaluate the robustness of different models trained us-ing the ImageNet+ dataset, we evaluate on three subsets of the ImageNetV2 dataset [48], which is specifically designed to study the robustness of models trained on the ImageNet dataset. We also evaluate ImageNet models on other distri-bution shift datasets, ImageNet-A [24], ImageNet-R [22],
+ImageNet-Sketch [61], ObjectNet [4], and ImageNet-C [23].
+We measure the top-1 accuracy except for ImageNet-C. On
+ImageNet-C, we measure the mean corruption error (mCE) and report 100 minus mCE.
+Tab. 7 shows that models trained using ImageNet+ dataset are up to 20% more robust. Overall, these robustness results in conjunction with results in Tab. 4 highlight the effective-ness of the proposed dataset. 3.3. Calibration: Why are ImageNet+ models ro-bust and transferable?
+To understand why ImageNet+ models are significantly more robust than ImageNet models we evaluate their Ex-pected Calibration Error (ECE) [32] on the validation set.
+Fig. 5 shows that ImageNet+ models are well-calibrated and significantly better than ImageNet models. This matches recent observations about ensembles that out-of-distribution robustness is better for well-calibrated models [33]. Full calibration results are presented in Appendix E. 3.4. Comparison with FKD and ReLabel.
+We reproduce FKD and ReLabel with our training recipe as well as regenerate the dataset of FKD. We compare the accuracy on ImageNet validation and its distribution shifts as well as the cost of dataset generation/storage. We train models for 300 epochs.
+Training recipe We report results of training with our code on the released datasets of ReLabel and FKD. In addition to reproducing FKD results by training on their released dataset of 500-sample per image, we also reproduce their dataset using our code and their teacher. Tab. 9 verifies that our
+Model
+Dataset
+ImageNet-V2
+V2-A V2-B V2-C
+ImageNet-A ImageNet-R ImageNet-Sketch ObjectNet
+ImageNet-C Avg.
+MobileNetV3-Large
+ResNet-50
+SwinTransformer-Tiny
+ImageNet
+ImageNet+ (Ours)
+ImageNet
+ImageNet+ (Ours)
+ImageNet
+ImageNet+ (Ours) 71.5 75.1 76.3 79.3 77.0 81.5 62.9 66.3 67.4 71.3 69.3 74.1 76.8 80.5 81.3 83.8 81.6 85.3 4.5 7.6 11.9 15.1 21.0 30.2 32.4 42.0 38.1 48.1 37.7 58.0∗ 20.6 29.0 27.4 34.9 25.4 40.8 32.8 38.1 41.6 46.8 40.5 50.6 21.8 32.0 33.2 39.0 36.9 46.6 31.1 37.6 38.3 43.9 35.7 42.2
+Table 7: ImageNet+ models are up to 20% more robust on ImageNet distribution shifts. All models are trained for 1000 epochs. We report on ImageNetV2 variations Threshold-0.7 (V2-A), Matched-Frequency (V2-B), and Top-Images (V2-C).
+We report accuracy on all datasets except for ImageNet-C where we report 100 minus mCE metric. ∗ Largest improvement. improvements are due to the superiority of ImageNet+, not any other factors such as the training recipe. Our ImageNet+-RRC is also closely related to FKD as it uses the same set of augmentations (random-resized-crop and horizontal flip) but together with our optimal teacher (4xIG-ResNext). We observe that ImageNet+-RRC achieves better results than
+FKD but still lower than ImageNet+ (Tab. 11c and Fig. 4).
+Model
+Pretraining dataset
+Fine-tuning dataset
+CIFAR-100
+Flowers-102
+Food-101
+MobileNetV3-Large
+ResNet-50
+SwinTransformer-Tiny
+ImageNet
+ImageNet+ (Ours)
+ImageNet
+ImageNet+ (Ours)
+ImageNet
+ImageNet+ (Ours) 84.4 86.0 88.4 88.8 90.6 90.9 92.5 93.7 93.6 95.0 96.3 96.6 86.1 86.6 90.0 90.5 92.3 93.0
+Table 8: Transfer learning for fine-grained object classifi-cation. Only pretraining dataset is reinforced and fine-tuning datasets are not reinforced. Reinforced pretraining/fine-tuning results in Tab. 1.
+Figure 5: ImageNet+ models are well-calibrated. We plot the Expected Calibration Error (ECE) on the ImageNet validation set over the validation error (normalized by 100 to range [0, 1]) for MobileNetV3/ResNet-50/Swin-Tiny ar-chitectures trained for 300 and 1000 epochs on ImageNet and ImageNet+. ImageNet+ models are significantly more calibrated, even matching or better than their teacher (IG-ResNext Ensemble). We also observe that the IG-ResNext model is one of the best calibrated models on the validation set from our pool of teachers.
+Generation/Storage Cost We provide comparison of gen-eration/storage costs in Tab. 9. In our reproduction, gen-erating FKD’s data takes 2260 GPUh, slightly more than
+ImageNet+ because their teacher processes inputs at the larger resolution of 475 × 475 compared to our resolution of 224 × 224.
+ImageNet+-Small We subsampled ImageNet+ into a vari-ant that is 10.6 GBs, comparable to prior work. We reduce the number of samples per image to 100 and store teacher probabilities with top-5 sparsity. If not subsampled from
+ImageNet+, generating ImageNet+-Small would take half the time of FKD (200 samples) while still comparable in ac-curacy to ImageNet+. Note that ImageNet+ is more general-purpose and preferred, especially for long training. 3.5. CLIP-pretrained Teachers
+In this section, we evaluate the performance of CLIP-pretrained models [47] fine-tuned on ImageNet as teachers.
+This study complements our large-scale study of teachers in Sec. 2.1 where we evaluated more than 100 SOTA large models and ensembles. Table 10 compares an ensemble of 4
+CLIP-pretrained models to our selected ensemble of 4 IG-ResNext models as well as a mixture of ResNext, ConvNext,
+CLIP-ViT, and ViT (abrv. RCCV) models (See Appendix H for the model names). We generate new ImageNet+ vari-ants and train various architectures for 1000 epochs on each dataset. We observe that ImageNet+ with our previously se-lected IG-ResNext ensemble is superior to CLIP-pretrained and mixed-architecture teachers across architectures. The
+CLIP variant provides near the maximum gain on Swin-Tiny and mixing it with IG-ResNext reduces the gap on CNNs. 4.

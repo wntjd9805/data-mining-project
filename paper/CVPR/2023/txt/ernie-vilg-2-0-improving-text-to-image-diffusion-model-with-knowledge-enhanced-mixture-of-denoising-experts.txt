@@ -1,0 +1,174 @@
+Abstract
+Recent progress in diffusion models has revolutionized the popular technology of text-to-image generation. While exist-* denotes equal contribution. Work done during Feng’s internship at Baidu. ing approaches could produce photorealistic high-resolution images with text conditions, there are still several open prob-lems to be solved, which limits the further improvement of
+In this paper, we pro-image fidelity and text relevancy. pose ERNIE-ViLG 2.0, a large-scale Chinese text-to-image
+diffusion model, to progressively upgrade the quality of gen-erated images by: (1) incorporating fine-grained textual and visual knowledge of key elements in the scene, and (2) utiliz-ing different denoising experts at different denoising stages.
+With the proposed mechanisms, ERNIE-ViLG 2.01 not only achieves a new state-of-the-art on MS-COCO with zero-shot
+FID-30k score of 6.75, but also significantly outperforms recent models in terms of image fidelity and image-text align-ment, with side-by-side human evaluation on the bilingual prompt set ViLG-300. 1.
+
+Introduction
+Recent years have witnessed incredible progress in text-to-image generation. With large-scale training data and model parameters, kinds of text-to-image generation models are now able to vividly depict the visual scene described by a text prompt, and enable anyone to create exquisite images without sophisticated drawing skills. Among all types of image generation approaches, diffusion models [9] are at-tracting increasing attention due to their ability to produce highly photorealistic images conditioned on text prompts.
+Given a text prompt, the models transform a Gaussian noise into an image that conforms to the prompt through iterative denoising steps. In the past years, text-to-image diffusion models such as LDM [25], GLIDE [18], DALL-E 2 [22], and
+Imagen [26] have achieved impressive performance in both text relevancy and image fidelity. Despite these advances, the exploration of diffusion models by existing methods is still at the initial stage. When we go deep into the princi-ple and implementation of text-to-image diffusion models, there are still many opportunities to improve the quality of generated images further.
+First, during the learning process of each denoising step, all text tokens interact with image regions and all the image regions contribute equally to the final loss function. How-ever, a visual scene of text and image contains many ele-ments (i.e., textual words and visual objects), and different elements usually hold different importance for the expres-sion of the scene semantics [42]. The indiscriminate learning process may cause the model to miss some key elements and interactions in the scene, thus facing the risk of text-image misalignment, such as the attribute confusion problem, es-pecially for text prompts containing multiple objects with specific attributes [22]. Second, when opening the horizon from individual step to the whole denoising process, we can found that the requirements of different denoising stages are also not identical. In the early stages, the input images are highly noised, and the model is required to outline the semantic layout and skeleton out of almost pure noise. By contrast, in the later steps close to the image output, denois-1https://wenxin.baidu.com/ernie-vilg ing mainly means improving the details based on an almost completed image [25]. In practice, existing models usually use one U-Net for all steps, which means that the same set of parameters has to learn different denoising capabilities.
+In this paper, we propose ERNIE-ViLG 2.0, an improved text-to-image diffusion model with knowledge-enhanced mixture-of-denoising-experts, to incorporate extra knowl-edge about the visual scene and decouple the denoising ca-pabilities in different steps. Specifically, we employ a text parser and an object detector to extract key elements of the scene in the input text-image pair, and then guide the model to pay more attention to their alignment in the learning pro-cess, so as to hope the model could handle the relationships among various objects and attributes. Moreover, we divide the denoising steps into several stages and employ specific denoising “experts” for each stage. With the mixture of multiple experts, the model can involve more parameters and learn the data distribution of each denoising stage better, without increasing the inference time, as only one expert is activated in each denoising step.
+With the extra knowledge from the visual scene and the mixture-of-denoising-experts mechanism, we train ERNIE-ViLG 2.0 and scale up the model size to 24B parameters.
+Experiments on MS-COCO show that our model exceeds previous text-to-image models by setting a new state-of-the-art of 6.75 zeros-shot FID-30k score, and detailed ablation studies confirm the contributions of each proposed strategy.
+Apart from automatic metrics, we also collect 300 bilingual text prompts that could assess the quality of generated im-ages from different aspects and enable a fair comparison between English and Chinese text-to-image models. The hu-man evaluation results again indicate that ERNIE-ViLG 2.0 outperforms other recent methods, including DALL-E 2 [22] and Stable Diffusion [25], by a significant margin both in terms of image-text alignment and image fidelity.
+To sum up, the main contributions of this work are: (1)
+We incorporate textual and visual knowledge into the text-to-image diffusion model, which effectively improves the ability of fine-grained semantic control and alleviates the problem of object-attribute mismatching in generated images. (2) We propose the mixture-of-denoising-experts mechanism to refine the denoising process, which can adapt to the char-acteristics of different denoising steps and scale up the model to 24B parameters, making it the largest text-to-image model at present. (3) ERNIE-ViLG 2.0 achieves the state-of-the-art zero-shot FID-30k score of 6.75 on MS-COCO, surpasses
+DALL-E 2 and Stable Diffusion in human evaluation on the
+Chinese-English bilingual prompt set ViLG-300. 2. Method
+During the training process, the text-to-image diffusion model receives paired inputs (x, y) consisting of an image x with its text description y, and the ultimate goal is to gener-Figure 2. The architecture of ERNIE-ViLG 2.0, which incorporates fine-grained textual and visual knowledge of key elements in the scene and utilizes different denoising experts at different denoising stages. ate x based on y. To achieve this, a text encoder fθ(·) first encodes y as fθ(y), then a denoising network ϵθ(·) condi-tioned on fθ(y) learns to generate x from a Gaussian noise.
+To help the model generate high-quality images that accu-rately match the text description (i.e., text prompt), ERNIE-ViLG 2.0 enhances text encoder fθ(·) and denoising network
+ϵθ(·) with textual and visual knowledge of key elements in the scene. Furthermore, ERNIE-ViLG 2.0 employs mixture-of-denoising-experts to refine the image generation process, where different experts are responsible for different genera-tion steps in the denoising process. The overall architecture of ERNIE-ViLG 2.0 is shown in Figure 2 and the details are described in the following subsections. 2.1. Preliminary
+Denoising diffusion probabilistic models (DDPM) are a class of score-based generative models that have recently shown delightful talents in the field of text-to-image genera-tion [9]. The diffusion process of DDPM aims to iteratively add diagonal Gaussian noise to the initial data sample x and turn it into an isotropic Gaussian distribution after T steps: xt =
+√
+αtxt−1 +
+√ 1 − αtϵt, t ∈ {1, . . . , T } (1) where the sequence {xt} starts with x0 = x and ends with xT ∼ N (0, I), the added noise at each step is ϵt ∼ N (0, I), and {αt}1...T is a pre-defined schedule [30, 32]. The denois-ing process is the reverse of diffusion, which converts the
+Gaussian noise xT ∼ N (0, I) back into the data distribution x0 through iterative denoising steps t = T, . . . , 1. During training, for a given image x, the model calculates xt by sampling a Gaussian noise ϵ ∼ N (0, I):
+√
+¯αtx0 +
+√ xt = 1 − ¯αtϵ, (2) where ¯αt = (cid:81)t s=1 αs. Given xt, the target of the denoising network ϵθ(·) is to restore x0 by predicting the noise ϵ. It is learned via the loss function
+L = Ex,ϵ∼N (0,I),t (cid:2)||ϵ − ϵθ(xt, t)||2 2 (cid:3) . (3)
+With the predicted ϵθ(xt, t), we can have the prediction of x0 at step t by converting Equation (2): 1
+√
+¯αt
+ˆx0,t = (xt −
+√ 1 − ¯αtϵθ(xt, t)). (4)
+In Figure 2, we visualize the sampled xt and the predicted
+ˆx0,t for several timesteps during training. In the inference process of DDPM, x0 is unknown, so the model iteratively generates xt−1 based on xt and ˆx0,t:
+√
+√ xt−1 =
+¯αt−1 ˆx0,t 1 − ¯αt−1 1 − ¯αt (cid:114)
+αtxt + 1 − αt 1 − ¯αt (1 − ¯αt−1)(1 − αt) 1 − ¯αt
++
+ϵ′ t, (5) t ∈ {T, . . . , 1}, where ϵ′ t ∼ N (0, I) is a sampled Gaussian noise.
+The denoising network ϵθ(·) is typically implemented by
+U-Net [9]. To allow ϵθ(·) to condition on text prompts, a text encoder fθ(·) first extracts the text representation fθ(y) ∈ Rny×dy , which is then fed into ϵθ(·) via a cross-modal attention layer [18]. Formally, the U-Net represen-tation φi(xt) ∈ Rnx×d is concatenated with the text repre-sentation fθ(y) after projection, and then goes through an attention layer to achieve cross-modal interaction,
+Q = φi(xt)W (i)
+Q ,
+K = [φi(xt)W (i)
+Kx
+V = [φi(xt)W (i)
+Vx
+],
+; fθ(y)W (i)
+Ky
+; fθ(y)W (i)
+Vy (cid:18) QK ⊤
+√ d
+], (6) (7) (cid:19)
+V,
+Attention(Q, K, V ) = softmax where i is the index for U-Net layers, [; ] is the concatena-, W (i) tion operator, W (i)
+∈
+Vx
+Rdy×d are learnable projection layers, nx and ny are the length of encoded image and text, respectively.
+∈ Rd×d and W (i)
+Ky
+Q , W (i)
+Kx
+, W (i)
+Vy
+During inference, given a text prompt y, the denoising
+U-Net ϵθ(·) predicts the image sample x conditioned on the text y with classfier-free guidance [10] and Denoising
+Diffusion Implicit Models (DDIM) sampling [31].
+2.2. Knowledge-Enhanced Diffusion Model
+The text-to-image model receives a text prompt that de-scribes the scene of an image, then depicts it with crucial objects and corresponding attribute details. In other words, both text and image are intended to express a visual scene, in which key elements have different expressions, such as keywords in text or salient regions in image. However, naive diffusion model does not distinguish the importance of el-ements and indiscriminately iterates the denoising process.
+ERNIE-ViLG 2.0 incorporates extra text and visual knowl-edge into the learning stage, hoping to enhance the fine-grained semantic perception of diffusion model.
+Textual Knowledge. An ideal text-to-image model is ex-pected to focus on all the critical semantics mentioned in the text prompt. To distinguish function words and words describing key semantics, we adopt an off-the-shelf part-of-speech toolkit to extract lexical knowledge of the input prompt, and then improve the learning process by (1) insert-ing special tokens into the input sequence and (2) increasing the weight of tokens with specific part-of-speech tags in the attention layer. Specifically, we selected 50% of samples and inserted special tokens at the beginning of each word, in which each part-of-speech tag corresponds to a special token.
+For the selected samples, we also strengthen the attention weight of keywords based on the lexical analysis results. In this way, Equation (7) is modified to,
+Attention(Q, K, V )′ = softmax (cid:18) Wa · (QK ⊤)
+√ d (cid:19)
+V, (8) where Wa ∈ Rnx×(nx+ny) is an auxiliary weight matrix that used to scale the vanilla attention, and (cid:26) 1 + wa 1 toki ∈ {x}, tokj ∈ {x, ykey} otherwise. a =
+W ij (9)
+Here wij a is the scaling factor of the attention weight between token toki and tokj, wa is a hyper-parameter, x refers to all the image tokens, and ykey denotes the keywords in text2.
+Figure 2 gives an example, where special tokens “[a]” and
+“[n]” are inserted for adjectives and nouns, respectively.
+Visual Knowledge. Similar to notional words in the text prompt, there are also salient regions in an image, such as people, trees, buildings, and objects mentioned in the in-put. To extract such visual knowledge, we apply an object detector [1] to 50% of training samples, and then select eye-catching objects from the results with heuristic strategies.
+Since the loss function of the diffusion model directly acts on the image space, we can assign higher weights to corre-sponding regions by modifying Equation (3), thus promoting the model to focus on the generation of these objects:
+L′ = Ez,ϵ∼N (0,I),t (cid:2)Wl · ||ϵ − ϵθ(zt, t)||2 2 (cid:3) , (10) 2The keywords is defined as notional words in modern Chinese (i.e., nouns, verbs, adjectives, numerals, quantifiers, and pronouns).
+W ij l = (cid:26) 1 + wl 1 losij ∈ {xkey} otherwise. (11)
+Here Wl ∈ Rnh×nw is the weight matrix, nh and nw are the height and weight of image space, wl is a hyper-parameter, losij is the loss item in i-th row and j-th column of image space, xkey is the regions that corresponding to key objects.
+As Figure 2 illustrates, the regions of “dog” and “cat” are assigned with larger weights in the calculation of L′.
+Now a new problem arises: as a kind of fine-grained knowledge, the selected objects may not appear in the text prompt, thus perplexing the model in learning the alignment between words and objects. An intuitive idea is first to obtain the object and attribute category of each region, then com-bine corresponding class labels with the original text prompt to achieve fine-grained description, thus ensuring the input contains both coarse and fine granularity information. For instance, as shown in Figure 2, the detected object “bowl” is not included in the caption, so we append it to the original description. Besides, we also employ an image captioning model [38] to generate text for images, and randomly re-place the original prompt with generated captions, because the generated captions of many images are more concise and reveal more accurate semantics than original prompts.
+Most notably, the above strategies are only limited to the training stage. By randomly selecting a part of samples to equip these additional enhancement strategies, the model is supposed to sense the hints of knowledge from various perspectives, and generate higher quality images for the given text in the inference stage, even without special tokens, attention strengthening, or text refinement. 2.3. Mixture-of-Denoising-Experts
+Recall that the diffusion process is to iteratively corrupt the image with Gaussian noises by a series of diffusion steps t = 1, . . . , T , and DDPM [9] are trained to revert the diffu-sion process by denoising steps t = T, . . . , 1. During the denoising process, all steps aim to denoise a noised input, and they together convert a completely random noise into a meaningful image gradually. Although sharing the same goal, the difficulty of these denoising steps varies according to the noise ratio of input. Figure 2 illustrates such differ-ence by presenting some examples of xt and the denoising prediction ˆx0,t during training. For timesteps t near T , such as t = T, tk, tj in the figure, the input of the denoising net-work xt is highly noised, and the network of these steps mainly tackles a generation task, i.e., generating an image from a noise. On the contrary, for timesteps t near 1, such as t = ti, 1, the input xt is close to the original image, and the network of these steps needs to refine the image details.
+DDPM makes no specific assumption on the implementa-tion of denoising network, that is, the denoising process does not require the same denoising network for all steps in theory.
+However, most of the previous text-to-image diffusion ap-proaches [18,22,25,26] follow the vanilla implementation to adopt a denoising network for the whole denoising process.
+Considering that tasks of different timesteps are different, we conjecture that using the same set of parameters to learn different tasks might lead to suboptimal performance.
+In view of this, we further propose Mixture-of-Denoising-Experts (MoDE), where the primary motivation is to employ multiple specialized expert networks to fit different tasks at different timesteps. Since the inputs of adjacent timesteps are similar and so are the denoising tasks, we divide all the timesteps uniformly into n blocks (S1, · · · , Si, · · · , Sn), in which each block consists of consecutive timesteps and is assigned to one denoising expert. In other words, the timesteps in the same block are denoised by the same group of network parameters. In practice, we share the same text encoder for all denoising experts, and utilize different U-Net experts for different timestep blocks:
+ϵθ(xt, t) = {ϵθ,i(xt, t)}, t ∈ Si, (12) where ϵθ,i(xt, t) is the i-th expert network. Herein, MoDE improves the model performance by adopting expert net-works to specially deal with different denoising stages.
+Intuitively, when using more experts, each block contains fewer timesteps, so each expert could better focus on learning the characteristics of specific denoising steps assigned to it.
+Meanwhile, as only one expert network is activated at each step, increasing the number of experts does not affect the computation overhead during inference. Therefore, ERNIE-ViLG 2.0 can flexibly scale up the parameters of diffusion model, allowing the experts to fit the data distribution better without increasing inference time. 3. Experiments
+In this section, we first introduce the implementation details of ERNIE-ViLG 2.0. Then we present the comparison of models with automatic metrics and human evaluation.
+Last, we further analyze the results with quantitative ablation studies and qualitative showcases. 3.1. Implementation Details h×nl
+To reduce learning complexity, we use diffusion models to generate the representations of images in latent space of an image auto-encoder following Latent Diffusion Models [25].
+We first pre-train an image encoder to transform an image x ∈ Rnh×nw×3 from pixel space into latent space ˆx ∈
+Rnl w×4 and an image decoder to convert it back. Here nh/nl w denote the image’s original/latent height and width, and we collectively refer to pixel space and hidden space as image space in this paper. Then we fix the auto-encoder and train the diffusion model to generate ˆx from text prompt y. During inference, we adopt the pre-trained image decoder to turn ˆx into pixel-level image output. h and nw/nl
+Table 1. Comparison of ERNIE-ViLG 2.0 and representative text-to-image generation models on MS-COCO 256 × 256 with zero-shot
+FID-30k. We use classifier-free guidance scale 2.1 for our diffusion model and achieve the best performance.
+Model
+Zero-Shot FID-30k ↓
+DALL-E [23]
+CogView [2]
+LAFITE [46]
+LDM [25]
+ERNIE-ViLG [45]
+GLIDE [18]
+Make-A-Scene [6]
+DALL-E 2 [22]
+CogView2 [3]
+Imagen [26]
+Parti [43]
+ERNIE-ViLG 2.0 27.50 27.10 26.94 12.61 14.70 12.24 11.84 10.39 24.00 7.27 7.23 6.75
+ERNIE-ViLG 2.0 contains a transformer-based text en-coder with 1.3B parameters and 10 denoising U-Net experts with 2.2B parameters each, which totally add up to about 24B parameters. For hyper-parameters to incorporate knowl-edge, the attention weight scale wa is set to 0.01 and the loss weight scale wl is set to 0.1 (both chosen from [0.01, 0.1, 0.5, 1]). For the MoDE strategy, all timesteps are divided into 10 blocks. The model is optimized by AdamW [15], with a fixed learning rate 0.9 × 10−4, β1 = 0.9, β2 = 0.999, and weight decay of 0.01. We train ERNIE-ViLG 2.0 on 320
+Tesla A100 GPUs for 18 days.
+The training data consists of 170M image-text pairs, in-cluding publicly available English datasets like LAION [28] and a series of internal Chinese datasets. The image auto-encoder is trained on the same set. For images with English captions, we translate them with Baidu Translate API3 to get the Chinese version. 3.2. Results
+Automatic Evaluation on MS-COCO. Following previous work [22, 25, 26], we evaluate ERNIE-ViLG 2.0 on MS-COCO 256 × 256 with zero-shot FID-30k, where 30,000 images from the validation set are randomly selected and the
+English captions are automatically translated to Chinese.
+Table 1 shows that ERNIE-ViLG 2.0 achieves new state-of-the-art performance of text-to-image generation, with 6.75 zero-shot FID-30k on MS-COCO. Inspired by DALL-E [23] and Parti [43], we rerank the batch-sampled images (with only 4 images per text prompt, comparing with 512 im-ages used in DALL-E and 16 images used in Parti) based on the image-text alignment score, calculated by a pre-trained
+CLIP model [21], in which the text is the initial English 3https://fanyi.baidu.com
+(a) v.s. DALL-E 2. (b) v.s. Stable Diffusion. (a) Knowledge enhancement. (b) Mixture-of-denoising-experts.
+Figure 3. Comparison of ERNIE-ViLG 2.0 and DALL-E 2/Stable
+Diffusion on ViLG-300 with human evaluation. We report the user preference rates with 95% confidence intervals.
+Figure 5. Performance with various strategies in ERNIE-ViLG 2.0.
+Here we draw pareto curves with guidance scale [2,3,4,5,6,7,8,9]. 0
+. 2
+G
+L
+V i 2
+E
+-L
+L
+A
+D
+. f f i
+D
+. a t
+S (1) A green cup and a blue cell phone (3) Zongzi and corn boiled in the pot (2) A wine glass on top of a dog (4) Cherry blossom, digital oil painting
+Figure 4. Qualitative Comparison of ERNIE-ViLG 2.0 and DALL-E 2/Stable Diffusion on ViLG-300. caption in MS-COCO and the image is generated from the auto-translated Chinese caption. Besides, even without the reranking strategy, we find that ERNIE-ViLG 2.0 can also beat the latest diffusion-based models like DALL-E 2 [22] and Imagen [26], with the zero-shot FID-30k of 7.23.
+Human Evaluation on ViLG-300. ERNIE-ViLG 2.0 takes
+Chinese prompts as input and generates high-resolution im-ages, unlike recent English-oriented text-to-image models.
+Herein, we introduce ViLG-3004, a bilingual prompt set that supports the systematic evaluation and comparison of
+Chinese and English text-to-image models. ViLG-300 con-tains 300 prompts from 16 categories, composed of Draw-Bench [26] (in English) and the prompt set used in ERNIE-ViLG [45] (in Chinese).
+With ViLG-300, we can make convincing comparisons between ERNIE-ViLG 2.0 and DALL-E 25, Stable Diffu-sion67. For evaluation, five raters are presented with two sets 4https : / / github . com / PaddlePaddle / ERNIE / tree / ernie - kit - open - v1 . 0 / Research / ERNIE - ViLG2 / data /
+ViLG-300.csv 5https://openai.com/dall-e-2/ 6https://beta.dreamstudio.ai/dream 7We use DALL-E 2 and Stable Diffusion interfaces to generate images on October 25, 2022, before the CVPR 2023 submission deadline. e n i l e s a b
+. t x t
+/ w
+. s i v
+/ w l l a
+/ w
+. p x e 1
+. p x e 2
+. p x e 5
+. p x e 0 1 (1) A white car and a red sheep (2) A panda making latte art (3) A small red ball in a big green block (4) A burning fish (1) A single clock is sitting on a table (2) An umbrella on top of a spoon (3) Wolf in a suit (4) A rabbit with a fox’s head
+Figure 6. Samples from ViLG-300 with different knowledge en-hancement strategies (left) and different number of experts (right). of images generated by ERNIE-ViLG 2.0 and the compared model. Next, they are asked to compare these images from two dimensions of image-text alignment and image fidelity, and then select the model they prefer, or respond that there is no measurable difference between two models. Throughout the process, raters are unaware of which model the image is generated from, and we do not apply any filtering strat-egy to the rating results. Figure 3 shows that human raters prefer ERNIE-ViLG 2.0 over all other models in both image-text alignment (56.5%±3.8% and 68.2%±3.8% when com-pared to DALL-E 2 and Stable Diffusion, respectively) and image fidelity (58.8%±3.6% to DALL-E 2, 66.5%±3.5% to Stable Diffusion, respectively), which again proves that
+ERNIE-ViLG 2.0 can generate high-quality images that con-form to the text, with the help of knowledge enhancement and mixture-of-denoising-experts strategies. Beyond text relevancy and image fidelity, we also observe that ERNIE-ViLG 2.0 can generate images with better sharpness and textures than baseline models. 3.3. Analysis
+To examine the effectiveness of our design philosophy, we conduct two groups of ablation studies. Similar to the main experiment, we also provide both automatic metrics and intuitive showcases to demonstrate the advantages of each strategy in ERNIE-ViLG 2.0 here.
+Figure 7. The visualization of cross-attention maps in different denoising timesteps, where each value in the image space is the average of attention from this image token to all text tokens.
+Knowledge Enhancement Strategies.
+In this part, we focus on the impact of various knowledge enhancement strategies by training a series of lightweight models, with 500M text encoders, 870M U-Nets, and 500M training sam-ples. The pareto curves in Figure 5a demonstrate that in-corporating knowledge in the learning process brings sig-nificant performance gains in image fidelity and image-text alignment. Specifically, (1) the benefits of textual knowl-edge are mainly reflected in precise fine-grained semantic control (w/ textual), (2) only utilizing object knowl-edge may not be able to steadily promote the performance (w/ object), while taking synthetic descriptions into con-sideration is an effective solution to make full use of vi-sual knowledge (w/ visual). Figure 6 provides more visual comparisons to intuitively demonstrate the changes brought by each strategy. When handling complex prompts, baseline model faces problems such as the absence of key objects or incorrect assignment of attributes. At this point, textual knowledge helps the model accurately understand the attributes of each object, but the generated images some-times fall into a new problem of distortion. Complementarily, visual knowledge promotes the generation of high-fidelity images, but it cannot well understand specific entities in text.
+Eventually, the combination of two kinds of knowledge har-moniously promotes the model from single- and multi-modal views, which ensures high fidelity and boost the image-text alignment in fine-grained visual scene.
+Mixture-of-Denoising-Experts Strategies. Based on the above lightweight settings, we further train the baseline model with 500M samples, and then train 200M samples for each denoising expert. Figure 5b shows that with the increasing number of denoising experts, the overall perfor-mance is gradually improved, proving that scaling the size of U-Net is also an effective solution to achieve better image quality. More showcases are provided in Figure 6. When the number of experts increases from 1 to 10, the model can not only better handle the coupling between different elements but also generate images with more natural textures. For instance, the numbers on clocks become clearer, the propor-tion of wolf and suit becomes more harmonious, and the model can generate more photorealistic pictures instead of cartoon drawings. We also tried to analyze the impact of the amount of denoising experts and training samples, and found that using more expert networks has better performance than using a network to train more samples.
+Figure 7 further visualizes the cross-attention maps from image features to text representations in denoising experts during 1,000-step denoising process, where these steps shown are denoised by different experts. As shown in the illustration, attentions of different denoising timesteps vary.
+Specifically, the attention maps of timesteps t near 1,000 are almost evenly distributed over the whole image, which is be-cause the input of these steps is close to Gaussian noise and the image layout is unclear, so all the image tokens have to attend to the text prompt to generate image skeleton. When the timesteps are close to 1, attention maps concentrate more on foreground objects. For these timesteps, the input to de-noising network is close to the final image and the layout is clear, and only a few parts of the image need to focus on the text to fill in the details of object. These observations again illustrate the difference among denoising timesteps and demonstrate the need to disentangle different timesteps with multiple experts. 4.

@@ -1,0 +1,137 @@
+Abstract
+The success of graph neural networks (GNNs) largely relies on the process of aggregating information from neighbors deﬁned by the input graph structures. No-tably, message passing based GNNs, e.g., graph convolutional networks, leverage the immediate neighbors of each node during the aggregation process, and recently, graph diffusion convolution (GDC) is proposed to expand the propagation neigh-borhood by leveraging generalized graph diffusion. However, the neighborhood size in GDC is manually tuned for each graph by conducting grid search over the validation set, making its generalization practically limited. To address this issue, we propose the adaptive diffusion convolution (ADC)* strategy to automatically learn the optimal neighborhood size from the data. Furthermore, we break the conventional assumption that all GNN layers and feature channels (dimensions) should use the same neighborhood size for propagation. We design strategies to enable ADC to learn a dedicated propagation neighborhood for each GNN layer and each feature channel, making the GNN architecture fully coupled with graph structures—the unique property that differs GNNs from traditional neural networks.
+By directly plugging ADC into existing GNNs, we observe consistent and sig-niﬁcant outperformance over both GDC and their vanilla versions across various datasets, demonstrating the improved model capacity brought by automatically learning unique neighborhood size per layer and per channel in GNNs. 1
+
+Introduction
+Graph neural networks (GNNs) are a type of neural networks that can be directly coupled with graph-structured data [30, 41]. Speciﬁcally, graph convolution networks [12, 19] (GCNs) generalize the convolution operation to local graph structures, offering attractive performance for various graph mining tasks [15, 32, 37]. The graph convolution operation is designed to aggregate information from immediate neighboring nodes into the central node, which is also referred to as message passing [14].
+To propagate information between nodes that are further away, multiple neural layers can be stacked
+*Now at Meta AI and work done when at Microsoft.
+†Jie Tang is the corresponding author.
+*Code is available at https://github.com/abcbdf/ADC 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+to go beyond the immediate hop of neighbors. To directly collect high-order information, spectral based GNNs leverage graph spectral properties to collect signals from global neighbors [6, 12, 17].
+Though generating promising results, both strategies are limited to a pre-determined and ﬁxed neighborhood for passing and receiving messages. Essentially, these methods have an implicit assumption that all graph datasets share the same size of receptive ﬁeld during the message passing process. To break this, graph diffusion convolution (GDC) [21] was recently proposed to extend the discrete message passing process in GCN to a diffusion process, enabling it to aggregate information from a larger neighborhood. For each input graph, GDC hand-tunes the best neighborhood size for feature aggregation by grid-searching the parameters on the validation set, making its practical application limited and sensitive.
+To eliminate the manual search process of the optimal propagation neighborhood in GDC, we propose the adaptive diffusion convolution (ADC) strategy that supports learning the optimal neighborhood from the data automatically. ADC achieves this by formalizing the task as a bilevel optimization problem [11], enabling the customized learning of one optimal propagation neighborhood size for each dataset. In other words, all GNN layers and feature channels (dimensions) share the same neighborhood size during message passing on each graph.
+To further this direction, we also enable ADC to automatically learn a customized neighborhood size for each GNN layer and each feature channel from data. By learning a unique propagation neighborhood for each layer, ADC can empower GNNs to capture neighbors’ information from diverse graph structures, which is fully dependent on the data and downstream learning objective.
+Similarly, by learning distinct neighborhood size for each feature channel, GNNs are then capable of selectively modeling each neighbor’s multiple feature signals. Altogether, ADC makes GNNs fully coupled with the graph structures and all feature channels.
+By design, ADC is a general plugin that can be directly applied to existing GNN models. By plugging it on several GNNs, we show that the upgraded GNNs can offer signiﬁcant performance advances over their vanilla versions across a wide range of datasets. Furthermore, experimental results also show that by learning the propagation neighborhood size automatically, ADC can consistently outperform
+GDC, which customizes this for each dataset by grid search. Finally, we demonstrate that GNNs’ model capacity can beneﬁt from the better coupling between the its architecture, graph structures, and feature channels, that is, by learning dedicated neighborhood size for each GNN layer and feature channel. 2 Neighborhood Radius in GNNs
+We focus on the problem of semi-supervised node classiﬁcation. The input includes an undirected network G = (V, E), where the node set V contains of n nodes {v1, ..., vn} and E is the edge set, and A ∈ Rn×n is the symmetric adjacency matrix of graph G. Given the input feature matrix X and a subset of node label Y, the task is to predict the labels of remaining nodes. 2.1 Neighborhood Radius in Message Passing Networks
+The convolution operation on graphs can be described as the process of neighborhood feature aggregation or message passing [14]. The message passing graph convolutional networks can be simply deﬁned as: 2 ˜A ˜D− 1
+H(l) = γ(l)(ϕ(l)(H(l−1)), G) (1) where H(l) denotes the hidden feature of layer l with H(0) = X and X as the input feature, ϕ(·) denotes feature transformation and γ(·) denotes feature propagation. Take GCN [19] for example. The feature transformation and feature propagation functions correspond to ϕ(H) = HW , γ( ˆH, G) = 2 ˆH, respectively, in which D is the diagonal degree matrix with ˜Dii = (cid:80)
+˜D− 1
+˜Aij, and ˆH denotes hidden feature after transformation. Note that GCN uses the adjacency matrix A with self loop, so it actually uses ˜A = I + A. To simplify the notations, we use T to denote ˜D− 1
+Straightforwardly, the feature transformation function ϕ(·) describes how features transform inside each node and the feature propagation function γ(·) describes how features propagate between nodes.
+Essentially, how good a GNN model can utilize graph structures heavily depends on the design of the feature propagation function. 2 ˜A ˜D− 1 2 . j 2
+Neighborhood radius r. Most graph-based models can be represented as γ(l)( ˆH, G) = f (T) ˆH, where f (T) is a matrix that can be generated by T. So f (T) can be represented as f (T) = (cid:80)∞ k=0 θkTk. To quantify how far each node could aggregate features from, we deﬁne the neighbor-hood radius of a node as r: r = (cid:80)∞ (cid:80)∞ k=0 θkk k=0 θk (2)
+Here, θk denotes the inﬂuence from k-step-away nodes. For a large r, this means the model puts more emphasis on long distance nodes, i.e., global information. For a small r, this means the model ampliﬁes local information.
+Neighborhood radius r in GCN. For GCN, the neighborhood radius r = 1, which is just range of nodes directly connected to it. To collect information beyond direct connections, it is required to stack multiple GCN layers to reach high-order neighborhoods.
+Neighborhood radius r in multi-hop models.
+There are attempts to improve GCN’s feature propagation function from ﬁrst-hop neighborhood to multi-hop neighborhood, such as MixHop [2],
+JKNet [38], and SGC [35]. For example, SGC [35] uses feature propagation function γ( ˆH, G) =
+TK ˆH, where T = ˜D− 1 2 . In other words, the neighborhood radius r = K for SGC, which is the range of neighborhoods to collect information from each GNN layer. However, for all multi-hop models, the discrete nature of hop numbers makes r non-differentiable. 2 ˜A ˜D− 1 2.2 Neighborhood Radius in Graph Diffusion Convolution
+Recently, a line of work has been focused on generalizing feature propagation from discrete hops to continuous graph diffusion [21, 36, 40]. Notably, graph diffusion convolution (GDC) addresses this by the following propagation setup [21]:
+γ(l)( ˆH, G) =
+∞ (cid:88) k=0
+θkTk ˆH (3) where k is summed from 0 to inﬁnity, making each node aggregate information from the whole graph.
+In Eq.3, the weight coefﬁcients should satisfy (cid:80)∞ k=0 θk = 1 such that the signal strength is not ampliﬁed nor reduced through the propagation. The two commonly-used sets of weight coefﬁcients
+[21, 36, 40] are generated from personalized PageRank (θk = α(1 − α)k) [27] and the heat kernel (θk = e−t tk k! ) [22], respectively. In this work, we focus on heat kernel.
+Heat kernel. Heat kernel incorporates prior knowledge into the GNN model, which means the feature propagation between nodes follows Newton’s law of cooling [34], i.e., the feature propagation speed between two nodes is proportional to the difference between their features. Formally, this prior knowledge can be described as: dxi(t) dt (cid:88)
+= −
+˜Aij(xi(t) − xj(t)) j∈N (i) (4) where N (i) denotes the neighborhood of node i, xi(t) represents the feature of node i after diffusion time t. This differential equation can be solved as:
+X(t) = HtX(0) (5) where X(t) means the feature matrix after diffusion time t and Ht = e−(I−T)t is the heat kernel.
+Neighborhood radius rh in diffusion models. According to the deﬁnition of neighborhood radius
+Eq. 2, the heat kernel version of the GDC has neighborhood radius rh as rh = (cid:80)∞ (cid:80)∞ k=0 θkk k=0 θk
+= (cid:80)∞ k=0 e−t tk k! k k=0 e−t tk k! (cid:80)∞
+= e−t (cid:80)∞ k=0 e−t (cid:80)∞ k=0 tk k! k tk k!
+= e−t(ett) e−tet = t (6)
+This suggests that t is the neighborhood radius for the heat kernel based GDC, that is, t becomes a perfect continuous substitute for the hop number in multi-hop models. 3
+Figure 1: Comparison among ﬁxing t (red), training t on train set (blue), training t on validation set (green), and training t separately for each feature channel on validation set (black). The results are reported by using the Heat Kernel version of GCN on the Cora dataset. Training t on validation set can prevent overﬁtting. 3 Adaptive Diffusion Convolution
+Recall that the heat kernel version of graph diffusion convolution (GDC) has the following feature propagation function as
+γ(l)( ˆH, G) = e−Lt ˆH =
+∞ (cid:88) k=0 e−t tk k!
+Tk ˆH (7) where the Laplacian matrix L = I − T. For each graph dataset, it requires the manual grid search step to determine the neighborhood radius related parameter t. Moreover, t is ﬁxed for all feature channels and propagation layers in each dataset. In this work, we explore how to adaptively learn the neighborhood radius from data for each graph and further examine the potential to generalize it for different feature channels and GNN layers. 3.1 Training Neighborhood Radius
+Diffusion convolution enables us to replace GNNs’ discrete feature propagation function with the continuous heat kernel. Instead of hand-tuning t, we can calculate the gradient of t and update t to converge to an optimal neighborhood, which is the same to learning other weight and bias parameters in the model.
+Figure 1 shows the training process of learning t. With more epochs, both t and training loss decrease when learning on the training set (blue). Meanwhile, the validation and test accuracies drop dramatically as t tends to zero (more epochs)—representing each node could only use its own features to predict the label. That is, learning t directly on the training set causes overﬁtting. This phenomenon has also been observed in GDC [21]. The authors found that strong regularization on the difference of θk+1 − θk could help overcome the overﬁtting issue. However, that would require hand-tuning the regularization factor for every dataset, which is similar to hand-tuning t itself, e.g., by grid search, further limiting the generalization of the model.
+To address this issue, we propose a method of training t by using the gradient of the model on the validation set. The goal for the model is to ﬁnd t∗ that minimizes the validation loss Lval(t, w∗), where w denotes all the other trainable parameters in the feature transformation function and w∗ denotes the set of parameters that minimize the training loss Ltrain(t, w). This strategy can be formalized as a bilevel optimization problem [3, 11]: t∗ = arg min t
+Lval(t, w∗(t)) (8) w∗(t) = arg min w
+By doing so, every time we update t, we need to make w converge to the optimal value, which is too expensive to train. An approximation method is to update t every time we update w, that is,
+Ltrain(t, w) (9) w(e+1) = w(e) − α1 (cid:53)w Ltrain(t(e), w(e)) (10) 4
+t(e+1) = t(e) − α2 (cid:53)t Lval(t(e), w(e+1)) (11) where e denotes the number of training epochs, α1 and α2 denote the learning rate on the training and validation sets, respectively. The similar idea has been proposed in the gradient-based hyperparameter tuning [24] and neural architecture search [23]. Figure 1 shows that using this method (green lines) helps avoid overﬁtting and thus offers better generalization, as there is no sign of test accuracy drop. Meanwhile, t does not diminish to zero, indicating the meaningful learning of this parameter— neighborhood radius. 3.2 Training Neighborhood Radius for Each Layer and Channel
+Conventional GNNs use the pre-determined neighborhood radius for feature propagation. GDC proposes to use different neighborhood radius t for different datasets by hand-tuning the values. The above method furthers this direction by automatically learn-ing the radius t from the given graph.
+This implies that one t for one dataset, that is, the same t for all GNN layers and all feature channels (dimensions). diffusion convolution
+Adaptive (ADC). The natural question arises here is whether we can have a unique t for each layer and channel, making them adaptive for the ﬁnal learning objective. The obstacle that prevents previous models from achieving this lies in the infeasible challenge of hand-tuning or grid-searching the propagation function separately for each feature channel and GNN layer, given that as the number of parameters increases, the time complexity increases exponentially. However, the aforementioned strategy for updating t during the training of the model empowers us to adaptively learn speciﬁc t for all layers and all feature channels.
+Figure 2: Illustration of the Adaptive Diffusion Convolu-tion (ADC). For the hidden feature ˆHi of feature channel i in layer l, we train a separate feature propagation function
+γ(l)( ˆH, G)i with a unique neighborhood radius t(l)
+. When i t is large (e.g., t=3), the contributions from close (e.g., in 1-hop) and distant neighbors (e.g., in 3-hop) have little dif-ference (shown as the relatively similar color shading across different hops). When t is small (e.g., t=1), the contributions from close neighbors are much more signiﬁcant than from distant neighbors (shown as dark color concentrated around center).
+Straightforwardly, we have the adaptive diffusion convolution (ADC) by extending the feature propagation function in Eq. 7 for each layer and channel, that is, from t to t(l) i
+,
+γ(l)( ˆH, G)i = e−t(l) i k (t(l) i ) k!
+∞ (cid:88) k=0
+Tk ˆHi (12) where t(l) i denotes the neighborhood radius t for the l-th layer and i-th channel, ˆHi represents the i-th column of the hidden feature ˆH, i.e., the feature on channel i, and γ(l) i denotes the feature propagation function on the l-th layer and i-th channel. This feature propagation function enables the GNN to train a separate t for each feature channel and layer, which is illustrative in Figure 2. In addition,
+Figure 1 (black lines) also shows that there is no overﬁtting caused by the increase of the number of hyperparameters (t).
+Generalized adaptive diffusion convolution (GADC). By now, we introduce the adaptive diffusion convolution based on heat kernel. Without loss of generality, we can have ADC extended to a generalized ADC (GADC), that is, not limiting the weight coefﬁcients θk as heat kernel. Therefore, we have the feature propagation of GADC as:
+γ(l)( ˆH, G)i =
+∞ (cid:88) k=0
+θ(l) ki Tk ˆHi 5 (13)
+Table 1: Dataset Statistics [29]
+CORA CiteSeer PubMed Coauthor CS Amazon Computers Amazon Photo
+#Nodes
+#Edges
+#Classes
+#Training-Nodes
+#Validation-Nodes
+#Test-Nodes 2485 5069 7 140 1360 985 2110 3668 6 120 1380 610 19717 44324 3 60 1440 18217 18333 81894 15 300 4700 13333 13381 245778 10 200 1300 11881 7487 119043 8 160 1340 5987
+CORA
+CITESEER
+PUBMED
+COAUTHOR CS
+AMZ COMP
+AMZ PHOTO
+Figure 3: Semi-supervised node classiﬁcation accuracy, on original model or improved with GDC or our trainable heat kernel. Our improvement surplus GDC in most datasets and models. ki denotes the weight coefﬁcient for k-hop neighbors on l-th layer and i-th channel. We where θ(l) restrict (cid:80)∞ k=0 θ(l) ki = 1 during training.
+Implementation Details. As we operate differently on each channel, whether we propagate before or after the feature transformation function actually matters. Empirically, we ﬁnd that propagating on the input channels generates better results than propagating on the output channels (Cf. Figure 7 for details). Therefore, we swap the propagation and transformation steps in the original message passing networks from Eq. 1 to:
+H(l) = ϕ(l)(γ(l)(H(l−1), G)) (14)
+Additionally, calculating e−Lt directly is infeasible for large graphs. Practically, we need to use the top-K truncation to approximate the heat kernel, making ADC (Eq. 12) and GADC (Eq.13) respectively updated as:
+γ(l)( ˆH, G)i = e−t(l) i k (t(l) i ) k!
+K (cid:88) k=0
+Tk ˆHi, γ(l)( ˆH, G)i =
+K (cid:88) k=0
+θ(l) ki Tk ˆHi (15)
+Similar to GDC, ADC and GADC are ﬂexible components that can be directly plugged into existing
+GNN models, enabling them to adaptively learn the neighborhood radius for feature aggregation. 6
+4 Experiments 4.1 Experimental setup
+We follow the standard procedure to conduct experiments and report results. Same as GDC, each result is averaged across 100 random data splits and initializations. All baseline GNNs use the same hyperparameters as GDC’s baseline model. We only compare with the heat kernel version of GDC.
+We set the learning rate of t equals to the learning rate of other parameters, which is 0.01. All results are calculated as averages with 95% conﬁdence via bootstrapping.
+The prediction task is focused on semi-supervised node classiﬁcation. We use widely-adopted datasets including CORA, CiteSeer [28], PubMed [25], Coauthor CS, Amazon Computers and Amazon Photo
+[29]. Statistics of datasets are listed in Table 1. Same as GDC, we only use their largest connected components. The data is split to a development and test set. Development set contains 1500 nodes except Coauthor CS that contains 5000 nodes. The development set is split to a training set containing 20 nodes for each class and a validation set with remaining nodes.
+We implement ADC and GADC on three models: GCN [19], JKNet [38] and ARMA [5]. We only replace original model’s feature propagation function with ADC or GADC and preserve feature transformation function. The expansion step (K in Eq.15) is set to 10. We use early stopping with patience of 100 epochs. Different from GDC, we don’t use GAT [32] or GIN [37], because GAT uses learned attention matrix instead of adjacency matrix and GDC’s experiments show that GIN performs much worse than other models. 4.2 Results
+Figure 3 reports the main results when applying GDC and the proposed ADC on GCN, ARMA, and
+JKNet. It shows that ADC signiﬁcantly improves base GNNs and outperforms GDC on most cases.
+Compared to GADC, which has K× more hyperparameters than ADC, ADC can match and achieve comparable or even better results.
+In addition, we observe that the runs with low stopping epochs (less than 300) often perform worse than those with more stopping epochs. Forcing early stopping inactive in low epochs could help increase the performance by a little. This suggests that the neighborhood radius t may need more training epochs, however, this contradicts with the early stopping strategy, which means high stopping epochs may cause w to overﬁtting. To make a straightforward and fair comparison, we do not use this training trick in our experiments.
+Ablation study. The ablation studies on different diffusion setting are summarized in Figure 4. GDC can be seen as ﬁxing t heat kernel with sparsiﬁcation. The results suggest that GDC’s performance is partly due to its sparsiﬁcation on propagation matrix, because if we remove sparsiﬁcation, training t for each feature channel and layer always performs better than ﬁxing t to its initialization value.
+Figure 4 also shows that by comparing the improvements brought by training t at different levels, training t for each channel and layer contributes the most to the performance improvements on the node classiﬁcation task.
+The inﬂuence of rate between training and validation set. Because ADC trains a large number of hyperparameters on validation set, this may cause concerns about whether the improvement is due to overuse of the validation set. To verify that, we do the same experiment of Figure 3 on different rates between training and validation sets, with same settings. We ﬁx the total number of nodes of the development set and change the number of nodes per class in training set. As stated before, the development set contains 1500 nodes except Coauthor CS which has 5000 nodes. Results in Figure 5 show that ADC constantly performs better than GDC and the original base GNN model (GCN) in most cases. This demonstrates that the advantage of ADC does not come from training more parameters on a large validation set.
+The inﬂuence of expansion step. Do the long-distance neighbor nodes really help? K in Eq. 15 denotes the expansion step or truncation step of Taylor expansion. By changing K, we could examine whether neighbors further than K step away really matter. Figure 6 shows that increasing the step of
+Taylor expansion (K) often helps to increase accuracy. Nodes further than ten step away don’t carry valuable information. 7
+CORA
+CITESEER
+PUBMED
+COAUTHOR CS
+AMZ COMP
+AMZ PHOTO
+Figure 4: (a) Fixing t to the initialization value. (b) Training one t for all layers. (c) Training one t for each layer. (d) Training a unique t for each feature channel and layer. (a) can be seen as GDC without sparsiﬁcation. Results show that after removing sparsiﬁcation in GDC, training t from data always helps improve performance.
+CORA
+CITESEER
+PUBMED
+COAUTHOR CS AMZ COMP
+AMZ PHOTO
+Figure 5: Inﬂuence of the number of training nodes. X-axis denotes the number of nodes per class in training set. We ﬁx the total number of development set (train + valid) to be the same. ADC constantly performs better than GDC and the original model (GCN) in most cases. This indicates that the advantage of ADC is not due to training more parameters on a large validation set.
+CORA
+CITESEER
+PUBMED
+COAUTHOR CS AMZ COMP
+AMZ PHOTO
+Figure 6: Inﬂuence of the number of Taylor expansion steps on the trainable heat kernel in ADC.
+Increasing step number helps increase the accuracy in most cases. 8
+The inﬂuence of propagation before or after transfor-mation. As we discuss in Eq.14, different from GCN, propagation before or after transformation does matter in our model, because this means learning unique t for each input feature channel or each output feature channel.
+Figure 7 shows that propagation before transformation per-forms better than propagation after transformation. This is probably because input feature’s channel carries more diverse information. 5

@@ -1,0 +1,198 @@
+Abstract
+Energy-based models (EBMs) offer ﬂexible distribution parametrization. How-ever, due to the intractable partition function, they are typically trained via con-trastive divergence for maximum likelihood estimation. In this paper, we propose pseudo-spherical contrastive divergence (PS-CD) to generalize maximum likeli-hood learning of EBMs. PS-CD is derived from the maximization of a family of strictly proper homogeneous scoring rules, which avoids the computation of the intractable partition function and provides a generalized family of learning objectives that include contrastive divergence as a special case. Moreover, PS-CD allows us to ﬂexibly choose various learning objectives to train EBMs without additional computational cost or variational minimax optimization. Theoretical analysis on the proposed method and extensive experiments on both synthetic data and commonly used image datasets demonstrate the effectiveness and modeling
+ﬂexibility of PS-CD, as well as its robustness to data contamination, thus showing its superiority over maximum likelihood and f -EBMs. 1
+
+Introduction
+Energy-based models (EBMs) provide a uniﬁed framework for generative and discriminative learning by capturing dependencies between random variables with an energy function. Due to the absence of the normalization constraint, EBMs offer much more ﬂexibility in distribution parametrization and architecture design compared to properly normalized probabilistic models such as autoregressive models [53, 23], ﬂow-based models [14, 15, 46] and sum-product networks [72]. Recently, deep
+EBMs have achieved considerable success in realistic image generation [17, 66, 12, 30], molecular modeling [90] and model-based planning [16], thanks to modern deep neural networks [54, 49, 35] for parametrizing expressive energy functions and improved Markov Chain Monte Carlo (MCMC) techniques [62, 75, 40, 17, 66] for efﬁciently sampling from EBMs.
+Training EBMs consists of ﬁnding an energy function that assigns low energies to correct conﬁg-urations of variables and high energies to incorrect ones [55], where a central concept is the loss functional that is used to measure the quality of the energy function and is minimized during training.
+The ﬂexibility of EBMs does not come for free: it makes the design of loss functionals particularly challenging, as it usually involves the partition function that is generally intractable to compute. As a result, EBMs are typically trained via CD [37], which belongs to the “analysis by synthesis” scheme
+[31] and performs a sampling-based estimation of the gradient of KL between data distribution and energy-based distribution. Since different loss functionals will induce different solutions in practice (when the model is mis-speciﬁed and data is ﬁnite) and KL may not provide the right inductive 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+bias [25, 91], inspired by the great success of implicit generative models [28, 67, 3], [89] proposed a variational framework to train EBMs by minimizing general f -divergences [10]. Although this framework enables us to specify various modeling preferences such as diversity/quality tradeoff, they rely on learning additional components (variational functions) within a minimax framework, where the optimization is complicated by the notion of Nash equilibrium and local optimality [42] and suffers from instability and non-convergence issues [59]. Along this line, noise contrastive estimation (NCE) [34] can train EBMs with a family of loss functionals induced by different Bregman divergences. However, in practice, NCE usually relies on carefully-designed noise distribution such as context-dependent noise distribution [41] or joint learning of a ﬂow-based noise distribution [21].
+In this paper, we draw inspiration from statistical decision theory [13] and propose a novel perspective for designing loss functionals for training EBMs without involving auxiliary models or variational optimization. Speciﬁcally, to generalize maximum likelihood training of EBMs, we focus on maximizing pseudo-spherical scoring rules [76, 27], which are strictly proper such that the data distribution is the unique optimum and homogeneous such that they can be evaluated without the knowledge of the normalization constant. Under the “analysis by synthesis” scheme used in CD and f -EBM [89], we then derive a practical algorithm termed Pseudo-Spherical Contrastive Divergence (PS-CD). Different from f -EBM, PS-CD enables us to specify ﬂexible modeling preferences without requiring additional computational cost or unstable minimax optimization. We provide a theoretical analysis on the sample complexity and convergence property of PS-CD, as well as its connections to maximum likelihood training. With experiments on both synthetic data and commonly used image datasets, we show that PS-CD achieves signiﬁcant sample quality improvement over conventional maximum likelihood training and competitive performance to f -EBM without expensive variational optimization. Based on a set of recently proposed generative model evaluation metrics [61], we further demonstrate the various modeling tradeoffs enabled by PS-CD, justifying its modeling ﬂexibility.
+Moreover, PS-CD is also much more robust than CD in face of data contamination. 2 Preliminaries 2.1 Energy-Based Distribution Representation and Sampling
+Given a set of i.i.d. samples {xi}N i=1 from some unknown data distribution p(x) deﬁned over the sample space X ⊂ Rm, the goal of generative modeling is to learn a θ-parametrized probability distribution qθ(x) to approximate the data distribution p(x). In the context of energy-based mod-eling, instead of directly parametrizing a properly normalized distribution, we ﬁrst parametrize an unnormalized energy function Eθ : X → R, which further deﬁnes a normalized probability density via the Boltzmann distribution:
+,
+= (1) qθ(x) = qθ(x)
+Zθ exp(−Eθ(x))
+Zθ where Zθ := (cid:82)
+X exp(−Eθ(x))dx is the partition function (normalization constant). In this paper, unless otherwise stated, we will use q to denote an unnormalized density and q to denote the corresponding normalized distribution. We also assume that the exponential of the negative energy belongs to the L1 space, E := (cid:8)Eθ : X → R : (cid:82)
+Since energy-based models (EBMs) represent a probability distribution by assigning unnormalized scalar values (energies) to the data points, we can use any model architecture that outputs a bounded real number given an input to implement the energy function, which allows extreme ﬂexibility in distribution parametrization. However, it is non-trivial to sample from an EBM, usually requiring
+MCMC [75] techniques. Speciﬁcally, in this work we consider using Langevin dynamics [62, 88], a gradient-based MCMC method that performs noisy gradient descent to traverse the energy landscape and arrive at the low-energy conﬁgurations:
+X exp(−Eθ(x))dx < ∞(cid:9), i.e., Zθ is ﬁnite.
+˜xt = ˜xt−1 − (cid:15) 2
+∇xEθ( ˜xt−1) +
+√ (cid:15)zt, (2) where zt ∼ N (0, I). The distribution of ˜xT converges to the model distribution qθ(x) ∝ exp(−Eθ(x)) when (cid:15) → 0 and T → ∞ under some regularity conditions [88].
+In order to sample from an energy-based distribution efﬁciently, many scalable techniques have been proposed such as learning non-convergent, non-persistent, short-run MCMC [66] and using a sample replay buffer to improve mixing time and sample diversity [17]. In this work, we leverage these recent advances when we need to obtain samples from an EBM. 2
+2.2 Maximum Likelihood Training of EBMs via Contrastive Divergence
+The predominant approach to training explicit density generative models is to approximately minimize the KL divergence between the (empirical) data distribution and model distribution. Minimizing KL divergence is equivalent to the following maximum likelihood estimation (MLE) objective: min
+θ
+LMLE(θ; p) = min
+θ
+−Ep(x) [log qθ(x)] = min
+θ
+Ep(x)[Eθ(x)] + log Zθ. (3)
+Because of the intractable partition function (an integral over the sample space), we cannot directly optimize the above MLE objective. To tackle this issue, [37] proposed contrastive divergence (CD) algorithm as a convenient way to estimate the gradient of LMLE(θ; p) using samples from qθ:
+∇θLMLE(θ; p) = Ep(x)[∇θEθ(x)] + ∇θ log Zθ = Ep(x)[∇θEθ(x)] − Eqθ (x)[∇θEθ(x)], which can be interpreted as decreasing the energies of real data from p and increasing the energies of fake data generated by qθ. As discussed above, evaluating Equation (4) typically relies on MCMC methods such as the Langevin dynamics sampling procedure deﬁned in Equation (2) to produce samples from the model distribution qθ, which induces a surrogate gradient estimation: (4)
+∇θLCD−K(θ; p) = Ep(x)[∇θEθ(x)] − E
+θ (x)[∇θEθ(x)], qK (5) where qK (typically data distribution or uniform distribution), and Equation (4) corresponds to LCD−∞.
+θ denotes the distribution after K steps of MCMC transitions from an initial distribution 2.3 Strictly Proper Scoring Rules
+Stemming from statistical decision theory [13], scoring rules evaluate the quality of probabilistic forecasts by assigning numerical scores based on the predictive distributions and the events that materialize. Formally, consider a compact sample space X . Let M be a space of all locally 1-integrable non-negative ﬁnite measures and P be a subspace consisting of all probability measures on the sample space X . A scoring rule S(x, q) speciﬁes the utility of forecasting using a probability forecast q ∈ P for a given sample x ∈ X . With slightly abused notation, we write the expected score of S(x, q) under a reference distribution p as:
+S(p, q) := Ep(x)[S(x, q)]. (6)
+Deﬁnition 1 (Proper Scoring Rules [26]). A scoring rule S : X × P → R is called proper relative to P if the corresponding expected score satisﬁes:
+∀p, q ∈ P, S(p, q) ≤ S(p, p). (7)
+It is strictly proper if the equality holds if and only if q = p.
+In prediction and elicitation problems, strictly proper scoring rules encourage the forecaster to make honest predictions based on their true beliefs [22]. In estimation problems, where we want to approximate a distribution p with another parametric distribution qθ, strictly proper scoring rules provide attractive learning objectives: arg max qθ ∈Pθ
+S(p, qθ) = arg max qθ ∈Pθ
+Ep(x)[S(x, qθ)] = p (when p ∈ Pθ). (8)
+When a scoring rule S is strictly proper relative to P, the associated generalized entropy function and divergence function are deﬁned as:
+G(p) := sup q∈P
+S(p, q) = S(p, p), D(p, q) := S(p, p) − S(p, q) ≥ 0. (9)
+G(p) is convex and represents the maximally achievable utility, while D(p, q) is the Bregman divergence [6] associated with the convex function G and the equality holds only when p = q.
+Next, we introduce a speciﬁc kind of scoring rules that are particularly suitable for learning unnor-malized statistical models.
+Deﬁnition 2 (Homogeneous Scoring Rules [69]). A scoring rule is homogeneous if it satisﬁes (here the domain of the score function is extended to X × M):
+∀λ > 0, x ∈ X , S(x, q) = S(x, λ · q). (10) 3
+Since scaling the model distribution q by a positive constant λ does not change the value of a homo-geneous scoring rule, such homogeneity allows us to evaluate it without computing the intractable partition function of an energy-based distribution. Thus, strictly proper and homogeneous scoring rules are natural candidates for new training objectives of EBMs.
+Example 1. A notable example of scoring rules is the widely used logarithm score: S(x, q) = log q(x).
+The associated generalized entropy is the negative Shannon entropy: G(p) =
+Ep(x)[log p(x)], and the associated Bregman divergence is the KL divergence: D(p, q) =
+Ep(x) [log(p(x)/q(x))]. From Deﬁnitions 1 and 2, we know that the logarithm score is strictly proper but not homogeneous. Speciﬁcally, for a θ-parametrized energy-based distribution qθ = qθ/Zθ, since S(x, qθ) = S(x, Zθ · qθ) = S(x, qθ) + log Zθ (cid:54)= S(x, qθ) and log Zθ cannot be ignored during the optimization of θ, we need to use tailored methods such as contrastive divergence [37] or doubly dual embedding [11] to tackle the intractable partition function. 3 Training EBMs by Maximizing Homogeneous Scoring Rules
+In this section, we derive a new principle for training EBMs from the perspective of optimizing strictly proper homogeneous scoring rules. All proofs for this section can be found in Appendix B. 3.1 Pseudo-Spherical Scoring Rule
+In this section, we introduce the pseudo-spherical scoring rule, which is a representative family of strictly proper homogeneous scoring rules that have great potentials for training deep energy-based models and allow ﬂexible and convenient speciﬁcation of modeling preferences, yet have not been explored before in the context of energy-based generative modeling.
+Deﬁnition 3 (Pseudo-Spherical Scoring Rule [76, 27]). For γ > 0, the pseudo-spherical scoring rule is deﬁned as:
+S(x, q) := q(x)γ
+X q(y)γ+1dy) ((cid:82)
+=
+γ
+γ+1 q(x)γ
+X q(y)γ+1dy) ((cid:82)
+=
+γ
+γ+1 (cid:19)γ (cid:18) q(x) (cid:107)q(cid:107)γ+1 where (cid:107)q(cid:107)γ+1 := (cid:0)(cid:82)
+The expected pseudo-spherical score under a reference distribution p is deﬁned as:
+X q(y)γ+1dy(cid:1) 1
+γ+1 .
+Sps(p, q) := Ep(x)[S(x, q)] =
+Ep(x)[q(x)γ]
+X q(y)γ+1dy) ((cid:82)
+γ
+γ+1 (11) (12)
+Example 2. The classic spherical scoring rule [19] is a special case in the pseudo-spherical family, which corresponds to γ = 1:
+S(x, q) = q(x)
+X q(y)2dy) 1 2 ((cid:82)
+= q(x) (cid:107)q(cid:107)2 (13)
+The family of pseudo-spherical scoring rules is appealing because it introduces a different and principled way for assessing a probability forecast. For example, the spherical scoring rule has an interesting geometric interpretation. Suppose the sample space X contains n mutually exclusive and exhaustive outcomes. Then a probability forecast can be represented as a vector q = (q1, . . . , qn).
+Let vector p = (p1, . . . , pn) represent the oracle probability forecast. The expected spherical score can be written as:
+S(p, q) = Ep(x)[S(x, q)] = (cid:80) (cid:112)(cid:80) i piqi i q2 i
+= (cid:107)p(cid:107)2 (cid:104)p, q(cid:105) (cid:107)p(cid:107)2(cid:107)q(cid:107)2
+= (cid:107)p(cid:107)2 cos(∠(p, q)) (14) where (cid:104)p, q(cid:105) and ∠(p, q) denote the inner product and the angle between vectors p and q respectively.
+In other words, when we want to evaluate the expected spherical score of a probability forecast q under real data distribution p using samples, the angle between p and q is the sufﬁcient statistics.
+Since we know that both p and q belong to the probability simplex P = {v| (cid:80) x∈X v(x) = 1 and ∀x ∈ X , v(x) ≥ 0.}, the expected score will be minimized if and only if the angle is zero, which implies p = q. More importantly, since all we need to do is to minimize the angle of 4
+(cid:80) (cid:16) exp(−E1) i exp(−Ei) , . . . , the deviation, we are allowed to scale q by a constant. Speciﬁcally, when q is an energy-based (cid:17) distribution q =
+, we can instead evaluate and minimize the angle between data distribution p and the unnormalized distribution q = (exp(−E1), . . . , exp(−En)), since ∠(p, q) = ∠(p, q). More generally, we have the following theorem to justify the use of pseudo-spherical scoring rules for training energy-based models:
+Theorem 1 ([26, 70]). Pseudo-spherical scoring rule is strictly proper and homogeneous. exp(−En) i exp(−Ei) (cid:80)
+As the original deﬁnition of pseudo-spherical scoring rule (Equation (11)) takes the form of a fraction, for computational considerations, in this paper we instead focus on optimizing its composite scoring rule (Deﬁnition 2.1 in [44]):
+Deﬁnition 4 (γ-score [20]). For the expected pseudo-spherical score Sps(p, q) deﬁned in Equa-tion (12) with γ > 0, the expected γ-score is deﬁned as:
+Sγ(p, q) := 1
+γ log(Sps(p, q)) = 1
+γ log (cid:0)Ep(x)[q(x)γ](cid:1) − log((cid:107)q(cid:107)γ+1) (15)
+Since 1
+γ log(u) is strictly increasing in u, Sγ(p, q) is a strictly proper homogeneous composite score: arg max q∈P
+Sγ(p, q) = arg max q∈P 1
+γ log(Sps(p, q)) = arg max q∈P
+Sps(p, q) = p. (16) 3.2 Pseudo-Spherical Contrastive Divergence
+Suppose we parametrize the energy-based model distribution as qθ ∝ qθ = exp(−Eθ) and we want to minimize the negative γ-score in Equation (15): min
+θ
+Lγ(θ; p) = min
+θ
+− 1
+γ log (cid:0)Ep(x)[qθ(x)γ](cid:1) + log((cid:107)qθ(cid:107)γ+1) (17)
+In the following theorem, we derive the gradient of Lγ(θ; p) with respect to θ:
+Theorem 2. The gradient of Lγ(θ; p) with respect to θ can be written as:
+∇θLγ(θ; p) = − 1
+γ
+∇θ log (cid:0)Ep(x)[exp(−γEθ(x))](cid:1) − Erθ (x)[∇θEθ(x)] (18) where the auxiliary distribution rθ is also an energy-based distribution deﬁned as: rθ(x) := qθ(x)γ+1
+X qθ(x)γ+1dx (cid:82)
+= exp(−(γ + 1)Eθ(x))
+X exp(−(γ + 1)Eθ(x))dx
+. (cid:82)
+In App. B.1, we provide two different ways to prove the above theorem. The ﬁrst one is more straightforward and directly differentiates through the term log((cid:107)qθ(cid:107)γ+1). The second one leverages a variational representation of log((cid:107)qθ(cid:107)γ+1), where the optimal variational distribution happens to take an analytical form of r∗
+θ(x) ∝ qθ(x)γ+1, thus avoiding the minimax optimization in other variational frameworks such as [89, 11, 12]. The main challenge in maximizing γ-score is that it is generally intractable to exactly compute the gradient of the second term in Equation (15).
+During training, estimating the second term of Equation (18) requires us to obtain samples from the auxiliary distribution rθ ∝ exp(−(γ + 1)Eθ), while at test time, we want to sample from the model distribution qθ ∝ exp(−Eθ) that approximates the data distribution. Due to the restrict regularity conditions on the convergence of Langevin dynamics, in practice, we found it challenging to use the iterative sampling process in Equation (2) with a ﬁxed number of transition steps and step size to produce samples from rθ and qθ simultaneously, as the temperature γ + 1 in rθ simply amounts to a linear rescaling to the energy function during training. Thus for generality, as in contrastive divergence [37, 17, 66] and f -EBM [89], we make the minimal assumption that we only have a sampling procedure to produce samples from qθ for both learning and inference procedures.
+In this case, we can leverage the analytical form of rθ and self-normalized importance sampling [68] (which has been used to derive gradient estimators in other contexts such as importance weighted autoencoder [7, 18]) to obtain a consistent estimation of Equation (18): 5
+Algorithm 1 Pseudo-Spherical Contrastive Divergence. 1: Input: Empirical data distribution pdata. Pseudo-spherical scoring rule hyperparameter γ. 2: Initialize energy function Eθ. 3: repeat 4: 5:
+N } from pdata.
+N } from qθ ∝ exp(−Eθ) (e.g., using Langevin
+Draw a minibatch of samples {x+
+Draw a minibatch of samples {x− dynamics with a sample replay buffer).
+Update the energy function by stochastic gradient descent: (cid:32) 1 , . . . , x+ 1 , . . . , x− (cid:33) 6: (cid:92)∇θLN
+γ (θ; p) = −∇θ exp(−γEθ(x+ i ))
+− 1
+γ log 1
+N
+N (cid:88) i=1 (cid:80)N i=1 exp(−γEθ(x− (cid:80)N i=1 exp(−γEθ(x− i ))∇θEθ(x− i ) i )) 7: until Convergence
+Theorem 3. Let x+ qθ(x) ∝ exp(−Eθ(x)). Deﬁne the gradient estimator as:
+N be i.i.d. samples from p(x) and x− 1 , . . . , x+ 1 , . . . , x−
+N be i.i.d. samples from (cid:92)∇θLN
+γ (θ; p) := −∇θ 1
+γ log (cid:32) 1
+N
+N (cid:88) i=1 (cid:33) exp(−γEθ(x+ i ))
+− (cid:80)N i=1 ωθ(x− (cid:80)N i )∇θEθ(x− i ) i=1 ωθ(x− i ) (19) where the self-normalized importance weight ωθ(x− i )).
+Then the gradient estimator converges to the true gradient (Equation (18)) in probability, i.e., ∀(cid:15) > 0: i ) = exp(−γEθ(x− i ) := rθ(x− i )/qθ(x−
+P lim
+N→∞ (cid:16)(cid:13) (cid:92)∇θLN (cid:13) (cid:13)
+γ (θ; p) − ∇θLγ(θ; p) (cid:17) (cid:13) (cid:13) (cid:13) ≥ (cid:15)
+= 0.
+We summarize the pseudo-spherical contrastive divergence (PS-CD) training procedure in Algo-rithm 1. In Appendix A, we also provide a simple PyTorch implementation for stochastic gradient descent (SGD) with the gradient estimator in Equation (19). 3.3 Connections to Maximum Likelihood Estimation and Extension to γ < 0
+From Equation (9) in Section 2.3, we know that γ-score induces the following Bregman divergence (the divergence function associated with proper composite scoring rule is analogously deﬁned in Def. 2.1 in [44]):
+Dγ(p, qθ) = Sγ(p, p) − Sγ(p, qθ) and maximizing γ-score is equivalent to minimizing Dγ(p, qθ). In the following lemma, we show that when γ → 0, Dγ(p, qθ) will recover the KL divergence between p and qθ, and the gradient of
+PS-CD will recover the gradient of CD.
+Lemma 1. When γ → 0, we have: lim
+γ→0
+Dγ(p, qθ) = DKL(p(cid:107)qθ); lim
+γ→0
+∇θLγ(θ; p) = ∇θLMLE(θ; p).
+Inspired by [86, 56] that generalize Rényi divergence beyond its deﬁnition to negative orders, we now consider the extension of γ-score with γ < 0 (although it may not be strictly proper for these γ values). The following lemma shows that maximizing such scoring rule amounts to maximizing a lower bound of logarithm score (MLE) with an additional Rényi entropy regularization.
+Lemma 2. When −1 ≤ γ < 0, we have:
+Sγ(p, q) ≤ Ep(x)[log q(x)] +
+γ
+γ + 1
+Hγ+1(q) where Hγ+1(q) is the Rényi entropy of order γ + 1. 4 Theoretical Analysis
+In this section, to gain a deeper understanding of our PS-CD algorithm and how the proposed estimator behaves, we analyze its sample complexity and convergence property under certain conditions. All the proofs for this section can be found in Appendix C. 6
+4.1 Sample Complexity
+We start with analyzing the sample complexity of the consistent gradient estimator in Equation (19), that is how fast it approaches the true gradient value. We ﬁrst make the following assumption:
+Assumption 1. The energy function is bounded by K and the gradient is bounded by L:
+∀x ∈ X , θ ∈ Θ, |Eθ(x)| ≤ K, (cid:107)∇θEθ(x)(cid:107) ≤ L.
+This assumption is typically easy to satisfy because in practice we always use a bounded sample space (e.g. normalizing images to [0,1] or truncated Gaussian) to ensure stability. For example, in image modeling experiments, we use L2 regularization on the outputs of the energy function (hence bounded energy values), as well as normalized inputs and spectral normalization [60] for the neural network that realizes the energy function (hence Lipschitz continuous with bounded gradient).
+With vector Bernstein inequality [47, 32], we have the following theorem showing a sample complex-ity of O such that the estimation error is less than (cid:15) with probability at least 1 − δ: (cid:17) (cid:16) log(1/δ) (cid:15)2
+Theorem 4. For any constants (cid:15) > 0 and δ ∈ (0, 1), when the number of samples N satisﬁes:
+N ≥ 32L2e8γK (1 + 4 log(2/δ)) (cid:15)2
+P (cid:16)(cid:13) (cid:92)∇θLN (cid:13) (cid:13) (cid:13) (cid:13) (cid:13) ≤ (cid:15)
+γ (θ; p) − ∇θLγ(θ; p) (cid:17)
+≥ 1 − δ. we have: 4.2 Convergence
+Typically, convergence of SGD are analyzed for unbiased gradient estimators, while the gradient estimator in PS-CD is asymptotically consistent but biased. Building on the sample complexity bound above and prior theoretical works for analyzing SGD [8, 24], we analyze the convergence of PS-CD.
+For notational convenience, we use L(θ) to denote the loss function Lγ(θ; p) = −Sγ(p, qθ). Besides
+Assumption 1, we further make the following assumption on the smoothness of L(θ):
+Assumption 2. The loss function L(θ) is M -smooth (with M > 0):
+∀θ1, θ2 ∈ Θ, (cid:107)∇L(θ1) − ∇L(θ2)(cid:107) ≤ M (cid:107)θ1 − θ2(cid:107).
+This is a common assumption for analyzing ﬁrst-order optimization methods, which is also used in
+[24, 8]. Also this is a relatively mild assumption since we do not require the loss function to be convex in θ. Since in non-convex optimization, the convergence criterion is typically measured by gradient norm, following [64, 24], we use (cid:107)∇L(θ)(cid:107) ≤ ξ to judge whether a solution θ is approximately a stationary point.
+Theorem 5. For any constants α ∈ (0, 1) and δ ∈ (0, 1), suppose that the step sizes satisfy
+ηt < 2(1 − α)/M and the sample size Nt used for estimating (cid:98)gt is sufﬁciently large (satisfying
+Equation (36)). Let L∗ denote the minimum value of L(θ). Then with probability at least 1 − δ, the output of Algorithm 2 (in Appendix C.2), (cid:98)θ, satisﬁes (constant C := αM L2e4γK):
+E[(cid:107)∇L( (cid:98)θ)(cid:107)2] < 2(L(θ1) − L∗) + 12C (cid:80)T t=1 η2 t t=1(2(1 − α)ηt − M η2 t ) (cid:80)T
+√
+T ) for non-convex optimization problems:
+The above theorem implies the following corollary, which shows a typical convergence rate of
+O(1/
+Corollary 1. Under the conditions in Theorem 5 except that we use constant step sizes: ηt =
+T } for t = 1, . . . , T . Then with probability at least 1 − δ, we have (constant min{(1 − α)/M, 1/
+C := αM L2e4γK):
+√
+E[(cid:107)∇L( (cid:98)θ)(cid:107)2] < 2M (L(θ1) − L∗) (1 − α)2T
++ 2(L(θ1) − L∗) + 12C
+√ (1 − α)
+T
+In Appendix C.2, we discuss more on the strongly convex (Theorem 7) and convex cases (Theorem 8). 7
+5

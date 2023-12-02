@@ -1,0 +1,125 @@
+Abstract
+Multi-View Representation Learning (MVRL) aims to discover a shared representa-tion of observations from different views with the complex underlying correlation.
+In this paper, we propose a variational approach which casts MVRL as maximizing the amount of total correlation reduced by the representation, aiming to learn a shared latent representation that is informative yet succinct to capture the correla-tion among multiple views. To this end, we introduce a tractable surrogate objective function under the proposed framework, which allows our method to fuse and cali-brate the observations in the representation space. From the information theoretic perspective, we show that our framework subsumes existing multi-view generative models. Lastly, we show that our approach straightforwardly extends to the Partial
+MVRL (PMVRL) setting, where the observations are missing without any regu-lar pattern. We demonstrate the effectiveness of our approach in the multi-view translation and classiﬁcation tasks, outperforming strong baseline methods. 1
+
+Introduction
+Multi-View Representation Learning (MVRL) aims to learn a shared representation of multiple observations from different types of views. In MVRL, it is important to encourage the shared representation to be complete enough to capture the correlation across views without losing view-speciﬁc information so that the learned representation can be readily applied to rich set of downstream tasks. For example, in sensor fusion for the multi-sensor system [51] and in clinical diagnosis based on patients’ various types of medical records [47, 49], one would like to aggregate all the information from various observations in order to uncover the true underlying factors under the correlation. Although using views as many as possible seems to be always beneﬁcial for the task of learning a good representation, it can make the problem itself harder depending on the complexity of correlations across all views and the scalability of handling a number of views.
+MVRL becomes even more challenging when the model does not always have access to complete observations from all views for every data instance during training, which we call Partial Multi-View
+Representation Learning (PMVRL). PMVRL is closer to the practical setting since it is unrealistic to expect that observations from all different kinds of views are always available. For example, it is unlikely for all the sensors in a sensor-based system to have the same frequency to update their measurements or for all kinds of medical records to be available for any patient.
+Considering those difﬁculties, any desirable MVRL methods are encouraged to satisfy three desiderata.
+The ﬁrst one is scalability to the number of input views. The method should handle multiple observations in a way computationally scalable to arbitrary many views in both training and testing time. In addition, the method needs to be robust to partial observability. The method should be able to combine any combination of available observations in the representation space in test time.
+This is important for PMVRL because we have to handle observations arbitrarily missing not only in testing data but also in training data. Lastly, the method should discover cross-view association, 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+which can be learned by identifying both shared and view-speciﬁc factors of variation of each view in the representation space. Associating views correctly in the representation space allows the method to utilize any additional observations from different views to improve identiﬁcation of the shared factors without determining any unobserved ones.
+Combining multiple of Variational Auto-Encoder (VAE) [22] for each view1, several generative models [30, 33, 34, 46] have been recently proposed to address MVRL. Since naive optimization of the evidence lower bound (ELBO) on the joint likelihood of multiple views does not address any of the desiderata, those methods impose different structural bias on the joint representation encoders whose strengths and weaknesses are complementary (see Section 2.4). Although they showed encouraging performance on multiple tasks such as predicting common attributes and inferring missing views, they often fail to simultaneously capture both the shared and view-speciﬁc factors of variation and turn out to poorly associate views in our experiments.
+In this paper, we address the problem of MVRL with a principled approach grounded in information theory. Speciﬁcally, we formulate the representation learning task as maximizing the reduction in
+Total Correlation [12, 38, 39]. Based on our formulation, we derive a novel objective function that not only offers tractable optimization but also introduces multiple types of variational information bottlenecks which successfully associate views. We then show that our method naturally extends to the PMVRL setting via inverse variance weighting, a classical approach used in sensor fusion.
+We demonstrate the validity and effectiveness of our method in the multi-view translation and classiﬁcation downstream tasks. Our contributions are three-fold: 1. Measuring the informativeness of the multi-view representation by Total Correlation, we propose a general information-theoretic framework to learn a complete representation, which encompasses existing multi-view generative models. 2. Under the proposed framework, we identify drawbacks of optimizing ELBO and derive a novel objective function that resolves them. Speciﬁcally, our method yields a representation that correctly associates views by capturing not only the common factors of variation but also the view-speciﬁc ones. 3. We conducted extensive evaluation with comparing methods and ours in translation and classiﬁcation tasks in both MVRL and PMVRL settings, showing that our method is the most reliable method to obtain the latent representation agnostic to the downstream tasks. 2 Approach
+Let (cid:126)o = {ov}V v=1 be the observation of a data instance composed of V different views, which is sampled from an unknown joint distribution pD ((cid:126)o), where we emphasize that this is a data distribution using the subscript D. Given these observations, MVRL is the task of learning a complete representation z across the views (cid:126)o. Following [50], we deﬁne a complete representation as follows.
+Deﬁnition 1 (Completeness for Multi-View Representation [50]) A multi-view representation z is complete if each observation, i.e., ov from (cid:126)o, can be reconstructed from a mapping fv(·), i.e., ov = fv(z).
+The deﬁnition directly indicates that a complete representation describes all factors of variations in (cid:126)o, since every view can be reconstructed solely from the complete representation. While MVRL considers complete observations for training data, PMVRL assumes otherwise, i.e. some views being missing in the training data. This poses a unique challenge of (1) learning to produce the complete representation with partial views (2) whose availability varies per instance in training and testing.
+We ﬁrst relate informativeness of the representation measured in terms of Total Correlation (TC) and the goal of MVRL (Section 2.1). We then show that the TC-based MVRL objective function encompasses existing multimodal generative models and analyze its limits based on a straightforward variational lower bound (Section 2.2). To resolve those limits, we derive an alternative variational lower bound which suits better for MVRL (Section 2.3). Lastly, we ﬁnalize our formulation by proposing the representation aggregation model that naturally extends to PMVRL (Section 2.4). 1We follow the conventional terminology in the related literature [11, 14, 24, 41, 44, 47, 48, 50, 53], but any choice among views, modalities [30, 33, 34, 46], and domains [19] can be suitable for our paper and our baseline methods, as long as there is a common latent representation that explains different views / modalities / domains. 2
+2.1 Multi-View Representation Learning with Total Correlation
+A complete representation Z should be informative enough to explain the correlation among V different views. Total correlation (TC) [42], deﬁned as the Kullback-Leibler divergence of the joint distribution from the factored marginals, measures the amount of information shared among a ﬁnite set of random variables. In our MVRL context, TC is deﬁned as (cid:34)
+T C( (cid:126)O) (cid:44) DKL pD ((cid:126)o) (cid:107) (cid:35) pD (ov)
+.
+V (cid:89) v=1 (1)
+We aim to ﬁnd the encoder pθ (z|(cid:126)o) such that the knowledge of z would reduce TC as much as possible. This can be formulated by maximizing the objective where the conditional TC in the last term is given by
+T Cθ( (cid:126)O; Z) (cid:44) T C( (cid:126)O) − T Cθ( (cid:126)O | Z),
+T Cθ( (cid:126)O|Z) (cid:44) Epθ(z)
+DKL pθ ((cid:126)o|z) (cid:107) (cid:34) (cid:34) (cid:35)(cid:35) pθ (ov|z)
+,
+V (cid:89) v=1 (2) (3) which is the expected Kullback-Leibler divergence of the joint conditional from the factored condi-tionals. The parameterized distributions in the above formula involve the encoder pθ (z|(cid:126)o) as follows: pθ (z) = (cid:82) pθ (z|(cid:126)o) pD ((cid:126)o) d(cid:126)o, pθ ((cid:126)o|z) = pθ (z|(cid:126)o) pD ((cid:126)o)/pθ (z), and pθ (ov|z) = (cid:82) pθ ((cid:126)o|z) d(cid:126)o\v.
+Intuitively, minimization of Eq. (3) (i.e., maximization of Eq. (2)) suits well for MVRL, since (1) any complete representation Z would minimize Eq. (3) (e.g., Z = (cid:126)o), and (2) it accords with the theoretical result that complete representation z should factorize the generative distribution [44, 50].
+Further decomposition of (2) reveals that it encourages Z to encode the correlation across views [12], a desirable property for MVRL:
+T Cθ( (cid:126)O; Z) =
+V (cid:88) v=1
+Iθ (Ov; Z) − Iθ( (cid:126)O; Z). (4)
+The ﬁrst term in Eq. (4), Mutual Information (MI) between each observation and the representation, enforces the representation to be informative for every observation. On the other hand, the second term takes the role of Information Bottleneck (IB), which encourages the encoder to learn minimal sufﬁcient representation [37]. Consequently, simultaneous optimization of both terms naturally allows the representation Z to capture correlations among views while being minimally sufﬁcient.
+Note that when V =2, Eq. (4) coincides with Interaction Information [4, 19, 25, 36], which quantiﬁes the amount of information shared among two views and their joint representation (see Section A.4). 2.2 Limitations of VAE models for multi-view data
+Unfortunately, a direct optimization of MIs in Eq. (4) is intractable [2, 12]. A straightforward approach would be employing approximate distributions qv
+φ (ov|z) ≈ pθ (ov|z) and r (z) ≈ pθ (z), and optimize a variational lower bound of Eq. (4) as follows (see Section A.1 in the supplementary material for full derivation):
+T Cθ( (cid:126)O; Z) ≥
+V (cid:88) v=1 (cid:2)H (Ov) + Epθ(z|(cid:126)o)pD((cid:126)o) (cid:2)ln qv
+φ (ov|z)(cid:3)(cid:3) − EpD((cid:126)o) [DKL [pθ(z|(cid:126)o)(cid:107)r(z)]]
+, (cid:125) (cid:124) (cid:123)(cid:122)
+VIB (5) where the entropy terms can be dropped from optimization since they are determined by the true data distribution pD ((cid:126)o). Without the entropy terms, we note that Eq. (5) is essentially identical to evidence lower bound (ELBO) of the variational auto-encoder (VAE) models for multi-view data [30, 33, 34, 46] by switching the notations, for p for encoder and q for decoder. This notation switch follows the convention in [2, 12].
+Although this lower bound contains the variational information bottleneck term that encourages the representation to be minimally sufﬁcient for generalizing well even with small training data [2], it has the following fundamental limitations: 3
+1. Unbalanced representation: If a subset of views is overwhelmingly informative enough to reconstruct the others, the encoder pθ (z|(cid:126)o) may learn to rely on those views while ignoring the rest, yielding a degenerate solution of Eq. (4) that fails cross-view association. This is problematic in MVRL since such views may not be available at test time. 2. Missing views: The encoder pθ (z|(cid:126)o) requires complete observations (cid:126)o not only in training but also in testing phases, while MVRL requires the model to encode incomplete observa-tions ˜o ⊆ (cid:126)o in test time. Furthermore, PMVRL requires to handle incomplete observations even in training. inductive
+In order to overcome these challenges, prior methods impose special structures (i.e. hypotheses) for pθ (z|(cid:126)o), such as Product of Experts (PoE) [17, 46], Mixture of Experts (MoE) [30], or Mixture of Product of Experts (MoPoE) [34]. In our work, we present a more principled approach to this problem by deriving an alternative lower bound, described in the next section. 2.3 Conditional Variational Information Bottleneck
+To resolve the ﬁrst issue raised in the previous section, we start from Eq. (4) and reformulating it as follows:
+T Cθ( (cid:126)O; Z) =
+V (cid:88) v=1 (cid:20) V − 1
+V
+Iθ (Ov; Z) + 1
+V
+Iθ (Ov; Z) − (cid:16) (cid:126)O; Z
+Iθ (cid:17)(cid:21) 1
+V
+= 1
+V
+V (cid:88) v=1 (cid:104) (V − 1) Iθ (Ov; Z) − Iθ( (cid:126)O\v; Z|Ov) (cid:105)
+, (6) where the last equality is due to the chain rule of MI (see Section A.5 in the supplementary material for details). Interestingly, Eq. (6) transforms IB in Eq. (4) into multiple conditional MIs between the latent representation and V − 1 other views given every view, each of which penalizes the extra information of the representation not inferable from the given view. Although Eq. (6) is essentially equal to Eq. (4), its conditional information constraints give us intuition to derive a new tractable lower bound on T Cθ( (cid:126)O; Z) that regularizes unbalanced representation, which we present below.
+Since the conditional MIs in Eq. (6) involve pθ(z|ov) = (cid:82) pθ(z|(cid:126)o)pD((cid:126)o\v|ov)d(cid:126)o\v which requires to compute intractable integration, we use the variational upper bound of those terms by introducing approximate distributions rv
+ψ(z|ov) ≈ pθ (z|ov) as follows (see Section A.2 in the supplementary material for the full derivation and analysis):
+T Cθ( (cid:126)O; Z) ≥
+V − 1
+V
+V (cid:88) v=1 (cid:2)H (Ov) + Epθ(z|(cid:126)o)pD((cid:126)o) (cid:2)ln qv
+φ (ov|z)(cid:3)(cid:3)
+− 1
+V
+V (cid:88) v=1
+EpD((cid:126)o) (cid:124) (cid:2)DKL (cid:2)pθ(z|(cid:126)o)(cid:107)rv (cid:123)(cid:122)
+Conditional VIB
+ψ(z|ov)(cid:3)(cid:3) (cid:125)
+. (7)
+This lower bound is equipped with conditional VIBs which provide a number of beneﬁts over Eq. (5) in handling challenges mentioned in the previous section. First, conditional VIBs, which upper bounds condtional MIs in Eq. (6) by introducing the view-speciﬁc encoder rv
+ψ (z|ov) for each view, regularize pθ (z|(cid:126)o) to encode representation inferable from rv
+ψ (z|ov) of every view. Consequently, the joint representation is enforced to be balanced rather than to be prone to uneven dependency on some subset of views. Second, each of them uses forward KL divergence DKL[pθ (z|(cid:126)o) (cid:107)rv
+ψ (z|ov)] to calibrate each encoder rv
+ψ (z|ov) to cover all the supports or modes of pθ (z|(cid:126)o). As a consequence, one can extract the representation z even when some views are missing in the observation. This property is critically important in (P)MVRL, where one needs to infer the complete representation from the partially available views without being overly conﬁdent on any unobserved factors. We remark that mmJSD [33] adopts reverse KL divergence, which is not ideal as we later demonstrate in the experiments.
+ψ (z|ov) to the joint encoder pθ (z|(cid:126)o), encouraging rv
+Finally, although Eq. (7) has aforementioned desirable properties for MVRL, it is prone to overﬁtting when the size of training data is limited. This is because rv
+ψ can optimize the conditional VIB by 4
+simply memorizing instead of learning to infer the representation of pθ (z|(cid:126)o). In order to prevent overﬁtting, we found that VIB in Eq. (5) is an effective regularization as it favors the minimal sufﬁcient encoding of the representation, which will be demonstrated in Section 4.2.1. Therefore, we formulate our objective function as a convex combination of Eq. (5) and Eq. (7) so that we regularize the training via VIB (see Section A.3 in the supplementary ﬁle for full derivation):
+T Cθ( (cid:126)O; Z) ≥
+V − α
+V
+V (cid:88) v=1 (cid:2)H (Ov) + Epθ(z|(cid:126)o)pD((cid:126)o) (cid:2)ln qv
+φ (ov|z)(cid:3)(cid:3)
+−
+α
+V
+V (cid:88) v=1
+EpD((cid:126)o) (cid:124) (cid:2)DKL (cid:2)pθ(z|(cid:126)o)(cid:107)rv (cid:123)(cid:122)
+Conditional VIB
+ψ(z|ov)(cid:3)(cid:3) (cid:125)
+− (1 − α) EpD((cid:126)o) [DKL [pθ(z|(cid:126)o)(cid:107)r(z)]]
+, (cid:125) (cid:124) (cid:123)(cid:122)
+VIB (8) where α is the hyperparmeter that trades off learning minimal sufﬁcient representation in favor of calibrating rv
+ψ. For simplicity, we model the encoder, decoder, and approximate marginal distributions vI(cid:1), using the parameterized Gaussians with the diagonal covariance matrix, i.e. rv qv
+φ (ov|z) = N (ˆµv, I), and r (z) = N (0, I), respectively.
+While the view-speciﬁc encoders rv
+ψ allow us to extract the representation from any available view individually, combining any subset of these representations (fusion) still remains as a problem. In addition, the use of joint-view encoder p(z|(cid:126)o) makes our method limited to complete observations (cid:126)o during training, which needs to be addressed for PMVRL. In the next section, we show that these issues can be effectively resolved by a simple model design for pθ (z|(cid:126)o).
+ψ (z|ov) = N (cid:0)µv, σ2 2.4 Models for Joint Representation Encoder
+We review the models adopted by prior methods that make the joint representation encoder pθ (z|(cid:126)o) amenable to missing views and discuss their strengths and weaknesses.
+PoE Product-of-Experts (PoE) [17] combines multiple probability distributions by their product.
+MVAE [46] models the joint representation encoder as a PoE, treating view-speciﬁc encoders as experts. The PoE can produce a sharper distribution as we increase the number of input views, thus an effective method for aggregating information across any subset of view-speciﬁc encoders. Assuming vI(cid:1), the PoE each of view-speciﬁc encoders as Gaussian distributions such that rv joint encoder is obtained with computation linearly scales to the number of views by
+ψ (z|ov) = N (cid:0)µv, σ2 pθ (z|(cid:126)o) (cid:44) N (cid:0)µp, σ2 pI(cid:1) , where µp (cid:44) (cid:80)V v=1 µv/σ2 v v=1 1/σ2 v (cid:80)V and σ2 p (cid:44) 1 v=1 1/σ2 v (cid:80)V
+. (9)
+Eq. (9) is also the formula of Inverse-Variance Weighted (IVW) method [6, 7], a classical method in statistics for aggregating multiple random variables, such as sensor fusion.
+Unfortunately, a naive application of the PoE to the ELBO formulation (Eq.(5)) may fail to optimize the individual encoders, which is important in learning the balanced representation. MVAE [46], as an example, randomly samples subsets of views among 2V combinations and jointly optimizes their
+ELBOs in order to ensure that all the view-speciﬁc encoders are optimized under PoE. However, such treatment may result in a precision miscalibration of view-speciﬁc encoders [30].
+MoE The Mixture-of-Expert (MoE) takes an arithmetic mean of probability distributions, which is computationally scalable to the number of views as well. MMVAE [30] and mmJSD [33] adopt MoE of rv
+ψ(z|ov) as the model for the joint representation encoder. In MMVAE, the MoE is trained by pair-wise optimization in such a way that the latent representation from a view-speciﬁc encoder can reconstruct the observation in other views as well as its own view. However, this does not necessarily imply that the latent representation successfully aggregates the information across views. mmJSD addresses this issue by adopting a common learnable prior across views.
+We remark that, in Eq. (8), modeling pθ (z|(cid:126)o) as MoE of rv
+ψ(z|ov) and setting α = 0 yields the ELBO objective version of MMVAE. Assuming the same model for pθ (z|(cid:126)o) and α = 0, and modeling r(z) as the PoE of rv
+ψ(z|ov) yields the objective function of mmJSD. For tractable optimization of the KL term involving MoE, mmJSD derives a lower bound on the ELBO by decomposing it into multiple
+KL terms. This bound can be also obtained from Eq. (8) by setting α = 1 and using the reverse KL for the conditional VIB terms. However, we empirically show that minimization of the reverse KL is not helpful with learning complete representation in Section 4. 5
+Figure 1: The architecture of Multi-View Total Correlation Auto-Encoder.
+MoPoE The Mixture-of-Product-of-Experts (MoPoE) is a mixture of 2V combination of PoE experts, which is used as the model for joint encoder in MoPoE-VAE [34]. Since the MoPoE joint encoder takes into account all possible combinations of views, it naturally learns to aggregate information across any given views while optimizing every view-speciﬁc encoder. Similar to mmJSD,
+MoPoE-VAE derives a lower bound on the objective to decompose the KL term into 2V KL terms with analytic solutions. However, this would render the method intractable for tasks with many views.
+Multi-View Total Correlation Auto-Encoder Since our model uses conditional VIBs that explic-itly calibrate all the representations encoded by view-speciﬁc encoders, we can safely choose PoE as the model for the joint representation encoder without suffering from the precision miscalibration.
+We call our resulting model the Multi-View Total Correlation Auto-Encoder (MVTCAE), depicted in Figure 1. Thanks to PoE joint representation encoder, MVTCAE linearly scales to the number of input views. Furthermore, when training with partial observations, MVTCAE simply treats the covariance matrix of qv
+φ (ov|z) to be ∞I for any missing observation ov /∈ ˜o, so that it does not contribute to the reconstruction loss for missing views, similar to [50]. As a result, MVTCAE can be naturally extended to PMVRL. We show that MVTCAE successfully associates views in Section 4. 3

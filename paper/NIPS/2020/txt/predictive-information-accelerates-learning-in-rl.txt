@@ -1,0 +1,153 @@
+Abstract
+The Predictive Information is the mutual information between the past and the future, I(Xpast; Xfuture). We hypothesize that capturing the predictive information is useful in RL, since the ability to model what will happen next is necessary for success on many tasks. To test our hypothesis, we train Soft Actor-Critic (SAC) agents from pixels with an auxiliary task that learns a compressed representation of the predictive information of the RL environment dynamics using a contrastive version of the Conditional Entropy Bottleneck (CEB) objective. We refer to these as Predictive Information SAC (PI-SAC) agents. We show that PI-SAC agents can substantially improve sample efﬁciency over challenging baselines on tasks from the DM Control suite of continuous control environments. We evaluate PI-SAC agents by comparing against uncompressed PI-SAC agents, other compressed and uncompressed agents, and SAC agents directly trained from pixels. Our implementation is given on GitHub.1 1
+
+Introduction
+Many Reinforcement Learning environments have speciﬁc dynamics and clear temporal structure: observations of the past allow us to predict what is likely to happen in the future. However, it is also commonly the case that not all information about the past is relevant for predicting the future. Indeed, there is a common Markov assumption in the modeling of RL tasks: given the full state at time t, the past and the future are independent of each other.
+However, in general not all RL tasks are speciﬁed with a full state vector that can guarantee Markovity.
+Instead, the environment may be only partially observable, or the state may be represented in very high dimensions, such as an image. In such environments, the task of the agent may be described as ﬁnding a representation of the past that is most useful for predicting the future, upon which an optimal policy may more easily be learned.
+In this work, we approach the problem of learning continuous control policies from pixel observations.
+We do this by ﬁrst explicitly modeling the Predictive Information, the mutual information between the past and the future. In so doing, we are looking for a compressed representation of the past that the agent can use to select its next action, since most of the information about the past is irrelevant 1https://github.com/google-research/pisac 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+for predicting the future, as shown in [4]. This corresponds to learning a small state description that makes the environment more Markovian, rather than using the entire observed past as a state vector.
+This explicit requirement for a concise representation of the Predictive Information leads us to prefer objective functions that are compressive. Philosophically and technically, this is in contrast to other recent approaches that have been described in terms of the Predictive Information, such as Contrastive
+Predictive Coding (CPC) [30] and Deep InfoMax (DIM) [19], which do not explicitly compress.
+Modeling the Predictive Information is, of course, insufﬁcient to solve RL problems. We must also provide a mechanism for learning how to select actions. In purely model-based approaches, such as
+PlaNet [18], that can be achieved with a planner and a reward estimator that both use the model’s state representation. Alternatively, one can use the learned state representation as an input to a model-free
+RL algorithm. That is the approach we explore in this paper. We train a standard Soft Actor-Critic (SAC) agent with an auxiliary model of the Predictive Information. Together, these pieces give us
+Predictive Information Soft Actor-Critic (PI-SAC).
+The main contributions of this paper are:
+• PI-SAC: A description of the core PI-SAC agent (Section 3).
+• Sample Efﬁciency: We demonstrate strong gains in sample efﬁciency on nine tasks from the
+DM Control Suite [42] of continuous control tasks, compared to state-of-the-art baselines such as
+Dreamer [17] and DrQ [27] (Section 4.1).
+• Ablations: Through careful ablations and analysis, we show that the beneﬁt of PI-SAC is due substantially to the use of the Predictive Information and compression (Section 4.2).
+• Generalization: We show that compressed representations outperform uncompressed representa-tions in generalization to unseen tasks (Section 4.3). 2 Preliminaries
+Predictive Information. The Predictive Information [4] is the mutual information between the past and the future, I(past; future). From here on, we will denote the past by X and the future by Y .
+[4] shows that the entropy of the past, H(X), is a quantity that grows much faster than the Predictive
+Information, I(X; Y ), as the duration of past observations increases. Consequently, if we would like to represent only the information in X that is relevant for predicting Y , we should prefer a compressed representation of X. This is a sharp distinction with techniques such as Contrastive
+Predictive Coding (CPC) [30] and Deep InfoMax (DIM) [19] which explicitly attempt to maximize a lower bound on I(X; Y ) without respect to whether the learned representation has compressed away irrelevant information about X.
+The Conditional Entropy Bottleneck.
+In order to learn a compressed representation of the Predic-tive Information, we will use the Conditional Entropy Bottleneck (CEB) [7] objective. CEB attempts to learn a representation Z of some observed variable X such that Z is as useful as possible for predicting a target variable Y , i.e. maximizing I(Y ; Z), while compressing away any information from X that is not also contained in Y , i.e. minimizing I(X; Z|Y ):
+CEB ≡ min
+Z
+= min
+Z
+βI(X; Z|Y ) − I(Y ; Z)
+β(−H(Z|X) + H(Z|Y )) − I(Y ; Z)
+= min
+Z
+≤ min
+Z
+Ex,y,z∼p(x,y)e(z|x) β log
+Ex,y,z∼p(x,y)e(z|x) β log e(z|x) p(z|y) e(z|x) b(z|y)
+− I(Y ; Z)
+− I(Y ; Z) (1) (2) (3) (4)
+Here, e(z|x) is the true encoder distribution where we sample z from; b(z|y) is the variational backwards encoder distribution that approximates the unknown true distribution p(z|y). Both can be parameterized by the outputs of neural networks. Compression increases as β goes from 0 to 1. 2
+Figure 1: PI-SAC system diagram for a single minibatch example. To compute JCEB requires K bψb (·) distributions from the minibatch, as described in Section 2. Colored edges show how gradients
+ﬂow back to model weights.
+To get a variational lower bound on the I(Y ; Z) term, we will use the CatGen formulation from [7], which is equivalent to the InfoNCE bound [30, 32] but reuses the backwards encoder:
+I(Y ; Z) ≥ Ex,y,z∼p(x,y)e(z|x) log b(z|y) k=1 b(z|yk) (cid:80)K 1
+K (5)
+We write the objective for a single example in a minibatch of size K to simplify notation. The K examples are sampled independently. Altogether, this gives us:
+CEB ≤ min
+Z
+Ex,y,z∼p(x,y)e(z|x) β log e(z|x) b(z|y)
+− log b(z|y) k=1 b(z|yk) (cid:80)K 1
+K (6)
+Soft Actor-Critic. Soft Actor-Critic (SAC) [16] is an off-policy algorithm that learns a stochastic policy πφa , a Q-value function Qφc, and a temperature coefﬁcient α to ﬁnd an optimal control policy.
+It maximizes a γ-discounted return objective based on the Maximum Entropy Principle [45, 44, 15, 24]. SAC has objectives for the critic, the actor, and the temperature parameter, α. The critic minimizes:
+JQ(φc) = Est,at∼D (cid:16) 1 2
+Qφc(st, at) − (r(st, at) + γ Est+1∼p V ¯φc(st+1) (cid:17)2 (7) where V ¯φc (st) ≡ Eat∼π(at|st) Q ¯φc (st, at)−α log π(at|st) is a value function that uses an exponential moving average of the φc parameters, ¯φc. The actor minimizes:
+Jπ(φa) = Est∼D Eat∼π(at|st) α log π(at|st) − Qφc(st, at)
+Given H, a target entropy for the policy distribution, the temperature α is learned by minimizing:
+Jα(α) = Eat∼π(at|st) −α log π(at|st) − αH and maintains two target critics Q ¯φ1
+, Qφ2
+SAC learns two critics Qφ1 for double Q-learning
+[9], but we omit it in our notation for simplicity and refer readers to the SAC paper [16] for details.
+, Q ¯φ2 (8) (9) c c c c 3 Predictive Information Soft Actor-Critic (PI-SAC)
+A natural way to combine a stochastic latent variable model trained with CEB with a model-free
+RL algorithm like SAC is to use the latent representation at timestep t, zt, as the state variable for the actor, the critic, or both. We will call this Representation PI-SAC and deﬁne it in Section H.
+However, any representation given to the actor cannot have a dependency on the next action, and any representation given to the critic can depend on at most the next action, since during training and evaluation, the actor must use the representation to decide what action to take, and the critic needs the representation to decide how good a particular state and action are. The CEB model’s strength, on the 3
+Algorithm 1 Training Algorithm for PI-SAC
+Require: Estep, θe, φ1 c, φ2
+¯θb ← θe, ¯θe ← θe
+D ← ∅ for each initial collection step do c, φa, α, ψe, ψb (cid:46) Environment and initial parameters (cid:46) Copy initial forward conv weights to the backward and target critic conv encoder (cid:46) Initialize replay buffer (cid:46) Initial collection with random policy (cid:46) Sample action from a random policy at ∼ πrandom(at) st+1, rt+1 ∼ Estep(at)
+D ← D ∪ (st+1, at, rt+1) (cid:46) Get initial environment step (cid:46) Sample action from the policy (cid:46) Sample next observation from environment end for s1 ← Estep() for t=1 to M do at ∼ πφa (at|st) st+1, rt+1 ∼ Estep(at)
+D ← D ∪ (st+1, at, rt+1) for each gradient step do c, θe} ← {φi c, θe} − λQ ˆ∇{φi c,θe}JQ(φi c, θe) for i ∈ {1, 2}
+{φi
+φa ← φa − λπ ˆ∇φa Jπ(φa)
+α ← α − λα ˆ∇αJα(α)
+{θe, ψe, ψb} ← {θe, ψe, ψb} − λCEB ˆ∇{θe,ψe,ψb}JCEB(θe, ψe, ψb) c − (1 − τ ) ¯φi
+¯φi c ← τ φi
+¯θe ← τ θe − (1 − τ )¯θe
+¯θb ← τbθe − (1 − τb)¯θb (cid:46) gradient step on critics (cid:46) gradient step on actor (cid:46) adjust temperature (cid:46) CEB gradient step (cid:46) Update target critic network weights (cid:46) Update target critic conv encoder weights (cid:46) Update backward conv encoder weights c for i ∈ {1, 2} end for end for other hand, lies in capturing a representation of the dynamics of the environment multiple steps into the future. We may therefore hypothesize that using CEB as an auxiliary loss can be more effective, since in that setting, the future prediction task can be conditioned on the actions taken at each future frame. Conditioning on multiple future actions in the forward encoder allows it to make more precise predictions about the future states, thereby allowing the forward encoder to more accurately model environment dynamics.2 Consequently, PI-SAC agents are trained using CEB as an auxiliary task, as shown in Figure 1.
+PI-SAC uses the same three objective functions from SAC, described above. The only additional piece to specify is the choice of X and Y for the CEB objective. In our setting, X consists of previous observations and future actions, and Y consists of future observations and future rewards. If we deﬁne the present as t = 0 and we limit ourselves to observations from −T + 1 to T , we have:
+JCEB(θe, ψe, ψb) = Es−T +1:T ,a0:T −1,r1:T ∼D,z0∼e(z0|·) log eθe,ψe (z0|s−T +1:0, a0:T −1) bψb (z0|s1:T , r1:T )
++ log 1
+K bψb (z0|s1:T , r1:T ) k=1 bψb (z0|sk 1:T , rk (cid:80)K 1:T ) (10)
+The training algorithm for PI-SAC is in Algorithm 1. Estep is the environment step function. θe is the weight vector of the convolutional encoder. ¯θb = EMA(θe, τb) is the weight vector of the convolutional backwards encoder, where EMA(·) is the exponential moving average function. φ1 c, φ2 c, and φa are the weight vectors for two critic networks and the actor network, respectively. We let the critic gradients back-propagate through the shared conv encoder eθe , but stop gradients from actor.
+The target critics use a shared conv encoder parameterized by ¯θe which is an exponential moving average of eθe , similar to updating the target critics. α is the SAC temperature parameter. ψe and
+ψb are the weight vectors of MLPs to parameterize the CEB forward and backwards encoders. τ and τb are exponents for EMA calls. λQ, λπ, λα, and λCEB are learning rates for the four different objective functions. See Section A for implementation details. 2We give details and results for Representation PI-SAC agents in Section H. Representation PI-SAC agents are also very sample efﬁcient on most tasks we consider, but they don’t achieve as strong performance on tasks with more complicated environment dynamics, such as Cheetah, Hopper, and Walker. 4
+Figure 2: Performance comparison to existing methods on 9 tasks from DeepMind control suite. The upper 6 tasks are the PlaNet benchmark [18]. Dreamer* indicates that the other agents do not use
+Dreamer’s action repeat of 2. We additionally include the 3 lower tasks with a ﬁxed action repeat of 2 to compare with Dreamer [17] and DrQ [27] results on the Dreamer benchmark. PI-SAC matches the state-of-the-art performance on all 9 tasks and is consistently the most sample efﬁcient. 4 Experiments
+We evaluate PI-SAC on the DeepMind control suite [42] and compare with leading model-free and model-based approaches for continuous control from pixels: SLAC [29], Dreamer [17], CURL [39] and DrQ [27]. Our benchmark includes the six tasks from the PlaNet benchmark [18] and three additional tasks: Cartpole Balance Sparse, Hopper Stand, and Walker Stand.
+The PlaNet benchmark treats action repeat as a hyperparameter. On each PlaNet task, we evaluate
+PI-SAC with the action repeat at which SLAC performs the best, and compare with the best DrQ and
+CURL results. The choices of action repeat are listed in Section A.2. On Walker Walk (also in the
+PlaNet benchmark), Cartpole Balance Sparse, Hopper Stand, and Walker Stand, we evaluate PI-SAC with action repeat 2 and directly compare with Dreamer and DrQ results on the Dreamer benchmark.
+We report the performance using true environment steps to be invariant to action repeat. All ﬁgures show mean, minimum, and maximum episode returns of 10 runs unless speciﬁed otherwise.
+Throughout these experiments we mostly use the standard SAC hyperparameters [16], including the sizes of the actor and critic networks, learning rates, and target critic update rate. Unless otherwise speciﬁed, we set CEB β = 0.01. We report our results with the best number of gradient updates per environment step in Section 4.1, and use one gradient update per environment step for the rest of the experiments. Full details of hyperparameters are listed in Section A.2. We use an encoder architecture similar to DrQ [27]; the details are described in Section A.1. 4.1 Sample Efﬁciency
+Figure 2 and Table 1 compare PI-SAC with SLAC, Dreamer, DrQ, and CURL3. PI-SAC consistently achieves state-of-the-art performance and better sample efﬁciency across all benchmark tasks, better 3SLAC, Dreamer, and DrQ learning curves were provided to us by the authors. 5
+100k step scores
+PI-SAC
+CURL
+DrQ
+SLAC
+Ball in Cup Catch
+Cartpole Swingup
+Cheetah Run
+Finger Spin
+Reacher Easy
+Walker Walk
+Cartpole Balance Sparse
+Hopper Stand
+Walker Stand 933±16 816±72 460±93 957±45 758±167 514±89 1000±0 97±147 942±21 769±43 582±146 299±48 767±56 538±233 403±24
+---913±53 759±92 344±67 901±104 601±213 612±164 999±2 87±152 832±259 756±314 305±66 344±69 859±132 305±134 541±98
+---500k step scores
+PI-SAC
+CURL
+DrQ
+SLAC
+Cheetah Run
+Reacher Easy
+Walker Walk
+Hopper Stand 801±23 950±45 946±18 821±166 518±28 929±44 902±43
+-660±96 942±71 921±45 750±140 715±24 688±135 938±15
+-Table 1: Returns at 100k and 500k environment steps. We only show results at 500k steps for tasks on which PI-SAC is not close to convergence at 100k steps. We omit Dreamer’s results using action repeat of 2 (most of the scores are signiﬁcantly lower as shown in Figure 2).
+Figure 3: The predictive information improves performance on Cartpole Swingup and Cheetah
+Run without any data augmentation. With data augmentation, it continues showing strong improve-ments over the SAC baseline on all three tasks. We perform 5 runs for PI-SAC and SAC without augmentation. More results are presented in Section F. than or at least comparable to all the baselines. We report our results on Reacher Easy with one gradient update per environment step, on Cheetah Run with four gradient updates, and the rest with two gradient updates. A comparison of PI-SAC agents with different numbers of gradient updates is available in Section B. The comparison in this section is system-to-system as all baseline methods have their own implementation advantages: SLAC uses much larger networks and 8 context frames, making its wall clock training time multiple times slower; DrQ and CURL’s SAC differs substantially from the standard SAC [16], including having much larger actor and critic networks; Dreamer is a model-based method that uses RNNs and learns a policy in simulation. 4.2 Predictive Information
+We test our hypothesis that predictive information is the source of the sample efﬁciency gains here.
+Data Augmentation. We follow [27] to train our models with image sequences randomly shifted by
+[−4, 4] pixels. Without this perturbation, Figure 3 shows that learning the predictive information by itself still greatly improves agents’ performance on Cartpole and Cheetah but makes little difference on Reacher. Learning PI-SAC with data augmentation continues showing strong improvements over the SAC baseline with data augmentation and solves all benchmark tasks.
+[27, 28] showed that input perturbation facilitates actor-critic learning, and we show that it also improves CEB learning. As described in Section 2, we use the contrastive CatGen formulation to get a variational lower bound on I(Y ; Z). Because of its contrastive nature, CatGen can ignore information that is not required for it to distinguish different samples and still saturate its bound. In our experiments without data augmentation, we found that it ignores essential information for solving 6
+Figure 4: We learn a diagnostic deconvolutional decoder to predict future observations from CEB representations learned along with PI-SAC for Reacher. We show ground truth future observations and the predicted future observations from CEB representations. Left: CEB representations learned without data augmentation only capture positions of the target. Right: CEB representations learned with data augmentation capture both the target and the arm.
+Figure 5: Compression improves agents’ performance. We disable data augmentation for Cartpole
+Swingup to amplify the beneﬁt of compression. At β = 0, compression is not part of the learning objective. We perform 5 runs for each curve shown in this ﬁgure.
+Reacher. We train a deconvolutional decoder to diagnostically predict future frames from CEB representations (we stop gradients from the decoder). As shown in Figure 4, CEB representations learned without input perturbation completely fail to capture the arm’s pose. This is because CatGen can perfectly distinguish frame sequences in a minibatch sampled from the replay buffer by only looking at the position of the target, since that is constant in each episode but varies between episodes.
+In contrast, CatGen representations learned with randomly shifted images successfully capture both the target and the arm. This observation suggests that appropriate data augmentation helps CatGen to capture meaningful information for control.
+Compression. As described in Section 2, we compress the residual information I(X; Z|Y ) out to preserve the minimum necessary predictive information. Figure 5 studies the trade-off between strength of compression and agents’ performance by sweeping β values. Some amount of compression improves sample efﬁciency and stability of the results, but overly strong compression can be harmful.
+The impact of β on the agent’s performance conﬁrms that, even though the CEB representation isn’t being used directly by the agent, the auxiliary CEB objective is able to substantially change the agent’s weights. Sweeping β allows us to explore the frontier of the agent’s performance, as well as the Pareto-optimal frontier of the CEB objective as usual [7]. For example, for Cheetah Run, the residual information at the end of training ranges between ∼ 0 nats for β = 1, to ∼ 947 nats for
+β = 0. For the top performing agent, β = 0.01, the residual information was ∼ 6 nats.
+Figure 6: Learning the predictive information outperforms multiview self-prediction (MVSP) at all levels of compression. In this ﬁgure we show MVSP agents that predict future rewards conditioning on actions. The MVSP curves show results of 5 runs. 7
+e
+Figure 7: Compression improves task transfer. We train a PI-SAC agent on a source task (SRC), freeze the representation zdet (see Figure 1), and train a new agent on a target task (TGT). We show the results of normal PI-SAC agents with different β for the source tasks, and the transfer results using representations learned on the source tasks with different β for the target tasks. Compression substantially improves task transfer when the target task is intuitively more difﬁcult than the source, i.e. Cartpole Balance to Swingup and Walker Stand to Walk. The difference is less signiﬁcant when the target task is presumably easier, i.e. Walker Walk to Stand. We disable data augmentation for the
+Cartpole experiment to amplify the beneﬁt of compression. All curves show 5 runs.
+Comparison to Multiview Self-Prediction. Multiview Self-Prediction (MVSP) is an auxiliary objective used by CURL [39]. CURL uses the InfoNCE bound to capture the mutual information between two random crops I(Xcrop1; Xcrop2) as an auxiliary task for continuous control from pixels.
+This approach preserves information about the present, differing philosophically from PI-SAC which captures information about the future. By changing the CEB prediction target from the future (Y ) to a random shift of the past observation, X (cid:48), we can achieve the equivalent multiview self-prediction in our framework and fairly compare the two approaches. Figure 6 shows that PI-SAC agents outperform
+MVSP agents at all levels of compression. But similar to PI-SAC, compression also helps MVSP agents on tasks like Cheetah and Reacher. This empirical evidence suggests that, for RL agents, knowing what will happen in the future matters more than knowing what has happened in the past.
+Note that Figure 6 shows MVSP agents that predict future rewards conditioning on actions to enable a direct comparison to PI-SAC agents. More results of PI-SAC and MVSP agents with and without future reward prediction on all tasks can be found in Section D. 4.3 Generalization to Unseen Tasks
+It is well-known that compressed representations can generalize better in many machine learning settings [36, 3, 8], including RL [20, 12, 11]. In addition to sample efﬁciency, for more testing of generalization, we explore transferring representations to an unseen task with the same environment dynamics. Speciﬁcally, we learn a PI-SAC agent on a source task, freeze the representation zdet (see
+Figure 1), and train a new agent for a target task using the frozen representation. Figure 7 shows that compressed representations generalize substantially better to unseen tasks than uncompressed representations. Especially when the target task is intuitively harder than the source task, i.e. Cartpole
+Balance to Swingup and Walker Stand to Walk, the performance differences between different levels of compression are more signiﬁcant on the target task than on the original tasks. It is, however, less prominent when the target task is easier, i.e. Walker Walk to Stand. Our conjecture is that solving the original Walk task would require exploring a wider range of the environment dynamics that presumably includes much what the Stand task would need. On the other hand, transferring from
+Stand to Walk requires generalization to more unseen part of the environment dynamics. Note that in these settings it is still more sample efﬁcient to train a full new PI-SAC agent on the target task.
+These experiments simply demonstrate that the more compressed predictive information models have representations that are more useful in a task transfer setting. e 8
+5

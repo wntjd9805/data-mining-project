@@ -1,0 +1,286 @@
+Abstract
+We identify and formalize a fundamental gradient descent phenomenon leading to a learning proclivity in over-parameterized neural networks. Gradient Starvation arises when cross-entropy loss is minimized by capturing only a subset of features relevant for the task, despite the presence of other predictive features that fail to be discovered. This work provides a theoretical explanation for the emergence of such feature imbalances in neural networks. Using tools from Dynamical Systems theory, we identify simple properties of learning dynamics during gradient descent that lead to this imbalance, and prove that such a situation can be expected given certain statistical structure in training data. Based on our proposed formalism, we develop guarantees for a novel but simple regularization method aimed at decoupling feature learning dynamics, improving accuracy and robustness in cases hindered by gradient starvation. We illustrate our ﬁndings with simple and real-world out-of-distribution (OOD) generalization experiments. 1
+
+Introduction
+In 1904, a horse named Hans attracted worldwide attention due to the belief that it was capable of doing arithmetic calculations [81]. Its trainer would ask Hans a question, and Hans would reply by tapping on the ground with its hoof. However, it was later revealed that the horse was only noticing subtle but distinctive signals in its trainer’s unconscious behavior, unbeknown to him, and not actually performing arithmetic. An analogous phenomenon has been noticed when training neural networks [e.g. 85, 109, 54, 39, 17, 14, 37, 51, 107, 76, 48, 19, 61, 77]. In many cases, state-of-the-art neural networks appear to focus on low-level superﬁcial correlations, rather than more abstract and robustly informative features of interest [16, 88, 40, 68, 30].
+The rationale behind this phenomenon is well known by practitioners: given strongly-correlated and fast-to-learn features in training data, gradient descent is biased towards learning them ﬁrst. However, the precise conditions leading to such learning dynamics, and how one might intervene to control this feature imbalance are not entirely understood. Recent work aims at identifying the reasons behind this phenomenon [97, 70, 22, 73, 51, 76, 100, 92, 83, 105, 42, 79, 4], while complementary work quantiﬁes resulting shortcomings, including poor generalization to out-of-distribution (OOD) test data, reliance upon spurious correlations, and lack of robustness [30, 68, 77, 41, 63, 64, 9].
+However most established work focuses on squared-error loss and its particularities, where results do not readily generalize to other objective forms. This is especially problematic since for several classiﬁcation applications, cross-entropy is the loss function of choice, yielding very distinct learning dynamics. In this paper, we argue that Gradient Starvation, ﬁrst coined in [26], is a leading cause for this feature imbalance in neural networks trained with cross-entropy, and propose a simple approach to mitigate it. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: Diagram illustrating the effect of gradient starvation in a simple 2-D classiﬁcation task. (a) Data is not linearly separable and the learned decision boundary is curved. (b) Data is linearly separable by a small margin (∆ = 0.1). This small margin allows the network to discriminate conﬁdently only along the horizontal axis and ignore the vertical axis. (c) Data is linearly separable as in (b). However, with the proposed Spectral decoupling (SD), a curved decision boundary with a large margin is learned. (d) Diagram shows the evolution of two of the features (Eq. 4) of the dynamics in three cases shown as dotted, dashed and solid lines. Analysis: (dotted) vs (dashed): Linear separability of the data results in an increase in z1 and a decrease (starvation) of z2. (dashed) vs (solid): SD suppresses z1 and hence allows z2 to grow. Decision boundaries are averaged over ten runs. More experiments with common regularization methods are provided in App. B.
+Here we summarize our contributions:
+We provide a theoretical framework to study the learning dynamics of linearized neural networks trained with cross-entropy loss in a dual space.
+Using perturbation analysis, we formalize Gradient Starvation (GS) in view of the coupling between the dynamics of orthogonal directions in the feature space (Thm. 2).
+We leverage our theory to introduce Spectral Decoupling (SD) (Eq. 17) and prove this simple regularizer helps to decouple learning dynamics, mitigating GS.
+We support our ﬁndings with extensive empirical results on a variety of classiﬁcation and adversarial attack tasks. All code and experiment details available at GitHub repository.
+•
+•
+•
+•
+In the rest of the paper, we ﬁrst present a simple example to outline the consequences of GS. We then present our theoretical results before outlining a number of numerical experiments. We close with a review of related work followed by a discussion. 2 Gradient Starvation: A simple example
+Consider a 2-D classiﬁcation task with a training set consisting of two classes, as shown in Figure 1. A two-layer ReLU network with 500 hidden units is trained with cross-entropy loss for two different arrangements of the training points. The difference between the two arrangements is that, in one setting, the data is not linearly separable, but a slight shift makes it linearly separable in the other setting. This small shift allows the network to achieve a negligible loss by only learning to discriminate along the horizontal axis, ignoring the other. This contrasts with the other case, where both features contribute to the learned classiﬁcation boundary, which arguably matches the data structure better. We observe that training longer or using different regularizers, including weight decay [58], dropout [95], batch normalization [49], as well as changing the optimization algorithm to Adam [56] or changing the network architecture or the coordinate system, do not encourage the network to learn a curved decision boundary. (See App. B for more details.)
+We argue that this occurs because cross-entropy loss leads to gradients “starved” of information from vertical features. Simply put, when one feature is learned faster than the others, the gradient contribution of examples containing that feature is diminished (i.e., they are correctly processed based on that feature alone). This results in a lack of sufﬁcient gradient signal, and hence prevents any remaining features from being learned. This simple mechanism has potential consequences, which we outline below. 2.1 Consequences of Gradient Starvation
+Lack of robustness.
+In the example above, even in the right plot, the training loss is nearly zero, and the network is very conﬁdent in its predictions. However, the decision boundary is located very 2
+close to the data points. This could lead to adversarial vulnerability as well as lack of robustness when generalizing to out-of-distribution data.
+Excessive invariance. GS could also result in neural networks that are invariant to task-relevant changes in the input. In the example above, it is possible to obtain a data point with low probability under the data distribution, but that would still be classiﬁed with high conﬁdence.
+Implicit regularization. One might argue that according to Occam’s razor, a simpler decision boundary should generalize better. In fact, if both training and test sets share the same dominant feature (in this example, the feature along the horizontal axis), GS naturally prevents the learning of less dominant features that could otherwise result in overﬁtting. Therefore, depending on our assumptions on the training and test distributions, GS could also act as an implicit regularizer. We provide further discussion on the implicit regularization aspect of GS in Section 5. 3 Theoretical Results
+In this section, we study the learning dynamics of neural networks trained with cross-entropy loss.
+Particularly, we seek to decompose the learning dynamics along orthogonal directions in the feature space of neural networks, to provide a formal deﬁnition of GS, and to derive a simple regularization method to mitigate it. For analytical tractability, we make three key assumptions: (1) we study deep networks in the Neural Tangent Kernel (NTK) regime, (2) we treat a binary classiﬁcation task, (3) we decompose the interaction between two features. In Section 4, we demonstrate our results hold beyond these simplifying assumptions, for a wide range of practical settings. All derivation details can be found in SM C.
+= 3.1 Problem Setup and Gradient Starvation Deﬁnition denote a training set containing n datapoints with d dimensions, where, X =
+X, y
+Let
+{
+}
+D
+Rn n. Also let ˆy(X) := f (L)(X) : d and their corresponding class label y
+[x1, ..., xn]
+×
+∈
+Rn
+Rn represent the logits of an L-layer fully-connected neural network where each hidden d
+→ layer h(l)(x)
+Rdl is deﬁned as follows, 1, +1
+}
+∈ {−
+×
+∈ (cid:40)f (l)(xi) = W(l)h(l 1)(xi)
+−
+ξ(f (l)(xi)) (cid:113) γ dl h(l)(xi) =
+, l 0, 1, ..., L
+∈ {
+,
+} (1)
+−
+∈ dl−1 is a weight matrix drawn from (0, I) and γ is a scaling factor to ensure
+× 1) is preserved at initialization (See [28] for a formal treatment). The function
+Rdl in which W(l) that norm of each h(l
+ξ(.) is also an element-wise non-linear activation function.
+Let θ = concat(cid:0)
+Rm be the concatenation of all vectorized weight matrices with m as the total number of parameters. In the NTK regime [52], in the limit of inﬁnite width, the output of the neural network can be approximated as a linear function of its parameters governed by the neural tangent random feature (NTRF) matrix [23], l=1 vec(W(l))(cid:1)
+∪
+N
+∈
+L
+Φ (X, θ) =
+∂ ˆy (X, θ)
+∂θ
+In the wide-width regime, the NTRF changes very little during training [62], and the output of the neural network can be approximated by a ﬁrst order Taylor expansion around the initialization
+Φ (X, θ0) and then, without loss of generality, centering parameters parameters θ0. Setting Φ0 ≡ and the output coordinates to their value at the initialization (θ0 and ˆy0), we get m.
+Rn (2)
+∈
+×
+ˆy (X, θ) = Φ0θ. (3)
+Dominant directions in the feature space as well as the parameter space are given by principal components of the NTRF matrix Φ0, which are the same as those of the NTK Gram matrix [106].
+We therefore introduce the following deﬁnition.
+Deﬁnition 1 (Features and Responses). Consider the singular value decomposition (SVD) of the matrix YΦ0 = USVT , where Y = diag (y). The jth feature is given by (VT )j.. The strength of jth feature is represented by sj = (S)jj. Also, (U).j contains the weights of this feature in all examples. A neural network’s response to a feature j is given by zj where, z := UT Yˆy = SVT θ. (4) 3
+In Eq. 4, the response to feature j is the sum of the responses to every example in (Yˆy) multiplied by the weight of the feature in that example (UT ). For example, if all elements of (U).j are positive, it indicates a perfect correlation between this feature and class labels. We are now equipped to formally deﬁne GS.
+Deﬁnition 2 (Gradient Starvation). Recall the the model prescribed by Eq. 3. Let z∗j denote the model’s response to feature j at training optimum θ∗1. Feature i starves the gradient for feature j if dz∗j /d(s2 i ) < 0.
+This deﬁnition of GS implies that an increase in the strength of feature i has a detrimental effect on the learning of feature j. We now derive conditions for which learning dynamics of system 3 suffer from GS. 3.2 Training Dynamics
+We consider the widely used ridge-regularized cross-entropy loss function, (θ) = 1
+·
+L log [1 + exp (
+−
+Yˆy)] +
+λ 2 (cid:107)
+θ (cid:107) 2, (5) where 1 is a vector of size n with all its elements equal to 1. This vector form simply represents a summation over all the elements of the vector it is multiplied to. λ
+) denotes the weight decay coefﬁcient.
+[0,
+∞
+∈
+Direct minimization of this loss function using the gradient descent obeys coupled dynamics and is difﬁcult to treat directly [26]. To overcome this problem, we call on a variational approach that leverages the Legendre transformation of the loss function. This allows tractable dynamics that can directly incorporate rates of learning in different feature directions. Following [50], we note the following inequality, log [1 + exp (
+Yˆy)]
+H(α)
+α
+Yˆy, (6)
+[α log α + (1 where H(α) =
+−
+∈ (0, 1)n is a variational parameter deﬁned for each training example, and denotes the element-wise vector product. Crucially, the equality holds when the maximum of r.h.s. w.r.t α is achieved at
+α∗ = ∂
+L∂(Yˆy)T , which leads to the following optimization problem,
+≥
+α)] is Shannon’s binary entropy function, α
+−
+α) log (1 (cid:12) (cid:12)
+−
+−
+− min
+θ
+L (θ) = min
+θ (cid:18) max
+α 1 · H(α) − αYˆy + (cid:19)
+, (cid:107)θ(cid:107)2
+λ 2 (7) where the order of min and max can be swapped (see Lemma 3 of [50]). Since the neural network’s output is approximated by a linear function of θ, the minimization can be performed analytically with an critical value θ∗
+λ αYΦ0, given by a weighted sum of the training examples. This results in the following maximization problem on the dual variable, i.e., minθ L (θ) = max (θ) is equivalent to,
+T = 1
+H(α)
+αYΦ0ΦT (8) 0 YT αT (cid:19) (cid:18) 1
+. min
+θ L
+α
+· 1 2λ
+−
+By applying continuous-time gradient ascent on this optimization problem, we derive an autonomous differential equation for the evolution of α, which can be written in terms of features (see Deﬁnition 1),
+˙α = η (cid:18)
+− log α + log (1
+α)
+−
+− 1
+λ
+αUS2UT (cid:19)
+, (9) where η is the learning rate (see SM C.1 for more details). For this dynamical system, we see that the (0, 1). The other term depends on the matrix US2UT , logarithm term acts as barriers that keep αi ∈ which is positive deﬁnite, and thus pushes the system towards the origin and therefore drives learning. s2 k, where k is an index over the singular values, the linear term dominates Eq. 9, and
+When λ the ﬁxed point is drawn closer towards the origin. Approximating dynamics with a ﬁrst order Taylor expansion around the origin of the second term in Eq. 9, we get (cid:28) (cid:18)
+˙α
+η
+≈
+− log α 1
+λ
+−
+αU (cid:0)S2 + λI(cid:1) UT (cid:19)
+, (10) with stability given by the following theorem with proof in SM C. 1Training optimum refers to the solution to ∇θL(θ) = 0. 4
+Theorem 1. Any ﬁxed points of the system in Eq. 10 is attractive in the domain αi ∈
+At the ﬁxed point α∗, corresponding to the optimum of Eq. 8, the feature response of the neural network is given by, (0, 1). z∗ = 1
+λ
+S2UT α∗
+T . (11)
+See App. A for further discussions on the distinction between "feature space" and "parameter space".
+Below, we study how the strength of one feature could impact the response of the network to another feature which leads to GS. 3.3 Gradient Starvation Regime
+In general, we do not expect to ﬁnd an analytical solution for the dynamics of the coupled non-linear dynamical system of Eq. 10. However, there are at least two cases where a decoupled form for the dynamics allows to ﬁnd an exact solution. We ﬁrst introduce these cases and then study their perturbation to outline general lessons. 1. If the matrix of singular values S2 is proportional to the identity: This is the case where all the features have the same strength s2. The ﬁxed points are then given by,
+α∗ i =
+λW(λ−1s2 + 1) s2 + λ
+, z∗ j = s2W(λ−1s2 + 1) s2 + λ (cid:88) uij, i (12) is the Lambert W function. where 2. If the matrix U is a permutation matrix: This is the case in which each feature is associated with a single example only. The ﬁxed points are then given by,
+W
+α∗ i =
+λW(λ−1s2 s2 i + λ i + 1)
+, z∗ j = i W(λ−1s2 s2 s2 i + λ i + 1)
+. (13)
+To study a minimal case of starvation, we consider a variation of case 2 with the following assumption which implies that each feature is not associated with a single example anymore.
+Lemma 1. Assume U is a perturbed identity matrix (a special case of a permutation matrix) in which the off-diagonal elements are proportional to a small parameter δ > 0. Then, the ﬁxed point of the dynamical system in Eq. 10 can be approximated by,
+α∗ = (1 log (α∗0))
+− (cid:104)
+A + diag (cid:16) 1(cid:17)(cid:105)− 1
+,
+α∗0− where A = λ− 1U(S2 + λI)UT and α∗0 is the ﬁxed point of the uncoupled system with δ = 0.
+For sake of ease of derivations, we consider the two dimensional case where, which is equivalent to a U matrix with two blocks of features with no intra-block coupling and δ amount of inter-block coupling.
+Theorem 2 (Gradient Starvation Regime). Consider a neural network in the linear regime, trained under cross-entropy loss for a binary classiﬁcation task. With deﬁnition 1, assuming coupling between features 1 and 2 as in Eq. 15 and s2 1 > s2 (cid:18)√1
+U =
+δ2
+−
+δ (cid:19)
+,
+δ2
+δ
+−
+√1
+− 2, we have, dz∗2 ds2 1
+< 0, (14) (15) (16) which implies GS.
+While Thm. 2 outlines conditions for GS in two dimensional feature space, we note that the same rationale naturally extends to higher dimensions, where GS is deﬁned pairwise over feature directions.
+For a classiﬁcation task, Thm. 2 indicates that gradient starvation occurs when the data admits different feature strengths, and coupled learning dynamics. GS is thus naturally expected with cross-entropy loss. Its detrimental effects however (as outlined in Sect. 2) arise in settings with large discrepancies between feature strengths, along with network connectivity that couples these features’ directions. This phenomenon readily extends to multi-class settings, and we validate this case with experiments in Sect. 4. Next, we introduce a simple regularizer that encourages feature decoupling, thus mitigating GS by insulating strong features from weaker ones. 5
+3.4 Spectral Decoupling
+By tracing back the equations of the previous section, one may realize that the term U T S2U in Eq. 9 is not diagonal in the general case, and consequently introduces coupling between αi’s and hence, between the features zi’s. We would like to discourage solutions that couple features in this way. To that end, we introduce a simple regularizer: Spectral Decoupling (SD). SD replaces the general L2 weight decay term in Eq. 5 with an L2 penalty exclusively on the network’s logits, yielding (θ) = 1
+·
+L log [1 + exp (
+Yˆy)] +
+−
+λ 2 (cid:107)
+ˆy 2. (cid:107) (17)
+Repeating the same analysis steps taken above, but with SD instead of general L2 penalty, the critical value for θ∗ becomes θ∗ = 1 2V T . This new expression for θ∗ results in the following modiﬁcation of Eq. 9,
+λ αY Φ0V S− (cid:18)
+˙α = η log 1
+α
+−
+α − 1
+λ
+αUS2S− 2UT (cid:19) (cid:18)
+= η log 1
+α
+−
+α − 1
+λ (cid:19)
+α
+, (18) where as earlier, log and division are taken element-wise on the coordinates of α.
+Note that in contrast to Eq. 9 the matrix multiplication involving U and S in Eq. 18 cancels out, leaving αi independent of other αj
+=i’s. We point out this is true for any initial coupling, without simplifying assumptions. Thus, a simple penalty on output weights promotes decoupled dynamics across the dual parameter αi’s, which track learning dynamics of feature responses (see Eq. 7).
+Together with Thm. 2, Eq. 18 suggests SD should mitigate GS and promote balanced learning dynamics across features. We now verify this in numerical experiments. For further intuition, we provide a simple experiment, summarized in Fig. 5, where directly visualizes the primal vs. the dual dynamics as well as the effect of the proposed spectral decoupling method. 4 Experiments
+The experiments presented here are designed to outline the presence of GS and its consequences, as well as the efﬁcacy of our proposed regularization method to alleviate them. Consequently, we highlight that achieving state-of-the-art results is not the objective. For more details including the scheme for hyper-parameter tuning, see App. B. 4.1 Two-Moon classiﬁcation and the margin
+Recall the simple 2-D classiﬁcation task between red and blue data points in Fig. 1. Fig. 1 (c) demonstrates the learned decision boundary when SD is used. SD leads to learning a curved decision boundary with a larger margin in the input space. See App. B for additional details and experiments. 4.2 CIFAR classiﬁcation and adversarial robustness
+To study the classiﬁcation margin in deeper networks, we conduct a classiﬁcation experiment on
+CIFAR-10, CIFAR-100, and CIFAR-2 (cats vs dogs of CIFAR-10) [57] using a convolutional network with ReLU non-linearity. Unlike linear models, the margin to a non-linear decision boundary cannot be computed analytically. Therefore, following the approach in [72], we use "the norm of input-disturbance required to cross the decision boundary" as a proxy for the margin. The disturbance on the input is computed by projected gradient descent (PGD) [84], a well-known adversarial attack.
+Table 1: Table compares adversarial robustness of ERM (vanilla cross-entropy) vs SD with a CNN trained on
+CIFAR-2, 10, and 100 (setup of [72]). SD consistently achieves a better OOD performance.
+Figure 2: The plot shows the cumulative distribution function (CDF) of the margin for the CIFAR-2 binary classiﬁcation. SD appears to improve the margin con-siderably. 6 (cid:54)
+Table 1 includes the results for IID (original test set) and OOD (perturbed test set by (cid:15)PGD = 0.05).
+Fig. 2 shows the percentange of mis-classiﬁcations as the norm of disturbance is increased for the Cifar-2 dataset. This plot can be interpreted as the cumulative distribution function (CDF) of the margin and hence a lower curve reads as a more robust network with a larger margin. This experiment suggests that when trained with vanilla cross-entropy, even slight disturbances in the input deteriorates the network’s classiﬁcation accuracy. That is while spectral decoupling (SD) improves the margin considerably. Importantly, this improvement in robustness does not seem to compromise the noise-free test performance. It should also be highlighted that SD does not explicitly aim at maximizing the margin and the observed improvement is in fact a by-product of decoupled learning of latent features. See Section 5 for a discussion on why cross-entropy results in a poor margin while being considered a max-margin classiﬁer in the literature [94]. 4.3 Colored MNIST with color bias
+We conduct experiments on the Colored MNIST Dataset, proposed in [9]. The task is to predict 1 for digits 0 to 4 and y = +1 for digits 5 to 9. A color channel (red, green) is binary labels y = artiﬁcially added to each example to deliberately impose a spurious correlation between the color and the label. The task has three environments:
+−
+Training env. 1: Color is correlated with the labels with 0.9 probability.
+•
+Training env. 2: Color is correlated with the labels with 0.8 probability.
+•
+Testing env.: Color is correlated with the labels with 0.1 probability (0.9 reversely correlated).
+•
+Because of the opposite correlation between the color and the label in the test set, only learning to classify based on color would be disastrous at testing. For this reason, Empirical Risk Minimization (ERM) performs very poorly on the test set (23.7 % accuracy) as shown in Tab. 2.
+Method
+Train Accuracy Test Accuracy
+ERM (Vanilla Cross-Entropy)
+REx [59]
+IRM [9]
+SD (this work)
+Oracle - (grayscale images)
+Random Guess 91.1 % ( 71.5 % ( 70.5 % ( 70.0 % ( 73.5 % ( 0.4) 1.0) 0.6) 0.9)
+±
+±
+±
+± 0.2)
+± 50 % 0.8) 0.9) 1.4) 1.2) 23.7 % ( 68.7 % ( 67.1 % ( 68.4 % ( 73.0 % (
+±
+±
+±
+± 0.4)
+± 50 %
+Table 2: Test accuracy on test examples of the Colored MNIST after training for 1k epochs. The standard deviation over 10 runs is reported in parenthesis. ERM stands for the empirical risk minimization. Oracle is an
+ERM trained on grayscale images. Note that due to 25 % label noise, a hypothetical optimum achieves 75 % accuracy (the upper bound).
+Invariant Risk Minimization (IRM) [9] on the other hand, performs well on the test set with (67.1 % accuracy). However, IRM requires access to multiple (two in this case) separate training environments with varying amount of spurious correlations. IRM uses the variance between environments as a signal for learning to be “invariant” to spurious correlations. Risk Extrapolation (REx) [59] is a related training method that encourages learning invariant representations. Similar to IRM, it requires access to multiple training environments in order to quantify the concept of “invariance”.
+SD achieves an accuracy of 68.4 %. Its performance is remarkable because unlike IRM and REx,
+SD does not require access to multiple environments and yet performs well when trained on a single environment (in this case the aggregation of both of the training environments).
+A natural question that arises is “How does SD learn to ignore the color feature without having access to multiple environments?” The short answer is that it does not! In fact, we argue that
+SD learns the color feature but it also learns other predictive features, i.e., the digit shape features.
+At test time, the predictions resulting from the shape features prevail over the color feature. To validate this hypothesis, we study a trained model with each of these methods (ERM, IRM, SD) on four variants of the test environment: 1) grayscale-digits: No color channel is provided and the network should rely on shape features only. 2) colored-digits: Both color and digit are provided however the color is negatively correlated (opposite of the training set) with the label. 3) grayscale-blank: All images are grayscale and blank and hence do not provide any information. 4) colored-blank:
+Digit features are removed and only the color feature is kept, also with reverse label compared to training. Fig. 3 summarizes the results. For more discussions see SM B.
+As a ﬁnal remark, we should highlight that, by design, this task assumes access to the test environment for hyperparameter tuning for all the reported methods. This is not a valid assumption in general, and 7
+Figure 3: Diagram comparing ERM, SD, and IRM on four different test environments on which we evaluate a pre-trained model. Top and bottom rows show the accuracy and the entropy (inverse of conﬁdence), respectively.
+Analysis: Compare three values of 9.4 % , 9.4 % , and 49.6 % : Both ERM and SD have learned the color feature but since it is inversely correlated with the label, when only the color feature is provided, as expected both ERM and SD performs poorly. Now compare 0.00 and 0.41 : Although both ERM and SD have learned the color feature, ERM is much more conﬁdent on its predictions (zero entropy). As a consequence, when digit features are provided along with the color feature (colored-digit environment), ERM still performs poorly ( 23.9 % ) but SD achieves signiﬁcantly better results ( 67.2 % ). IRM ignores the color feature altogether but it requires access to multiple training environments.
+Method
+Average Acc. Worst Group Acc.
+ERM 94.61 % (
+±
+SD (this work) 91.64 % (
+±
+LfF
+Group DRO∗ 91.76 % (
+± 0.67) 0.61)
+N/A 0.28) 40.35 % ( 1.68)
+± 83.24 % ( 2.01)
+± 81.24 % ( 87.78 % ( 1.38)
+± 0.96)
+±
+Figure 4: CelebA: blond vs dark hair classiﬁcation.
+The HairColor and the Gender are spuriously cor-related which leads to poor OOD performance with
+ERM, however SD signiﬁcantly improves performance.
+ERM’s worst group accuracy is signiﬁcantly lower than
+SD.
+Table 3: CelebA: blond vs dark hair classiﬁcation with spurious correlation. We report test performance over ten runs. SD signiﬁcantly improves upon ERM.
+∗Group DRO [89] requires explicit information about the spurious correlation. LfF [71] requires simultane-ous training of two networks. hence the results should be only interpreted as a probe that shows that SD could provide an important level of control over what features are learned.
+∈ 4.4 CelebA with gender bias
+The CelebA dataset [65] contains 162k celebrity faces with binary attributes associated with each image. Following the setup of [89], the task is to classify images with respect to their hair color into two classes of blond or dark hair. However, the Gender
+{Male, Female} is spuriously correlated with the HairColor
+{Blond, Dark} in the training data. The rarest group which is blond males represents only 0.85 % of the training data (1387 out of 162k examples). We train a ResNet-50 model
+[38] on this task. Tab. 3 summarizes the results and compares the performance of several methods. A model with vanilla cross-entropy (ERM) appears to generalize well on average but fails to generalize to the rarest group (blond males) which can be considered as “weakly" out-of-distribution (OOD).
+Our proposed SD improves the performance more than twofold. It should be highlighted that for this task, we use a variant of SD in which, λ 2 2 is added to the original cross-entropy loss.
+−
+||
+The hyper-parameters λ and γ are tuned separately for each class (a total of four hyper-parameters).
+This variant of SD does provably decouple the dynamics too but appears to perform better than the original SD in Eq. 17 in this task.
+ˆy 2 ||
+∈
+γ
+Other proposed methods presented in Tab. 3 also show signiﬁcant improvements on the performance 8
+of the worst group accuracy. The recently proposed “Learning from failure” (LfF) [71] achieves comparable results to SD, but it requires simultaneous training of two networks. Group DRO [89] is another successful method for this task. However, unlike SD, Group DRO requires explicit information about the spuriously correlated attributes. In most practical tasks, information about the spurious correlations is not provided and, dependence on the spurious correlation goes unrecognized.2 5

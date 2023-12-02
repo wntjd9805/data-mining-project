@@ -1,0 +1,215 @@
+Abstract
+The ﬁne-tuning of pre-trained language models has a great success in many NLP
+ﬁelds. Yet, it is strikingly vulnerable to adversarial examples, e.g., word substitution attacks using only synonyms can easily fool a BERT-based sentiment analysis model. In this paper, we demonstrate that adversarial training, the prevalent defense technique, does not directly ﬁt a conventional ﬁne-tuning scenario, because it suffers severely from catastrophic forgetting: failing to retain the generic and robust linguistic features that have already been captured by the pre-trained model. In this light, we propose Robust Informative Fine-Tuning (RIFT), a novel adversarial
+ﬁne-tuning method from an information-theoretical perspective. In particular, RIFT encourages an objective model to retain the features learned from the pre-trained model throughout the entire ﬁne-tuning process, whereas a conventional one only uses the pre-trained weights for initialization. Experimental results show that RIFT consistently outperforms the state-of-the-arts on two popular NLP tasks: sentiment analysis and natural language inference, under different attacks across various pre-trained language models. 1. 1
+
+Introduction
+Deep models are well-known to be vulnerable to adversarial examples [64, 19, 50, 35]. For instance,
+ﬁne-tuned models pre-trained on very large corpora can be easily fooled by word substitution attacks using only synonyms [2, 58, 32, 12]. This has raised grand security challenges to modern NLP systems, such as spam ﬁltering and malware detection, where pre-trained language models like BERT
+[11] are widely deployed.
+Attack algorithms [19, 7, 76, 40, 2] aim to maliciously generate adversarial examples to fool a victim model, while adversarial defense aims at building robustness against them. Among the defense methods, adversarial training [64, 19, 48, 45] is the most effective one [3]. It updates model parameters using perturbed adversarial samples generated on-the-ﬂy and yields consistently robust performance even against the challenging adaptive attacks [3, 68].
+However, despite its effectiveness in training from scratch, adversarial training may not directly
+ﬁt the current NLP paradigm, the ﬁne-tuning of pre-trained language models. First, ﬁne-tuning per se suffers from catastrophic forgetting [46, 18, 34], i.e., the resultant model tends to over-ﬁt to a small ﬁne-tuning data set, which may deviate too far from the pre-trained knowledge [25, 81].
+Second, adversarially ﬁne-tuned models are more likely to forget: adversarial samples are usually 1Our code will be available at https://github.com/dongxinshuai/RIFT-NeurIPS2021. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: An illustration of the overall objective of RIFT. Maximizing I(S; Y ) encourages features of the objective model to be predictive of the class label, while maximizing I(S; T ∣ Y ) encourages learning robust and generic linguistic information from the pre-trained model. (Random variable S denotes extracted features of X by the objective model and T by the pre-trained language model) out-of-distribution [38, 63], thus they are generally inconsistent with the pre-trained model. As a result, adversarial ﬁne-tuning fails to memorize all the robust and generic linguistic features already learned during pre-training [65, 57], which are however very beneﬁcial for a robust objective model.
+Addressing forgetting is essential for achieving a more robust objective model. Conventional wisdom such as pre-trained weight decay [8, 10] and random mixout [37] mitigates forgetting by constraining lp distance between the two models’ parameters. Though effective to some extent, however, it is limited because change in the model parameter space only serves as an imperfect proxy for that in the function space [5]. Besides, the extent to which an encoder fails to retain information also depends on the input distribution. Therefore, a better way to encourage memorization is favorable.
+In this paper, we follow an information-theoretical lens to look into the forgetting problem: we employ mutual information to measure how well an objective model memorizes the useful features captured before. This motivates our novel adversarial ﬁne-tuning method, Robust Informative Fine-Tuning (RIFT). In addition to ﬁtting a down-stream task as conventions, RIFT maximizes the mutual information between the output of an objective model and that of the pre-trained model conditioned on the class label. It encourages an objective model to continuously retain useful information from the pre-trained one throughout the whole ﬁne-tuning process, whereas the conventional one only makes use of the pre-trained weights for initialization. We illustrate the overall objective of RIFT in
+Figure 1 and summarize the major contributions of this paper as follows:
+• To the best of our knowledge, we are the ﬁrst to investigate the intensiﬁed phenomenon of catastrophic forgetting in the adversarial ﬁne-tuning of pre-trained language models.
+• To address the forgetting problem and achieve more robust models, we propose a novel approach named Robust Informative Fine-Tuning (RIFT) from an information-theoretical perspective. RIFT enables an objective model to retain robust and generic linguistic features throughout the whole
+ﬁne-tuning process and thus enhance robustness against adversarial examples.
+• We empirically evaluate RIFT on two prevailing NLP tasks, sentiment analysis and natural language inference, where RIFT consistently outperforms the state-of-the-arts in terms of robustness, under different attacks across various pre-trained language models. 2 Methodology 2.1 Notations and Problem Setting
+In this paper, we focus on the text classiﬁcation task to introduce our method, while it can be easily extended to other NLP tasks. We suppose random variables X, Y ∼ pD(x, y), where X represents the textual input, Y represents the class label, pD is the data distribution, and x, y are the observed values. Our goal is to build a classiﬁer q(y∣Fs(x)), where Fs(⋅), referred to as our objective model 2
+(a) In adversarial ﬁne-tuning, the relative L2 dist-ance continuously grows as the ﬁne-tuning proceeds. (b) Trading clean accuracy off against robustness (by increasing β in Eq. 2) induces increased relative L2 distance at the last epoch.
+Figure 2: Relative L2 distance between the pre-trained model and the objective model in the parameter space, under different ﬁne-tuning schemes on IMDB, with small learning rate 2e-5. in the rest of this paper, is a feature extractor ﬁne-tuned from the encoder of a pre-trained language model, e.g., Transformer [72], and q(⋅∣⋅) is parameterized by using an MLP with softmaxed output.
+We favor a classiﬁer that is robust against adversarial attacks [64, 2], i.e., maintaining high accuracy even given adversarial examples as inputs. 2.2 Adversarial Fine-Tuning Suffers From Forgetting
+Adversarial training [64, 19, 45] is currently the most effective defense technique [3]. Its training objective can be generally formulated as: min[ E (1)
+ˆx∈B(x) L(x, ˆx, y)]],
+[ max x,y∼pD where B(x) deﬁnes the allowed perturbation space around x, and L is a loss to encourage correct predictions both given vanilla samples and given perturbed examples. Such an objective function can also be applied to the ﬁne-tuning of a pre-trained language model towards robustness, and we refer to it as adversarial ﬁne-tuning. The loss function in Eq. 1 can be speciﬁed following Miyato et al.
+[48], Zhang et al. [79] in a semi-supervised fashion as:
+− log q(y∣Fs(x)) + βKL(q(⋅∣Fs(x))∣∣q(⋅∣Fs(ˆx))), (2) where the Kullback–Leibler divergence encourages invariant predictions between x and ˆx.
+Despite its effectiveness in training from scratch, such an adversarial objective function may not directly ﬁt the ﬁne-tuning scenario. To begin with, ﬁne-tuning itself suffers from catastrophic forgetting [46, 18, 34]. During ﬁne-tuning, an objective model Fs(⋅) tends to continuously deviate away from the pre-trained one to ﬁt a down-stream task [25, 81], and thus the useful information already captured before is less utilized as the ﬁne-tuning proceeds. Further, adversarial ﬁne-tuning suffers even more from the forgetting problem, the reasons of which are given as what follows. (i) Adversarial Fine-Tuning Tends to Forget: Adversarial ﬁne-tuning targets at tackling adversarial examples, which are generally out of the manifold [38, 63] of the pre-training corpora. To additionally handle them, an objective model would be ﬁne-tuned towards a solution that is far away from the optimization starting point, i.e., the pre-trained model. Figure 2 (b) empirically shows this point: by increasing β in Eq. 2, we emphasize more on robustness instead of vanilla accuracy, and consequently, at the last epoch the distance between models also increases. Besides, adversarial ﬁne-tuning often entails more iterations to converge (several times of normal ﬁne-tuning), which further intensiﬁes the forgetting problem, as the objective model is continuously deviating away as shown in Figure 2 (a). (ii) Adversarial Fine-Tuning Needs to Memorize: Overﬁtting to training data is a dominant phe-nomenon throughout the adversarial training/ﬁne-tuning process [60]. To mitigate overﬁtting and generalize better, adversarial ﬁne-tuning should retain all the generalizable features already captured by the pre-trained model [11, 41]. In addition, adversarial ﬁne-tuning favors an objective model that 3
+extracts features invariant to perturbations [70, 28] for robustness. As such, all those generalizable and robust linguistic information captured during pre-training [11, 65] are particularly beneﬁcial and should be memorized. We empirically validates that encouraging memorization does improve both generalization and robustness in Sec. 3.5.
+To address forgetting, previous methods such as pre-trained weight decay [8, 10] and random mixout
+[37] have shown their effectiveness in stabilizing ﬁne-tuning [81]. However, they focus only on the parameter space, in which they encourage an object model to be similar to the pre-trained one.
+Distance in the parameter space can only approximately characterize the change in the function space, and fails to take the data distribution into consideration. A more natural way to capture the extent to which a model memorizes or forgets, should be using the mutual information between outputs of the two models, and we provide our solution as follows. 2.3
+Informative Fine-Tuning
+We ﬁrst use an information-theoretical perspective to look into how a pre-trained model should be leveraged throughout the whole ﬁne-tuning process.
+We deﬁne random variable T = Ft(X) as the feature of X extracted by the pre-trained language model Ft(⋅), and t as the observed value of T . Similarly, we deﬁne random variable S = Fs(X) as the feature of X extracted by our objective model Fs(⋅), and s as the observed value of S. We formulate an overall ﬁne-tuning objective as follows. The motivation is to train Fs(⋅) such that S is capable of predicting Y , as well as preserving the information from T . max I(S; Y, T ), i.e., maximizing the mutual information between (i) the feature extracted by the objective model and (ii) the class label plus the feature extracted by the pre-trained model. Since the pre-trained model Ft(⋅) is a ﬁxed deterministic function, the ﬁne-tuning objective in Eq. 3 in essense encourages
+Fs(⋅) to output features that contain as much information as possible for predicting Y and T . This enables the objective model to learn from the pre-trained language model via T throughout the whole
+ﬁne-tuning process, and thus helps address the forgetting problem. (3)
+However, the objective deﬁned in Eq. 3 is generally hard to optimize directly. Therefore, we decompose Eq. 3 into two terms as follows:
+I(S; Y, T ) = I(S; Y ) + I(S; T ∣ Y ), where I(S; Y ) measures how well the output of our objective model can predict the label, and
+I(S; T ∣ Y ) measures when conditioned on the class label, how well the output features of the two models can predict each other. Visualization of each component can be seen in Figure 1 for more intuitive understandings. We next introduce how each term in the right-hand side of Eq. 4 can be transformed into a tractable lower bound for optimization. (i) Maximizing I(S;Y): We treat q(y∣s), which is the classiﬁcation layer that takes the features extracted by the objective model as input, as a variational distribution of p(y∣s), and derive a variational lower bound on I(S; Y ) following variational inference [33] as follows: (4)
+I(S; Y ) = H(Y ) − Ex,y∼pD [− log q(y∣s)] + KL(p(⋅∣s)∣∣q(⋅∣s)) (5)
+≥ H(Y ) − Ex,y∼pD [− log q(y∣s)], (6) where H(Y ) is a constant measuring the shannon entropy of Y , and EX,Y [− log q(y∣s)] is essentially the cross-entropy loss using q(y∣s) for classiﬁcation. Then, the objective of maximizing I(S; Y ) can be achieved by minimizing EX,Y [− log q(y∣s)] instead. (ii) Maximizing I(S;T| Y): The deﬁnition of the conditional mutual information I(S; T ∣ Y ) is as follows:
+I(S; T ∣ Y ) = Ey∼pD(y)[I(S; T )∣ Y = y] = Ey∼pD(y)[ Ex∼pD(x∣y)[log p(s, t∣y) p(s∣y)p(t∣y)
+]]. (7)
+To achieve a tractable objective for maximizing Eq. 7, we employ noise contrastive estimation [20, 49] and derive a lower bound −Linfo on the conditional mutual information. This can be summarized in the following Lemma (the proof of which can be found in Appendix A.2): 4
+Figure 3: Visualization of the learned geometry using 500 random samples from IMDB by t-SNE [71].
+▲ and ∎ denote samples from two different classes respectively. Different colors represent different 1 data point IDs (approximately due to limited color space). In (c) and (d), Fs(x) are projected to S with radius 1, while Ft(x) with radius 0.9. For each sub-image: (a) The geometry of Fs(x) before
+ﬁne-tuning, represents the data manifold. (b) Maximizing I(S; Y ) encourages separating the whole data manifold into two class-speciﬁc data manifolds. (c) Maximizing I(S; T ) by contrastive loss in essence encourages alignment between two circles and uniformity over the whole data manifold. (d)
+Maximizing I(S; T ∣ Y ) by contrastive loss in essence encourages alignment and uniformity inside each class-speciﬁc data manifold. Best view in color with zooming in.
+Lemma 1. Given {xi, y}
+I(S; T ∣ Y ) is lower bounded by −Linfo = Ey∼pD(y)[ E{xi,y}N and fy is a score function indexed by y.
+N i=1 that is sampled i.i.d. from pD(x∣y), si = Fs(xi), and ti = Ft(xi), efy (si,ti) j=1 efy (si,tj ) + log N ]],
+N i=1 log 1
+N ∑ i=1 [
+∑N
+By leveraging Lemma 1, Linfo can be computed using a batch of samples and then minimized for maximizing I(S; T ∣ Y ). The score function fy is deﬁned as the inner product after non-linear projections into a space of hyper-sphere following [9] as fy(a, b) = y and g2 y are parameterized by using MLPs. y(a),g2
+⟨g1 y(a)∥2∥g2
+, where g1 y(b)⟩ y(b)∥2
+∥g1 1
+τ 2.4 Conditional Mutual Information Better Fits A Down-Stream Task
+Above we have introduced the training objective of informative ﬁne-tuning and decomposed it into
+I(S; Y ) and I(S; T ∣ Y ) for optimization. However, one may wonder why not maximize I(S; T ) directly instead of I(S; T ∣ Y ). From an information-theoretical perspective, if we maximize I(S; Y ) and I(S; T ), the intersection of the three circles in Figure 1, i.e., the interaction information of them, is repeatedly optimized and might induce conﬂiction. To further elaborate this point, we look into contrastive loss and give an explanation as follows.
+We consider contrastive learning by decomposing it into the encouragement of alignment and unifor-mity following [74]. For example, maximizing I(S; T ) = H(S) − H(S∣T ) is to decrease H(S∣T ) and increase H(S). Decreasing H(S∣T ) corresponds to encouraging alignment in contrastive learn-ing, which aims to align si and ti in the sense of inner product when they are projected into a hyper-sphere. In the meanwhile, increasing H(S) corresponds to uniformity in contrastive learning, which encourages si and sj, where i ≠ j, to diffuse over the whole sub-space as uniformly as possible. 1, alignment is achieved in that points from two
+It can be seen in Figure 3 (c) that, in the space of S different circles but with the same color are aligned, and uniformity is achieved in that all points diffuse over the whole S
+However, when maximizing I(S; T ), the uniformity in the contrastive loss is encouraged over the whole data manifold. Diffusing uniformly over the whole data manifold can be against the objective of maximizing I(S; Y ), which aims to separate the whole data manifold into class-speciﬁc parts as shown in Figure 3 (b). In contrast, maximizing I(S; T ∣ Y ) only encourages uniformity inside each class-speciﬁc data manifold, which is complementary to maximizing I(S; Y ), as show in Figure 3 (d).
+In the meanwhile, the alignment is still enforced. More empirical support can be found in Sec. 3.4. 1. 5
+Algorithm 1 RIFT
+Input: dataset D, hyper-parameters of AdamW [43]
+Output: the model parameters θ and φ 1: Initialize θ using the pre-trained model, and initialize φ and ϕ randomly. 2: repeat 3: 4: 5: 6: 7: 8: until the training converges.
+Sample y ∼ pD(y) and then {xi, y} for every xi, y in the mini-batch {xi, y}
+N i=1 ∼ pD(x∣y)
+N i=1 do end for
+Compute the loss function deﬁned in Eq. 11 and update θ, φ, and ϕ by gradients.
+Find ˆxi by solving Eq. 8; 2.5 Robust Informative Fine-Tuning
+In this section, we are going to put the objective function of informative ﬁne-tuning into the adversarial context and introduce Robust Informative Fine-Tuning (RIFT).
+To robustly train a model, the adversarial examples ˆx for training should be formulated and generated
+ﬁrst. As our end goal is to enhance robustness in down-stream tasks, the generation process of adversarial examples should focus on preventing a model from predicting the ground truth label.
+However, using label for generating adversarial examples in training often induces label leaking [36], i.e., the generated adversarial examples contains label information which is used as a trivial short-cut by a classiﬁer. As such, we follow [48, 79] to generate ˆx in a self-supervised fashion:
+ˆx = arg max x′∈B(x)
+KL(q(⋅∣Fs(x))∣∣q(⋅∣Fs(x′
+))). (8)
+By solving Eq. 8, ˆx is found to induce the most different prediction from that of a vanilla sample x in terms of KL, inside the attack space B(x).
+Next, we introduce how to robustly optimize each objective in the informative ﬁne-tuning by using ˆx. (i) Robustly Maximizing I(S;Y): As shown in Sec. 2.3, maximizing I(S; Y ) can be achieved by minimizing a cross-entropy loss instead. To encourage adversarial robustness, this cross-entropy loss can be upgraded to encourage both correct predictions on and invariant predictions between x and ˆx
+[48, 79]. We formulate such an objective function as follows:
+θ,φ Lr-task, Lr-task = E min x,y∼pD
+[ − log q(y∣Fs(x)) + βKL(q(⋅∣Fs(x))∣∣q(⋅∣Fs(ˆx)))], (9) where θ denotes the parameters of Fs(⋅) and φ denotes the parameters of q(⋅∣⋅). Minimizing Lr-task in
+Eq. 9 corresponds to adversarilly maximizing I(S; Y ) for robust performance in a down-stream task.
+By doing so, the adversarial example ˆx is generated by Eq. 8 ﬁrst and then both x and ˆx are used to optimize the model parameters θ and φ. (ii) Robustly Maximizing I(S;T| Y): We aim to maximize the conditional mutual information
+I(S; T ∣ Y ), but under an adversarial distribution of input data. We formulate such a term as
+ˆX), ˆX ∼ padv(ˆx∣x, θ, φ, B), and sampling from padv, the
+I( adversarial distribution of input data, is to generate adversarial example ˆx by Eq. 8.
+ˆS; T ∣ Y ), where random variable ˆS = Fs(
+To optimize I( minimize Lr-info as follows (similar to −Linfo by using Lemma 1):
+ˆS; T ∣ Y ), we propose −Lr-info as a lower bound on it, and formulate the objective to
+θ,ϕ Lr-info, Lr-info = min
+E y∼pD(y)
+[
+E
+{xi,y}N i=1∼pD(x∣y) 1
+N
+[
+N
+∑ i=1
+− log efy(ˆsi,ti) j=1 efy(ˆsi,tj ) − log N ]],
+N
+∑ (10) where ˆsi = Fs(ˆxi), ti = Ft(xi), and ϕ denotes the parameters of all the score functions fy. By
+Eq. 10, we are able to encourage Fs(⋅) to retain information from Ft(⋅) in a robust fasion.
+Noted that, in Lr-info we do not use ˆxi to extract features from the pre-trained model. This follows the spirit of Knowledge Distillation [22] (though the setting is different in that a student is expected to perform identically to a teacher in knowledge distillation, while in ﬁne-tuning it does not): the data used to extract features of a teacher should be inside the domain for which the teacher is trained. A 6
+Table 1: Accuracy(%) of different ﬁne-tuning methods under attacks on IMDB.
+Model Genetic
+Method 38.1±2.5
+BERT
+Standard 74.8±0.4
+Adv-Base
+BERT 73.9±0.4
+Adv-PTWD BERT 75.4±0.7
+Adv-Mixout BERT 77.2±0.8
+RIFT
+BERT
+PWWS 40.7±1.1 68.3±0.3 69.1±0.7 68.8±0.6 70.1±0.5
+Model
+Method
+RoBERTa
+Standard
+Adv-Base
+RoBERTa
+Adv-PTWD RoBERTa
+Adv-Mixout RoBERTa
+RIFT
+RoBERTa
+Genetic 42.1±2.1 70.3±1.2 69.3±1.4 70.6±1.0 73.5±0.8
+PWWS 45.6±3.1 63.3±0.7 64.4±0.3 63.9±1.3 66.3±0.7 (a) Accuracy (%) based on BERT-base-uncased. (b) Accuracy (%) based on RoBERTa-base.
+Table 2: Accuracy(%) of different ﬁne-tuning methods under attacks on SNLI.
+Genetic 43.4±1.2 82.6±0.6 81.2±0.8 82.6±0.9 83.5±0.8
+Method
+Model
+Standard
+RoBERTa
+RoBERTa
+Adv-Base
+Adv-PTWD RoBERTa
+Adv-Mixout RoBERTa
+RIFT
+RoBERTa
+Method
+Model Genetic 40.1±0.7
+Standard
+BERT 75.7±0.5
+BERT
+Adv-Base 75.2±1.0
+Adv-PTWD BERT 76.3±0.8
+Adv-Mixout BERT 77.5±0.9
+RIFT
+BERT
+PWWS 19.4±0.4 72.9±0.2 72.6±0.5 73.2±1.0 74.3±1.1
+PWWS 20.4±1.0 79.9±0.7 78.9±0.7 80.6±0.3 81.1±0.4 (a) Accuracy (%) based on BERT-base-uncased. (b) Accuracy (%) based on RoBERTa-base. down-stream NLP task, e.g., sentiment analysis, has a data domain that is generally a sub-domain of the pre-training corpora, while ˆxi can be signiﬁcantly off the pre-training data manifold.
+Objective Function of Robust Informative Fine-Tuning (RIFT): The objective function of RIFT is a combination of Lr-task and Lr-info, deﬁned as follows:
+θ,φ,ϕ Lr-task + αLr-info, min (11) where the hyper-parameter α controls to what extent we encourage an objective model to absorb information from the pre-trained one (ablation on α can be seen in Sec. 3.5). We summarize the whole training process in Algorithm 1 and include more implementation details in Appendix A.1. 3 Experiments 3.1 Experimental Setting
+Tasks and Datasets: We evaluate the robust accuracy and compare our method with the state-of-the-arts on: (i) Sentiment analysis using the IMDB dataset [44]. (ii) Natural language inference using the SNLI dataset [6]. We mainly focus on robustness against adversarial word substitutions [2, 58], as such attacks preserve the syntactic and semantics very well [31, 78, 12], and are very hard to detect even by humans. Under this attack setting, any word in the input sequence can be substituted by a semantically similar word of it (often its synonym). We evaluate robustness on 1000 random examples from the testset of IMDB and SNLI respectively following [31, 12].
+Model Architectures: We examine our methods and compare with state-of-the-arts on the following two prevailing pre-trained language models: (i) BERT-base-uncased [11]. (ii) RoBERTa-base [41].
+Attack Algorithms: Two powerful attacks are employed: (i) Genetic [2] based on population algorithm. Aligned with [31, 12], the population size and iterations are set as 60 and 40 respectively. (ii) PWWS [58] based on word saliency. We only attack hypothesis on SNLI aligned with [31, 12].
+Substitution Set: We follow [31, 12] to use the substitution set from [2], and the same language model constraint is applied to Genetic attacks and not to PWWS attacks. 3.2 Comparative Methods (i) Standard Fine-Tuning: The standard ﬁne-tuning process ﬁrst initializes the objective model by the pre-trained weight, and then use cross-entropy loss to ﬁne-tune the whole model. 7
+(a) Accuracy (%) under Genetic attacks. (b) Accuracy (%) under PWWS attacks.
+Figure 4: Tradeoff curve between robustness and vanilla accuracy of BERT-based model on IMDB.
+Table 3: Accuracy(%) of RIFT with maximizing I(S; T ∣ Y ) and I(S; T ) respectively.
+Maximizing
+I(S; T∣ Y)
+I(S; T )
+I(S; T∣ Y)
+I(S; T )
+Model
+BERT
+BERT
+RoBERTa
+RoBERTa
+Genetic 77.2 76.1 73.5 72.0
+PWWS 70.1 69.4 66.3 65.3
+Maximizing
+I(S; T∣ Y)
+I(S; T )
+I(S; T∣ Y)
+I(S; T )
+Model
+BERT
+BERT
+RoBERTa
+RoBERTa
+Genetic 77.5 76.6 83.5 82.5
+PWWS 74.3 72.1 81.1 79.4 (a) Accuracy (%) under attacks on IMDB. (b) Accuracy (%) under attacks on SNLI. (ii) Adversarial Fine-Tuning Baseline (Adv-Base): We employ the state-of-the-art defense against word substitutions, ASCC-Defense [12], as the adversarial ﬁne-tuning baseline. This method is not initially proposed for pre-trained language models but can readily extend to perform adversarial
+ﬁne-tuning. During ﬁne-tuning, adversarial example ˆx, which is a sequence of convex combinations, is generated ﬁrst and then both x and ˆx are used for optimization using objective deﬁned in Eq. 9. (iii) Adv + Pre-Trained Weight Decay (Adv-PTWD): Pre-trained weight decay [8, 10] penalizes
+λ∥Wobj − Wpre∥2, and mitigates catastrophic forgetting [75, 37]. We combine it with the adversarial baseline for comparisons and λ is chosen as 0.01 on IMDB and 0.005 on SNLI for best robustness. (iv) Adv + Mixout (Adv-Mixout): Motivated by Dropout [62] and DropConnect [73], Mixout [37] is proposed to addresses catastrophic forgetting in ﬁne-tuning. At each iteration each parameter is replaced by its pre-trained counter-part with probability m. We combine it with the adversarial
+ﬁne-tuning baseline for comparisons with our method and m is chosen as 0.6 for best robustness. (v) Robust Informative Fine-Tuning (RIFT): The proposed adversarial ﬁne-tuning method. It can be deemed as the adversarial ﬁne-tuning baseline plus the Lr-info term. We set τ as 0.2 for all score functions fy. For best robust accuracy, α is chosen as 0.1 and 0.7 on IMDB and SNLI respectively.
+Ablation study on α can be seen in Sec. 3.5.
+For fair comparisons, all compared adversarial ﬁne-tuning methods use the same β on a same dataset, i.e., β = 10 on IMDB and β = 5 on SNLI, both of which are chosen for the best robust accuracy. Early stopping [60] is used for all compared methods according to best robust accuracy
+More implementation details and runtime analysis can be found in Appendix A.1 and A.3. 3.3 Main Result
+In this section we compare our method with state-of-the-arts by robustness under attacks. As shown in Tables 1 and 2., RIFT consistently achieves the best robust performance among state-of-the-arts in all datasets across different pre-trained language models under all attacks. For instance, on IMDB our method outperforms the RoBERTa-based runner-up method by 2.9% under Genetic attacks and 1.9% under PWWS attacks. On SNLI based on BERT, we surpass the runner-up method by 1.2% under
+Genetic attacks and 1.1% under PWWS attacks. In addition, RIFT consistently improves robustness upon the adversarial ﬁne-tuning baseline, while the improvements by other methods are not stable.
+We observe that on SNLI, we surpass the runner-up by a relatively small margin compared to IMDB.
+This may relate to the dataset property: input from SNLI has a smaller attack space (on average 6.54 8
+Table 4: Ablation study on the hyper-parameter α.
+Parameter α Vanilla Genetic 0.00 0.05 0.10 0.30 78.1 78.4 78.3 78.3 74.8 76.5 77.2 76.2
+PWWS 68.3 69.2 70.1 69.5
+Parameter α Vanilla Genetic 0.00 0.50 0.70 1.00 79.4 80.0 80.4 80.6 75.7 76.9 77.5 77.3
+PWWS 72.9 73.8 74.3 73.2 (a) Acc (%) of RIFT based on BERT on IMDB. (b) Acc (%) of RIFT based on BERT on SNLI. combinations of substitutions on SNLI compared to 6108 on IMDB), and thus smaller absolute space left for improvement. For results of vanilla accuracy please refer to Appendix A.4. 3.4 Conditional Mutual Information Does Fit a Down-Stream Task Better
+In this section we empirically validate that maximizing I(S; T ∣ Y ) cooperates with a down-stream task better than maximizing I(S; T ) does. We plot two sets of results of our method with max-imizing I(S; T ∣ Y ) and I(S; T ) respectively (using similar noise contrastive loss with all other hyper-parameters the same). As shown in Table 3, RIFT with maximizing I(S; T ∣ Y ) consistently outperforms that with maximizing I(S; T ) in terms of robustness under all attacks on both IMDB and SNLI, which serves as an empirical validation of Sec. 2.4. 3.5 Ablation Study and Tradeoff Curve Between Robustness and Vanilla Accuracy
+In this section we conduct ablation study on α, which is the weight of Lr-info in Eq. 11. It aims to control to what extent the objective model absorbs information from the pre-trained one. As shown in Table 4, a good value of α improves both vanilla accuracy and robust accuracy; e.g., on
+IMDB increasing α from 0 to 0.1 results in increased vanilla accuracy by 0.2% and increased robust accuracy under Genetic attacks by 2.4%. This demonstrates that RIFT does motivate the objective model to retain robust and generalizable features that are beneﬁcial to both robustness and vanilla accuracy. When α goes too large, the objective of ﬁne-tuning would focus too much on preserving as much information from the pre-trained model as possible, and thus ignores the down-stream task.
+One may wonder whether informative ﬁne-tuning itself can improve the clean accuracy upon normal
+ﬁne-tuning. The answer is yes; e.g., on IMDB using RoBERTa, informative ﬁne-tuning improves about 0.3% clean accuracy upon normal ﬁne-tuning baseline. The improvement is not very signiﬁcant as normal ﬁne-tuning targets at vanilla input only and thus suffers less from the forgetting problem.
+One common problem in contrastive loss is that the complexity grows quadratically with N , but larger N contributes to tighter bound on the mutual information [49, 53]. One potential improvement is to maintain a dictionary updated on-the-ﬂy like [21] and we will leave it for future exploration.
+We ﬁnally show the trade-off curve between robustness and vanilla accuracy in Figure 4. As shown,
+RIFT outperforms the state-of-the-arts in terms of both robust accuracy and vanilla accuracy. It again validates that RIFT indeed helps the objective model capture robust and generalizable information to improve both robustness and vanilla accuracy, rather than trivially trading off one against another. 4

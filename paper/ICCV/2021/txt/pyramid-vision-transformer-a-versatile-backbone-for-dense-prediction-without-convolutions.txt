@@ -1,0 +1,38 @@
+Abstract
+Although convolutional neural networks (CNNs) have achieved great success in computer vision, this work inves-tigates a simpler, convolution-free backbone network use-ful for many dense prediction tasks. Unlike the recently-proposed Vision Transformer (ViT) that was designed for image classification specifically, we introduce the Pyra-mid Vision Transformer (PVT), which overcomes the diffi-culties of porting Transformer to various dense prediction tasks. PVT has several merits compared to current state of the arts. (1) Different from ViT that typically yields low-resolution outputs and incurs high computational and mem-ory costs, PVT not only can be trained on dense partitions of an image to achieve high output resolution, which is im-portant for dense prediction, but also uses a progressive shrinking pyramid to reduce the computations of large fea-ture maps. (2) PVT inherits the advantages of both CNN and Transformer, making it a unified backbone for vari-(cid:66) Corresponding authors: Deng-Ping Fan (dengpfan@gmail.com);
+Tong Lu (lutong@nju.edu.cn). ous vision tasks without convolutions, where it can be used as a direct replacement for CNN backbones. (3) We val-idate PVT through extensive experiments, showing that it boosts the performance of many downstream tasks, includ-ing object detection, instance and semantic segmentation.
+For example, with a comparable number of parameters,
+PVT+RetinaNet achieves 40.4 AP on the COCO dataset, surpassing ResNet50+RetinNet (36.3 AP) by 4.1 absolute
+AP (see Figure 2). We hope that PVT could serve as an alternative and useful backbone for pixel-level predictions and facilitate future research. 1.
+
+Introduction
+Convolutional neural network (CNNs) have achieved re-markable success in computer vision, making them a ver-satile and dominant approach for almost all tasks [53, 21, 72, 48, 20, 38, 8, 31]. Nevertheless, this work aims to ex-plore an alternative backbone network beyond CNN, which can be used for dense prediction tasks such as object detec-tion [39, 13], semantic [81] and instance segmentation [39], in addition to image classification [11]. 1
+Backbone
+R18 [21]
+PVT-T (ours)
+R50 [21]
+PVT-S (ours)
+R101 [21]
+X101-32x4d [72]
+ViT-S/32 [12]
+PVT-M (ours)
+X101-64x4d [72]
+PVT-L (ours)
+#Param (M) AP 31.8 36.7 36.3 40.4 38.5 39.9 31.7 41.9 41.0 42.6 21.3 23.0 37.7 34.2 56.7 56.4 60.8 53.9 95.5 71.1
+Figure 2: Performance comparison on COCO val2017 of different backbones using RetinaNet for object detec-tion, where “T”, “S”, “M” and “L” denote our PVT models with tiny, small, medium and large size. We see that when the number of parameters among different models are com-parable, PVT variants significantly outperform their corre-sponding counterparts such as ResNets (R) [21], ResNeXts (X) [72], and ViT [12].
+Inspired by the success of Transformer [63] in natu-ral language processing, many researchers have explored its application in computer vision. For example, some works [5, 82, 71, 55, 23, 41] model the vision task as a dic-tionary lookup problem with learnable queries, and use the
+Transformer decoder as a task-specific head on top of the
+CNN backbone. Although some prior arts have also incor-porated attention modules [69, 47, 78] into CNNs, as far as we know, exploring a clean and convolution-free Trans-former backbone to address dense prediction tasks in com-puter vision is rarely studied.
+Recently, Dosovitskiy et al. [12] introduced the Vision
+Transformer (ViT) for image classification. This is an in-teresting and meaningful attempt to replace the CNN back-bone with a convolution-free model. As shown in Figure 1 (b), ViT has a columnar structure with coarse image patches as input.1 Although ViT is applicable to image classifi-cation, it is challenging to directly adapt it to pixel-level dense predictions such as object detection and segmenta-tion, because (1) its output feature map is single-scale and low-resolution, and (2) its computational and memory costs are relatively high even for common input image sizes (e.g., shorter edge of 800 pixels in the COCO benchmark [39]).
+To address the above limitations, this work proposes a pure Transformer backbone, termed Pyramid Vision Trans-1Due to resource constraints, ViT cannot use fine-grained image patches (e.g., 4×4 pixels per patch) as input, instead only receive coarse patches (e.g., 32×32 pixels per patch) as input, which leads to its low out-put resolution (e.g., 32-stride). former (PVT), which can serve as an alternative to the CNN backbone in many downstream tasks, including image-level prediction as well as pixel-level dense predictions. Specifi-cally, as illustrated in Figure 1 (c), our PVT overcomes the difficulties of the conventional Transformer by (1) taking fine-grained image patches (i.e., 4×4 pixels per patch) as in-put to learn high-resolution representation, which is essen-tial for dense prediction tasks; (2) introducing a progressive shrinking pyramid to reduce the sequence length of Trans-former as the network deepens, significantly reducing the computational cost, and (3) adopting a spatial-reduction at-tention (SRA) layer to further reduce the resource consump-tion when learning high-resolution features.
+Overall, the proposed PVT possesses the following mer-its. Firstly, compared to the traditional CNN backbones (see Figure 1 (a)), which have local receptive fields that in-crease with the network depth, our PVT always produces a global receptive field, which is more suitable for detection and segmentation. Secondly, compared to ViT (see Fig-ure 1 (b)), thanks to its advanced pyramid structure, our method can more easily be plugged into many represen-tative dense prediction pipelines, e.g., RetinaNet [38] and
+Mask R-CNN [20]. Thirdly, we can build a convolution-free pipeline by combining our PVT with other task-specific
+Transformer decoders, such as PVT+DETR [5] for ob-ject detection. To our knowledge, this is the first entirely convolution-free object detection pipeline.
+Our main contributions are as follows: (1) We propose Pyramid Vision Transformer (PVT), which is the first pure Transformer backbone designed for various pixel-level dense prediction tasks. Combining our
+PVT and DETR, we can construct an end-to-end object de-tection system without convolutions and handcrafted com-ponents such as dense anchors and non-maximum suppres-sion (NMS). (2) We overcome many difficulties when porting Trans-former to dense predictions, by designing a progressive shrinking pyramid and a spatial-reduction attention (SRA).
+These are able to reduce the resource consumption of Trans-former, making PVT flexible to learning multi-scale and high-resolution features. (3) We evaluate the proposed PVT on several differ-ent tasks, including image classification, object detection, instance and semantic segmentation, and compare it with popular ResNets [21] and ResNeXts [72]. As presented in Figure 2, our PVT with different parameter scales can consistently archived improved performance compared to the prior arts. For example, under a comparable number of parameters, using RetinaNet [38] for object detection,
+PVT-Small achieves 40.4 AP on COCO val2017, outper-forming ResNet50 by 4.1 points (40.4 vs. 36.3). Moreover,
+PVT-Large achieves 42.6 AP, which is 1.6 points better than
+ResNeXt101-64x4d, with 30% less parameters.
+2.

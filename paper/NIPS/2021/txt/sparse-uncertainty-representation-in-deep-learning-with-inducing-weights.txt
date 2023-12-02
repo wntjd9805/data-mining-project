@@ -1,0 +1,220 @@
+Abstract
+Bayesian Neural Networks and deep ensembles represent two modern paradigms of uncertainty quantiﬁcation in deep learning. Yet these approaches struggle to scale mainly due to memory inefﬁciency, requiring parameter storage several times that of their deterministic counterparts. To address this, we augment each weight matrix with a small inducing weight matrix, projecting the uncertainty quantiﬁcation into a lower dimensional space. We further extend Matheron’s conditional Gaussian sampling rule to enable fast weight sampling, which enables our inference method to maintain reasonable run-time as compared with ensembles. Importantly, our approach achieves competitive performance to the state-of-the-art in prediction and uncertainty estimation tasks with fully connected neural networks and ResNets, while reducing the parameter size to ≤ 24.3% of that of a single neural network. 1
+
+Introduction
+Deep learning models are becoming deeper and wider than ever before. From image recognition models such as ResNet-101 (He et al., 2016a) and DenseNet (Huang et al., 2017) to BERT (Xu et al., 2019) and GPT-3 (Brown et al., 2020) for language modelling, deep neural networks have found consistent success in ﬁtting large-scale data. As these models are increasingly deployed in real-world applications, calibrated uncertainty estimates for their predictions become crucial, especially in safety-critical areas such as healthcare. In this regard, Bayesian Neural Networks (BNNs) (MacKay, 1995; Blundell et al., 2015; Gal & Ghahramani, 2016; Zhang et al., 2020) and deep ensembles (Lakshminarayanan et al., 2017) represent two popular paradigms for estimating uncertainty, which have shown promising results in applications such as (medical) image processing (Kendall & Gal, 2017; Tanno et al., 2017) and out-of-distribution detection (Ovadia et al., 2019).
+Though progress has been made, one major obstacle to scaling up BNNs and deep ensembles is their high storage cost. Both approaches require the parameter counts to be several times higher than their deterministic counterparts. Although recent efforts have improved memory efﬁciency (Louizos & Welling, 2017; ´Swi ˛atkowski et al., 2020; Wen et al., 2020; Dusenberry et al., 2020), these still use more parameters than a deterministic neural network. This is particularly problematic in hardware-constrained edge devices, when on-device storage is required due to privacy regulations.
+Meanwhile, an inﬁnitely wide BNN becomes a Gaussian process (GP) that is known for good uncertainty estimates (Neal, 1995; Matthews et al., 2018; Lee et al., 2018). But perhaps surprisingly, this inﬁnitely wide BNN is “parameter efﬁcient”, as its “parameters” are effectively the datapoints, which have a considerably smaller memory footprint than explicitly storing the network weights. In addition, sparse posterior approximations store a smaller number of inducing points instead (Snelson
+& Ghahramani, 2006; Titsias, 2009), making sparse GPs even more memory efﬁcient.
+∗Work done at Microsoft Research Cambridge. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Can we bring the advantages of sparse approximations in GPs — which are inﬁnitely-wide neural networks — to ﬁnite width deep learning models? We provide an afﬁrmative answer regarding memory efﬁciency, by proposing an uncertainty quantiﬁcation framework based on sparse uncertainty representations. We present our approach in BNN context, but the proposed approach is also applicable to deep ensembles. In detail, our contributions are as follows:
+• We introduce inducing weights — an auxiliary variable method with lower dimensional counterparts to the actual weight matrices — for variational inference in BNNs, as well as a memory efﬁcient parameterisation and an extension to ensemble methods (Section 3.1).
+• We extend Matheron’s rule to facilitate efﬁcient posterior sampling (Section 3.2).
+• We provide an in-depth computation complexity analysis (Section 3.3), showing the signiﬁ-cant advantage in terms of parameter efﬁciency.
+• We show the connection to sparse (deep) GPs, in that inducing weights can be viewed as projected noisy inducing outputs in pre-activation output space (Section 5.1).
+• We apply the proposed approach to BNNs and deep ensembles. Experiments in classiﬁcation, model robustness and out-of-distribution detection tasks show that our inducing weight approaches achieve competitive performance to their counterparts in the original weight space on modern deep architectures for image classiﬁcation, while reducing the parameter count to ≤ 24.3% of that of a single network.
+We open-source our proposed inducing weight approach, together with baseline methods reported in the experiments, as a PyTorch (Paszke et al., 2019) wrapper named bayesianize: https:
+//github.com/microsoft/bayesianize. As demonstrated in Appendix I, our software makes the conversion of a deterministic neural network to a Bayesian one with a few lines of code: import bnn # our pytorch wrapper package net = torchvision.models.resnet18() # construct a deterministic ResNet18 bnn.bayesianize_(net, inference="inducing") # convert it into a Bayesian one 2
+Inducing variables for variational inference
+Our work is built on variational inference and inducing variables for posterior approximations. Given observations D = {X, Y} with X = [x1, ..., xN ], Y = [y1, ..., yN ], we would like to ﬁt a neural network p(y|x, W1:L) with weights W1:L to the data. BNNs posit a prior distribution p(W1:L) over the weights, and construct an approximate posterior q(W1:L) to the exact posterior p(W1:L|D) ∝ p(D|W1:L)p(W1:L), where p(D|W1:L) = p(Y|X, W1:L) = (cid:81)N n=1 p(yn|xn, W1:L).
+Variational inference Variational inference (Hinton & Van Camp, 1993; Jordan et al., 1999; Zhang et al., 2018a) constructs an approximation q(θ) to the posterior p(θ|D) ∝ p(θ)p(D|θ) by maximising a variational lower-bound: (cid:81)dl log p(D) ≥ L(q(θ)) := Eq(θ) [log p(D|θ)] − KL [q(θ)||p(θ)] .
+For BNNs, θ = {W1:L}, and a simple choice of q is a Fully-factorized Gaussian (FFG): q(W1:L) = (cid:81)L the mean and variance of W(i,j)
+), with m(i,j) in, dl and dl out the respective number of inputs and outputs to layer l. The variational parameters are then φ = {m(i,j)
+}L l=1. Gradients of L w.r.t. φ can be estimated with mini-batches of data (Hoffman et al., 2013) and with Monte Carlo sampling from the q distribution (Titsias & Lázaro-Gredilla, 2014; Kingma & Welling, 2014). By setting q to an BNN, a variational BNN can be trained with similar computational requirements as a deterministic network (Blundell et al., 2015). j=1 N (m(i,j)
+, v(i,j) l
+, v(i,j) l
+, v(i,j) l (cid:81)dl out i=1 (1) l=1 in l l l l
+Improved posterior approximation with inducing variables Auxiliary variable approaches (Agakov & Barber, 2004; Salimans et al., 2015; Ranganath et al., 2016) construct the q(θ) dis-tribution with an auxiliary variable a: q(θ) = (cid:82) q(θ|a)q(a)da, with the hope that a potentially richer mixture distribution q(θ) can achieve better approximations. As then q(θ) becomes intractable, an auxiliary variational lower-bound is used to optimise q(θ, a) (see Appendix B): log p(D) ≥ L(q(θ, a)) = Eq(θ,a)[log p(D|θ)] + Eq(θ,a) (cid:20) log p(θ)r(a|θ) q(θ|a)q(a) (cid:21)
+. (2) 2
+Here r(a|θ) is an auxiliary distribution that needs to be speciﬁed, where existing approaches often use a “reverse model” for r(a|θ). Instead, we deﬁne r(a|θ) in a generative manner: r(a|θ) is the
+“posterior” of the following “generative model”, whose “evidence” is exactly the prior of θ: r(a|θ) = ˜p(a|θ) ∝ ˜p(a)˜p(θ|a), such that ˜p(θ) := (cid:90)
+˜p(a)˜p(θ|a)da = p(θ). (3)
+Plugging Eq. (3) into Eq. (2):
+L(q(θ, a)) = Eq(θ)[log p(D|θ)] − Eq(a) [KL[q(θ|a)||˜p(θ|a)]] − KL[q(a)||˜p(a)].
+This approach yields an efﬁcient approximate inference algorithm, translating the complexity of inference in θ to a. If dim(a) < dim(θ) and q(θ, a) = q(θ|a)q(a) has the following properties: (4) 1. A “pseudo prior” ˜p(a)˜p(θ|a) is deﬁned such that (cid:82) ˜p(a)˜p(θ|a)da = p(θ); 2. The conditionals q(θ|a) and ˜p(θ|a) are in the same parametric family, so can share parameters; 3. Both sampling θ ∼ q(θ) and computing KL[q(θ|a)||˜p(θ|a)] can be done efﬁciently; 4. The designs of q(a) and ˜p(a) can potentially provide extra advantages (in time and space complexities and/or optimisation easiness).
+We call a the inducing variable of θ, which is inspired by variationally sparse GP (SVGP) with inducing points (Snelson & Ghahramani, 2006; Titsias, 2009). Indeed SVGP is a special case (see Appendix C): θ = f , a = u, the GP prior is p(f |X) = GP(0, KXX), p(u) = GP(0, KZZ),
+˜p(f , u) = p(u)p(f |X, u), q(f |u) = p(f |X, u), q(f , u) = p(f |X, u)q(u), and Z are the optimisable inducing inputs. The variational lower-bound is L(q(f , u)) = Eq(f )[log p(Y|f )] − KL[q(u)||p(u)], and the variational parameters are φ = {Z, distribution parameters of q(u)}. SVGP satisﬁes the marginalisation constraint Eq. (3) by deﬁnition, and it has KL[q(f |u)||˜p(f |u)] = 0. Also by using small M = dim(u) and exploiting the q distribution design, SVGP reduces run-time from O(N 3) to O(N M 2 + M 3) where N is the number of inputs in X, meanwhile it also makes storing a full Gaussian q(u) affordable. Lastly, u can be whitened, leading to the “pseudo prior” ˜p(f , v) = p(f |X, u = K1/2
+ZZ v)˜p(v), ˜p(v) = N (v; 0, I) which could bring potential beneﬁts in optimisation.
+We emphasise that the introduction of “pseudo prior” does not change the probabilistic model as long as the marginalisation constraint Eq. (3) is satisﬁed. In the rest of the paper we assume the constraint
+Eq. (3) holds and write p(θ, a) := ˜p(θ, a). It might seem unclear how to design such ˜p(θ, a) for an arbitrary probabilistic model, however, for a Gaussian prior on θ the rules for computing conditional
+Gaussian distributions can be used to construct ˜p. In Section 3 we exploit these rules to develop an efﬁcient approximate inference method for Bayesian neural networks with inducing weights. 3 Sparse uncertainty representation with inducing weights 3.1
+Inducing weights for neural network parameters
+Following the above design principles, we introduce to each network layer l a smaller inducing weight matrix Ul to assist approximate posterior inference in Wl. Therefore in our context, θ = W1:L and a = U1:L. In the rest of the paper, we assume a factorised prior across layers p(W1:L) = (cid:81) l p(Wl), and drop the l indices when the context is clear to ease notation.
+Augmenting network layers with inducing weights Suppose the weight W ∈ Rdout×din has a Gaussian prior p(W) = p(vec(W)) = N (0, σ2I) where vec(W) concatenates the columns of the weight matrix into a vector. A ﬁrst attempt to augment p(vec(W)) with an inducing weight variable U ∈ RMout×Min may be to construct a multivariate Gaussian p(vec(W), vec(U)), such that (cid:82) p(vec(W), vec(U))dU = N (0, σ2I). This means for the joint covariance matrix of (vec(W), vec(U)), it requires the block corresponding to the covariance of vec(W) to match the prior covariance σ2I. We are then free to parameterise the rest of the entries in the joint covariance matrix, as long as this full matrix remains positive deﬁnite. Now the conditional distribution p(W|U) is a function of these parameters, and the conditional sampling from p(W|U) is further discussed in
+Appendix D.1. Unfortunately, as dim(vec(W)) is typically large (e.g. of the order of 107), using a full covariance Gaussian for p(vec(W), vec(U)) becomes computationally intractable.
+We address this issue with matrix normal distributions (Gupta & Nagar, 2018). The prior p(vec(W)) = N (0, σ2I) has an equivalent matrix normal distribution form as p(W) = 3
+r I, σ2
+MN (0, σ2 c I), with σr, σc > 0 the row and column standard deviations satisfying σ = σrσc.
+Now we introduce the inducing variable U in matrix space, as well as two auxiliary variables
+Ur ∈ RMout×din , Uc ∈ Rdout×Min , so that the full augmented prior is: (cid:19) (cid:18)W Uc
+Ur U
+∼ p(W, Uc, Ur, U) := MN (0, Σr, Σc), (5) with Lr = and Lc = (cid:19) (cid:18)σrI 0
+Zr Dr (cid:19) (cid:18)σcI 0
+Zc Dc s.t. Σr = LrL(cid:62) r = s.t. Σc = LcL(cid:62) c = (cid:18) σ2 r I (cid:18) σ2 c I
+σrZr ZrZ(cid:62)
+σcZc ZcZ(cid:62) (cid:19)
+σrZ(cid:62) r r + D2 r (cid:19)
+σcZ(cid:62) c c + D2 c
+.
+See Fig. 1(a) for a visualisation of the augmentation. Matrix normal distributions have similar marginalisation and conditioning rules as multivariate Gaussian distributions, for which we provide further examples in Appendix D.2. Therefore the marginalisation constraint Eq. (3) is satisﬁed for any Zc ∈ RMin×din , Zr ∈ RMout×dout and diagonal matrices Dc, Dr. For the inducing weight
+U we have p(U) = MN (0, Ψr, Ψc) with Ψr = ZrZ(cid:62) c . In the experiments we use whitened inducing weights which transforms U so that p(U) = MN (0, I, I) (Appendix H), but for clarity we continue with the above formulas in the main text. r and Ψc = ZcZ(cid:62) c + D2 r + D2
+The matrix normal parameterisation introduces two additional variables Ur, Uc without providing additional expressiveness. Hence it is desirable to integrate them out, leading to a joint multivariate normal with Khatri-Rao product structure for the covariance: p(vec(W), vec(U)) = N 0, (cid:18) (cid:18) σ2 c I ⊗ σ2 r I
+σcZc ⊗ σrZr
+σcZ(cid:62) c ⊗ σrZ(cid:62) r
+Ψc ⊗ Ψr (cid:19)(cid:19)
+. (6)
+As the dominating memory complexity here is O(doutMout + dinMin) which comes from storing Zr and Zc, we see that the matrix normal parameterisation of the augmented prior is memory efﬁcient.
+Posterior approximation in the joint space We construct a factorised posterior approximation across the layers: q(W1:L, U1:L) = (cid:81) l q(Wl|Ul)q(Ul). Below we discuss options for q(W|U).
+The simplest option is q(W|U) = p(vec(W)| vec(U)) = N (µW|U, ΣW|U), similar to sparse GPs.
+A slightly more ﬂexible variant adds a rescaling term λ2 to the covariance matrix, which allows efﬁcient KL computation (Appendix E): q(W|U) = q(vec(W)| vec(U)) = N (µW|U, λ2ΣW|U),
+R(λ) := KL [q(W|U)||p(W|U)] = dindout(0.5λ2 − log λ − 0.5). (7) (8)
+Plugging θ = W1:L, a = U1:L and Eq. (8) into Eq. (4) returns the following variational lower-bound
+L(q(W1:L, U1:L)) = Eq(W1:L)[log p(D|W1:L)] − (cid:88)L l=1 (R(λl) + KL[q(Ul)||p(Ul)]), (9) with λl the associated scaling parameter for q(Wl|Ul). Again as the choices of Zc, Zr, Dc, Dr do not change the marginal prior p(W), we are safe to optimise them as well. Therefore the variational parameters are now φ = {Zc, Zr, Dc, Dr, λ, dist. params. of q(U)} for each layer.
+Two choices of q(U) A simple choice is FFG q(vec(U)) = N (mu, diag(vu)), which performs mean-ﬁeld inference in U space (c.f. Blundell et al., 2015), and here KL[q(U)||p(U)] has a closed-form solution. Another choice is a “mixture of delta measures” q(U) = 1 k=1 δ(U = U(k)),
+K i.e. we keep K distinct sets of parameters {U (k) 1:L}K k=1 in inducing space that are projected back into the original parameter space via the shared conditionals q(Wl|Ul) to obtain the weights. This approach can be viewed as constructing “deep ensembles” in U space, and we follow ensemble methods (e.g. Lakshminarayanan et al., 2017) to drop KL[q(U)||p(U)] in Eq. (9). (cid:80)K
+Often U is chosen to have signiﬁcantly lower dimensions than W, i.e. Min << din and Mout << dout. As q(W|U) and p(W|U) only differ in the covariance scaling constant, U can be regarded as a sparse representation of uncertainty for the network layer, as the major updates in (approximate) posterior belief is quantiﬁed by q(U). 4
+Figure 1: Visualisation of (a) the inducing weight augmentation, and compare (b) the original
+Matheron’s rule to (c) our extended version. White blocks represent samples from the joint Gaussian. 3.2 Efﬁcient sampling with extended Matheron’s rule
+Computing the variational lower-bound Eq. (9) requires samples from q(W), which requires an efﬁcient sampling procedure for q(W|U). Unfortunately, q(W|U) derived from Eq. (6) & Eq. (7) is not a matrix normal, so direct sampling is prohibitive. To address this challenge, we extend
+Matheron’s rule (Journel & Huijbregts, 1978; Hoffman & Ribak, 1991; Doucet, 2010) to efﬁciently sample from q(W|U), with derivations provided in Appendix F.
+The original Matheron’s rule applies to multivariate Gaussian distributions. As a running example, consider two vector-valued random variables w, u with joint distribution p(w, u) = N (0, Σ). Then the conditional distribution p(w|u) = N (µw|u, Σw|u) is also Gaussian, and direct sampling from it requires decomposing the conditional covariance matrix Σw|u which can be costly. The main idea of
+Matheron’s rule is that we can transform a sample from the joint Gaussian to obtain a sample from the conditional distribution p(w|u) as follows: w = ¯w + ΣwuΣ−1 uu(u − ¯u),
+¯w, ¯u ∼ N (0, Σ), Σ = (cid:18)Σww Σwu
+Σuw Σuu (cid:19)
+. (10)
+One can check the validity of Matheron’s rule by computing the mean and variance of w above:
+E ¯w, ¯u[w] = ΣwuΣ−1 uuu = µw|u, V ¯w, ¯u[w] = Σww − ΣwuΣ−1 uuΣuw = Σw|u.
+It might seem counter-intuitive at ﬁrst sight in that this rule requires samples from a higher dimensional space. However, in the case where decomposition/inversion of Σ and Σuu can be done efﬁciently, sampling from the joint Gaussian p(w, u) can be signiﬁcantly cheaper than directly sampling from the conditional Gaussian p(w|u). This happens e.g. when Σ is directly parameterised by its Cholesky decomposition and dim(u) << dim(w), so that sampling ¯w, ¯u ∼ N (0, Σ) is straight-forward, and computing Σ−1 uu is signiﬁcantly cheaper than decomposing Σw|u.
+Unfortunately, the original Matheron’s rule cannot be applied directly to sample from q(W|U). This is because q(W|U) = q(vec(W)| vec(U)) differs from p(vec(W)| vec(U)) only in the variance scaling λ, and for p(vec(W)| vec(U)), its joint distribution counter-part Eq. (6) does not have an efﬁcient representation for the covariance matrix. Therefore a naive application of Matheron’s rule requires decomposing the covariance matrix of p(vec(W), vec(U)) which is even more expensive than direct conditional sampling. However, notice that for the joint distribution p(W, Uc, Ur, U) in an even higher dimensional space, the row and column covariance matrices Σr and Σc are parameterised by their Cholesky decompositions, so that sampling from this joint distribution can be done efﬁciently. This inspire us to extend the original Matheron’s rule for efﬁcient sampling from q(W|U) (details in Appendix F, when λ = 1 it also applies to sampling from p(W|U)):
+W = λ ¯W + σZ(cid:62) r Ψ−1 r (U − λ ¯U)Ψ−1 c Zc;
+¯W, ¯U ∼ p( ¯W, ¯Uc, ¯Ur, ¯U) = MN (0, Σr, Σc). (11)
+Here ¯W, ¯U ∼ p( ¯W, ¯Uc, ¯Ur, ¯U) means we ﬁrst sample ¯W, ¯Uc, ¯Ur, ¯U from the joint then drop
+¯Uc, ¯Ur; in fact ¯Uc, ¯Ur are never computed, and the other samples ¯W, ¯U can be obtained by:
+¯W = σE1, ¯U = ZrE1Z(cid:62)
+E1 ∼ MN (0, Idout , Idin );
+ˆLr = chol(ZrZ(cid:62) r ), ˆLc = chol(ZcZ(cid:62) c ). c + ˆLr ˜E2Dc + Dr ˜E3 ˆL(cid:62) c + DrE4Dc,
+˜E2, ˜E3, E4 ∼ MN (0, IMout, IMin ), (12)
+The run-time cost is O(2M 3 in +doutMoutMin +Mindoutdin) required by inverting Ψr, Ψc, computing ˆLr, ˆLc, and the matrix products. The extended Matheron’s rule is visualised in Fig. 1 out +2M 3 5
+Table 1: Computational complexity per layer. We assume W ∈ Rdout×din , U ∈ RMout×Min , and K forward passes for each of the N inputs. (∗ uses a parallel computing friendly vectorisation technique (Wen et al., 2020) for further speed-up.)
+Method
+Deterministic-W
+FFG-W
+Ensemble-W
+Matrix-normal-W k-tied FFG-W rank-1 BNN
+FFG-U
+Ensemble-U
+Time complexity
+O(N dindout)
+O(N Kdindout)
+O(N Kdindout)
+O(N Kdindout)
+O(N Kdindout)
+O(N Kdindout)∗
+O(N Kdindout + 2M 3
++K(doutMoutMin + Mindoutdin)) same as above in + 2M 3 out
+Storage complexity
+O(dindout)
+O(2dindout)
+O(Kdindout)
+O(dindout + din + dout)
+O(dindout + k(din + dout))
+O(dindout + 2(din + dout))
+O(dinMin + doutMout + 2MinMout)
+O(dinMin + doutMout + KMinMout) with a comparison to the original Matheron’s rule for sampling from q(vec(W)| vec(U)). Note that the original rule requires joint sampling from Eq. (6) (i.e. sampling the white blocks in Fig. 1(b)) which has O((doutdin + MoutMin)3) cost. Therefore our recipe avoids inverting and multiplying big matrices, resulting in a signiﬁcant speed-up for conditional sampling. 3.3 Computational complexities
+In Table 1 we report the complexity ﬁgures for two types of inducing weight approaches: FFG q(U) (FFG-U) and Delta mixture q(U) (Ensemble-U). Baseline approaches include: Deterministic-W, variational inference with FFG q(W) (FFG-W, Blundell et al., 2015), deep ensemble in W (Ensemble-W, Lakshminarayanan et al., 2017), as well as parameter efﬁcient approaches such as matrix-normal q(W) (Matrix-normal-W, Louizos & Welling (2017)), variational inference with k-tied FFG q(W) (k-tied FFG-W, ´Swi ˛atkowski et al. (2020)), and rank-1 BNN (Dusenberry et al., 2020). The gain in memory is signiﬁcant for the inducing weight approaches, in fact with Min < din and Mout < dout the parameter storage requirement is smaller than a single deterministic neural network. The major overhead in run-time comes from the extended Matheron’s rule for sampling q(W|U). Some of the computations there are performed only once, and in our experiments we show that by using a relatively low-dimensional U and large batch-sizes, the overhead is acceptable. 4 Experiments
+We evaluate the inducing weight approaches on regression, classiﬁcation and related uncertainty estimation tasks. The goal is to demonstrate competitive performance to popular W-space uncertainty estimation methods while using signiﬁcantly fewer parameters. We acknowledge that existing parameter efﬁcient approaches for uncertainty estimation (e.g. k-tied or rank-1 BNNs) have achieved close performance to deep ensembles. However, none of them reduces the parameter count to be smaller than that of a single network. Therefore we decide not to include these baselines and instead focus on comparing: (1) variational inference with FFG q(W) (FFG-W, Blundell et al., 2015) v.s. FFG q(U) (FFG-U, ours); (2) deep ensemble in W space (Ensemble-W, Lakshminarayanan et al., 2017) v.s. ensemble in U space (Ensemble-U, ours). Another baseline is training a deterministic neural network with maximum likelihood. Details and additional results are in Appendices J and K. 4.1 Synthetic 1-D regression
+The regression task follows Foong et al. (2019), which has two input clusters x1 ∼ U [−1, −0.7], x2 ∼ U [0.5, 1], and targets y ∼ N (cos(4x + 0.8), 0.01). For reference we show the exact posterior results using the NUTS sampler (Hoffman & Gelman, 2014). The results are visualised in Fig. 2 with predictive mean in blue, and up to three standard deviations as shaded area. Similar to historical results, FFG-W fails to represent the increased uncertainty away from the data and in between clusters. While underestimating predictive uncertainty overall, FFG-U shows a small increase in predictive uncertainty away from the data. In contrast, a per-layer Full-covariance Gaussian (FCG) in both weight (FCG-W) and inducing space (FCG-U) as well as Ensemble-U better capture the increased predictive variance, although the mean function is more similar to that of FFG-W. 6
+(a) FFG-U (b) FCG-U (c) Ensemble-U (d) FFG-W (e) FCG-W (f) NUTS
+Figure 2: Toy regression results, with observations in red dots and the ground truth function in black.
+Table 2: CIFAR in-distribution metrics (in %).
+Method
+CIFAR10
+CIFAR100
+Acc. ↑ ECE ↓ Acc. ↑ ECE ↓ 94.72
+Deterministic
+Ensemble-W 95.90 94.13
+FFG-W 94.40
+FFG-U 94.94
+Ensemble-U 4.46 1.08 0.50 0.64 0.45 75.73 79.33 74.44 75.37 75.97 19.69 6.51 4.24 2.29 1.12
+Figure 3: Resnet run-times & model sizes. 4.2 Classiﬁcation and in-distribution calibration
+As the core empirical evaluation, we train Resnet-50 models (He et al., 2016b) on CIFAR-10 and
+CIFAR-100 (Krizhevsky et al., 2009). To avoid underﬁtting issues with FFG-W, a useful trick is to set an upper limit σ2 max on the variance of q(W) (Louizos & Welling, 2017). This trick is similarly applied to the U-space methods, where we cap λ ≤ λmax for q(W|U), and for FFG-U we also set σ2 max for the variance of q(U). In convolution layers, we treat the 4D weight tensor W of shape (cout, cin, h, w) as a cout × cinhw matrix. We use U matrices of shape 64 × 64 for all layers (i.e. M = Min = Mout = 64), except that for CIFAR-10 we set Mout = 10 for the last layer.
+In Table 2 we report test accuracy and test expected calibration error (ECE) (Guo et al., 2017) as a
+ﬁrst evaluation of the uncertainty estimates. Overall, Ensemble-W achieves the highest accuracy, but is not as well-calibrated as variational methods. For the inducing weight approaches, Ensemble-U outperforms FFG-U on both datasets; overall it performs the best on the more challenging CIFAR-100 dataset (close-to-Ensemble-W accuracy and lowest ECE). Tables 5 and 6 in Appendix K show that increasing the U dimensions to M = 128 improves accuracy but leads to slightly worse calibration.
+In Fig. 3 we show prediction run-times for batch-size = 500 on an NVIDIA Tesla V100 GPU, relative to those of an ensemble of deterministic nets, as well as relative parameter sizes to a single ResNet-50.
+The extra run-times for the inducing methods come from computing the extended Matheron’s rule.
+However, as they can be calculated once and cached for drawing multiple samples, the overhead reduces to a small factor when using larger number of samples K, especially for the bigger Resnet-50.
+More importantly, when compared to a deterministic ResNet-50, the inducing weight models reduce the parameter count by over 75% (5, 710, 902 vs. 23, 520, 842) for M = 64.
+Hyper-parameter choices We visualise in Fig. 4 the accuracy and ECE results for computation-ally lighter inducing weight ResNet-18 models with different hyper-parameters (see Appendix J).
+Figure 4: Ablation study: average CIFAR-10 accuracy (↑) and ECE (↓) for the inducing weight methods on ResNet-18. In the ﬁrst two columns M = 128 for U dimensions. For λmax, σmax = 0 we use point estimates for U, W respectively. 7
+Figure 5: Mean±two errs. for Acc↑ and ECE↓ on corrupted CIFAR (Hendrycks & Dietterich, 2019).
+Table 3: OOD detection metrics for Resnet-50 trained on CIFAR10/100.
+C100 → SVHN
+C10 → SVHN
+In-dist → OOD
+Method / Metric AUROC AUPR AUROC AUPR AUROC AUPR AUROC AUPR
+C100 → C10
+C10 → C100
+Deterministic
+Ensemble-W
+FFG-W
+FFG-U
+Ensemble-U
+.84±.00
+.89
+.88±.00
+.89±.00
+.90±.00
+.80±.00
+.89
+.90±.00
+.91±.00
+.91±.00
+.93±.01
+.95
+.90±.01
+.94±.01
+.93±.00
+.85±.01
+.92
+.86±.01
+.91±.01
+.91±.00
+.74±.00
+.78
+.76±.00
+.77±.00
+.77±.00
+.74±.00
+.79
+.79±.00
+.79±.00
+.79±.00
+.81±.01
+.86
+.80±.01
+.83±.01
+.82±.01
+.72±.02
+.78
+.69±.01
+.74±.01
+.72±.02
+Performance in both metrics improves as the U matrix size M is increased (right-most panels), and the results for M = 64 and M = 128 are fairly similar. Also setting proper values for λmax, σmax is key to the improved results. The left-most panels show that with ﬁxed σmax values (or Ensemble-U), the preferred conditional variance cap values λmax are fairly small (but still larger than 0 which corresponds to a point estimate for W given U). For σmax which controls variance in U space, we see from the top middle panel that the accuracy metric is fairly robust to σmax as long as λmax is not too large. But for ECE, a careful selection of σmax is required (bottom middle panel). 4.3 Robustness, out-of-distribution detection and pruning
+To investigate the models’ robustness to distribution shift, we compute predictions on corrupted
+CIFAR datasets (Hendrycks & Dietterich, 2019) after training on clean data. Fig. 5 shows accuracy and ECE results for the ResNet-50 models. Ensemble-W is the most accurate model across skew intensities, while FFG-W, though performing well on clean data, returns the worst accuracy under perturbation. The inducing weight methods perform competitively to Ensemble-W with Ensemble-U being slightly more accurate than FFG-U as on the clean data. For ECE, FFG-U outperforms
+Ensemble-U and Ensemble-W, which are similarly calibrated. Interestingly, while the accuracy of
+FFG-W decays quickly as the data is perturbed more strongly, its ECE remains roughly constant.
+Table 3 further presents the utility of the maximum predicted probability for out-of-distribution (OOD) detection. The metrics are the area under the receiver operator characteristic (AUROC) and the precision-recall curve (AUPR). The inducing-weight methods perform similarly to Ensemble-W; all three outperform FFG-W and deterministic networks across the board.
+Parameter pruning We further investigate pruning as a pragmatic alternative for more parameter-efﬁcient inference. For FFG-U, we prune entries of the Z matrices, which contribute the largest number of parameters to the inducing methods, with the smallest magnitude.
+For FFG-W we follow Graves (2011) in setting different fractions of W to 0 depending on their variational mean-to-variance ratio and repeat the previous experiments after ﬁne-tuning the distributions on the remaining variables. We stress that, unlike FFG-U, the FFG-W pruning corresponds to a post-hoc change of the probabilistic model and no longer performs inference in the original weight-space.
+For FFG-W, pruning 90% of the parameters (leaving 20% of pa-rameters as compared to its deterministic counterpart) worsens the
+ECE, in particular on CIFAR100, see Fig. 6. Further pruning to 1% 8
+Figure 6: CIFAR100 pruning accuracy(↑) & ECE(↓). Right-most points are w/out pruning.
+worsens the accuracy and the OOD detection results as well. On the other hand, pruning 50% of the
+Z matrices for FFG-U reduces the parameter count to 13.2% of a deterministic net, at the cost of only slightly worse calibration. See Appendix K for the full results. 5 Discussions 5.1 A function-space perspective on inducing weights
+Although the inducing weight approach performs approximate inference in weight space, we present in Appendix G a function-space inference perspective of the proposed method, showing its deep connections to sparse GPs. Our analysis considers the function-space behaviour of each network layer’s output and discusses the corresponding interpretations of the U variables and Z parameters.
+The interpretations are visualised in Fig. 7. Similar to sparse GPs, in each layer, the Zc parameters can be viewed as the (transposed) in-ducing input locations which lie in the same space as the layer’s input.
+The Uc variables can also be viewed as the corresponding (noisy) inducing outputs that lie in the pre-activation space. Given that the output dimension dout can still be high (e.g. > 1000 in a fully con-nected layer), our approach performs further dimension reduction in a similar spirit as probabilistic PCA (Tipping & Bishop, 1999), which projects the column vectors of Uc to a lower-dimensional space. This returns the inducing weight variables U, and the projec-tion parameters are {Zr, Dr}. Combining the two steps, it means the column vectors of U can be viewed as collecting the “noisy projected inducing outputs” whose corresponding “inducing inputs” are row vectors of Zc (see the red bars in Fig. 7).
+Figure 7: Visualising U vari-ables in pre-activation spaces.
+In Appendix G we further derive the resulting variational objective from the function-space view, which is almost identical to Eq. (9), except for scaling coefﬁcients on the R(λl) terms to account for the change in dimensionality from weight space to function space. This result nicely connects posterior inference in weight- and function-space. 5.2

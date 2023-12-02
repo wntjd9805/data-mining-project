@@ -1,0 +1,191 @@
+Abstract
+We introduce a framework that abstracts Reinforcement Learning (RL) as a se-quence modeling problem. This allows us to draw upon the simplicity and scalabil-ity of the Transformer architecture, and associated advances in language modeling such as GPT-x and BERT. In particular, we present Decision Transformer, an architecture that casts the problem of RL as conditional sequence modeling. Un-like prior approaches to RL that ﬁt value functions or compute policy gradients,
+Decision Transformer simply outputs the optimal actions by leveraging a causally masked Transformer. By conditioning an autoregressive model on the desired return (reward), past states, and actions, our Decision Transformer model can gen-erate future actions that achieve the desired return. Despite its simplicity, Decision
+Transformer matches or exceeds the performance of state-of-the-art model-free ofﬂine RL baselines on Atari, OpenAI Gym, and Key-to-Door tasks.
+Figure 1: Decision Transformer architecture1. States, actions, and returns are fed into modality-speciﬁc linear embeddings and a positional episodic timestep encoding is added. Tokens are fed into a GPT architecture which predicts actions autoregressively using a causal self-attention mask. 1Our code is available at: https://sites.google.com/berkeley.edu/decision-transformer 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 2: Illustrative example of ﬁnding shortest path for a ﬁxed graph (left) posed as reinforcement learning. Training dataset consists of random walk trajectories and their per-node returns-to-go (middle). Conditioned on a starting state and generating largest possible return at each node, Decision
+Transformer sequences optimal paths. 1
+
+Introduction
+Recent work has shown transformers [1] can model large-scale distributions of semantic concepts, including capable zero-shot generalization in language [2] and impressive out-of-distribution image generation [3]. This stands in sharp contrast to much work in reinforcement learning (RL), which learns a single policy to model a particular narrow behavior distribution. Given the diversity of applications and impact of transformer models, we seek to examine their application to sequential decision making problems. In particular, instead of using transformers as an architectural choice for traditional RL algorithms [4, 5], we seek to study if trajectory modeling (analogous to language modeling) can serve as a replacement for conventional RL algorithms.
+We consider the following shift in paradigm: instead of training a policy through conventional
+RL algorithms like temporal difference (TD) learning [6], the dominant paradigm in RL, we will train transformer models on collected experience using a sequence modeling objective. This will allow us to bypass the need for bootstrapping to propagate returns – thereby avoiding one of the
+“deadly triad” [6] known to destabilize RL. It also avoids the need for discounting future rewards, as typically done in TD-learning, which can induce undesirable short-sighted behaviors. Additionally, we can make use of existing transformer frameworks widely used in language and vision that are easy to scale, utilizing a large body of work studying stable training of transformer models; this approach removes the need for specialized RL frameworks by appealing only to commonplace supervised learning systems. Given their demonstrated ability to model long sequences and wide data distributions, transformers also have other advantages. Transformers can perform credit assignment directly via self-attention, in contrast to Bellman backups which slowly propagate rewards and are prone to “distractor” signals [7]. This can enable transformers to still work effectively in the presence of sparse or distracting rewards. Furthermore, a transformer modeling approach can model a wide distribution of behaviors, enabling better generalization and transfer. While “upside-down” reinforcement learning (UDRL) [8, 9, 10] also uses a supervised loss conditioned on a target return, our work is motivated by sequence modeling rather than supervised learning and seeks to beneﬁt from modeling long sequences of behaviors. See Section 6 for more discussions about related works.
+We explore our hypothesis by considering ofﬂine RL, where we will task agents with learning policies from suboptimal data – producing maximally effective behavior from ﬁxed, limited experience. This task is traditionally challenging due to error propagation and value overestimation [11]. However, it is a natural task when training with a sequence modeling objective. By training an autoregressive model on sequences of states, actions, and returns, we reduce policy sampling to autoregressive generative modeling. We can specify the expertise of the policy – which “skill” to query – by manually setting the return tokens, acting as a prompt for generation.
+Illustrative example. To get an intuition for our proposal, consider the task of ﬁnding a shortest path on a directed graph posed as an RL problem. The reward is 0 when at the goal node and −1 otherwise.
+We train a GPT [12] model to predict next token in a sequence of returns-to-go (sum of future rewards), states, and actions. Training only on random walk data – with no expert demonstrations – we can at test time generate optimal trajectories by adding a prior to generate highest possible returns (see more details and empirical results in the Appendix) and subsequently generate actions 2
+conditioned on that. Thus, by combining the tools of sequence modeling with hindsight return information, we achieve policy improvement without the need for dynamic programming.
+Motivated by this observation, we propose Decision Transformer, where we use the GPT architecture to autoregressively model trajectories (shown in Figure 1). We study whether sequence modeling can perform policy optimization by evaluating Decision Transformer on ofﬂine RL benchmarks in Atari [13], OpenAI Gym [14], and Key-to-Door [15] environments. We show that – without using dynamic programming – Decision Transformer performs comparably on these benchmarks to state-of-the-art model-free ofﬂine RL algorithms [16, 17]. Furthermore, in tasks where long-term credit assignment is required, Decision Transformer capably outperforms RL algorithms. With this work, we hope to bridge vast recent progress in transformer models with RL problems. 2 Preliminaries 2.1 Ofﬂine reinforcement learning
+We consider learning in a Markov decision process (MDP) described by the tuple (S, A, P , R). The
+MDP tuple consists of states s ∈ S, actions a ∈ A, transition dynamics P (s(cid:48)|s, a), and a reward function r = R(s, a). We use st, at, and rt = R(st, at) to denote the state, action, and reward at timestep t, respectively. The goal in reinforcement learning is to learn a policy which maximizes the expected return E in an MDP. In ofﬂine reinforcement learning, instead of obtaining data via environment interactions, we only have access to some ﬁxed limited dataset consisting of trajectories from the environment. This setting is harder as it removes the ability for agents to explore the environment and collect additional feedback. t=1 rt (cid:104)(cid:80)T (cid:105) 2.2 Transformers
+Transformers were proposed by Vaswani et al. [1] as an architecture to efﬁciently model sequences.
+They consist of stacked self-attention layers with residual connections. Each self-attention layer receives n embeddings {xi}n i=1 corresponding to unique input tokens, and outputs n embeddings
+{zi}n i=1, preserving the input dimensions. The i-th token is mapped via linear transformations to a key ki, query qi, and value vi. The i-th output of the self-attention layer is given by weighting the values vj by the normalized dot product between the query qi and other keys kj: zi = n (cid:88) j=1 softmax({(cid:104)qi, kj(cid:48)(cid:105)}n j(cid:48)=1)j · vj. (1)
+This allows the layer to assign “credit” by implicitly forming state-return associations via similarity of the query and key vectors (maximizing the dot product). In this work, we use the GPT architec-ture [12], which modiﬁes the transformer architecture with a causal self-attention mask to enable autoregressive generation, replacing the summation/softmax over the n tokens with only the previous tokens in the sequence (j ∈ [1, i]). We defer the other architecture details to the original papers. 3 Method
+In this section, we present Decision Transformer, which models trajectories autoregressively with minimal modiﬁcation to the transformer architecture, as summarized in Figure 1 and Algorithm 1.
+Trajectory representation. The key desiderata in our choice of trajectory representation are (a) it should enable transformers to learn meaningful patterns and (b) we should be able to conditionally generate actions at test time. It is nontrivial to model rewards since we would like the model to generate actions based on future desired returns, rather than past rewards. As a result, instead of modeling the rewards directly, we model the returns-to-go (cid:98)Rt = (cid:80)T t(cid:48)=t rt(cid:48). This leads to the following trajectory representation which is amenable to autoregressive training and generation: (cid:16)
+τ = (cid:98)R1, s1, a1, (cid:98)R2, s2, a2, . . . , (cid:98)RT , sT , aT (cid:17)
+. (2)
+Architecture. We feed the last K timesteps into Decision Transformer, for a total of 3K tokens (one for each modality: return-to-go, state, or action). To obtain token embeddings, we learn a linear 3
+layer for each modality, which projects raw inputs to the embedding dimension, followed by layer normalization [18]. For environments with visual inputs, the state is fed into a convolutional encoder instead of a linear layer. Additionally, an embedding for each timestep is learned and added to each token – note this is different than the standard positional embedding used by transformers, as one timestep corresponds to three tokens. The tokens are then processed by a GPT [12] model, which predicts future action tokens via autoregressive modeling.
+Training. We sample minibatches of sequence length K from the dataset. The prediction head corresponding to the input token st is trained to predict at – either with cross-entropy loss for discrete actions or mean-squared error for continuous actions – and the losses for each timestep are averaged.
+We did not ﬁnd predicting the states or returns-to-go to be necessary for good performance, although it is possible (as shown in Section 5.3) and would be an interesting study for future work.
+Evaluation. During evaluation rollouts, we specify a target return based on our desired performance (e.g., specify maximum possible return to generate expert behavior) as well as the environment starting state, to initialize generation. After executing the generated action, we decrement the target return by the achieved reward and obtain the next state. We repeat this process of generating actions and applying them to obtain the next return-to-go and state until episode termination.
+Algorithm 1 Decision Transformer Pseudocode (for continuous actions)
+# R , s , a , t : returns - to - go , states , actions , or timesteps
+# K : context length ( length of each input to DecisionTransformer )
+# transformer : transformer with causal masking ( GPT )
+# embed_s , embed_a , embed_R : linear embedding layers
+# embed_t : learned episode positional embedding
+# pred_a : linear action prediction layer
+# main model def Dec isio nT ran sf or mer (R , s , a , t ):
+# compute embeddings for tokens pos_embedding = embed_t ( t ) s_embedding = embed_s ( s ) + pos_embedding a_embedding = embed_a ( a ) + pos_embedding
+R_embedding = embed_R ( R ) + pos_embedding
+# per - timestep ( note : not per - token )
+# interleave tokens as ( R_1 , s_1 , a_1 , ... , R_K , s_K ) input_embeds = stack ( R_embedding , s_embedding , a_embedding )
+# use transformer to get hidden states hidden_states = transformer ( input_embeds = input_embeds )
+# select hidden states for action prediction tokens a_hidden = unstack ( hidden_states ). actions
+# predict action return pred_a ( a_hidden )
+# training loop for (R , s , a , t ) in dataloader :
+# dims : ( batch_size , K , dim ) a_preds = Deci sion Tra nsf orm er (R , s , a , t ) loss = mean (( a_preds - a )**2) optimizer . zero_grad (); loss . backward (); optimizer . step ()
+# L2 loss for continuous actions
+# evaluation loop target_return = 1
+R , s , a , t , done = [ target_return ] , [ env . reset ()] , [] , [1] , False while not done :
+# autoregressive generation / sampling
+# for instance , expert - level return
+# sample next action action = D ec is ion Tr an sform er (R , s , a , t )[ -1] new_s , r , done , _ = env . step ( action )
+# for cts actions
+# append new tokens to sequence
+R = R + [ R [ -1] - r ] s , a , t = s + [ new_s ] , a + [ action ] , t + [ len ( R )]
+R , s , a , t = R [ - K :] , ...
+# decrement returns - to - go with reward
+# only keep context length of K 4
+Figure 3: Results comparing Decision Transformer (ours) to TD learning (CQL) and behavior cloning across Atari, OpenAI Gym, and Minigrid. On a diverse set of tasks, Decision Transformer performs comparably or better than traditional approaches. 4 Evaluations on ofﬂine RL benchmarks
+In this section, we investigate if Decision Transformer can perform well compared to standard TD and imitation learning approaches for ofﬂine RL. TD learning algorithms represent the conventional state-of-the-art, while imitation learning algorithms have similar formulations to Decision Transformer.
+The exact algorithms depend on the environment but our motivations are as follows:
+• TD learning: most of these methods use an action-space constraint or value pessimism, and will be the most faithful comparison to Decision Transformer, representing standard RL methods. A state-of-the-art model-free method is Conservative Q-Learning (CQL) [17] which serves as our primary comparison. In addition, we also compare against other prior model-free RL algorithms like BEAR [19] and BRAC [20].
+• Imitation learning: this regime similarly uses supervised losses for training, rather than Bellman backups. We use behavior cloning here, and include a more detailed discussion in Section 5.1.
+We evaluate on both discrete (Atari [13]) and continuous (OpenAI Gym [14]) control tasks. The former requires long-term credit assignment, while the latter requires ﬁne-grained continuous control, representing a diverse set of tasks. Our main results are summarized in Figure 3, where we show averaged expert normalized performance for each domain. 4.1 Atari
+The Atari benchmark is challenging due to its high-dimensional visual inputs and difﬁculty of credit assignment arising from the delay between actions and resulting rewards. We evaluate our method on 1% of all samples in the DQN-replay dataset as per Agarwal et al. [16], representing 500 thousand of the 50 million transitions observed by an online DQN agent [21] during training; we report the mean and standard deviation of 3 seeds. We normalize scores based on a professional gamer, following the protocol of Hafner et al. [22], where 100 represents the professional gamer score and 0 represents a random policy.
+We compare to CQL [17], REM [16], and QR-DQN [23] on four Atari tasks (Breakout, Qbert, Pong, and Seaquest) that are evaluated in Agarwal et al. [16]. We use context lengths of K = 30 for
+Decision Transformer (except K = 50 for Pong); for results with different values of K see the supplementary material. We also report the performance of behavior cloning (BC), which utilizes
+Game
+DT (Ours)
+CQL
+QR-DQN REM
+BC
+Breakout
+Qbert
+Pong
+Seaquest 267.5 ± 97.5 15.1 ± 11.4 106.1 ± 8.1 2.4 ± 0.7 211.1 104.2 111.9 1.7 21.1 1.7 20.0 1.4 32.1 1.4 39.1 1.0 138.9 ± 61.7 17.3 ± 14.7 85.2 ± 20.0 2.1 ± 0.3
+Table 1: Gamer-normalized scores for the 1% DQN-replay Atari dataset. We report the mean and variance across 3 seeds. Best mean scores are highlighted in bold. Decision Transformer (DT) performs comparably to CQL on 3 out of 4 games, and outperforms other baselines in most games. 5
+the same network architecture and hyperparameters as Decision Transformer but does not have return-to-go conditioning2. For CQL, REM, and QR-DQN baselines, we report numbers directly from the CQL paper. We show results in Table 1. Our method is competitive with CQL in 3 out of 4 games and outperforms or matches REM, QR-DQN, and BC on all 4 games. 4.2 OpenAI Gym
+In this section, we consider the continuous control tasks from the D4RL benchmark [24]. We also consider a 2D reacher environment that is not part of the benchmark, and generate the datasets using a similar methodology to the D4RL benchmark. Reacher is a goal-conditioned task and has sparse rewards, so it represents a different setting than the standard locomotion environments (HalfCheetah,
+Hopper, and Walker). The different dataset settings are described below. 1. Medium: 1 million timesteps generated by a “medium” policy that achieves approximately one-third the score of an expert policy. 2. Medium-Replay: the replay buffer of an agent trained to the performance of a medium policy (approximately 25k-400k timesteps in our environments). 3. Medium-Expert: 1 million timesteps generated by the medium policy concatenated with 1 million timesteps generated by an expert policy.
+We compare to CQL [17], BEAR [19], BRAC [20], and AWR [25]. CQL represents the state-of-the-art in model-free ofﬂine RL, an instantiation of TD learning with value pessimism. Score are normalized so that 100 represents an expert policy, as per Fu et al. [24]. CQL numbers are reported from the original paper; BC numbers are run by us; and the other methods are reported from the
+D4RL paper. Our results are shown in Table 2. Decision Transformer achieves the highest scores in a majority of the tasks and is competitive with the state of the art in the remaining tasks.
+Dataset
+Environment
+DT (Ours)
+CQL
+BEAR BRAC-v AWR
+BC
+HalfCheetah
+Medium-Expert
+Medium-Expert
+Hopper
+Medium-Expert Walker
+Reacher
+Medium-Expert 86.8 ± 1.3 107.6 ± 1.8 108.1 ± 0.2 89.1 ± 1.3 62.4 111.0 98.7 30.6
+Medium
+Medium
+Medium
+Medium
+HalfCheetah
+Hopper
+Walker
+Reacher
+Medium-Replay HalfCheetah
+Medium-Replay Hopper
+Medium-Replay Walker
+Medium-Replay Reacher
+Average (Without Reacher)
+Average (All Settings) 42.6 ± 0.1 67.6 ± 1.0 74.0 ± 1.4 51.2 ± 3.4 36.6 ± 0.8 82.7 ± 7.0 66.6 ± 3.0 18.0 ± 2.4 74.7 69.2 44.4 58.0 79.2 26.0 46.2 48.6 26.7 19.0 63.9 54.2 53.4 96.3 40.1
+-41.7 52.1 59.1
+-38.6 33.7 19.2
+-48.2
+-41.9 0.8 81.6
+-46.3 31.1 81.1
+-47.7 0.6 0.9
+-36.9
+-52.7 27.1 53.8
+-37.4 35.9 17.4
+-40.3 28.4 15.5
+-34.3
+-59.9 79.6 36.6 73.3 43.1 63.9 77.3 48.9 4.3 27.6 36.9 5.4 46.4 47.7
+Table 2: Results for D4RL datasets4. We report the mean and variance for three seeds. Decision
+Transformer (DT) outperforms conventional RL algorithms on almost all tasks. 5 Discussion 5.1 Does Decision Transformer perform behavior cloning on a subset of the data?
+In this section, we seek to gain insight into whether Decision Transformer can be thought of as performing imitation learning on a subset of the data with a certain return. To investigate this, we propose a new method, Percentile Behavior Cloning (%BC), where we run behavior cloning on only the top X% of timesteps in the dataset, ordered by episode returns. The percentile X% interpolates between standard BC (X = 100%) that trains on the entire dataset and only cloning the best observed 2We also tried using an MLP with K = 1 as in prior work, but found this was worse than the transformer. 4Given that CQL is generally the strongest TD learning method, for Reacher we only run the CQL baseline. 6
+Dataset
+Environment
+DT (Ours) 10%BC 25%BC 40%BC 100%BC CQL
+Medium
+Medium
+Medium
+Medium
+HalfCheetah
+Hopper
+Walker
+Reacher
+Medium-Replay HalfCheetah
+Medium-Replay Hopper
+Medium-Replay Walker
+Medium-Replay Reacher
+Average 42.6 ± 0.1 67.6 ± 1.0 74.0 ± 1.4 51.2 ± 3.4 36.6 ± 0.8 82.7 ± 7.0 66.6 ± 3.0 18.0 ± 2.4 56.1 42.9 65.9 78.8 51.0 40.8 70.6 70.4 33.1 56.7 43.0 65.2 80.9 48.9 40.9 58.6 67.8 16.2 52.7 43.1 65.3 78.8 58.2 41.1 31.0 67.2 10.7 49.4 43.1 63.9 77.3 58.4 4.3 27.6 36.9 5.4 39.5 44.4 58.0 79.2 26.0 46.2 48.6 26.7 19.0 43.5
+Table 3: Comparison between Decision Transformer (DT) and Percentile Behavior Cloning (%BC). trajectory (X → 0%), trading off between better generalization by training on more data with training a specialized model that focuses on a desirable subset of the data.
+We show full results comparing %BC to Decision Transformer and CQL in Table 3, sweeping over
+X ∈ [10%, 25%, 40%, 100%]. Note that while both %BC and DT introduce hyperparameters, returns are human interpretable and it is relatively natural for humans to specify a desired return compared to choosing an optimal subset for cloning. When data is plentiful – as in the D4RL regime – we ﬁnd
+%BC can match or beat other ofﬂine RL methods. On most environments, Decision Transformer is competitive with the performance of the best %BC, indicating it can hone in on a particular subset after training on the entire dataset distribution.
+In contrast, when we study low data regimes – such as Atari, where we use 1% of a replay buffer as the dataset – %BC is weak (shown in Table 4). This suggests that in scenarios with relatively low amounts of data, Decision Transformer can outperform %BC by using all trajectories in the dataset to improve generalization, even if those trajectories are dissimilar from the return conditioning target. Our results indicate that Decision Transformer can be more effective than simply performing imitation learning on a subset of the dataset. On the tasks we considered, Decision Transformer either outperforms or is competitive to %BC, without the confound of having to select the optimal subset.
+Game
+DT (Ours) 10%BC 25%BC 40%BC 100%BC
+Breakout
+Qbert
+Pong
+Seaquest 267.5 ± 97.5 15.1 ± 11.4 106.1 ± 8.1 2.4 ± 0.7 28.5 ± 8.2 6.6 ± 1.7 2.5 ± 0.2 1.1 ± 0.2 73.5 ± 6.4 16.0 ± 13.8 13.3 ± 2.7 1.1 ± 0.2 108.2 ± 67.5 11.8 ± 5.8 72.7 ± 13.3 1.6 ± 0.4 138.9 ± 61.7 17.3 ± 14.7 85.2 ± 20.0 2.1 ± 0.3
+Table 4: %BC scores for Atari. We report the mean and variance across 3 seeds. Decision Transformer (DT) outperforms all versions of %BC in most games. 5.2 How well does Decision Transformer model the distribution of returns?
+We evaluate the ability of Decision Transformer to understand return-to-go tokens by varying the desired target return over a wide range – evaluating the multi-task distribution modeling capability of transformers. Figure 4 shows the average sampled return accumulated by the agent over the course of the evaluation episode for varying values of target return. On every task, the desired target returns and the true observed returns are highly correlated. On some tasks like Pong, HalfCheetah and
+Walker, Decision Transformer generates trajectories that almost perfectly match the desired returns (as indicated by the overlap with the oracle line). Furthermore, on some Atari tasks like Seaquest, we can prompt the Decision Transformer with higher returns than the maximum episode return available in the dataset, demonstrating that Decision Transformer is sometimes capable of extrapolation. 5.3 Does Decision Transformer perform effective long-term credit assignment?
+To evaluate long-term credit assignment capabilities of our model, we consider a variant of the
+Key-to-Door environment proposed in Mesnard et al. [15]. This is a grid-based environment with a sequence of three phases: (1) in the ﬁrst phase, the agent is placed in a room with a key; (2) then, the 7
+Figure 4: Sampled (evaluation) returns accumulated by Decision Transformer when conditioned on the speciﬁed target (desired) returns. Top: Atari. Bottom: D4RL medium-replay datasets. agent is placed in an empty room; (3) and ﬁnally, the agent is placed in a room with a door. The agent receives a binary reward when reaching the door in the third phase, but only if it picked up the key in the ﬁrst phase. This problem is difﬁcult for credit assignment because credit must be propagated from the beginning to the end of the episode, skipping over actions taken in the middle.
+We train on datasets of trajectories generated by applying random actions and report success rates in Table 5. Furthermore, for the Key-to-Door environment we use the entire episode length as the context, rather than having a ﬁxed content window as in the other environments. Methods that use highsight return information: our Decision Transformer model and %BC (trained only on successful episodes) are able to learn effective policies – producing near-optimal paths, despite only training on random walks. TD learning (CQL) cannot effectively propagate Q-values over the long horizons involved and gets poor performance.
+Dataset
+DT (Ours)
+CQL
+BC %BC
+Random 1K Random Trajectories 10K Random Trajectories 71.8% 13.1% 1.4% 69.9% 94.6% 13.3% 1.6% 95.1% 3.1% 3.1%
+Table 5: Success rate for Key-to-Door environment. Methods using hindsight (Decision Transformer,
+%BC) can learn successful policies, while TD learning struggles to perform credit assignment. 5.4 Can transformers be accurate critics in sparse reward settings?
+In previous sections, we established that decision transformer can produce effective policies (actors).
+We now evaluate whether transformer models can also be effective critics. We modify Decision
+Transformer to output return tokens in addition to action tokens on the Key-to-Door environment.
+We ﬁnd that the transformer continuously updates reward probability based on events during the episode, shown in Figure 5 (Left). Furthermore, we ﬁnd the transformer attends to critical events in the episode (picking up the key or reaching the door), shown in Figure 5 (Right), indicating formation of state-reward associations as discussed in Raposo et al. [26] and enabling accurate value prediction. 5.5 Does Decision Transformer perform well in sparse reward settings?
+A known weakness of TD learning algorithms is that they require densely populated rewards in order to perform well, which can be unrealistic and/or expensive. In contrast, Decision Transformer can improve robustness in these settings since it makes minimal assumptions on the density of the reward.
+To evaluate this, we consider a delayed return version of the D4RL benchmarks where the agent does not receive any rewards along the trajectory, and instead receives the cumulative reward of the trajectory in the ﬁnal timestep. Our results for delayed returns are shown in Table 6. Delayed returns minimally affect Decision Transformer; and due to the nature of the training process, while imitation learning methods are reward agnostic. While TD learning collapses, Decision Transformer and %BC still perform well, indicating that Decision Transformer can be more robust to delayed rewards. 8
+Figure 5: Left: Averages of running return probabilities predicted by the transformer model for three types of episode outcomes. Right: Transformer attention weights from all timesteps superimposed for a particular successful episode. The model attends to steps near pivotal events in the episode, such as picking up the key and reaching the door.
+Dataset
+Environment
+DT (Ours)
+CQL
+BC %BC DT (Ours) CQL
+Delayed (Sparse)
+Agnostic
+Original (Dense)
+Hopper
+Medium-Expert
+Medium
+Hopper
+Medium-Replay Hopper 107.3 ± 3.5 60.7 ± 4.5 78.5 ± 3.7 9.0 5.2 2.0 59.9 63.9 27.6 102.6 65.9 70.6 107.6 67.6 82.7 111.0 58.0 48.6
+Table 6: Results for D4RL datasets with delayed (sparse) reward. Decision Transformer (DT) and imitation learning are minimally affected by the removal of dense rewards, while CQL fails. 5.6 Additional Discussions
+For more discussions see the supplementary material. 6

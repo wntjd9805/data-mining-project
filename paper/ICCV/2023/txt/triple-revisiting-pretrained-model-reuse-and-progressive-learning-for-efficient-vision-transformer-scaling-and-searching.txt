@@ -1,0 +1,415 @@
+Abstract
+One promising way to accelerate transformer training is to reuse small pretrained models to initialize the trans-former, as their existing representation power facilitates faster model convergence. Previous works designed expan-sion operators to scale up pretrained models to the target model before training. Yet, model functionality is difficult to preserve when scaling a transformer in all dimensions at once. Moreover, maintaining the pretrained optimizer states for weights is critical for model scaling, whereas the new weights added during expansion lack these states in pre-trained models. To address these issues, we propose TripLe, which partially scales a model before training, while grow-ing the rest of the new parameters during training by copy-ing both the warmed-up weights with the optimizer states from existing weights. As such, the new parameters intro-duced during training will obtain their training states. Fur-thermore, through serializing the scaling of model width and depth, the functionality of each expansion can be pre-served. We evaluate TripLe in both single-trial model scal-ing and multi-trial neural architecture search (NAS). Due to the fast training convergence of TripLe, the proxy accuracy from TripLe better reveals the model quality compared to from-scratch training in multi-trial NAS. Experiments show that TripLe outperforms from-scratch training and knowl-edge distillation (KD) in both training time and task perfor-mance. TripLe can also be combined with KD to achieve an even higher task accuracy. For NAS, the model obtained from TripLe outperforms DeiT-B in task accuracy with 69% reduction in parameter size and FLOPs. 1.
+
+Introduction
+Vision transformer (ViT) models are promising to achieve the state-of-the-art performance on various com-puter vision tasks [14, 20, 44, 45]. While the performance frontier keeps pushing forward, the training costs also scale with the growth of parameters. For example, Dehghani et al. [11] scaled a ViT to 22 billion parameters. Furthermore, recent research [33] shows that transformers require much more training steps and larger datasets to better generalize compared to convolutional neural networks (CNNs), impos-ing even more scaling costs of ViTs.
+Among various transformer training acceleration and cost reduction techniques [23, 7, 51, 54, 41, 17], one promising method is to reuse small pretrained models to initialize a large model before training. By scaling a small pretrained model with various expansion operators and us-ing it to initialize the large model, the implicit knowledge facilitates faster model convergence. Previous studies such as bert2BERT [4] focused on preserving the functionality of the small pretrained transformer, when growing transformer width (i.e., hidden dimensions). A recent work learn-to-grow [49] learns linear mappings to scale the pretrained model by minimizing the task loss during model expansion.
+However, we identify a set of critical limitations in the existing approaches through a comprehensive investi-(L1) Maintaining the functionality dur-gation (Sec 2.3). ing model scaling is not the only key factor to achieving a high speedup and final task accuracy. We identify that the other critical factor is retaining the optimizer states of the weights, because that preserves the direction of model up-dates when the functionality is preserved. Previous meth-ods [49, 4] do not include these optimizer states during model scaling. (L2) Training discrepancies exist between the pretrained weights and the new weights because the new weights introduced during scaling do not have optimizer states built up before training. (L3) The functionality of a pretrained model is hardly preserved by simply expanding a small pretrained model in multiple dimensions all at once.
+To address these limitations, we propose a new method,
+TripLe1, which partially expands a pretrained model be-fore training and grows the rest of the parameters during training. TripLe conducts the expansion of model width and depth in a serialized fashion. Tackling L1, we scale the width of the pretrained transformer with their optimizer states to initialize the scaled model and optimizer. So the pretrained weights will maintain their update directions dur-ing training. After a short warmup training phase, the new weights will obtain their training states. To address L2, we increase the depth of ViTs by copying the existing weights parameters and their training states. As such, the optimizer states obtained from the first stage can be leveraged by the second expansion, mitigating the training mismatch be-tween new and pretrained weights. For L3, when serializing the width and depth expansion, each expansion stage will mostly preserve the functionality of the small pretrained model, enabling faster convergence of the training period.
+Our method can be viewed as a combination of two lines of work: pretrained model reuse and progressive learning.
+Our exploration shows that they are two extreme cases for transformer scaling: the pretrained model reuse technique will scale a small pretrained model in multiple dimensions toward the target model before training, while progressive learning starts from a randomly initialized model and grows parameters during training until reaching the target large model. We observe that these methods in fact benefit each other on ViT training: reusing a pretrained ViT facilitates faster convergence of progressive learning at each stage, while progressive learning constructs the training states that help the ViT scaling.
+To further improve model quality, we augment TripLe with knowledge distillation (KD) [21]. Specifically, TripLe applies the pretrained model to initialize a large model and
+KD uses the pretrained model to provide teaching signals during training.
+Experiments and Results. We evaluate TripLe with both single-trial model scaling and multi-trial neural architec-ture search (NAS). With single-trial training, we scale var-ious ViTs, and compare the training time and task accu-racy against from-scratch training and a variety of baseline model scaling methods. When scaling pretrained ViTs size by 8×, TripLe saves the training time up to 71.0%∼80.9% compared to from-scratch training. Other model scal-ing methods hardly achieve performance neutrality against from-scratch training on large ViT models. Moreover, with the same training budget as from-scratch training, a 44MB
+ViT (expanded from a 5MB ViT) outperforms both the of-ficial 86MB DeiT-B (by 0.2%) and KD alone (by 1.0%) in
+ImageNet-1k task accuracy. Combining TripLe with KD, the 44MB model shows a 1.8% higher task accuracy com-pared to using KD alone. 1TripLe incorporates three principles: reusing pretrained models, pro-gressive learning, and knowledge distillation.
+TripLe enhances NAS performance by finding a 27MB model that outperforms the task accuracy of the 86MB
+DeiT-B [44] and the model searched by traditional multi-trial NAS. One of the significant downsides of multi-trial search is a long searching time [56], as sampled models are always trained from scratch. To reduce training time, prior approaches typically use ∼10% of the final training time to approximate model accuracy. Yet, this proxy accuracy is too far from the final accuracy. Our method can be viewed as a new form of ‘weight-sharing’ designated for multi-trial
+NAS. TripLe allows each trial to start from a pretrained model (Figure 2). The proxy accuracy obtained from TripLe shows a higher correlation with the final task accuracy com-pared to training from scratch. After the model is searched, we further improve the model performance using TripLe during model evaluation.
+Table 1. ViT [44] for evaluating TripLe. New model variants
+SL24/BL24 only change the #layers of DeiT-S/DeiT-B.
+#heads
+#layers
+#params hidden dim 192 384 768 1024 384 768
+Model (DeiT-)
+Ti
+S
+B
+L
+SL24
+BL24
+† Top-1 Accuracy of our DeiT re-implementation with 300 epochs of training.
+‡ Official Top-1 task accuracy under 300 epochs of training.
+FLOPs (billions) 2.16 8.50 33.72 119.36 16.87 67.21 5M 22M 86M 307M 44M 172M 3 6 12 16 6 12 12 12 12 24 24 24
+Top-1†
+Acc 72.0 79.5 81.0 82.1 80.0 81.4
+Top-1‡
+Acc 72.1 79.8 81.8 82.2
+--2. Scaling Vision Transformers
+In this section, we introduce the Vision Transformers (ViTs) studied in this paper. Furthermore, we perform a comprehensive investigation on the performance of existing scaling operators. 2.1. Vision Transformer
+Transformer [13] was first employed in vision tasks by
+Dosovitskiy et al. [14]. ViT first extracts features from raw image patches using a CNN and feeds the extracted fea-tures as the input to the transformer. DeiT [44] finds that the model can achieve a high task accuracy on ImageNet-1k [12] dataset when applying strong image augmentation with knowledge distillation [1]. Many follow-up works pro-pose ViT variants for better task accuracy [45, 20, 46, 55, 5].
+This study focuses on scaling pretrained ViTs, and our experiments reuse the DeiT architectures [44]. To study scaling ViTs in both depth and width, we also introduce two model variants namely DeiT-BL24 and DeiT-SL24 given in
+Table 1. 2.2. Revisiting Operators Scaling
+Recent studies [4, 49] reuse small pretrained transform-ers to accelerate the large model training. These works in-troduce different expansion operators for transformer depth
+(i.e., number of layers) and width (i.e., hidden dimension).
+They then employ the expanded pretrained model to ini-tialize the target model. We denote the width/depth expan-sion operator as γ/β. The large model Θ to be trained has
+L transformer layers with hidden dimension D. The pre-trained model θ has l layers with hidden dimension d.
+Layer Stacking βstck and Interpolation βinpt.
+Layer stacking [19] and interpolation [3] are two common ap-proaches to increasing the transformer depth. Specifically, the operation can be formulated as follows:
+βstck : Wi = wi mod l, ∀i ∈ {1, ..., L}
+βinpt : Wi = w⌊i/k⌋, ∀i ∈ {1, ..., L}, k = ⌊L/l⌋ (1) (2)
+Here, Wi denotes the initial weight of the i-th trans-former layer in model Θ. k is the expansion ratio of layers.
+By duplicating the existing layers according to Eq.1-2, we can scale the pretrained model in depth.
+Adding Identity Layers βST .
+Shen et al.[40] propose to add identity layers WI to maintain the functionality of the pretrained model. We denote this layer as WI where
+WI (x) = x. Specifically, each transformer layer can be viewed as two sub-layers:
+Table 2. Relationships between different methods and expansion operators for different transformer scaling methods. Model Inter-polation is a new baseline proposed in this paper.
+Method bert2BERT [4]
+Staged-Training [40]
+Model Interpolation
+Learn-to-grow [49]
+Pad Zero
+Notation width
+γb2B
+γST
+γinpt
+γlgt
+γpad0 b2B
+ST
+Inpt
+LTG
+Pad0 depth
+βstck
+βST inpt
+βinpt
+βlgt
+βstck
+Weight resizing γinpt: In this work, we propose a new baseline operator interpolation γinpt that treats the weight matrices as images and interpolates the matrices using im-age resizing methods, such as bicubic / bilinear [10] and etc.
+Empirically, we find bilinear outperforms other methods, so we apply it in γinpt.
+Learn-to-grow γlgt / βlgt: Besides all the above meth-ods, learn-to-grow [49] proposes to learn linear matrices that map the pretrained weights into larger weight matrices to preserve the functionality of the small pretrained model (Equations in Appendix B.2.). We denote its width and depth expansion operator as γltg and βltg, respectively.
+The combination of these operators forms all the existing methods for scaling pretrained transformers. The summary is given in Table 2. x′ = x + Attention(LN (x)) y = x′ + FFN(LN (x′)) (3) 2.3. Investigating Expansion Operators
+The ‘Attention’ denotes the multi-head attention layer.
+‘FFN’ denotes the feed-forward layers following the at-tention layer [47].
+‘LN’ denotes the layer normaliza-tion. When initializing the scale and bias in ‘LN’, ‘Atten-tion’, and ‘FFN’ to 0, the output of Attention(LN (x)) and
+FFN(LN (x′)) will be 0 as well. In this way, the transformer layer has y and x equal. βST can be combined with layer
+βstck or βinpt, i.e., where to add these identity layers. They are denoted as βST stck and βST inpt, respectively. bert2BERT γb2B: Net2Net [6] increases the width of neu-ral networks by duplicating neurons randomly and main-taining their output values through normalization. For trans-formers, it is first applied in bert2BERT [4] for pretrained transformer scaling (Detailed in Appendix B.2).
+Padding Zeros γpad0: A straightforward way to increase the transformer width is to pad zeros to the existing weights.
+The small pretrained weights are on the upper-left corner of the large layer, the rest parameters are all zero-initialized.
+Special padding zeros γST : Staged-training [40] proposes a new width expansion method. When scaling a dense layer, the width expansion can be written as: (cid:18)w z z w
+γST (w) = (4) (cid:19)
+We motivate TripLe with a detailed investigation of the performance and inefficiencies of previous scaling opera-tors.
+Definition of functionality preserving. We classify differ-ent scaling approaches into three categories based on their capability of preserving functionality. (I) If the scaled model is mathematically proved to yield the same output as the pretrained model, we define the scal-ing approach as full functionality-preserving. For example, the width scaling method γST is full FP. (II) If the scaled model achieves task accuracy better than random guessing experimentally, we classify the ap-proach as partial functionality-preserving. For example, depth scaling operators βInpt and βStck are partial FP. 1 (III) For non-functionality preserving approaches, the number of classes × 100% ac-scaled models show around curacy, which is the same as random guessing.
+Investigation 1: Which operators can preserve model functionality? Many different expansion methods, such as
+γb2B, γST and βST claim they are functionality preserving.
+We rebuild these baselines and their initialized accuracy is given in Table 3 (marked in blue). 1 bert2BERT (γb2B): We find γb2B can preserve trans-former functionality under constraint.
+Here, z is a d × d zero matrix. The scaled matrix has (Equations for other a size of D × D, where D = 2d. parameters are detailed in Appendix B.2.)
+When applying γb2B to scale a d × d dense layer into 2d×2d, the original output vector o can become ¯o = {o, o}.
+After another linear mapping, we can convert ¯o back to o.
+Here, o is a 1 × d vector and ¯o is a 1 × 2d vector. ’{·}’ denotes concatenation operation.
+However, if we randomly choose the columns and rows of the dense layer for duplication as the original method described in bert2BERT [4], the scaled output will become
+¯o = {o, o′} and the result cannot be converted back to o after LayerNorm. That is because the mean and variance of o′ (1 × d) cannot be derived from o. We provide an example given in Appendix B. 2 γST and βST : We find the operator γST /βST can pre-serve the functionality of the ViT. βST is an identity layer and it is functionality preserving as discussed in Sec 2.2.
+For γST , when expanding a d × d dense layer into 2d × 2d,
+The new dense layer has output ¯o = {o, o} where o is the original output with a size of 1 × d according to Eq.4. Be-cause the mean and variance of ¯o can be derived from o, the output results ¯o can be recovered back to o after LayerNorm.
+βstck and βinpt: Empirically, we also find βstck and βinpt can preserve partial functionality. For exam-ple, when expanding S−→SL24, the expanded model with
+βstck/βinpt can achieve 65.56%/39.98% task accuracy, re-spectively. This indicates the initial task loss is small after scaling the pretrained model using βstck / βinpt. 3 4 Learn-to-grow γltg and βltg: Learn-to-grow focuses on reducing the task loss L at the beginning of the train-ing as given in Eq.5 through learning linear mappings (βltg,
+γltg) from the small pretrained model to the large one. arg min
+βltgγltg
+Ex∼DtL(x; Θ), s.t.Θ = βltg(γltg(θ)) (5)
+Here, Dt represents the data distribution, and Θ is a large model expanded from a small checkpoint θ. When expand-ing ViT-S−→B, learn-to-grow can only achieve 72% initial task accuracy [49] compared to 79.5% task accuracy of the small pretrained model. As such, we conclude that γltg/βltg can only preserve partial functionality.
+Other scaling operators discussed in Sec. 2.2 are not functionally preserving.
+Investigation 2: Does the initial accuracy of the scaled model matter to the final task performance?
+We observe that the correlation between the initial ac-curacy of the scaled model and the final accuracy is weak.
+Specifically, we evaluate each width/depth operator using
+ImageNet-1k dataset. (Hyperparameters in Appendix A).
+The results are given in Table 3 (marked the columns in purple).
+Among width expansion operators, γST achieves the highest initial accuracy, however, it cannot achieve the best final accuracy across the baselines. The initial accuracy ob-tained using γST can be compromised within a few train-ing iterations. Our new baseline γinpt (not functionality preserving) achieves very similar final task accuracy com-pared to other baselines. For depth expansion operator,
+βST stck/βST inpt, can maintain model functionality. Yet,
+Table 3. Performance comparison between different expansion op-erators under 30/60 training epochs (ep30/ep60). ‘-m’ denotes ig-noring the optimizer states. ‘+m’ means we scale the optimizer states and use them to initialize the new optimizer. models width γ depth β
+Ti−→S
+Ti−→S
+Ti−→S
+Ti−→S
+S−→SL24
+S−→SL24
+S−→SL24
+S−→SL24
+Ti−→SL24
+Ti−→SL24
+γb2B
+γST
+γpad0
+γinpt
+----γST
+----βstck
+βinpt
+βST stck
+βST inpt
+βstck
+TripLe init 0.00 71.82 0.01 0.00 65.56 38.98 79.49 79.49 0.01 71.82
+Test accuracy
+-m
++m
+∆ep60 ep30 72.90 72.82 69.89 73.04 79.10 80.00 78.46 78.61 75.73
+-ep60 76.53 75.72 70.83 76.50 80.74 81.23 79.47 79.23 78.21
+-ep30 72.76 74.88 69.85 73.25 80.02 80.34 78.67 78.41 76.23 76.52 ep60 76.64 77.29 72.45 76.11 81.31 81.26 79.52 79.26 78.62 79.23
++0.11
++1.57
++1.63
+-0.39
++0.57
++0.03
++0.05
++0.03
++0.40
+-the identity transformer layer (Eq.3) poses a considerable challenge for the model to be trained properly.
+Investigation 3: Effect of optimizer states in scaling pre-trained ViTs. ViTs are mostly trained using AdamW [34].
+That means the optimizer states also exist in the pretrained model. Specifically, during the model update, we have: mt = β1mt−1 + (1 − β1)gt vt = β2vt−1 + (1 − β2)g2 t
+θt+1 = θt −
+√
+λ(t) vt + ϵ
+· mt (6) (7) (8)
+Here, gt is the first-order gradient of the weight param-eter θ at time step t. λ(t) is the learning rate scheduler.
+β1 and β2 are constant decay rates (0.9, 0.999). m and v are AdamW states with the same dimensions as θ. Previ-ous work, such as learn-to-grow or bert2BERT neglects this momentum information.
+To investigate whether m and v help reduce the training time, we also apply the same width and depth operators γ/β on m and v during model initialization. The performance differences are listed in Table 3 (marked in red).
+The results show that retaining optimizer states improve the model quality in general, especially when functionality of the pretrained model is preserved or at least partially pre-served. With width expansion, the functionality preserving
+γST with momentum information outperforms the second-best baseline by 0.65%. With depth expansion, βstck shows a 0.57% accuracy increase with momentum information.
+This is because functionality preserving reduces the initial task loss and maintains the gradient gt in Eq.6-7 for pre-trained weights. Together with mt−1 and vt−1, the direc-tion of pretrained weights update mt√ vt+ϵ is preserved. One exception is βST , because gt in the growing layers changes due to zero-initialized LN and bias (Eq.3).
+Investigation 4: Can we perfectly scale Ti to SL24 by combining the best scaling operators among γ and
+β? We expand the model from Ti−→SL24 using the best-performed operator selected from the previous investiga-tion, namely, γST and βstck (Table 3). Ti−→SL24 shows a
+2.7% accuracy drop compared to S−→SL24. This is due to the limitations of simply combining γST and βstck. (1) The functionality-preserving feature of γST and βstck is com-promised, when combining them together. This incurs the advantage of applying optimizer states. (2) For Ti−→SL24, the weights grow from 5MB to 44MB. Among them, 24MB of the weights are zeros introduced during model expansion.
+These zero values have no training states in the pretrained model. In addition, zero values are under-trained. As such, a training discrepancy exists between the zeros and the pre-trained parameters. The issue exacerbates once weight de-cay is applied because the zero values will not be penalized at the beginning of training. 3. Method
+Overview. We propose a new method to mitigate the afore-mentioned training mismatches by serializing the model ex-pansion. As discussed above, simply combining the best-performed scaling operators βstck and γST together is sub-optimal. We propose TripLe that scales width before train-ing and grows model depth during training (Figure 1(a)).
+TripLe maintains the functionality preserving feature of
+γST and βstck by serializing the scaling operations. Fur-thermore, with a short warmup training after conducting
+γST , zero weights will obtain their training states that ben-efit the subsequent depth expansion. In what follows, we discuss each step in detail.
+Scaling Width Before Training. TripLe applies γST to expand transformer width before the training. We extend
+γST to the scenario where the expanded model width is not divisible by the small model width (Eq.9). This method is for more general model scaling (e.g., NAS).
+γST (w) = k
+
+
+
+
+
+
+
+ w ... z zs
+...
+...
+...
+. . .
+... w zs z zT zT s ws
+... s
+
+
+
+
+
+, k = ⌊D/d⌋ (9)
+Here, w is the d × d pretrained dense layer. ws is down-sampled from w with a size of ds × ds, ds = D mod d. z and zs are zero matrices with different sizes. The scaled layer γST (w) has a size of D × D. For parameters b with a dimension of 1 × d in LN, weight bias, and classification token, we can conduct a similar procedure using Eq.10. (cid:122)
+γST (b) = (cid:0) b k (cid:125)(cid:124)
+... (cid:123) b (cid:1) bs
+, k = ⌊D/d⌋ (10)
+Here, ‘(·)’ is the concatenation operation, γST (b) has a size of 1 × D. As m and v have the same dimension as their weight parameters, we apply the same operators (Eq.9-10) on m/v and use γST (m)/γST (v) to initialize the
+AdamW optimizer. For the CNN in ViT with a dimension
+Figure 1. Training stages in TripLe when the model depth (l) (a) scales by 2× and (b) is not scaling. We simplify the transformer layer into a single MLP. All the dense layers in the transformer layer are operated in the same fashion. of (d, channel, r, s), we flatten it along kernel dimension (d) and apply Eq.10. The CNN after scaling will be reshaped back to (D, channel, r, s).
+Empirically, we find this method can maintain partial functionality at the beginning of the training when D is not divisible by d.
+Growing Model Depth During Training. As shown in
+Figure 1, before growing the depth of the model, we con-duct warm-up training by keeping the pretrained model depth (Stage I). After Stage I, we directly copy-paste the weight parameters and optimizer states from the bottom transformer layers to the top layers. The number of lay-ers will grow from l to L = 2l. In this stage (Stage II), we freeze the bottom l layers including the positional encoding and convolution layer. Lastly (Stage III), we unfreeze the bottom layer and train all the weights together.
+The key difference between our approach and progres-sive learning[51] is that: (1) besides the weight parameters, we also copy the momentum information which is effective in speedup the training (Sec 2.3) (2) Traditional progres-sive learning requires a long training time for each stage to converge. However, when reusing a pretrained model, each stage can converge in a very short amount of time.
+TripLe without Depth Expansion.
+When the depth of the small pretrained model and the target model is the same (l), we cannot copy-paste the warmed-up parameters from the bottom layer i (i ∈ {1, .., l 2 }) to the top layer j (j ∈ { l 2 + 1, .., l}), as the top layers have already been ini-tialized with pretrained weights. As discussed in Sec 2.3, zero weights (z) are under-trained compared to pretrained weight (w) after conducting γST (Eq.9). As such, we warm up the bottom layers and the zeros at the top layers in Stage
+I (Figure 1(b)). Next in Stage II, we train only the matrices that are zero-initialized in the bottom layers (position z/zs
+In this in Eq.9) and all the parameters in the top layers. way, zero weights have more training steps compared to the pretrained weights during warm-up stages, mitigating
+Figure 2. Leveraging TripLe in multi-trial NAS. The green blocks and arrows are key differences compared to traditional multi-trial
+NAS, while ‘ckpt’ denotes the small pretrained model. the problem that zeros are under-trained (Sec 2.3). Also, the training states for zero weights are established before training all parameters together. Empirically, we find this method improves the training speed and can achieve better task performance when scaling width only.
+Combining TripLe with Knowledge Distillation. We also find reusing pretrained models methods can be combined with Knowledge Distillation (KD) to further improve the model performance. For KD, the pretrained models are em-ployed to provide training signals; for methods in reusing pretrained models, the pretrained weights are used to ini-tialize the large model. Based on our knowledge, we are the first work to combine them together.
+We follow the KD method introduced in DeiT [44] and use the ‘hard-label distillation’ loss during training. Since our architectures are the same as DeiT, the integration is straightforward (Detailed in Appendix C.2). To make a fair comparison with the previous methods, we do not add KD during training unless specified. 4. TripLe for Multi-trial NAS
+As one of use cases of model scaling is to enhance multi-trial NAS, we design a ViT search space and evaluate
+TripLe against traditional approaches as shown in Figure 2.
+Traditional multi-trial NAS adopts an agent to sample a model and training hyperparameters from the search space.
+A worker starts training the model from scratch based on this selection. Different from traditional NAS, the worker in our approach will start training from a pretrained model leveraging TripLe. This section describes our search space, searching algorithm, and reward function.
+Multi-trial Search Space. We build a neural architecture search space based on ViT architecture (Table 4). We search head factors hf of each layer, hidden dimensions D, num-ber of layers, and FFN expansion ratio ef . The number of heads of each layer is D/hf . The dimension of the FFN layer is D × ef . D, hf and ef are sampled independently.
+Furthermore, we search the learning rate and weight decay, which cannot be explored using one-shot algorithms. The cardinality of our search space is around 9.4e11.
+Searching Algorithm and Reward function. We apply a regularized evolution algorithm [38] as the controller al-gorithm to optimize the search space of NAS. We do not
+Table 4. ViT search space for evaluating TripLe in NAS. ‘Global’ means all the layers are set to the same sampled parameter. ‘Local’ means the parameters are sampled for each layer.
+Parameter name hidden dimension (D)
+Head factor (hf )
+FFN Expansion factor (ef )
+Transformer layers (L)
+Learning rate (λ)
+Weight decay
+Selections
+[192, 384, 576, 768]
+[32, 64]
+[2, 3, 4]
+[12, 13,..., 24]
+[5e-4, 1e-3, 4e-3 ]
+[0.05, 0.02, 0]
+Global/Local
+Global
+Local
+Local
+Global
+Global
+Global choose to employ PPO method [39, 42, 56, 43] which re-quires a long training time for the agent to converge. We adopt the TuNAS reward [2] and our reward is defined as
+Reward(Θ) = Q(Θ) + ϵ|
+F LOP s(Θ)
+F LOP s0
+− 1| (11)
+Here, Q(·) indicates the quality (accuracy) of a candidate architecture Θ, F LOP s(Θ) is its FLOPs, F LOP s0 is a problem-dependent FLOPs target, and hyperparameter ϵ < 0 is the cost exponent. 5. Evaluation
+We evaluate the performance of TripLe in both single-trial model scaling and multi-trial NAS.
+Dataset and Hyperparameters. We evaluate TripLe using
+ImageNet-1k [12] for training ViTs. The ViT architectures are given in Table 1. We transfer the models trained us-ing TripLe to various downstream tasks which include CI-FAR10 [28], CIFAR100 [28], Flowers102 [35], Stanford-Cars [27] (results of given in Appendix F). All the exper-iments are done on dragonfish TPUs [25, 24] with 8×8 topology. The validation/test sets are evaluated every 400 seconds on separate TPUs. 512
+We set the batch size to 4096, so the learning rate would be batchsize
+∗ 0.0005 = 0.004 according to the DeiT paper.
+Other hyperparameters are the same as DeiT [44] (Detailed in Appendix A.1). Our baseline methods are given in Ta-ble 3. For ST and Inpt, we also initialize the scaled model with optimizer states for a fair comparison. Specifically, we conduct the width/depth expansion on m and v using the same operators to expand the weights. MSLT [51] is a pro-gressive learning baseline for transformer training.
+We set the training time t for each model scaling task to 30/60/90/120/300 epochs (denoted as ept), respectively.
+The final learning rates under different training times are always 0. The warm-up epochs are set to 5. For TripLe, the depth growth happens during the warm-up phase and
+Stage1/Stage2 takes 2.5/2.5 epochs, respectively. 5.1. Evaluation of Single-trial Models Scaling
+Metrics. For evaluating the model quality, we report the
+Top-1 test accuracy on ImageNet-1k.
+To measure the training cost for each method, we scan the minimum time required to match the validation loss
+Table 5. Performance comparison between different model scaling methods. ep30 denotes the total training time is set to 30 epochs.
+Model
+B
+B
+S−→B
+S−→B
+S−→B
+S−→B
+S−→B
+S
+S
+Ti−→S
+Ti−→S
+Ti−→S
+Ti−→S
+Method
+Max ↓
+Time 0%
+Scratch 28.9% MSLT
+LTG 52.0% b2B 67.7%
+Inpt 74.2% 78.6%
+ST 81.4% TripLe
+Scratch
+MSLT b2B
+Inpt
+ST 0%
+× 12.0% 11.2% 12.0% 17.4% TripLe ep30
+---Max ↓
+FLOPs 0% 36.7% 55.4% 68.2% 78.11 74.8% 78.98 80.0% 79.33 82.1% 79.72 0%
+×
+--12.2% 72.76 11.5% 73.25 13.8% 74.88 18.4% 74.67
+Top-1 Test accuracy (%) ep120 ep90
+------81.82 81.45 81.75 81.80 82.10 81.99 82.36 82.10
+----79.01 78.01 78.59 77.78 79.25 78.46 79.34 78.54 ep60
+---80.39 80.89 81.29 81.32
+--76.64 76.11 77.29 77.53 ep300 81.03 81.27 81.57 81.81 81.75 81.92 82.01 79.50 75.97 80.33 80.54 80.67 80.88 of from-scratch training. And then, we use it to compute the maximum wall-time reduction (Max ↓ Time) and max-imum training FLOPs reduction (Max ↓ FLOPs) for each method accordingly. When the method is unable to achieve the validation loss of from-scratch training under any set-tings, we report ’×’ in the corresponding table entry.
+Evaluation on Expanding Width Only. We first perform width scaling only to evaluate our method given in Fig-ure 1(b). As is shown in Table 5, TripLe outperforms other baselines in max training time reduction. For Ti−→S/S−→B,
+TripLe can save the 17.4%/82.1% maximum training time compared to 12.0%/78.6% of ST (the second-best baseline).
+Besides, TripLe can achieve better task accuracy com-pared to baselines generally. When using 300 epochs for training, TripLe can outperform from-scratch training accu-racy by 1.38%/0.98% for Ti−→S/S−→B. This indicates that training more steps on the zero weights introduced by ST can mitigate the training mismatch between zero weights and pretrained weights. For learn-to-grow, the implementa-tion is not open-source; so we report the max ↓ Time/FLOPs using the number reported in the paper.
+Expanding Width and Depth Together. When ex-panding width and depth together, we apply our method given in Figure 1(a) that serializes the expansion of
+The model will grow 8× in parameter size.
+ViTs.
+When choosing 40% (ep120) of the total training time (300 epochs), the model obtained from TripLe outper-forms ST by 0.88%/0.27%/0.69% and scratch training by 1.03%/0.99%/0.09% in task accuracy. This shows that seri-alizing expansion operators can obtain better task accuracy under the same training budget. Besides the saving training cost, TripLe can also be employed to train ViT for better task accuracy compared to training from scratch.
+Also, using progressive learning alone (i.e., MSLT) can-not reach task performance of scratch training for BL24/L under ep300. The existing weights cannot be fully trained before expanding to a larger model, resulting in perfor-mance degradation.
+Comparison and Combination of TripLe with Knowl-edge Distillation. As discussed in Sec 3, TripLe is orthog-Table 6. Performance comparison between different model scaling methods. ep30 denotes the total training time is set to 30 epochs.
+Ti−→SL24 denotes scaling DeiT-Ti to DeiT-SL24. The pretrained model accuracy is given in Table 1. models
+SL24
+SL24
+Ti−→ SL24
+Ti−→ SL24
+Ti−→ SL24
+Ti−→ SL24
+BL24
+BL24
+S−→ BL24
+S−→ BL24
+S−→ BL24
+S−→ BL24
+L
+L
+B−→ L
+L
+B−→ L
+B−→ L
+Method
+Max ↓
+Time 0%
+Scratch 39.3% MSLT b2B 58.9%
+Inpt 68.6%
+ST 67.9% 71.0% TripLe
+Scratch
+MSLT b2B
+Inpt
+ST 0%
+×
+× 79.9% 79.9% 80.9% TripLe
+Scratch
+MSLT b2B
+Inpt
+ST 0%
+×
+×
+×
+× 73.3% TripLe ep30
+--Max ↓
+FLOPs 0% 41.6% 60.1% 75.28 70.1% 75.72 70.0% 76.23 72.1% 76.52 0%
+×
+×
+--79.02 80.4% 80.40 80.4% 80.70 81.7% 80.77 0%
+×
+×
+×
+×
+--78.02 81.23 80.88 74.7% 81.23
+Top-1 Test accuracy (%) ep120 ep90
+----80.14 79.98 80.64 80.40 80.22 80.10 81.10 80.68
+----81.22 81.33 82.39 82.23 81.99 82.23 82.26 82.36
+----81.55 81.71 81.20 81.28 81.50 81.65 82.19 82.22 ep60
+--78.63 78.93 78.62 79.23
+--80.89 82.29 82.34 82.53
+--81.64 81.55 81.45 82.04 ep300 79.97 80.42 80.54 81.12 79.65 82.04 81.37 78.84 79.39 80.28 79.94 80.60 82.12 49.63 80.01 80.59 79.84 81.40 onal to KD which is another widely used technique to im-prove the transformer quality. In this subsection, we com-pare and combine TripLe with KD. For the teacher model in
+KD, we use a ResNet-101 with 79.33% test accuracy. The
+ResNet-101 must be trained using the same data augmenta-tion techniques as DeiT.
+The learning curves of TripLe and KD are given Fig-ure 4. We observe that using TripLe can outperform the model trained using KD. For Ti−→SL24, the model achieves 82.0% test accuracy compared to 81.0% obtained from KD.
+When combining TripLe with KD, the model accuracy of
+SL24 can reach 82.8% test accuracy. This combination re-veals that not only can we use the pretrained model to pro-vide teaching signals in KD, but we can also use the small pretrained model to initialize the large model directly.
+Sensitivity Analysis of TripLe. We gradually remove the design components from TripLe to validate their effects.
+The learning curves are given in Figure 3. When switch-ing our depth expansion method to βstck and conducting the expansion all at once before training (TripLe-copy), the performance gets worse and the model is overfitting in long-time training. This shows that conducting all the expansions before training incurs performance degradation. We further ignore the momentum information (TripLe-copy-m) during the model scaling and the results become even worse com-pared to the previous analysis. As such, maintaining the train states is critical for scaling pretrained models.
+Sensitivity to Training Times.
+In Table 6, we present the task performance as a function of training time. Keep-ing the original training budget with model scaling meth-ods incurs performance degradation. That is because scal-ing pretrained model achieves faster training convergence.
+In this scenario, training the large model for too long will result in model over-fitting. For training from scratch, the overfitting doesn’t occur until the model is trained for 400
+Figure 3. Sensitivity analysis of TripLe for (a) Ti−→SL24 (b) S−→BL24 (c) B−→L under ep30/ep60/ep120/ep300. ‘-copy’ denotes scaling both width and depth together before training. ‘-m’ denotes ignoring momentum information from the pretrained model.
+Table 7. Kendall-tau correlation between different methods.
+Method
+Scratchep300
+TripLeep120
+Scratchep30 0.221 0.789
+TripLeep30 0.318 0.865
+Scratchep300
+-0.363 epochs [44]. As such, reducing the training time when scal-ing a pretrained model is necessary. 5.2. Evaluation of TripLe on Multi-trial Search
+We intend to answer two questions in this section: (1)
+Does the proxy accuracy obtained from TripLe show a higher correlation to the final task accuracy? (2) Can
+TripLe find better models compared to multi-trial search?
+The pretrained model we reuse for the sampled models is DeiT-Ti. Our searching method is implemented inside the symbolic programming library named PyGlove [36].
+Ranking Score Comparison. We randomize 15 models from our search space (Table 4) and evaluate the Kendall-tau [26] correlation between the proxy accuracy and the task accuracy. Specifically, the models are trained: (1) from scratch for 30 epochs. (Scratchep30) (2) from the pre-trained model for 30 epochs. (TripLeep30) (3) from scratch for 300 epochs (Scratchep300). (4) from pretrained model for 120 epochs (TripLeep120). The results are given in Table 7.
+When using 10% of the total training time (i.e., 300 epochs) for each trial, traditional multi-trial search only shows 0.221 Kendall-tau correlation. This indicates that correlation between the proxy accuracy (scratch30) and the final training accuracy (scratch300) is weak. On the other hand, TripLe shows a higher correlation to the final model performance trained under TripLe120 and scratch300.
+We also evaluate the correlation between scratch300 and
+TripLe120, it shows a 0.363 Kendall-tau correction. This can be interpreted as the model that is suitable for scratch training may not fit for TripLe. Also, it can come from ran-dom seed selection [53] in the scratch training. For TripLe, the initialization weights are fixed.
+Searched Model Comparison. We conduct 200 trials for both multi-trial NAS and NAS with TripLe (Learning curve in Appendix D). For each trial, we conduct 30 epochs of training using TripLe (TripLeep30) and scratch train-Figure 4. Comparison of TripLe with knowledge distillation under 300 epochs of training for (a) Ti−→SL24 and (b) Ti−→S.
+Table 8. Comparison results of using TripLe in multi-trial NAS and traditional multi-trial NAS.
+Search method
+--Scratchep30
+Scratchep30
+TripLeep30
+TripLeep30
+Evaluation method
+Scratchep300
+Scratchep300
+TripLeep120
+TripLeep300
+TripLeep120
+TripLeep300
+Params (MB) 22 86 30 30 27 27
+FLOPs (Million) 8495 33722 11409 11409 10416 10416
+Test Acc (%) 79.5 81.0 79.5 80.8 79.7 81.1
+DeiT-S (ours)
+DeiT-B (ours)
+ViT-scratch
+ViT-scratch
+ViT-TripLe
+ViT-TripLe ing (Scratchep30). We set the FLOPs target (F LOP s0) to 10000M and other hyperparameters for the regularized evo-lutionary and our reward function are given in Appendix
+A.2. As shown in Table 8, the model (ViT-TripLe) searched using NAS with TripLe can obtain 81.1% accuracy. ViT-TripLe outperform our re-implement 86MB DeiT-B in task accuracy with 69%/69% reduction in parameter size and in-ference FLOPs. On the other hand, the model searched by traditional NAS can achieve 80.8% task accuracy (Detailed architectures in Appendix F). 6.

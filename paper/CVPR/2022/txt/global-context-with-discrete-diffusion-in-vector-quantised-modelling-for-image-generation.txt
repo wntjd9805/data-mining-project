@@ -1,0 +1,158 @@
+Abstract
+The integration of Vector Quantised Variational AutoEn-coder (VQ-VAE) with autoregressive models as generation part has yielded high-quality results on image generation.
+However, the autoregressive models will strictly follow the progressive scanning order during the sampling phase. This leads the existing VQ series models to hardly escape the trap of lacking global information. Denoising Diffusion
+Probabilistic Models (DDPM) in the continuous domain have shown a capability to capture the global context, while generating high-quality images. In the discrete state space, some works have demonstrated the potential to perform text generation and low resolution image generation. We show that with the help of a content-rich discrete visual codebook from VQ-VAE, the discrete diffusion model can also gen-erate high fidelity images with global context, which com-pensates for the deficiency of the classical autoregressive model along pixel space. Meanwhile, the integration of the discrete VAE with the diffusion model resolves the drawback of conventional autoregressive models being oversized, and the diffusion model which demands excessive time in the sampling process when generating images. It is found that the quality of the generated images is heavily dependent on the discrete visual codebook. Extensive experiments demonstrate that the proposed Vector Quantised Discrete
+Diffusion Model (VQ-DDM) is able to achieve compara-ble performance to top-tier methods with low complexity. It also demonstrates outstanding advantages over other vec-tors quantised with autoregressive models in terms of image inpainting tasks without additional training. 1.
+
+Introduction
+Vector Quantised Variational AutoEncoder (VQ-VAE)
+[34] is a popular method developed to compress images into discrete representations for the generation. Typically, after the compression and discretization representation by the convolutional network, an autoregressive model is used
+Figure 1. FID v.s. Operations and Parameters. The size of the blobs is proportional to the number of network parameters, the
+X-axis indicates FLOPs on a log scale and the Y-axis is the FID score. to model and sample in the discrete latent space, including
+PixelCNN family [5,22,35], transformers family [4,24], etc.
+However, in addition to the disadvantage of the huge num-ber of model parameters, these autoregressive models can only make predictions based on the observed pixels (left up-per part of the target pixel) due to the inductive bias caused by the strict adherence to the progressive scan order [3, 15].
+If the conditional information is located at the end of the au-toregressive sequence, it is difficult for the model to obtain relevant information.
+A recent alternative generative model is the Denoising
+Diffusion Model, which can effectively mitigate the lack of global information [10, 29], also achieving comparable or state-of-the-art performance in text [1,12], image [6,28,33] and speech generation [19] tasks. Diffusion models are pa-rameterised Markov chains trained to translate simple dis-tributions to more sophisticated target data distributions in a finite set of steps. Typically the Markov chain begins with an isotropic Gaussian distribution in continuous state space, with the transitions of the chain for reversing a diffusion process that gradually adds Gaussian noise to source im-ages. In the inverse process, as the current step is based on the global information of the previous step in the chain, this
+endows the diffusion model with the ability to capture the global information.
+However, the diffusion model has a non-negligible disad-vantage in that the time and computational effort involved in generating the images are enormous. The main rea-son is that the reverse process typically contains thousands of steps. Although we do not need to iterate through all the steps when training, all these steps are still required when generating a sample, which is much slower compared to GANs and even autoregressive models. Some recent works [21, 30] have attempted addressing these issues by decreasing the sampling steps, but the computation cost is still high as each step of the reverse process generates a full-resolution image.
+In this work, we propose the Vector Quantised Discrete
+Diffusion Model (VQ-DDM), a versatile framework for im-age generation consisting of a discrete variational autoen-coder and a discrete diffusion model. VQ-DDM consists of two stages: (1) learning an abundant and efficient discrete representation of images, (2) fitting the prior distribution of such latent visual codes via discrete diffusion model.
+VQ-DDM substantially reduces the computational re-sources and required time to generate high-resolution im-ages by using a discrete scheme. Then the common prob-lem of the lack of global content and overly large number of parameters of the autoregressive model is solved by fitting a latent variable prior using the discrete diffusion model. Fi-nally, since a bias of codebook will limit generation quality, while model size is also dependent on the number of cate-gories, we propose a re-build and fine-tune(ReFiT) strategy to construct a codebook with higher utilization, which will also reduce the number of parameters in our model.
+In summary, our key contributions include the following:
+• VQ-DDM fits the prior over discrete latent codes with a discrete diffusion model. The use of diffusion model allows the generative models consider the global in-formation instead of only focusing on partially seen context to avoid sequential bias.
+• We propose a ReFiT approach to improve the utilisa-tion of latent representations in the visual codebook, which can increase the code usage of VQ-GAN from 31.85% to 97.07%, while the FID between reconstruc-tion image and original training image is reduced from 10.18 to 5.64 on CelebA-HQ 256 × 256.
+• VQ-DDM is highly efficient for the both number of parameters and generation speed. As shown in Fig-ure 1, using only 120M parameters, it outperforms
+VQ-VAE-2 with around 10B parameters and is com-parable with VQ-GAN with 1B parameters in image generation tasks in terms of image quality. It is also 10 ∼ 100 times faster than other diffusion models for image generation [10, 30]. 2. Preliminaries 2.1. Diffusion Models in continuous state space
+Given data x0 from a data distribution q(x0), the diffu-sion model consists of two processes: the diffusion process and the reverse process [10, 29].
+The diffusion process progressively destroys the data x0 into xT over T steps, via a fixed Markov chain that grad-ually introduces Gaussian noise to the data according to a variance schedule β1:T ∈ (0, 1]T as follows: q(x1:T |x0) =
+T (cid:89) t=1 q(xt|xt−1), (1) q(xt|xt−1) = N (xt; (cid:112)1 − βtxt−1, βtI).
+With an adequate number of steps T and a suitable vari-ance schedule β, p(xT ) becomes an isotropic Gaussian dis-tribution. (2)
+The reverse process is defined as a Markov chain param-eterised by θ, which is used to restore the data from the noise: pθ(x0:T ) = p(xT )
+T (cid:89) t=1 pθ(xt−1|xt), (3) pθ(xt−1|xt) = N (xt−1; µθ(xt, t), Σθ(xt, t)). (4)
+The objective of training is to find the best θ to fit the data distribution q(x0) by optimizing the variational lower bound (VLB) [18]
+Eq(x0)[log pθ(x0)]
+=Eq(x0) log Eq(x1:T |x0) (cid:20)
+≥Eq(x0:T ) log pθ(x0:T ) q(x1:T |x0) (cid:21) (cid:20) pθ(x0:T ) q(x1:T |x0) (5) (cid:21)
+=: Lvlb.
+Ho et al. [10] revealed that the variational lower bound in Eq. 5 can be calculated with closed form expressions in-stead of Monte Carlo estimates as the diffusion process pos-teriors and marginals are Gaussian, which allows sampling xt at an arbitrary step t with αt = 1 − βt, ¯αt = (cid:81)t s=0 αs and ˜βt = 1− ¯αt−1 1− ¯αt
+: q(xt|x0) = N (xt|
+√
+¯αtx0, (1 − ¯αt)I), (6)
+Lvlb = Eq(x0)[DKL(q(xT |x0)||p(xT )) − log pθ(x0|x1)
++
+T (cid:88) t=2
+DKL(q(xt−1|xt, x0)||pθ(xt−1|xt))]. (7)
+Figure 2. The proposed VQ-DDM pipeline contains 2 stages: (1) Compress the image into discrete variables via discrete VAE. (2) Fit a prior distribution over discrete coding by a diffusion model. Black squares in the diffusion diagram illustrate states when the underlying distributions are uninformative, but which become progressively more specific during the reverse process. The bar chart at the bottom of the image represents the probability of a particular discrete variable being sampled.
+Thus the reverse process can be parameterised by neural networks ϵθ and υθ, which can be defined as:
+µθ(xt, t) = (cid:18) xt − 1
+√
+αt
+βt√ 1 − ¯αt (cid:19)
+ϵθ(xt, t)
+, (8) d is the dimension of each latent variable, after compress-ing the high dimension input data x ∈ Rc×H×W into latent vectors h ∈ Rh×w×d by an encoder E, z is the quantised h, which substitutes the vectors hi,j ∈ h by the nearest neigh-bor zk ∈ Z. The decoder D is trained to reconstruct the data from the quantised encoding zq:
+Σθ(xt, t) = exp(υθ(xt, t) log βt
++ (1 − υθ(xt, t)) log ˜βt). (9) z = Quantise(h) := arg mink||hi,j − zk||, (12)
+Using a modified variant of the VLB loss as a simple loss function will offer better results in the case of fixed Σθ [10]:
+Lsimple = Et,x0,ϵ (cid:2)||ϵ − ϵθ(xt, t)||2(cid:3) , (10) which is a reweighted version resembling denoising score matching over multiple noise scales indexed by t [31].
+Nichol et al. [21] used an additional Lvlb to the sim-ple loss for guiding a learned Σθ(xt, t), while keeping the
+µθ(xt, t) still the dominant component of the total loss:
+Lhybrid = Lsimple + λLvlb. (11) 2.2. Discrete Representation of Images van den Oord et al. [34] presented a discrete variational autoencoder with a categorical distribution as the latent prior, which is able to map the images into a sequence of discrete latent variables by an encoder and reconstruct the image according to those variables with a decoder.
+Formally, given a codebook Z ∈ RK×d, where K rep-resents the capacity of latent variables in the codebook and
+ˆx = D(z) = D(Quantise(E(x))). (13)
+As Quantise(·) has a non-differentiable operation arg min, the straight-through gradient estimator is used for back-propagating the reconstruction error from decoder to encoder. The whole model can be trained in an end-to-end manner by minimizing the following function:
+L = ||x− ˆx||2 +||sg[E(x)]−z||+β||sg[z]−E(x)||, (14) where sg[·] denotes stop gradient and broadly the three terms are reconstruction loss, codebook loss and commit-ment loss, respectively.
+VQ-GAN [8] extends VQ-VAE [34] in multiple ways. It substitutes the L1 or L2 loss of the original VQ-VAE with a perceptual loss [40], and adds an additional discriminator to distinguish between real and generated patches [41].
+The codebook update of the discrete variational autoen-coder is intrinsically a dictionary learning process. Its ob-jective uses L2 loss to narrow the gap between the codes
+Zt ∈ RKt×d and the encoder output h ∈ Rh×w×d [34],
+where Kt is constant during all diffusion steps.
+In other words, the codebook training is like k-means clustering, where cluster centers are the discrete latent codes. How-ever, since the volume of the codebook space is dimension-less and h is updated each iteration, the discrete codes Z typically do not follow the encoder training quickly enough.
+Only a few codes get updated during training, with most un-used after initialization.
+We use the same cosine noise schedule as [12, 21] be-cause our discrete model is also established on the latent codes with a small 16 × 16 resolution. Mathematically, it can be expressed in the case of ¯α by
+¯α = f (t) f (0)
+, f (t) = cos (cid:18) t/T + s 1 + s
+× (cid:19)2
+.
+π 2 (19)
+By applying Bayes’ rule, we can compute the posterior 3. Methods
+Our goal is to leverage the powerful generative capabil-ity of the diffusion model to perform high fidelity image generation tasks with a low number of parameters. Our proposed method, VQ-DDM, is capable of generating high fidelity images with a relatively small number of parame-ters and FLOPs, as summarised in Figure 2. Our solution starts by compressing the image into discrete variables via the discrete VAE and then constructs a powerful model to fit the joint distribution over the discrete codes by a diffusion model. During diffusion training, the darker coloured parts in Figure 2 represent noise introduced by uniform resam-pling. When the last moment is reached, the latent codes have been completely corrupted into noise. In the sampling phase, the latent codes are drawn from an uniform categor-ical distribution at first, and then resampled by performing reverse process T steps to get the target latent codes. Even-tually, target latent codes are pushed into the decoder to gen-erate the image. 3.1. Discrete Diffusion Model
+Assume the discretization is done with K categories, i.e. zt ∈ {1, . . . , K}, with the one-hot vector representation given by zt ∈ {0, 1}K. The corresponding probability dis-tribution is expressed by zlogits in logits. We formulate the t discrete diffusion process as q(zt|zt−1) = Cat(zt; zlogits t−1 Qt), (15) where Cat(x|p) is the categorical distribution parame-terised by p, while Qt is the process transition matrix. In our method, Qt = (1 − βt)I + βt/K, which means zt has 1−βt probability to keep the state from last timestep and βt chance to resample from a uniform categorical distribution.
+Formally, it can be written as q(zt|zt−1) = Cat(zt; (1 − βt)zlogits t−1 + βt/K). (16)
+It is straightforward to get zt from z0 under the schedule
+βt with αt = 1 − βt, ¯αt = (cid:81)t s=0 αs: q(zt−1|zt, z0) as: q(zt−1|zt, z0) = Cat zt; (cid:32) zlogits t Q⊤ t ⊙ z0 ¯Qt−1 (cid:33)
+⊤ z0 ¯Qtzlogits t
+K (cid:88)
+= Cat(zt; θ(zt, z0)/
+θk(zt,k, z0,k)), k=1
+θ(zt, z0) = [αtzlogits
++ (1 − αt)/K] t
+⊙ [¯αt−1z0 + (1 − ¯αt−1)/K]. (20) (21)
+It is worth noting that θ(zt, z0)/ (cid:80)K k=1 θk(zt,k, z0,k) is the normalised version of θ(zt, z0), and we use
+N[θ(zt, z0)] to denote θ(zt, z0)/ (cid:80)K k=1 θk(zt,k, z0,k) be-low.
+Hoogeboom et al. [12] predicted ˆz0 from zt with a neural network µ(zt, t), instead of directly predicting pθ(zt−1|zt).
+Thus the reverse process can be parameterised by the prob-ability vector from q(zt−1|zt, ˆz0). Generally, the reverse process pθ(zt−1|zt) can be expressed by pθ(z0|z1) = Cat(z0|ˆz0), pθ(zt−1|zt) = Cat(zt| N[θ(zt, ˆz0)]). (22)
+Inspired by [13, 20], we use a neural network µ(Zt, t) to learn and predict the a noise nt and obtain the logits of ˆz0.
+It is worth noting that the neural network µ(·) is based on the Zt ∈ Nh×w, where all the discrete representation zt of the image are combined. The final noise prior ZT is uninformative, and it is possible to separably sample from each axis during inference. However, the reverse process is jointly informed and evolves towards a highly coupled Z0.
+We do not define a specific joint prior for zt, but encode the joint relationship into the learned reverse process. This is implicitly done in the continuous domain diffusion. As zt−1 is based on the whole previous representation zt, the reverse process can sample the whole discrete code map directly while capturing the global information.
+The loss function used is the VLB from Eq. 7, where the q(zt|z0) = Cat(zt; ¯αtz0 + (1 − ¯αt)/K) (17) summed KL divergence for T > 2 is given by or q(zt|z0) = Cat(zt; z0 ¯Qt); ¯Qt = t (cid:89) s=0
+Qs. (18)
+KL(q(zt−1|zt, z0)||pθ(zt−1|zt)) = (cid:88) k
+N[θ(zt, z0)] × log
+N[θ(zt, z0)]
+N[θ(zt, ˆz0)]
+. (23)
+3.2. Re-build and Fine-tune Strategy
+Our discrete diffusion model is based on the latent rep-resentation of the discrete VAE codebook Z. However, the codebooks with rich content are normally large, with some even reaching K = 16384. This makes it highly unwieldy for our discrete diffusion model, as the transition matrices of discrete diffusion models have a quadratic level of growth to the number of classes K, e.g. O(K 2T ) [1].
+To reduce the categories used for our diffusion model, we proposed a Re-build and Fine-tune (ReFit) strategy to de-crease the size K of codebook Z and boost the reconstruc-tion performance based on a well-trained discrete VAEs trained by the straight-through method.
+From Eq. 14, we can find the second term and the third term are related to the codebook, but only the second term
+||sg[E(x)] − is involved in the update of the codebook. z|| reveals that only a few selected codes, the same number as the features from E(x), are engaged in the update per iteration. Most of the codes are not updated or used after initialization, and the update of the codebook can lapse into a local optimum.
+We introduce a re-build and fine-tune strategy to avoid the waste of codebook capacity. With the trained encoder, we reconstruct the codebook so that all codes in the code-book have the opportunity to be selected. This will greatly increase the usage of the codebook. Suppose we desire to obtain a discrete VAE having a codebook with Zt based on a trained discrete VAE with an encoder Es and a decoder
+Ds. We first encode each image x ∈ Rc×H×W to latent features h, or loosely speaking, each image gives us h × w features with d dimension. Next we sample P features uni-formly from the entire set of features found in training im-ages, where P is the sampling number and far larger than the desired codebook capacity Kt. This ensures that the re-build codebook is composed of valid latent codes. Since the process of codebook training is basically the process of finding cluster centres, we directly employ k-means with
+AFK-MC2 [2] on the sampled P features and utilise the centres to re-build the codebook Zt. We then replace the original codebook with the re-build Zt and fine-tune it on top of the well-trained discrete VAE. 4. Experiments and Analysis 4.1. Datasets and Implementation Details
+We show the effectiveness of the proposed VQ-DDM on
+CelebA-HQ [14] and LSUN-Church [39] datasets and verify the proposed Re-build and Fine-tune strategy on CelebA-HQ and ImageNet datasets. The details of the dataset are given in the Appendix.
+The discrete VAE follows the same training strategy as VQ-GAN [8]. All training images are processed to 256 × 256, and the compress ratio is set to 16, which means the latent vector z ∈ R1×16×16. When conducting Rebuild and Fine-tune, the sampling number P is set to 20k for
+LSUN and CelebA. For the more content-rich case, we tried a larger P value 50k for ImageNet. In practical experiments, we sample P images with replacement uniformly from the whole training data and obtained corresponding latent fea-tures. For each feature map, we make another uniform sam-pling over the feature map size 16 × 16 to get the desired features. In the fine-tuning phase, we freeze the encoder and set the learning rate of the decoder to 1e-6 and the learning rate of the discriminator to 2e-6 with 8 instances per batch.
+With regard to the diffusion model, the network for es-timating nt has the same structure as [10], which is a U-Net [26] with self-attention [36]. The detailed settings of hyperparameters are provided in the Appendix. We set timestep T = 4000 in our experiments and the noise sched-ule is the same as [21] 4.2. Codebook Quality
+A large codebook dramatically increases the cost of
+DDM. To reduce the cost to an acceptable scale, we pro-posed a resample and fine-tune strategy to compress the size of the codebook, while maintaining quality. To demon-strate the effectiveness of the proposed strategy, we com-pare the codebook usage and FID of reconstructed images of our method to VQ-GAN [8], VQ-VAE-2 [25] and DALL-E [24].
+In this experiment, we compressed the images from 3 × 256 × 256 to 1 × 16 × 16 with two different code-book capacities K = {512, 1024}. We also proposed an indicator to measure the usage rate of the codebook, which is the number of discrete features that have appeared in the test set or training set divided by the codebook capacity.
+The quantitative comparison results are shown in Table 1 while the reconstruct images are demonstrated in Figs. 3 & 4. Reducing the codebook capacity from 1024 to 512 only brings ∼ 0.1 decline in CelebA and ∼ 1 in ImageNet. As seen in Figure 4, the reconstructed images (c,d) after ReFiT strategy are richer in colour and more realistic in expression than the reconstructions from VQ-GAN (b). The codebook usage of our method has improved significantly compared to other methods, nearly 3x high than the second best. Our method also achieves the equivalent reconstruction quality at the same compression rate and with 32× lower capacity
+K of codebook Z.
+For VQ-GAN with capacity 16384, although it only has 976 effective codes, which is smaller than 1024 in our Re-FiT method when P = 20k, it achieves a lower FID in reconstructed images vs validation images. One possible reason is that the value of P is not large enough to cover some infrequent combinations of features during the re-build phase. As the results in Table 1, after we increase the sampling number P from 20k to 100k, we observe that
+Model
+Latent Size Capacity
+Usage of Z
+FID ↓
+CelebA ImageNet CelebA ImageNet 4.4. Image Inpainting
+VQ-VAE-2
+DALL-E
+VQ-GAN
+VQ-GAN ours (P = 100k) ours (P = 20k) ours (P = 20k)
+Cascade 32x32 16x16 16x16 16x16 16x16 16x16 512 8192 16384 1024 1024 1024 512
+∼65%
+----5.96% 31.85% 33.67% 100% 100% 100%
+-97.07% 93.06%
+---10.18
+-5.59 5.64
+∼10 32.01 4.98 7.94 4.98 5.99 6.95 1 All methods are trained straight-through, except DALL-E with Gumbel-Softmax [24]. 2 CelebA-HQ at 256×256. Reported FID is between 30k reconstructed data vs training data. 3 Reported FID is between 50k reconstructed data vs validation data
+Table 1. FID between reconstructed images and original images on CelebA-HQ and ImageNet increasing the value of P achieved higher performance. 4.3. Generation Quality
+We evaluate the performance of VQ-DDM for the un-conditional image generation on CelebA-HQ 256 × 256.
+Specifically, we evaluated the performance of our approach in terms of FID and compared it with various likelihood-based based methods including GLOW [16], NVAE [32],
+VAEBM [38], DC-VAE [23], VQ-GAN [8] and likelihood-free method, e.g., PGGAN [14]. We also conducted an ex-periment on LSUN-Church.
+In CelebA-HQ experiments, the discrete diffusion model was trained with K = 512 and K = 1024 codebooks re-spectively. We also report the different FID from T = 2 to
+T = 4000 with corresponding time consumption in Figure 6. Regarding the generation speed, it took about 1000 hours to generate 50k 256 × 256 images using DDPM with 1000 steps on a NVIDIA 2080Ti GPU, 100 hours for DDIM with 100 steps [30], and around 10 hours for our VQ-DDM with 1000 steps.
+Table 2 shows the main results on VQ-DDM along with other established models. Although VQ-DDM is also a likelihood-based method, the training phase relies on the negative log-likehood (NLL) of discrete hidden variables, so we do not compare the NLL between our method and the other methods. The training NLL is around 1.258 and test
+NLL is 1.286 while the FID is 13.2. Fig. 7a shows the gen-erated samples from VQ-DDM trained on the CelebA-HQ.
+For LSUN-Church, the codebook capacity K is set to 1024, while the other parameters are set exactly the same.
+The training NLL is 1.803 and the test NLL is 1.756 while the FID between the generated images and the training set is 16.9. Some samples are shown in Fig. 7b.
+After utilizing ReFiT, the generation quality of the model is significantly improved, which implies a decent codebook can have a significant impact on the subsequent genera-tive phase. Within a certain range, the larger the codebook capacity leads to a better performance. However, exces-sive number of codebook entries will cause the model col-lapse [12].
+Autoregressive models have recently demonstrated supe-rior performance in the image inpainting tasks [4, 8]. How-ever, one limitation of this approach is that if the important context is found at the end of the autoregressive series, the models will not be able to correctly complete the images.
+As mentioned in Sec. 3.1, the diffusion model will directly sample the full latent code map, with sampling steps based on the full discrete map of the previous step. Hence it can significantly improve inpainting as it does not depend on context sequencing.
+We perform the mask diffusion and reverse process in the discrete latent space. After encoding the masked image x0 ∼ q(x0) to discrete representations z0 ∼ q(z0), we dif-fuse z0 with t steps to ˜zt ∼ q(zt|z0). Thus the last step with mask ˜zm
+T can be demonstrated as ˜zm
+T = (1 − m) ×
+˜zT + m × C, where C ∼ Cat(K, 1/K) is the sample from a uniform categorical distribution and m ∈ {0, 1}K is the mask, m = 0 means the context there is masked and m = 1 means that given the information there. In the re-verse process, zT −1 can be sampled from pθ(zT −1|˜zm
+T ) at t = T , otherwise, zt−1 ∼ pθ(zt−1|zm t ), and the masked zm t−1 = (1 − m) × zt−1 + m × ˜zt−1.
+We compare our approach and another that exploits a transformer with a sliding attention window as an autore-gressive generative model [8]. The completions are shown in Fig. 8, in the first row, the upper 62.5% (160 out of 256 in latent space) of the input image is masked and the lower 37.5% (96 out of 256) is retained, and in the second row, only a quarter of the image information in the lower right corner is retained as input. We also tried masking in an ar-bitrary position. In the third row, we masked the perime-ter, leaving only a quarter part in the middle. Since the reverse diffusion process captures the global relationships, the image completions of our model performs much better.
+Our method can make a consistent completions based on arbitrary contexts, whereas the inpainting parts from trans-It is also worth noting that our former lack consistency. model requires no additional training in solving the task of image inpainting. 5.

@@ -1,0 +1,204 @@
+Abstract
+In the problems of image retrieval and few-shot classiﬁcation, the mainstream approaches focus on learning a better feature representation. However, directly tackling the distance or similarity measure between images could also be efﬁcient.
+To this end, we revisit the idea of re-ranking the top-k retrieved images in the context of image retrieval (e.g., the k-reciprocal nearest neighbors [48, 75]) and generalize this idea to transductive few-shot learning.
+We propose to meta-learn the re-ranking updates such that the similarity graph con-verges towards the target similairty graph induced by the image labels. Speciﬁcally, the re-ranking module takes as input an initial similarity graph between the query image and the contextual images using a pre-trained feature extractor, and predicts an improved similarity graph by leveraging the structure among the involved im-ages. We show that our re-ranking approach can be applied to unseen images and can further boost existing approaches for both image retrieval and few-shot learn-ing problems. Our approach operates either independently or in conjunction with classical re-ranking approaches, yielding clear and consistent improvements on image retrieval (CUB, Cars, SOP, rOxford5K, rParis6K) and transductive few-shot classiﬁcation (Mini-ImageNet, tiered-ImageNet and CIFAR-FS) benchmarks. Our code is available at https://imagine.enpc.fr/~shenx/SSR/. 1
+
+Introduction
+Learning deep image features that generalize beyond the training classes they have been trained on has been a clear success [63]. Using these strong features, recent works have shown that high performances can be obtained simply by computing nearest neighbors, in particular for image retrieval [1, 16, 50, 11, 30, 63] and few-shot image classiﬁcation [71, 6]. In this paper we highlight that, even with these strong features, results can be further improved by a large margin through re-ranking images based on the similarity graph between neighbors. To this end, we present a graph based deep architecture for re-ranking neighborhood images via a learning approach.
+Our method can be seen as revisiting and complementing classical approaches to re-ranking with deep learning techniques. These approaches can be broadly classiﬁed into query expansion that compute a new query feature based on the top retrieved neighbors [9, 8, 2, 16, 50], and k-reciprocal re-ranking that compute a new distance between images based on the Jaccard distance between conﬁdent neighbors [48, 75]. The approach we propose is related to both approaches. Since on one side, we focus successively on the neighbors of each sample, and on the other side, we update features to compute new similarities. This is achieved by designing a neural network architecture that can update the similarity graph by successively focusing on different subgraphs (as visualized in Figure 1) and updating features based on synthetic gradients [24, 21]. Our architecture for updating the similarity graph, referred to as Subgraph Similarity Reﬁner (SSR), operates on the adjacency matrices 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: Idea of our approach for image retrieval. Given an initial similarity graph between a query and its top candidates in image retrieval (left), we propose a module dubbed Subgraph
+Similarity Reﬁner (SSR) to improve the similarity graph (right). For each sample in the dataset we build a subgraph by considering only edges with either the sample or the query (middle), order the nodes according to their similarity to the sample and predict an update for the edges of the subgraph.
+This idea can be applied with minor changes to transductive few-shot classiﬁcation. of the subgraphs. We focus successively on each image (as a query image), extract a subgraph, where our key technical insight is to sort all other images according to the similarity to the query image.
+We show that our approach can improve different image features for both image retrieval and transductive few-shot classiﬁcation. We relate both tasks by casting them as a similarity graph reﬁnement problem, where the reﬁned similarity graph is used for task-speciﬁc predictions. In image retrieval, based on classical re-ranking techniques query expansion [9, 8, 16, 50] and k-reciprocal [75], our method consistently improves the image retrieval performance (mean average precision, mAP) achieved by recent state-of-the-art features [11, 30, 63]. For example, applying our method with the recent ProxyNCA++ [63] features improves the mAP@R from 55.4% to 60.6% on Stanford Online
+Product dataset [62] and combining our approach with k-reciprocal [75] re-ranking further boost them to 62.3%. In transductive few-shot classiﬁcation, we show that k-reciprocal [75] based re-ranking yields a simple but surprisingly good baseline, while by learning to re-rank our method consistently improves over several competitive transductive approaches, e.g., the synthetic information bottleneck (SIB) [21]. 2 Approach
+Motivation Consider the similarity graph among N images, each node of the graph corresponds to one image and each weighted edge represents the similarity between two images. The similarity graph plays an important role in computer vision. As an example, the k-nearest-neighbor classiﬁer remains a competitive method in image classiﬁcation if the similarity graph is sufﬁciently informative.
+Note that, during training, we do have access to the target similarity graph, which has similarity 1 if two images belong to the same class and 0 otherwise, can we learn to improve an initial similarity graph of test images given that we have seen the target similarity matrix for training images?
+Indeed, in the context of image retrievel, this idea of exploring and improving the similarity graph is called re-ranking, which refers to the case where an initial set of images have been retrieved, we then re-rank their relevance to the query image by examining again their similarities. Certainly, this idea can be hardly scaled to a large set of images as the complexity is quadratic, but it is quite interesting in the case of few-shot learning for unseen categories / domains.
+In this section, we ﬁrst present an overview of our approach as a generalization to re-ranking (Section 2.1); we then introduce our model architecture, called Subgraph Similarity Reﬁner (SSR) (Section 2.2) and how to combine our approach with the classical k-reciprocal [75] re-ranking approach (Section 2.3); ﬁnally, in Section 2.4 we explain how we train our approach and give implementation details. 2.1 Learning to improve a similarity graph
+We assume that we are given a set of N images and for each image an initial feature. During training, we also assume that we are given a label for each image. Our goal is to predict an improved similarity, where images with the same label have a higher similarity than images with different labels. We will 2
+(a) Overview of our update prediction approach (b) SSR for image retrieval (c) SSR for transductive few-shot classiﬁcation
+Figure 2: Subgraph Similarity Reﬁner (SSR) learns updates for a similarity graph. It decomposes the similarity graph, that can be represented by its similarity matrix, into N subgraphs where rows and columns of the matrix are ordered depending on similarities to the subgraph reference image.
+The output of SSR is an improved similarity matrix. The ﬁnal loss is between the predicted similarity matrix and target similarity matrix. The details of subgraphs are shown in (b) for image retrieval: the rows correspond to the subgraph reference image and the query image and the columns to the test images; and (c) for transductive few-shot classiﬁcation: the rows correspond to the subgraph reference image and the support set S while the columns to the support set S and the query set Q. represent the similarity graph by its adjacency matrix, which we will refer to as similarity matrix.
+Note that the similarity matrix allows to explore neighbors of the nearest neighbors (high order nearest neighbors), which is a classical and effective way to tackle the re-ranking problem [48, 75]. i the initial feature of ith image and yi its label.
+More formally, for i ∈ {1, . . . , N } we denote by f 0
+The initial similarity matrix is given by:
+S0 = (cid:2)s0 ij (cid:3) i,j∈{1,...,N } with s0 ij = (cid:104)f 0 i , f 0 j (cid:105) i (cid:107)(cid:107)f 0 (cid:107)f 0 j (cid:107)
+. (1)
+Our goal is to predict the target similarity matrix ˆS = [1yi=yj ]i,j∈{1,...,N } where 1yi=yj is the indicator function of yi = yj. We reﬁne the similarity matrix iteratively. First, consider the following update given a similarity matrix St−1: (cid:3) i,j∈{0,1,...,N } = St−1 + G(St−1),
+˜St := (cid:2)˜st (2) ij where G is the Subgraph Similarity Reﬁner (SSR) that we will describe in the next section. The issue with such an update is the ﬂexibility. We therefore would like to constraint the updated similarity matrix to have the form
+St = (cid:2)st ij (cid:3) i,j∈{1,...,N } with st ij = i , f t (cid:104)f t j (cid:105) (cid:107)f t i (cid:107)(cid:107)f t j (cid:107)
+. (3)
+This amounts to construct the update in features rather than in the similarity matrix directly. As such, St always remain positive semideﬁnite. Now, the question is how we make use of ˜St to obtain f t. Given f t−1, in fact, we only need to move a single gradient step along the projection direction (cid:80) according to the Euclidean distance Lf (f ) := 1 (cid:107)fi(cid:107)(cid:107)fj (cid:107) )2. Speciﬁcally, we obtain f t 2 by considering ˜St as an intermediate result: i,j − (cid:104)fi,fj (cid:105) i,j(˜st
+∀i : f t i = f t−1 i − λ
+∂Lf
+∂fi (f t−1) with
+∂Lf
+∂fi (f t−1) = − (cid:88) (˜st i,j − st−1 i,j ) j
+∂st−1 i,j
+∂f t−1 i (f t−1) (4) where λ is the step size. Indeed, this update can be seen as applying the synthetic gradient descent
+[21, 24] on the features. Here, we motivate it from a different perspective.
+Note that the network G deﬁnes a meta-model, as the update is supposed to generalize to unseen image categories. We learn G by minimizing a task-speciﬁc loss between the target similarity matrix
+ˆS and the updated similarity matrix ST . The key for this approach to work is the architecture design of the network G, which we detail in the next section. 3
+2.2 Subgraph Similarity Reﬁner (SSR)
+The adjacency matrix S is a natural way to encode a similarity graph. However, it is deﬁned up to the order of the nodes, i.e. permutations of its column and rows. For this reason, learning directly to make a prediction from the similarity matrix is challenging. One can simply order the nodes with respect to their distance to a speciﬁc sample, such as the query in the case of image retrieval, but this gives one of the nodes a speciﬁc role and it might be hard for the network to use the similarity structure among the other nodes, especially since S is very high dimensional and overﬁtting might be an issue. Thus, we propose a permutation-invariant architecture illustrated in Figure 2a.
+Our key idea is to make N update predictions by considering only subgraphs centered on each node i and then to aggregate them to obtain an update prediction on the full graph. We can associate a similarity matrix Mi to the ith subgraph, where we order nodes according to their similarity to the node i. Note that the order will be different for each subgraph. We then predict updates g(Mi) for each of the subgraphs using a simple network g . Finally, we aggregate the predictions on all the subgraphs by summing the updates predicted for each subgraph at the relevant position in S:
+G(S) = GraphSum (cid:0){g(Mi)}N (5) (cid:1) i=1 where g is a multi-layer perceptron (MLP) and GraphSum is an aggregation operator to account for the summation with respect to graph structure since each node is contained in multiple subgraphs.
+We now discuss the exact structure of the subgraph and associated similarity matrix Mi that we use in the case of image retrieval or transductive few-shot classiﬁcation. The choice of structures in both cases are validated by the ablation studies presented in Section 3.3.
+In image retrieval, we search for images similar to a query image in a pool of test
+Image Retrieval. images. We assume that a ﬁrst algorithm already selected the N − 1 test images most similar to the query and we focus on improving the similarities between the resulting set of N images (the query and its N − 1 nearest neighbors). By increasing the similarities between the query and the positive images against those of the negatives, we aim to obtain a better retrieval result where positives should be ranked before negatives for the N − 1 test images selected for the query. During training, we optimize the InfoNCE loss [44] with a learnable temperature parameter τ : (cid:88) (cid:16)
+− log i,j:yi=yj =yqry exp(τ sT ij) exp(τ sT ij) + (cid:80) k:yk(cid:54)=yi (cid:17) exp(τ sT ik) (6) where sT ij signiﬁes the similarity between the ith sample and jth sample after T similarity updates.
+As visualized in Figure 2b, we build the ith subgraph by considering only edges that connect nodes to either the ith sample or the query. Rather than considering Mi as the adjacency matrix of this graph, we deﬁne it as a 2 × N matrix deﬁned as follows. Each column corresponds to a different sample and the samples are ordered with respect to their similarity of the ith sample. The values in the ﬁrst row are the similarities between the ith sample and the samples associated to each column, it is thus decreasing. The values in the second row are the similarity between the query and the samples associated with each column. Note that for the subgraph corresponding to the query, the two lines of the matrix are the same and actually correspond to the same edges in the graph.
+In few-shot classiﬁcation, the set of N images to consider
+Transductive few-shot classiﬁcation. can be divided in two: a support set S with known labels and an unlabelled query set Q for which we want to predict labels. Our approach assumes that Q is accessible during the inference. This setting is known as transductive few-shot classiﬁcation. For each sample in the query set, we aim to increase the similarities between itself and the support images from the same class comparing to those from different classes. To this end, we minimize the Cross Entropy loss: (cid:88) (cid:16)
+− log i∈Q,j∈S:yq i =ys j exp(τ sT ij) exp(τ sT ij) + (cid:80) k∈S,yq i (cid:54)=ys k (cid:17) exp(τ sT ik) (7) where τ is a learnable temperature parameter, yq
+As visualized in Figure 2c, we build the ith subgraph by considering only the edges that connect nodes either to the ith sample or to the support set. Similar to the case of retrieval, we represent this
+· are labels of query and support samples.
+· and ys 4
+graph using a structured matrix, but we keep the nodes corresponding to the support and query set separated. We deﬁne Mi as a (|S| + 1) × (|S| + |Q|) matrix with |·| the number of elements in a set. Its ﬁrst |S| columns and last |Q| columns correspond to the samples in support set and query set, respectively. They are both sorted by decreasing similarity with respect to the ith sample. While the values in the ﬁrst row of Mi represent the similarities between the ith sample and the samples in different columns, the last |S| rows represent similarities between support samples and different columns. Note that if the ith sample comes from the support set, one row will be repeated in Mi. 2.3 Combination with k-reciprocal distance [75]
+Instead of taking CNN feature similarities as input of G, our approach can be augmented with other distances. In particular, we show that it leads to stronger results when using the k-reciprocal feature distance [75]. We summarize in this section how the k-reciprocal feature distance is obtained and how we update it with our approach.
+The k-reciprocal feature is computed from k-reciprocal neighbors [19]. Writing top(a, k) the k nearest neighbors of the feature a, the set of k-reciprocal neighbors R(a, k) of a is deﬁned as :
+R(a, k) = {b|b ∈ top(a, k) ∩ a ∈ top(b, k)}. (8)
+The backward veriﬁcation aims at reducing the number of false matches in the k-reciprocal neighbors.
+To consider potential positive matches excluded from the k nearest neighbors, [75] proposed to add the k 2 ) shares enough neighbors with R(a, k). 2 -reciprocal neighbors of b ∈ R(a, k) into an expanded set R∗(a, k) if R(b, k
+The ﬁnal proposed distance d in k-reciprocal [75] is a combination of the euclidean distance between normalized features and the Jaccard distance dJ computed with the expanded sets : d(a, b) = α (cid:13) (cid:13) (cid:13) (cid:13) a (cid:107)a(cid:107)
+− b (cid:107)b(cid:107) (cid:13) 2 (cid:13) (cid:13) (cid:13)
++ (1 − α)dJ (R∗(a, k), R∗(b, k)) (9) where α is a hyper-parameter representing the contribution of the feature similarity. For more details about the Jaccard distance, we refer to [75].
+Now, we compute the distance matrix J corresponding to the Jaccard distance obtained from the initial features and consider it as ﬁxed. We then consider the distance deﬁned by Equation 9 to build our graphs updating only the feature similarity in the ﬁrst part of the equation. More precisely, at each iteration t, we use Dt = 2α(1 − St) + (1 − α)J as input of the SSR, and consider its output is an update to St only and the ﬁnal objective function remains on ST . We also tried to use the ﬁnal objective on DT , but observed a severe overﬁtting on the training set and worse results. 2.4 Network architecture and implementation details
+Architecture. Each subgraph update in our SSR module is performed by a three-layer perceptron with constant hidden-layer size 1,024 for image retrieval and 4,096 for few-shot classiﬁcation. Further increasing the model size leads to similar performances. All the layers except the last one are followed by ReLU activations and Instance Normalization [64], which we also apply to the input matrix.
+Optimization. We optimize our networks using SGD with momentum 0.9. The batch size is set to 1 since there are numerous images to consider in a single similarity graph and increasing the batch size does not improve the performance. For image retrieval, we use a single update of the model (T = 1) and training converges in 10K iterations with a ﬁxed learning rate of 1e-5. Larger T leads to similar performance. The analysis of T and λ on rOxford5K [49] and rParis6K [49] are available in the supplimentary material. The entire training on CUB [67] takes 6 hours on a single GeForce 1080
+Ti GPU. For few-shot classiﬁcation, we ﬁrst train for 30K iterations with T = 1: the learning rate is set to 0.1 for 5K iterations then to 0.01 for another 25K iterations. Then, keeping a learning rate of 0.01, we train for 10K iterations with T = 2 and 10K more with T = 3. We ﬁnd that T = 3 leads to the most stable improvement and include this analysis in the supplementary material. The whole training process on mini-ImageNet [66] takes 20 hours on a single GeForce 1080 Ti GPU. 5
+Method \Feature
+CUB [67], mAP@R
+CARS [31], mAP@R
+SOP [62], mAP@R rOxford5K [49], mAP rParis6K [49], mAP
+GL [11] PA [30] PNCA++ [63] GL [11] PA [30] PNCA++ [63] GL [11] PA [30] PNCA++ [63] Medium [17] Hard [17] Medium [17] Hard [17]
+-LAttQE [17]
+Region Diffusion [23, 49]†
+-29.6
+Feat. only 39.5
+Feat + SSR 34.1
+AQE [9] 40.0
+AQE + Ours 34.2
+AQEwD [16] 41.2
+AQEwD + SSR 33.0
+DQE [2] 39.9
+DQE + SSR
+αQE [50] 34.1
+αQE + SSR 40.7 k-reciprocal [75]† 48.1 k-reciprocal [75]† + SSR 49.8
+† carries the extra cost of the graph over the whole dataset.
+--27.0 35.5 31.2 36.1 31.4 35.9 30.6 35.5 31.2 34.7 41.8 42.3
+--24.5 34.0 28.3 34.1 28.4 34.0 26.4 33.1 28.3 33.6 37.6 38.3
+--27.8 38.3 34.4 40.3 34.6 39.2 31.8 39.4 34.5 40.4 49.9 51.1
+--28.3 38.7 34.9 39.5 35.1 39.7 34.5 39.0 34.5 35.7 50.2 50.9
+--33.2 45.8 40.9 48.3 40.9 48.4 37.0 46.2 40.9 48.4 58.5 60.4
+--46.9 50.9 49.3 49.5 49.3 49.9 48.7 49.8 49.3 49.7 51.7 52.5
+--51.0 54.8 54.8 53.8 55.0 54.2 55.0 53.8 54.8 54.0 56.3 56.6
+--55.4 60.6 58.4 60.5 58.6 60.5 58.3 60.4 58.4 60.4 61.7 62.3 73.4 69.0 67.3 75.6 70.8 74.2 70.8 74.1 69.5 73.6 68.2 71.6 72.1 75.0 49.6 44.7 44.3 54.2 48.0 54.4 48.0 54.1 46.1 53.7 44.0 51.1 50.7 53.1 86.3 89.5 80.6 84.4 85.3 84.5 84.5 83.9 84.0 83.1 84.3 83.5 87.9 88.7 70.6 80.0 61.5 67.8 68.8 68.7 67.6 67.9 67.0 67.0 67.2 67.3 74.8 75.9
+Table 1: Image retrieval. For [67], CARS [31] and SOP [62], we use three features: GL [11],
+PA [30] and PNCA++ [63], and report mAP@R, which follows [40]. For rOxford5K [49] and rParis6K [49], we use the feature provided in [17] and report mAP, which follows [17].. The best and the 2nd best results are in red and blue respectively. 3 Experiments
+In this section, we cover our experimental setups and results for image retrieval and few-shot image classiﬁcation. Since these two problems are different in data processing and performance evaluation, we separate the discussions into two sub-sections followed by a joint ablation study. 3.1
+Image retrieval
+Datasets. We consider ﬁve image retrieval datasets, namely, CUB [67], CARS [31], SOP [62], rOxford5K [49] and rParis6K [49]. For CUB, CARS, SOP, we follow the standard split [11]: for
+CUB, the ﬁrst 100 species (5,864 images) are used for training and the remaining 100 species (5,924 images) are used for testing; for CARS, the ﬁrst 98 classes (8,054 images) are used for training and the other 98 classes (8,131 images) are kept for testing; for SOP, the dataset is separated into 11,318 training classes (59,551 images) and 11,316 testing classes (60 502 images). For rOxford5K [49] and rParis6K [49], we follow [17] and use the dataset SFM120k [50] , which is built with structure-from-motion pipeline, and clusters for the same 3D scene are cast as categories. We take features in [17], which already leads to good performance on the training set. For most training samples, the mAPs on the training set are already quite high and training SSR using the raw nearest neighbors makes it perform well only for high mAP queries. To address this problem, we sample only difﬁcult examples.
+To combine other re-ranking methods and SSR, we directly apply the trained SSR to the top retrieved samples given by other re-ranking methods. More details can be found in the supplementary material.
+Evaluation metric. For CUB, CARS, SOP, following [40], we choose the Mean Average Precision at R (MAP@R) as our main evaluation metric: MAP@R = 1 i=1 P (i) with R the total number
+R of true positive samples and P (i) is the precision at i if the ith retrieval is correct and 0 otherwise.
+For rOxford5K and rParis6K, we follow [17] and report stand Mean Average Precision (mAP) on medium and hard queries. (cid:80)R
+Baselines. We conduct exhaustive experiments with three recent feature representations: a) features trained with group loss [11] (GL), b) features trained with proxy anchor loss [30] (PA) and c) features trained with proxy neighborhood component analysis method [63] (PNCA++). For each feature, we report the baseline results obtained from the k-reciprocal method [75] and four standard query expansion methods [17]: Average Query Expansion (AQE, [9, 16, 50]), Average Query Expansion with Decay (AQEwD, [50]), Alpha Query Expansion (αQE [50]) and Discriminative Query Expansion (DQE [2]). The baselines and details are provided in the supplementary material.
+Results. Our results are shown in Table 1. Applying our SSR on original features (“Feat. + SSR”) largely improves the retrieval performance of using original features (“Feat.”) on different datasets for different metric. In almost all cases our method alone outperforms all the query expansion baselines and results can be further improved by applying it to the query-expanded results. The performance improvement brought by k-reciprocal [75] should be attributed to the statistics of neighbors of neighbors, while our method can further boost upon that. These results suggest that our method can be combined with many feature extractors for image retrieval to attain better performance. Note that the choices of N are available in the supplementary material. 6
+Methods
+Trans.
+Backbone mini-ImageNet [66] 5-shot 1-shot tiered-ImageNet [51] 1-shot 5-shot
+CIFAR-FS [45] 1-shot 5-shot
+MatchNet [66]
+ProtoNet† [60]
+GNN [13]
+Gidaris et al. [14]
+MAML‡ [12]
+TPN [35]
+SIB [21]
+EPNet [53]
+Baseline
++ k-reciprocal [75]
++ Ours
+TADAM [45]
+MetaOptNet-RR [33]
+ProtoNet+MABAS [28]
+EGNN* [29]
+CAN [20]
+EPNet [53]
+Baseline
++ k-reciprocal [75]
++ Ours
+LEO [55]
+Gidaris et al. [14]
+SIB‡‡ [21]
+SIB+E3BM [36]
+EPNet [53]
+Baseline
++ k-reciprocal [75]
++ Ours (cid:51) (cid:51)
+BN (cid:51) (cid:51) (cid:51) 44.2 49.4±0.8 50.3 54.8±0.4 48.7±1.8 55.5±0.9 58.0±0.6 59.3±0.9 52.4±0.4 58.6±0.7 62.1±0.6 58.5±0.3 61.4±0.6 65.1±0.9 64.0 67.2±0.6 66.5±0.9 57.6±0.5 67.3±0.7 68.1±0.6 61.8±0.1 62.9±0.5 70.0±0.6 71.4 70.7±0.9 61.9±0.5 68.1±0.8 72.4±0.6
+‡Results from [35]. *Results from [36].
+Conv-4-64
+Conv-4-64
+Conv-4-64
+Conv-4-64
+Conv-4-64
+Conv-4-64
+Conv-4-64
+Conv-4-64
+Conv-4-64
+Conv-4-64
+Conv-4-64
+ResNet-12
+ResNet-12
+ResNet-12
+ResNet-12
+ResNet-12
+ResNet-12
+ResNet-12
+ResNet-12
+ResNet-12
+WRN-28-10
+WRN-28-10
+WRN-28-10
+WRN-28-10
+WRN-28-10
+WRN-28-10
+WRN-28-10
+WRN-28-10 (cid:51) (cid:51) (cid:51) (cid:51) (cid:51) (cid:51) (cid:51) (cid:51) (cid:51) (cid:51) 57.0 68.2±0.7 66.4 71.9±0.3 63.1±0.9 69.9±0.7 70.7±0.4 73.0±0.6 69.6±0.4 72.2±0.5 73.2±0.4 76.7±0.3 77.9±0.5 82.7±0.5 77.2 80.6±0.4 81.1±0.6 73.5±0.4 78.0 ±0.5 76.9±0.4 77.6±0.1 79.9±0.3 78.9±0.4 81.2 84.3±0.5 77.8±0.3 79.4±0.5 80.2±0.4 – 53.3±0.9 61.9 – 51.7±1.8 59.9±0.9 – 60.0±1.0 55.2±0.5 63.1±0.8 65.1±0.6 – 65.4±0.7 – 66.5 73.2±0.6 76.5±0.9 68.8±0.5 77.3±0.8 81.2±0.6 66.3±0.1 70.5±0.5 72.9* 75.6 78.5±0.9 69.4±0.5 76.4±0.7 79.5±0.6 – 72.7±0.7 75.3 – 70.3±1.8 73.3±0.8 – 73.9±0.8 72.3±0.4 75.0±0.6 74.1±0.5 – 81.3±0.5 – 82.5 84.9±0.4 87.3±0.6 83.5±0.4 85.7±0.5 85.7±0.4 81.4±0.1 85.0±0.4 82.8* 84.3 88.4±0.6 83.4±0.4 84.8±0.5 84.8±0.4 – 55.5±0.7 – 72.0±0.6 63.5±0.3 – – 68.7±0.6 – 57.8±0.5 66.6±0.8 72.0±0.6 – 72.6±0.7 73.5±0.9 – – – 66.4±0.5 73.6±0.8 76.8±0.6 – 76.1±0.3 80.0±0.6 – – 69.5±0.5 76.7±0.8 81.6±0.6 79.8±0.2 – – 77.1±0.4 – 75.3±0.4 78.1±0.6 78.5±0.4 – 84.3±0.5 85.5±0.7 – – – 80.4±0.4 82.1±0.5 83.7±0.4 – 87.8±0.2 85.3±0.4 – – 83.5±0.4 84.9±0.5 86.0±0.4
+†Results from [33].
+‡‡ we use the same pre-trained features of WRN and Conv-4-64 as [21] on mini-ImageNet.
+Table 2: Transductive few-shot classiﬁcation. 5-way few-shot classiﬁcation accuracies (%) on mini-ImageNet [66], tiered-ImageNet [51], and CIFAR-FS [4]. We report average classiﬁcation accuracy (with 95% conﬁdence intervals) over 2000 episodes on the test set. We highlight in grey the results of our baseline features with nearest neighbor classiﬁer (entry “Baseline”), with k-reciprocal [75] re-ranking (entry “+ k-reciprocal”), and with our approach (entry “+ Ours”). The best and the 2nd best results are in red and blue respectively. 3.2 Transductive few-shot classiﬁcation
+Dataset. We evaluate our approach on three standard few-shot classiﬁcation datasets: mini-ImageNet [66], tiered-ImageNet [51], and CIFAR-FS [4]. mini-ImageNet and tiered-ImageNet contain a subset of ImageNet images resized to 84×84. mini-ImageNet contains 100 classes and 600 images per class. It is split into 64 classes for training, 16 for validation and 10 for testing. tiered-ImageNet contains a larger subset of ImageNet with 608 classes and 1 300 images per class. It is split into 351 classes for training, 97 for validation and 160 for testing. CIFAR-FS was created by dividing the original CIFAR-100 [32] into 64 training classes, 16 validation classes and 20 testing classes. Each class has 600 images. The image resolution is 32×32.
+Architectures and baseline features. We experimented with three architectures: WRN-28-10 [74, 15, 14, 21], ResNet-12 [38, 45, 33] and Conv-4-64 [15, 14, 21]. WRN-28-10 is commonly evaluated in few-shot classiﬁcation [74, 15, 14, 21]. ResNet-12 is the architecture used by [38, 45, 33].
+Conv-4-64 is widely used in few-shot learning [15, 14, 21] and has 4 convolutional modules, with 3 × 3 convolutions, followed by Batch Normalization [22], ReLU non-linearity and 2 × 2 Max
+Pooling. For all architectures and datasets, we use a baseline feature obtained by pre-training a cosine classiﬁer [15] to initialize our approach. Note that this pre-training is carried out on the train-set with hyper-parameter selection on the validation set. The cosine classiﬁer is trained following a standard training strategy: we use the SGD optimizer with momentum 0.9 and batch size 64 for 120 epochs.
+The ﬁrst 50 epochs are with learning rate 0.1, the next 50 with learning rate 0.01, and the last 20 with learning rate 0.001. We adopt standard data augmentation: resizing, cropping and horizontal ﬂipping.
+Results. We compare our approach to state-of-the-art methods in Table 2. For all the datasets and backbones, we report the performance of the baseline features (‘Baseline‘), k-reciprocal [75] with the baseline feature (‘+ k-reciprocal‘) and our approach with the baseline features (‘+ Ours‘). 7
+Interestingly, a simple baseline by combining the baseline feature and k-reciprocal, without any learning procedure, achieves comparable performance with recent methods [21, 36, 53] on all three datasets. Moreover, our method achieves the best performance on 1-shot classiﬁcation and obtains competitive performance on 5-shot classiﬁcation. In particular, compared to SIB [21], which is also an approach using synthetic gradient and similar baseline features, our approach yields a clear and consistent improvement. Note that combining k-reciprocal and our method did not bring any improvement over our method alone for few-shot classiﬁcation (see results in supplementary material). 3.3 Ablation study
+Image retrieval. We provide an analysis on CARS [31] with using Group Loss features [11] and N = 100 to analyze our approach for image retrieval. The results are presented in Ta-ble 3. This ablation provides several insights. First, using subgraphs is essential: perfor-mance simply using as input and predicting the full similarity matrix (w.o subgraph) leads to performances close to the baseline. Second, sorting the columns in each subgraph is impor-tant, because it makes the information about each sample easier for the network to extract, as can be seen in the 1.8% performance loss when the columns are sorted according to their similarity with the query (w.o local sort). Third, the feature update (w.o feat. update), which allows to leverage the input features, is also im-portant, removing it degrades the performance by 3.8%. Finally, adding or removing rows in
+Mi shows that using the subgraphs we deﬁne is a good trade-off: removing connections to the ith sample (w.o sample) or the query (w.o query) degrades performance, and so does considering the full graph (w.o other). Note that independently of the graph they represent, the matrices Mi are still focused on sample i which is used to sort their rows and columns. (b) Variants of Mi
+Table 3: Image retrieval: Ablation study on
+CARS [31]. w.o sample w.o query w. other w.o local sort w.o subgraph w.o feat. update
+Baseline (features)
+Ours (sample and query) (a) mAP@R on CARS [31] 27.8 34.0 32.9 28.2 33.0 32.2 27.9 30.2 mAP@R
+Method 61.9
+Acc %
+Method
+Baseline (features)
+Transductive few-shot classiﬁcation. We now present a similar analysis on transductive few-shot classiﬁcation. The results are in Table 4. We identify variants of the subgraph similarity matrices Mi by writing the samples we use in rows and columns. First, note that the optimal choice is the one presented in Sec-tion 2.2, using matrices Mi with rows corresponding the ith sample and the support set S and columns cor-responding to the support set S and the query set Q. Second, the local sorting is more important for few-shot classiﬁcation than for image retrieval, removing it (w.o local sort) degrades the performance by 9%. The reason is that in image retrieval we could order images with respect to their similar-ities to the query, while in few-shot classiﬁcation there is no natural order. Third, similar to image retrieval, the decomposition into subgraphs (w.o subgraph) is crucial to obtain improved performance. Finally, updating features (w.o feat. update) is also important in this task and brings an extra 1.4% improvement. (b) Variants of Mi
+Table 4: Transductive few-shot classiﬁcation: Ablation study on mini-ImageNet [66] with WRN [74].
+Mi Rows Mi Col. sample, S sample, S, Q
+S sample sample, S sample, S sample, S sample, S sample, S w.o local sort w.o subgraph w.o feat. update
+S, Q
+S, Q
+S, Q
+S, Q
+Q
+S
+S, Q
+S, Q
+S, Q 72.4 72.2 72.0 70.8 71.7 66.3 63.4 63.2 71.0 (a) 1-shot accuracy
+Ours 4

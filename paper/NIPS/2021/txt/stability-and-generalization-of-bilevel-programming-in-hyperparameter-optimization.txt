@@ -1,0 +1,166 @@
+Abstract
+The (gradient-based) bilevel programming framework is widely used in hyperpa-rameter optimization and has achieved excellent performance empirically. Previous theoretical work mainly focuses on its optimization properties, while leaving the analysis on generalization largely open. This paper attempts to address the issue by presenting an expectation bound w.r.t. the validation set based on uniform stability.
+Our results can explain some mysterious behaviours of the bilevel programming in practice, for instance, overfitting to the validation set. We also present an ex-pectation bound for the classical cross-validation algorithm. Our results suggest that gradient-based algorithms can be better than cross-validation under certain conditions in a theoretical perspective. Furthermore, we prove that regularization terms in both the outer and inner levels can relieve the overfitting problem in gradient-based algorithms. In experiments on feature learning and data reweighting for noisy labels, we corroborate our theoretical findings. 1
+
+Introduction
+Hyperparameter optimization (HO) is a common problem arising from various fields including neural architecture search [24, 8], feature learning [10], data reweighting for imbalanced or noisy samples [33, 37, 9, 35], and semi-supervised learning [14]. Formally, HO seeks the hyperparameter-hypothesis pair that achieves the lowest expected risk on testing samples from an unknown distribution.
+Before testing, however, only a set of training samples and a set of validation ones are given. The validation and testing samples are assumed to be from the same distribution. In contrast, depending on the task, the underlying distributions of the training and testing samples can be the same [24, 10] or different [33].
+Though various methods [17] have been developed to solve HO (See Section 5 for a comprehensive review), the bilevel programming (BP) [6, 32, 10] framework is a natural solution and has achieved excellent performance in practice [24]. BP consists of two nested search problems: in the inner level, it seeks the best hypothesis (e.g., a prediction model) on the training set given a specific configuration of the hyperparameter (e.g., the model architectures), while in the outer level, it seeks the hyperparameter (and its associated hypothesis) that results in the best hypothesis in terms of the error on the validation set.
+∗Equal contribution. G. Wu is now at School of Software, Shandong University and C. Li is now at Gaoling
+School of AI, Renmin University of China. The work was done when they were at Tsinghua University.
+†Corresponding author. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Generally, it is hard to solve the BP problem exactly, and several approximate algorithms have been developed in previous work. As a classical approach, Cross-validation (CV)3 can be viewed as an approximation method. It obtains a finite set of hyperparameters via grid search [31] or random search [2] as well as a set of the corresponding hypothesises trained in the inner level, and selects the best hyperparameter-hypothesis pair according to the validation error. CV is well understood in theory [31, 36] but suffers from the issue of scalability [10]. Recently, alternative algorithms [9, 10, 11, 29, 35] based on unrolled differentiation (UD) have shown promise on tuning up to millions of hyperparameters. In contrast to CV, UD exploits the validation data more aggressively: it optimizes the validation error directly via (stochastic) gradient descent in the space of the hyperparameters, and the gradient is obtained by finite steps of unrolling in the inner level.
+Though promising, previous theoretical work [10, 39, 35] of UD mainly focuses on the optimization, while leaving its generalization analysis largely open. This paper takes a first step towards solving it and aims to answer the following questions rigorously:
+• Can we obtain certain learning guarantees for UD and insights to improve it?
+• When should we prefer UD over classical approaches like CV in a theoretical perspective?
+Our first main contribution is to present a notion of uniformly stable on validation (in expectation) and an expectation bound of UD algorithms (with stochastic gradient descent in the outer level) on the validation data as follows:
+|Expected risk of UD−Empirical risk of UD on validation| ≲ ˜O (cid:19) (cid:18) T κ m and ˜O (cid:18) (1 + ηγφ)2K m (cid:19)
+, (1) where T and K are the numbers of steps in the outer level and the inner level respectively, κ ∈ (0, 1) is a constant, η is the learning rate in the inner level, γφ is a smoothness coefficient of the inner loss, m is the size of the validation set and ≲ means the inequality holds in expectation. As detailed in
+Section 4.1, our results not only present the order of the important factors in the generalization gap but also explain some mysterious behaviours of UD in practice, for instance, the trade-off on the values of T and K [10].
+Our second main contribution is to systematically compare UD and CV from the perspective of generalization in Section 4.2. Instead of using the existing high probability bounds of CV (see
+Theorem 4.4 in [31]), we present an expectation bound of CV for a direct comparison to Eq. (1) as follows:4
+|Expected risk of CV − Empirical risk of CV on validation| ≲ O (cid:32)(cid:114) (cid:33)
+. log T m (2)
+On the one hand, Eq. (1) and Eq. (2) suggest that with a large T ,5 CV has a much lower risk of overfitting than UD. On the other hand, the dependence of Eq. (2) on m is O
+, which is worse than that of UD. Furthermore, as discussed before, probably UD has a much lower validation risk than
+CV. Indeed, we show that CV with random search suffers from the curse of dimensionality. These analyses may explain the superior performance of UD [24], especially when we have a reasonable choice of T , a sufficiently large m and a sufficiently high-dimensional hyperparameter space. (cid:16)(cid:113) 1 m (cid:17)
+Our third main contribution is to present a regularized UD algorithm in Section 4.3 and prove that both a weight decay term of the parameter in the inner level and that of the hyperparameter in the outer level can increase the stability of the UD algorithms. Thus, the generalization performance will probably improve if the terms do not hurt the validation risk too much.
+Finally, experiments presented in Section 6 validate our theory findings. In particular, we reproduce the mysterious behaviours of UD (e.g., overfitting to the validation data) observed in [10], which can be explained via Eq. (1). Besides, we empirically compare UD and CV and analyze their performance via Eq. (1) and Eq. (2). Further, we show the promise of the regularization terms in both levels. 3While CV can refer to a general class of approaches by splitting a training set and a validation set, we focus on grid search and random search and denote the two methods as CV collectively. 4We do not find a strong dependency of CV on K in both the theory and practice. 5Every hyperparameter considered corresponds to a loop for the inner level optimization, which is the computational bottleneck in HO. Therefore, for fairness, we assume UD and CV share the same T by default. 2
+2 Problem Formulation
+Let Z, Θ and Λ denote the data space, the hypothesis space and the hyperparameter space respectively.
+ℓ : Λ × Θ × Z → [a, b] is a bounded loss function6 and its range is s(ℓ) = b − a.
+Given a hyperparameter λ ∈ Λ, a hypothesis θ ∈ Θ and a distribution D on the data space Z,
+R(λ, θ, D) denotes the expected risk of λ, θ on D, i.e., R(λ, θ, D) = Ez∼D [ℓ(λ, θ, z)]. Hyperparam-eter optimization (HO) seeks the hyperparameter-hypothesis pair that achieves the lowest expected risk on testing samples from an unknown distribution.
+Before testing, however, only a training set Str of size n and a validation set Sval of size m are accessible. As mentioned in Section 1, we consider a general HO problem, where the distribution of the testing samples Dte is assumed to be the same as that of the validation ones Dval but can differ from that of the training ones Dtr. In short, we assume Dval = Dte, but we do not require Dtr =
+Dte. Given a hyperparameter λ ∈ Λ, a hypothesis θ ∈ Θ and the validation set Sval, ˆRval(λ, θ, Sval) denotes the empirical risk of λ, θ on Sval, i.e., ˆRval(λ, θ, Sval) = 1 m
+). The empirical
+ℓ(λ, θ, zval i m (cid:80) i=1 risk on training is defined as ˆRtr(λ, θ, Str) = 1 n
+φi(λ, θ, ztr i ), where φi can be a slightly modified n (cid:80) i=1 (e.g., reweighted) version of ℓ for i-th training sample7.
+Technically, an HO algorithm A is a function mapping Str and Sval to a hyperparameter-hypothesis pair, i.e., A : Z n × Z m → Λ × Θ. In contrast, a randomized HO algorithm does not necessarily return a deterministic hyperparameter-hypothesis pair but more generally a random variable with the outcome space Λ × Θ.
+Though extensive methods [17] have been developed to solve HO (See Section 5 for a comprehen-sive review), the bilevel programming [6, 32, 10] is a natural solution and has achieved excellent performance in practice recently [24]. It consists of two nested search problems as follows:
+λ∗(Str, Sval) = arg min
+ˆRval(λ, θ∗(λ, Str), Sval)
+, where θ∗(λ, Str) = arg min
+ˆRtr(λ, θ, Str)
+. (cid:124)
+λ∈Λ (cid:123)(cid:122)
+Outer level optimization (cid:125) (cid:124)
+θ∈Θ (cid:123)(cid:122)
+Inner level optimization (cid:125) (3)
+In the inner level, it seeks the best hypothesis on Str given a specific configuration of the hyperpa-rameter. In the outer level, it seeks the hyperparameter λ∗(Str, Sval) (and its associated hypothesis
+θ∗(λ∗(Str, Sval), Str)) that results in the best hypothesis in terms of the error on Sval. Eq. (3) is sufficiently general to include a large portion of the HO problems we are aware of, such as:
+• Differential Architecture Search [24] Let λ be the coefficients of a set of network archi-tecture, let θ be the parameters in the neural network defined by the coefficients, and let l be the cross-entropy loss associated with θ and λ. Namely, l(λ, θ, z) = CE(hλ,θ(x), y), where hλ,θ(·) is a neural network with architecture λ and parameter θ.
+• Feature Learning [10] Let λ be a feature extractor, let θ be the parameters in a classifier that takes features as input and let l be the cross-entropy loss associated with θ and λ.
+Namely, l(λ, θ, z) = CE(gθ(hλ(x)), y), where hλ(·) is the feature extractor and gθ(·) is the classifier.
+• Data Reweighting for Imbalanced or Noisy Samples [35] Let λ be the coefficients of the training data, let θ be the parameters of a classifier that takes the data as input, let l be the cross-entropy loss associated with θ. Namely, l(θ, z) = CE(hθ(x), y), where hθ(·) is the classifier and l is irrelevant to λ. The empirical risk on the training set is defined through a reweighted version of the loss φi(λ, θ, zi) = σ(λi)l(θ, zi), where σ(·) is the sigmoid function and λi is the coefficient corresponding to zi. 6This formulation also includes the case where the loss function is irrelevant to the hyperparameter. Also see
+Appendix F for a discussion of the boundedness assumption of the loss function. 7While in many tasks such as differential architecture search [24] and feature learning [10], φi is just the same as ℓ, we distinguish between them to include tasks where φi and ℓ are different, such as data reweighting [35]. 3
+Algorithm 1 Unrolled differentiation for hyperparameter optimization 1: Input: Number of steps T and K; initialization ˆθ0 and
+ˆλ0; learning rate scheme α and η 2: Output: The hyperparameter ˆλud and hypothesis ˆθud 3: for t = 0 to T − 1 do 4: 5: 6:
+ˆθt 0 ← ˆθ0 for k = 0 to K − 1 do k − ηk+1∇θ ˆRtr(ˆλt, θ, Str)|θ=ˆθt
+ˆθt k+1 ← ˆθt end for
+ˆλt+1 ← ˆλt − αt+1∇λ ˆRval(λ, ˆθt
+K(λ), Sval)|λ=ˆλt k 7: 8: 9: end for 10: return ˆλT and ˆθT
+K
+Algorithm 2 Cross-validation for hyper-parameter optimization 1: Input: Number of steps T and K; t=1; initialization {ˆλt}T learning rate scheme η t=1 and {ˆθt 0}T 2: Output: The hyperparameter ˆλcv and hypothesis ˆθcv 3: for k = 0 to K − 1 do 4:
+ˆθt
+ˆθt
+← k k+1
+ηk+1∇θ ˆRtr(ˆλt, θ, Str)|θ=ˆθt k
+− 5: end for 6: t∗ ← arg min 1≤t≤T 7: return ˆλt∗ and ˆθt∗
+K
+ˆRval(ˆλt, ˆθt
+K, Sval) 3 Approximate the Bilevel Programming Problem
+In most of the situations (e.g., neural network as the hypothesis class [24]), the global optima of both the inner and outer level problems in Eq. (3) are nontrivial to achieve. It is often the case to approximate them in a certain way (e.g., using (stochastic) gradient descent) as follows:
+ˆλ(Str, Sval) ≈ arg min
+ˆRval(λ, ˆθ(λ, Str), Sval)
+, where ˆθ(λ, Str) ≈ arg min
+ˆRtr(λ, θ, Str)
+. (cid:124) (cid:123)(cid:122)
+Approximate outer level optimization (cid:125) (cid:124)
+λ∈Λ
+θ∈Θ (cid:123)(cid:122)
+Approximate inner level optimization (cid:125) (4)
+Here ˆθ(λ, Str) can be deterministic or random. differentiation (UD) and cross-validation (CV) algorithms as two implementation of Eq. (4).
+In this perspective, we can view the unrolled
+Unrolled differentiation. The UD-based algorithms [9, 10, 11, 29, 35] solve Eq. (4) via performing finite steps of gradient descent in both levels. Given a hyperparameter, the inner level performs
+K updates, and keeps the whole computation graph. The computation graph is a composite of K parameter updating functions, which are differentiable with respect to λ, and thereby the memory complexity is O(K). As a result, the corresponding hypothesis is a function of the hyperparameter.
+The outer level updates the hyperparameter a single step by differentiating through inner updates, which has a O(K) time complexity, and the inner level optimization repeats given the updated hyperparameter. Totally, the outer level updates T times. Formally, it is given by Algorithm 1, where we omit the dependency of λ and θ on Sval and Strfor simplicity.
+In some applications [24, 10], n and m can be very large and we cannot efficiently calculate the gradients in Algorithm 1. In this case, stochastic gradient descent (SGD) can be used to update the hyperparameter (corresponding to line 8 in Algorithm 1) as follows:
+ˆλt+1 ← ˆλt − αt+1∇λ ˆRval(λ, ˆθt
+K(λ), {zj})|λ=ˆλt
+, (5) where zj is randomly selected from Sval. Similarly, we can also adopt SGD when updating the hypothesis and then all intermediate hypothesises are random functions of λ and Str.
+Cross-validation. CV is a classical approach for HO. It first obtains a finite set of hyperparameters, which is often a subset of Λ, via grid search [31] or random search [2] 8. Then, it separately trains the inner level to obtain the corresponding hypothesis given a hyperparameter. Finally, it selects the best hyperparameter-hypothesis pair according to the validation error. It is formally given by Algorithm 2, where we use gradient descent to approximate the inner level (i.e., line 4). We can also adopt SGD to update the hypothesis. 8In our experiments, the hyperparameter is too high-dimensional to perform grid search, and thus random search is preferable. Nevertheless, they will be shown to have similar theoretical properties. 4
+In terms of optimization, CV searches over a prefixed subset of Λ in a discrete manner, while UD leverages the local information of the optimization landscape (i.e., gradient). Therefore, UD is more likely to achieve a lower empirical risk on the validation data with the same T . In the following, we will discuss the two algorithms from the perspective of generalization. 4 Main Results
+We present the main results below for clarity, and the readers can refer to Appendix A for all proofs. 4.1 Stability and Generalization of UD
+In most of the recent HO applications [10, 24, 14, 33] that we are aware of, stochastic gradient descent (SGD) is adopted for its scalability and efficiency. Therefore, we present the main results on
+UD with SGD in the outer level here.9
+Recall that a randomized HO algorithm returns a random variable with the outcome space Λ × Θ in general. To establish the generalization bound, we define the following notion of uniform stability on validation in expectation.
+Definition 1. A randomized HO algorithm A is β-uniformly stable on validation in expectation if for
+′val differ in at most one sample, we have all validation datasets Sval, S
+′val ∈ Z m such that Sval, S
+∀Str ∈ Z n, ∀z ∈ Z, EA (cid:104)
+ℓ(A(Str, Sval), z) − ℓ(A(Str, S (cid:105)
+′val), z)
+≤ β.
+Compared to existing work [15], Definition 1 considers the expected influence of changing one validation sample on a randomized HO algorithm. The reasons are two-folded. On the one hand, in
+HO, the distribution of the testing samples is assumed to be the same as that of the validation ones but can differ from that of the training ones [33], making it necessary to consider the bounds on the validation set. On the other hand, classical results in CV suggest that such bounds are usually tighter than the ones on the training set [31].
+If a randomized HO algorithm is β-uniformly stable on validation in expectation, then we have the following generalization bound.
+Theorem 1 (Generalization bound of a uniformly stable algorithm). Suppose a randomized HO algorithm A is β-uniformly stable on validation in expectation, then (cid:104) (cid:105)
+R(A(Str, Sval), Dval) − ˆRval(A(Str, Sval), Sval)
+| ≤ β.
+|EA,Str∼(Dtr)n,Sval∼(Dval)m
+Note that this is an expectation bound for any randomized HO algorithm with uniform stability. We now analyze the stability, namely bounding β, for UD with SGD in the outer level. Indeed, we consider a general family of algorithms that solve Eq. (4) via SGD in the outer level without any restriction on the inner level optimization in the following Theorem 2.
+Theorem 2 (Uniform stability of algorithms with SGD in the outer level). Suppose ˆθ is a random function in a function space Gˆθ and ∀Str ∈ Z n, ∀z ∈ Z, ∀g ∈ Gˆθ, ℓ(λ, g(λ, Str), z) as a function of λ is L-Lipschitz continuous and γ-Lipschitz smooth, let c ≤ s(ℓ) 2L2 and κ = c((1−1/m)γ) c((1−1/m)γ)+1 . Then, solving Eq. (4) with T steps SGD and learning rate αt ≤ c t in the outer level is β-uniformly stable on validation in expectation with
+β = 2cL2 m (cid:18) 1
+κ (cid:18)(cid:18) T s(ℓ) 2cL2 (cid:19)κ (cid:19) (cid:19)
+− 1
++ 1
+, which is increasing w.r.t. L and γ. (Recall that s(ℓ) = b − a is the range of the loss.)
+Theorem 2 doesn’t assume a specific form of ˆθ. Indeed, UD instantiates ˆθ as the output of SGD or
+GD in the inner level. For SGD, the corresponding Gˆθ is formed by iterating over all possible random indexes and initializations in ˆθ. For GD, the corresponding Gˆθ is only formed by iterating over all 9See Appendix D for the results on UD with GD in the outer level. The generalization gap of UD with GD in the outer level has an exponential dependence on T and K, and has the same 1/m dependence on m as SGD. 5
+possible initializations in ˆθ, since GD uses full batches. We analyze the constants L and γ appearing in β of UD, which solves the inner level problem by either SGD or GD, given the following mild assumptions on the outer loss ℓ and the inner loss φi.
+Assumption 1. Λ and Θ are compact and convex with non-empty interiors, and Z is compact.
+Assumption 2. ℓ(λ, θ, z) ∈ C 2(Ω), where Ω is an open set including Λ × Θ × Z (i.e., ℓ is second order continuously differentiable on Ω).
+Assumption 3. φi(λ, θ, z) ∈ C 3(Ω), where Ω is an open set including Λ × Θ × Z (i.e., φi is third order continuously differentiable on Ω).
+Assumption 4. φi(λ, θ, z) is γφ-Lipschitz smooth as a function of θ for all 1 ≤ i ≤ n, z ∈ Z and
+λ ∈ Λ (Assumption 1 and Assumption 3 imply such a constant γφ exists).
+Theorem 3. Suppose Assumption 1,2,3,4 hold and the inner level problem is solved with K steps
+SGD or GD with learning rate η, then ∀Str ∈ Z n, ∀z ∈ Z, ∀g ∈ Gˆθ, ℓ(λ, g(λ, Str), z) as a function of λ is L = O((1 + ηγφ)K) Lipschitz continuous and γ = O((1 + ηγφ)2K) Lipschitz smooth.
+Remark: Generally, a neural network composed of smooth operators satisfy all assumptions. We notice that the continuously differentiable assumption in Assumption 2 and Assumption 3 does not hold for ReLU. However, we argue that there are many smooth approximations of ReLU including
+Softplus, Gelu [16], and Lipswish [5], which satisfy the assumption and achieve promising results in classification and deep generative modeling. m ) or ˜O( (1+ηγφ)2K
+Combining the results in Theorem 1, Theorem 2 and Theorem 3, we obtain an expectation bound of UD that depends on the number of steps in the outer level T , the number of steps in the inner level K and the validation sample size m. Roughly speaking, its generalization gap has an order of
+˜O( T κ
+). In Appendix B, we construct a worst case where the Lipschitz constant L in Theorem 3 increases at least exponentially w.r.t. K. According to Theorem 2, the stability bound also increases exponentially w.r.t. K in the worst case. Besides, if we further assume the inner loss
+φi is convex or strongly convex, we can derive tighter generalization gaps. Indeed, the dependence on K of the generalization gap is O(K 2) in the convex case and O(1) in the strongly convex case.
+Please see Appendix C for a complete proof. m
+Our results can explain some mysterious behaviours of the UD algorithms in practice [10]. According to Theorem 2 and Theorem 3, very large values of K and T will significantly decrease the stability of UD (i.e., increasing β), which suggests a high risk of overfitting. On the other hand, if we use very small T and K, the empirical risk on the validation data might be insufficiently optimized, probably leading to underfitting. This trade-off on the values of K and T has been observed in previous theoretical work [10], which mainly focuses on optimization and does not provide a formal explanation. We also confirmed this phenomenon in two different experiments (See results in
+Section 6.2).
+As for the number of validation data m, the generalization gap has an order of O( 1 satisfactory compared to that of CV as presented in Section 4.2. m ), which is 4.2 Comparison with CV
+CV is a classical approach for HO with theoretical guarantees, which serves as a natural baseline of our results on UD in Theorem 1, Theorem 2 and Theorem 3. However, existing results on CV (see
+Theorem 4.4 in [31]) are in the form of high probability bounds, which are not directly comparable to ours. To compare under the same theoretical framework to obtain meaningful conclusions, we present an expectation bound for CV as follows.
+Theorem 4 (Expectation bound of CV). Suppose Str ∼ (Dtr)n, Sval ∼ (Dval)m and Str and Sval are independent, and let Acv(Str, Sval) denote the results of CV as shown in Algorithm 2, then (cid:104)
+R(Acv(Str, Sval), Dval) − ˆRval(Acv(Str, Sval), Sval) (cid:105)
+|E (cid:114)
+| ≤ s(ℓ) log T 2m
+.
+Technically, the expectation bound of CV is proved via the property of the maximum of a set of subgaussian random variables (see Theorem 1.14 in [34]), which is distinct from the union bound used in the high probability bound of CV (see Theorem 4.4 in [31]). In Appendix G.2, we also verify (cid:113) 1 the O( m ) dependence of the expectation bound empirically. 6
+On one hand, we note that the growth of the generalization gap w.r.t. T is logarithmic in Theorem 4, which is much slower than that of our results on UD. Besides, it does not explicitly depend on K.
+Therefore, sharing the same large values of K and T , CV has a much lower risk of overfitting than
+UD. On the other hand, the dependence of Theorem 4 on m is O( m ), which is worse than that of
+UD. Furthermore, as discussed in Section 3, probably UD has a much lower validation risk than CV via exploiting the gradient information of the optimization landscape. Indeed, we show that CV with random search suffers from the curse of dimensionality (See Theorem 7 in Appendix E). Namely,
+CV requires exponentially large T w.r.t. the dimensionality of the λ to achieve a reasonably low empirical risk. The above analysis may explain the superior performance of UD [24], especially when we have a reasonable choice of T and K, a sufficiently large m and a sufficiently high-dimensional hyperparameter space. (cid:113) 1 4.3 The Regularized UD Algorithm
+Building upon the above theoretical results and analysis, we further investigate how to improve the stability of the UD algorithm via adding regularization. Besides the commonly used weight decay term on the parameter in the inner level, we also employ a similar one on the hyperparameter in the outer level. Formally, the regularized bilevel programming problem is given by:
+λ∗(Str, Sval) = arg min
+ˆRval(λ, θ∗(λ, Str), Sval) + (cid:124)
+λ∈Λ (cid:123)(cid:122)
+Regularized outer level optimization
+µ 2
+||λ||2 2
+, (cid:125) where θ∗(λ, Str) = arg min
+ˆRtr(λ, θ, Str) +
+θ∈Θ (cid:124) (cid:123)(cid:122)
+Regularized inner level optimization
+ν 2
+||θ||2 2
+, (cid:125) (6) where µ and ν are coefficients of the regularization terms. Similar to Algorithm 1, we use UD to approximate Eq. (6). We formally analyze the effect of the regularization terms in both levels (See
+Theorem 2 and Theorem 3 in Appendix A). In summary, both regularization terms can increase the stability of the UD algorithm, namely, decreasing β in a certain way. In particular, the regularization in the outer level decreases κ in Theorem 2 while the regularization in the inner level decreases L and γ in Theorem 3. Therefore, we can probably obtain a better generalization guarantee by adding regularization in both levels, assuming that the terms do not hurt the validation risk too much. 5

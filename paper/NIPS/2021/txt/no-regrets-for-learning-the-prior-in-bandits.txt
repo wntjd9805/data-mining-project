@@ -1,0 +1,299 @@
+Abstract
+We propose AdaTS, a Thompson sampling algorithm that adapts sequentially to bandit tasks that it interacts with. The key idea in AdaTS is to adapt to an unknown task prior distribution by maintaining a distribution over its parameters. When solving a bandit task, that uncertainty is marginalized out and properly accounted for. AdaTS is a fully-Bayesian algorithm that can be implemented efﬁciently in several classes of bandit problems. We derive upper bounds on its Bayes regret that quantify the loss due to not knowing the task prior, and show that it is small. Our theory is supported by experiments, where AdaTS outperforms prior algorithms and works well even in challenging real-world problems. 1
+
+Introduction
+We study the problem of maximizing the total reward, or minimizing the total regret, in a sequence of stochastic bandit instances [29, 4, 31]. We consider a Bayesian version of the problem, where the bandit instances are drawn from some distribution. More speciﬁcally, the learning agent interacts with m bandit instances in m tasks, with one instance per task. The interaction with each task is for n rounds and with K arms. The reward distribution of arm i ∈ [K] in task s ∈ [m] is pi(·; θs,∗), where
+θs,∗ is a shared parameter of all arms in task s. When arm i is pulled in task s, the agent receives a random reward from pi(·; θs,∗). The parameters θ1,∗, . . . , θm,∗ are drawn independently of each other from a task prior P (·; µ∗). The task prior is parameterized by an unknown meta-parameter
+µ∗, which is drawn from a meta-prior Q. The agent does not know µ∗ or θ1,∗, . . . , θm,∗. However, it knows Q and the parametric forms of all distributions, which help it to learn about µ∗. This is a form of meta-learning [39, 40, 7, 8], where the agent learns to act from interactions with bandit instances.
+A simple approach is to ignore the hierarchical structure of the problem and solve each bandit task independently with some bandit algorithm, such as Thompson sampling (TS) [38, 11, 2, 37]. This may be highly suboptimal. To illustrate this, imagine that arm 1 is optimal for any θ in the support of
+P (·; µ∗). If µ∗ was known, any reasonable algorithm would only pull arm 1 and have zero regret over any horizon. Likewise, a clever algorithm that learns µ∗ should eventually pull arm 1 most of the time, and thus have diminishing regret as it interacts with a growing number of tasks. Two challenges arise when designing the clever algorithm. First, can it be computationally efﬁcient? Second, what is the regret due to adapting to µ∗?
+We make the following contributions. First, we propose a Thompson sampling algorithm for our problem, which we call AdaTS. AdaTS maintains a distribution over the meta-parameter µ∗, which concentrates over time and is marginalized out when interacting with individual bandit instances.
+Second, we propose computationally-efﬁcient implementations of AdaTS for multi-armed bandits
+[29, 4], linear bandits [14, 1], and combinatorial semi-bandits [19, 13, 26]. These implementations are for speciﬁc reward distributions and conjugate task priors. Third, we bound the n-round Bayes regret of AdaTS in linear bandits and semi-bandits, and multi-armed bandits as a special case. The
+Bayes regret is deﬁned by taking an expectation over all random quantities, including µ∗ ∼ Q. Our bounds show that not knowing µ∗ has a minimal impact on the regret as the number of tasks grows, of only ˜O( mn2). Finally, mn). This is in a sharp contrast to prior work [28], where this is ˜O(
+√
+√ 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+our experiments show that AdaTS quickly adapts to the unknown meta-parameter µ∗, is robust to meta-prior misspeciﬁcation, and performs well even in challenging classiﬁcation problems.
+We present a general framework for learning to explore from similar past exploration problems. One potential application is cold-start personalization in recommender systems where users are tasks. The users have similar preferences, but neither the individual preferences nor their similarity is known in advance. Another application could be online regression with bandit feedback (Appendix E.2) where individual regression problems are tasks. Similar examples in the tasks have similar mean responses, which are unknown in advance. 2 Setting
+We ﬁrst introduce our notation. The set {1, . . . , n} is denoted by [n]. The indicator 1{E} denotes that event E occurs. The i-th entry of vector v is vi. If the vector or its index are already subindexed, we write v(i). We use ˜O for the big-O notation up to polylogarithmic factors. A diagonal matrix with entries v is denoted diag (v). We use the terms “arm” and “action” interchangeably, depending on the context.
+σ2
+Σ0
+µq Σq
+Our setting was proposed in Kveton et al. [28] and is deﬁned as follows. Each bandit problem instance has K arms. Each arm i ∈ [K] is deﬁned by distribution pi(·; θ) with parameter
+θ ∈ Θ. The parameter θ is shared among all arms. The mean of pi(·; θ) is denoted by r(i; θ). The learning agent interacts with m instances, one at each of m tasks. At the beginning of task s ∈ [m], an instance θs,∗ ∈ Θ is sampled i.i.d. from a task prior P (·; µ∗), which is parameterized by µ∗. The agent interacts with θs,∗ for n rounds. In round t ∈ [n], it pulls one arm and observes a stochastic realization of its reward. We denote the pulled arm in round t of task s by As,t ∈ [K], the realized rewards of all arms in round t of task s by Ys,t ∈ RK, and the reward of arm i ∈ [K] by Ys,t(i) ∼ pi(·; θs,∗). We assume that the realized rewards Ys,t are i.i.d. with respect to both s and t. A graphical model of our environment is drawn in Figure 1. We deﬁne the distribution-speciﬁc parameters µq, Σq, Σ0, and σ2 when we instantiate our framework.
+Our terminology is summarized in Appendix A.
+Figure 1: Graphical model of our en-vironment. s = 1, ..., m t = 1, ..., n
+Ys,t
+θs,∗
+µ∗
+The n-round regret of an agent or algorithm over m tasks with task prior P (·; µ∗) is deﬁned as
+R(m, n; µ∗) = m (cid:88)
+E (cid:34) n (cid:88) s=1 t=1 r(As,∗; θs,∗) − r(As,t; θs,∗) (cid:35)
+µ∗
+, (cid:12) (cid:12) (cid:12) (cid:12) (cid:12) (1)
+√
+Kn). So, when TS is applied independently in each task, R(m, n; µ∗) = ˜O(m where As,∗ = arg max i∈[K] r(i; θs,∗) is the optimal arm in the random problem instance θs,∗ in task s ∈ [m]. The above expectation is over problem instances θs,∗ ∼ P (·; µ∗), their realized rewards, and also pulled arms. Note that µ∗ is ﬁxed. Russo and Van Roy [36] showed that the Bayes regret, which matches the deﬁnition in (1) in any task, of Thompson sampling in a K-armed bandit with n rounds is ˜O(
+Kn).
+Our goal is to attain a comparable regret without knowing µ∗. We frame this problem in a Bayesian fashion, where µ∗ ∼ Q before the learning agent interacts with the ﬁrst task. The agent knows Q and we call it a meta-prior. Accordingly, we consider R(m, n) = E [R(m, n; µ∗)] as a metric and call it the Bayes regret. Our approach is motivated by hierarchical Bayesian models [20], where the uncertainty in prior parameters, such as µ∗, is represented by another distribution, such as Q. In these models, Q is called a hyper-prior and µ∗ is called a hyper-parameter. We attempt to learn µ∗ from sequential interactions with instances θs,∗ ∼ P (·; µ∗), which are also unknown. The agent can only observe their noisy realizations Ys,t.
+√ 3 Algorithm
+Our algorithm is presented in this section. To describe it, we need to introduce several notions of history, the past interactions of the agent. We denote by Hs = (As,t, Ys,t(As,t))n t=1 the history in 2
+Algorithm 1 AdaTS: Instance-adaptive exploration in Thompson sampling. 1: Initialize meta-prior Q0 ← Q 2: for s = 1, . . . , m do 3: 4: 5: 6: 7:
+Compute meta-posterior Qs (Proposition 1)
+Compute uncertainty-adjusted task prior Ps (Proposition 1) for t = 1, . . . , n do
+Compute posterior of θ in task s, Ps,t(θ) ∝ Ls,t(θ)Ps(θ)
+Sample ˜θs,t ∼ Ps,t, pull arm As,t ← arg max i∈[K] r(i; ˜θs,t), and observe Ys,t(As,t) s,t(θ) ∝ Ls,t(θ) P (θ; µ∗). TS would sample ˜θt ∼ P TS task s and by H1:s = H1 ⊕ · · · ⊕ Hs a concatenated vector of all histories in the ﬁrst s tasks. The history up to round t in task s is Hs,t = (As,(cid:96), Ys,(cid:96)(As,(cid:96)))t−1 (cid:96)=1 and all history up to round t in task s is H1:s,t = H1:s−1 ⊕ Hs,t. We denote the conditional probability distribution given history H1:s,t by
+Ps,t(·) = P (· | H1:s,t) and the corresponding conditional expectation by Es,t[·] = E [· | H1:s,t].
+Our algorithm is a form of Thompson sampling [38, 11, 2, 37]. TS pulls arms proportionally to being optimal with respect to the posterior. In particular, let Ls,t(θ) = (cid:81)t−1 (cid:96)=1 pAs,(cid:96) (Ys,(cid:96)(As,(cid:96)); θ) be the likelihood of observations in task s up to round t. If the prior P (·; µ∗) was known, the posterior of instance θ in round t would be P TS s,t and pull arm
+At = arg max i∈[K] r(i; ˜θt).
+We address the case of unknown µ∗. The key idea in our method is to maintain a posterior density of
+µ∗, which we call a meta-posterior. This density represents uncertainty in µ∗ given history. In task s, we denote it by Qs and deﬁne it such that P (µ∗ ∈ B | H1:s−1) = (cid:82)
+µ∈B Qs(µ) dκ1(µ) holds for any set B, where κ1 is the reference measure for µ. We use this more general notation, as opposing to dµ, because µ can be both continuous and discrete. When solving task s, Qs is used to compute an uncertainty-adjusted task prior Ps, which is a posterior density of θs,∗ given history. Formally, Ps is a density such that P (θs,∗ ∈ B | H1:s−1) = (cid:82)
+θ∈B Ps(θ) dκ2(θ) holds for any set B, where κ2 is the reference measure for θ. After computing Ps, we run TS with prior Ps to solve task s. To maintain
+Qs and Ps, we ﬁnd it useful expressing them using a recursive update rule below.
+Proposition 1. Let Ls(θ) = (cid:81)n
+Then for any task s ∈ [m], (cid:96)=1 pAs,(cid:96) (Ys,(cid:96)(As,(cid:96)); θ) be the likelihood of observations in task s.
+Ps(θ) = (cid:90)
+µ
+P (θ; µ) Qs(µ) dκ1(µ) , Qs(µ) = (cid:90)
+θ
+Ls−1(θ) P (θ; µ) dκ2(θ) Qs−1(µ) .
+The claim is proved in Appendix A. The proof uses the Bayes rule, where we carefully account for the fact that the observations are collected adaptively, the pulled arm in round t of task s depends on history H1:s,t. The pseudocode of our algorithm is in Algorithm 1. Since the algorithm adapts to the unknown task prior P (·; µ∗), we call it AdaTS. AdaTS can be implemented efﬁciently when Ps is a conjugate prior for rewards, or a mixture of conjugate priors. We discuss several exact and efﬁcient implementations starting from Section 3.1.
+The design of AdaTS is motivated by MetaTS [28], which also maintains a meta-posterior Qs. The difference is that MetaTS samples ˜µs ∼ Qs in task s to be optimistic with respect to the unknown
+µ∗. Then it runs TS with prior P (·; ˜µs). While simple and intuitive, the sampling of ˜µs induces a high variance and leads to a conservative worst-case analysis. We improve MetaTS by avoiding the sampling step. This leads to tighter and more general regret bounds (Section 4), beyond multi-armed bandits; while the practical performance also improves signiﬁcantly (Section 5). 3.1 Gaussian Bandit
+We start with a K-armed Gaussian bandit with mean arm rewards θ ∈ RK. The reward distribution of arm i is pi(·; θ) = N (·; θi, σ2), where σ > 0 is reward noise and θi is the mean reward of arm i. A (cid:1) natural conjugate prior for this problem class is P (·; µ) = N (·; µ, Σ0), where Σ0 = diag (cid:0)(σ2 is known and we learn µ ∈ RK. 0,i)K i=1
+Because the prior is a multivariate Gaussian, AdaTS can be implemented efﬁciently with a Gaussian (cid:1) are known mean meta-prior Q(·) = N (·; µq, Σq), where µq = (µq,i)K i=1 and Σq = diag (cid:0)(σ2 q,i)K i=1 3
+parameter vector and covariance matrix, respectively. In this case, the meta-posterior in task s is also (cid:1) are deﬁned as i=1 and ˆΣs = diag (cid:0)(ˆσ2 a Gaussian Qs(·) = N (·; ˆµs, ˆΣs), where ˆµs = (ˆµs,i)K (cid:33) s,i)K i=1 (cid:32)
+ˆµs,i = ˆσ2 s,i
+µq,i
+σ2 q,i
++ s−1 (cid:88) (cid:96)=1
+T(cid:96),i 0,i + σ2
+B(cid:96),i
+T(cid:96),i
+T(cid:96),i σ2
+, s,i = σ−2
+ˆσ−2 q,i + s−1 (cid:88) (cid:96)=1
+T(cid:96),i 0,i + σ2 .
+T(cid:96),i σ2 (2) t=1 t=1
+Here T(cid:96),i = (cid:80)n 1{A(cid:96),t = i} is the number of pulls of arm i in task (cid:96) and the total reward from these pulls is B(cid:96),i = (cid:80)n 1{A(cid:96),t = i} Y(cid:96),t(i). The above formula has a very nice interpretation.
+The posterior mean ˆµs,i of the meta-parameter of arm i is a weighted sum of the noisy estimates of the means of arm i from the past tasks B(cid:96),i/T(cid:96),i and the prior. In this sum, each bandit task is essentially a single observation. The weights are proportional to the number of pulls in a task, giving the task with more pulls a higher weight. They vary from (σ2 0,i + σ2)−1, when the arm is pulled only once, up to σ−2 0,i . This is the minimum amount of uncertainty that cannot be reduced by more pulls.
+The update in (2) is by Lemma 7 in Appendix A, which we borrow from Kveton et al. [28]. From
+Proposition 1, we have that the uncertainty-adjusted prior for task s is Ps(·) = N (·; ˆµs, ˆΣs + Σ0). 3.2 Linear Bandit with Gaussian Rewards
+Now we generalize Section 3.1 and consider a linear bandit [14, 1] with K arms and d dimensions.
+Let A ⊂ Rd be an action set such that |A| = K. We refer to each a ∈ A as an arm. Then, with a slight abuse of notation from Section 2, the reward distribution of arm a is pa(·; θ) = N (·; a(cid:62)θ, σ2), where θ ∈ Rd is shared by all arms and σ > 0 is reward noise. A conjugate prior for this problem class is P (·; µ) = N (·; µ, Σ0), where Σ0 ∈ Rd×d is known and we learn µ ∈ Rd.
+As in Section 3.1, AdaTS can be implemented efﬁciently with a meta-prior Q(·) = N (·; µq, Σq), where µq ∈ Rd is a known mean parameter vector and Σq ∈ Rd×d is a known covariance matrix. In this case, Qs(·) = N (·; ˆµs, ˆΣs), where (cid:32)
+ˆµs = ˆΣs
+Σ−1 q µq + s−1 (cid:88) (cid:96)=1 (cid:18)
+Σ−1 0 +
+G(cid:96)
+σ2
+G(cid:96)
+σ2 (cid:19)−1 B(cid:96)
+σ2 (cid:33)
+,
+B(cid:96)
+σ2 − (cid:18)
+ˆΣ−1 s = Σ−1 q + s−1 (cid:88) (cid:96)=1
+G(cid:96)
+σ2 −
+G(cid:96)
+σ2
+Σ−1 0 +
+G(cid:96)
+σ2 (cid:19)−1 G(cid:96)
+σ2 . t=1 A(cid:96),tA(cid:62)
+Here G(cid:96) = (cid:80)n (cid:96),t is the outer product of the feature vectors of the pulled arms in task (cid:96) and
+B(cid:96) = (cid:80)n t=1 A(cid:96),tY(cid:96),t(A(cid:96),t) is their sum weighted by their rewards. The above update follows from
+Lemma 7 in Appendix A, which is due to Kveton et al. [28]. From Proposition 1, the uncertainty-adjusted prior for task s is Ps(·) = N (·; ˆµs, ˆΣs + Σ0).
+We note in passing that when K = d and A is the standard Euclidean basis of Rd, the linear bandit reduces to a K-armed bandit. Since the covariance matrices are unrestricted here, the formulation in this section also shows how to generalize Section 3.1 to arbitrary covariance matrices. 3.3 Semi-Bandit with Gaussian Rewards
+A stochastic combinatorial semi-bandit [19, 12, 25, 26, 42], or semi-bandit for short, is a K-armed bandit where at most L ≤ K arms are pulled in each round. After the arms are pulled, the agent observes their individual rewards and its reward is the sum of the individual rewards. Semi-bandits can be used to solve online combinatorial problems, such as learning to route.
+We consider a Gaussian reward distribution for each arm, as in Section 3.1. The difference in the semi-bandit formulation is that the action set is A ⊆ ΠL(K), where ΠL(K) is the set of all subsets of [K] of size at most L. In round t of task s, the agents pulls arms As,t ∈ A. The meta-posterior is updated analogously to Section 3.1. The only difference is that 1{A(cid:96),t = i} becomes 1{i ∈ A(cid:96),t}. 3.4 Exponential-Family Bandit with Mixture Priors
+We consider a general K-armed bandit with mean arm rewards θ ∈ RK. The reward distribution of arm i is any one-dimensional exponential-family distribution parameterized by θi. In a Bernoulli 4
+bandit, this would be pi(·; θ) = Ber(·; θi). A natural prior for this reward model would be a product of per-arm conjugate priors, such as the product of betas for Bernoulli rewards.
+It is challenging to generalize our approach beyond Gaussian models because we require more than the standard notion of conjugacy. Speciﬁcally, to apply AdaTS to an exponentially-family prior, such as the product of betas, we need a computationally tractable prior for that prior. In this case, it does not exist. We circumvent this issue by discretization. More speciﬁcally, let {P (·; j)}L j=1 be a set of L potential conjugate priors, where each P (·; j) is a product of one-dimensional exponential-family priors. Then a suitable meta-prior is a vector of initial beliefs into each potential prior. In particular, it is Q(·) = Cat(·; wq), where wq ∈ ∆L−1 is the belief and ∆L is the L-simplex.
+In this case, Qs(j) = (cid:82)
+θ Ls−1(θ)P (θ; j) dκ2(θ) Qs−1(j) in Proposition 1 has a closed form, since it is a standard conjugate posterior update for a distribution over θ followed by integrating out θ. In addition, Ps(θ) = (cid:80)L j=1 Qs(j)P (θ; j) is a mixture of exponential-family priors over θ. This is an instance of latent bandits [22]. For these problems, Thompson sampling can be implemented exactly and efﬁciently. We do not analyze this setting because prior-dependent Bayes regret bounds for this problem class do not exist yet. 4 Regret Bounds
+We ﬁrst introduce common notation used in our proofs. The action set A ⊆ Rd is ﬁxed. Recall that a matrix X ∈ Rd×d is positive semi-deﬁnite (PSD) if it is symmetric and its smallest eigenvalue is non-negative. For such X, we deﬁne σ2 max(X) depends on
+A, we suppress this dependence because A is ﬁxed. We denote by λ1(X) the maximum eigenvalue of X and by λd(X) the minimum eigenvalue of X. max(X) = maxa∈A a(cid:62)Xa. Although σ2
+We also need basic quantities from information theory. For two probability measures P and Q over a common measurable space, we use D(P ||Q) to denote the relative entropy of P with respect to Q. It is deﬁned as D(P ||Q) = (cid:82) log( dP dQ ) dP , where dP/dQ is the Radon-Nikodym derivative of P with respect to Q; and is inﬁnite when P is not absolutely continuous with respect to Q. We slightly abuse our notation and let P (X) denote the probability distribution of random variable X, P (X ∈ ·). For jointly distributed random variables X and Y , we let P (X | Y ) be the conditional distribution of X given Y , P (X ∈ · | Y ), which is Y -measurable and depends on random Y . The mutual information between X and Y is I(X; Y ) = D(P (X, Y )||P (X)P (Y )), where P (X)P (Y ) is the distribution of the product of P (X) and P (Y ). Intuitively, I(X; Y ) measures the amount of information that either X or Y provides about the other variable. For jointly distributed X, Y , and Z, we also need the conditional mutual information between X and Y conditioned on Z. We deﬁne this quantity as
+I(X; Y | Z) = E[ ˆI(X; Y | Z)], where ˆI(X; Y | Z) = D(P (X, Y | Z)||P (X | Z)P (Y | Z)) is the random conditional mutual information between X and Y given Z. Note that ˆI(X; Y | Z) is a function of Z. By the chain rule for the random conditional mutual information, ˆI(X; Y1, Y2 | Z) =
+E[ ˆI(X; Y1 | Y2, Z) | Z] + ˆI(X; Y2 | Z), where expectation is over Y2 | Z. We would get the usual chain rule I(X; Y1, Y2) = I(X; Y1 | Y2) + I(X; Y2) without Z. 4.1 Generic Regret Bound
+We start with a generic adaptation of the analysis of Lu and Van Roy [33] to our setting. In round t of task s, we denote the pulled arm by As,t, its observed reward by Ys,t ∼ pAs,t (·; θs,∗), and the suboptimality gap by ∆s,t = r(As,∗; θs,∗) − r(As,t; θs,∗). For random variables X and Y , we denote by Is,t(X; Y ) = ˆI(X; Y | H1:s,t) the random mutual information between X and Y given history
+H1:s,t of all observations from the ﬁrst s − 1 tasks and the ﬁrst t − 1 rounds of task s. Similarly, for random variables X, Y , and Z, we denote by Is,t(X; Y | Z) = E[ ˆI(X; Y | Z, H1:s,t) | H1:s,t] the random mutual information between X and Y conditioned on Z, given history H1:s,t. It is helpful to think of Is,t as the conditional mutual information of X | H1:s,t, Y | H1:s,t, and Z | H1:s,t.
+Let Γs,t and (cid:15)s,t be potentially history-dependent non-negative random variables such that
+Es,t[∆s,t] ≤ Γs,t (cid:113)
+Is,t(θs,∗; As,t, Ys,t) + (cid:15)s,t (3) 5
+holds almost surely. We want to keep both Γs,t and (cid:15)s,t “small”. The following lemma provides a bound on the total regret over n rounds in each of m tasks in terms of Γs,t and (cid:15)s,t.
+Lemma 2. Suppose that (3) holds for all s ∈ [m] and t ∈ [n], for some Γs,t, (cid:15)s,t ≥ 0. In addition, let (Γs)s∈[m] and Γ be non-negative constants such that Γs,t ≤ Γs ≤ Γ holds for all s ∈ [m] and t ∈ [n] almost surely. Then
+R(m, n) ≤ Γ(cid:112)mnI(µ∗; H1:m) + (cid:113)
+Γs m (cid:88) s=1 nI(θs,∗; Hs | µ∗, H1:s−1) + m (cid:88) n (cid:88) s=1 t=1
+E [(cid:15)s,t] .
+The ﬁrst term above is the price for learning µ∗, while the second is the price for learning all θs,∗ when µ∗ is known. Accordingly, the price for learning µ∗ is negligible when the mutual information terms grow slowly with m and n. Speciﬁcally, we show shortly in linear bandits that Γs,t and (cid:15)s,t can be set so that the last term of the bound is comparable to the rest, while Γs,t grows slowly with m and n. At the same time, I(µ∗; H1:m) and I(θs,∗; Hs | µ∗, H1:s−1) are only logarithmic in m and n. Thus the price for learning µ∗ is ˜O( n). Now we are ready to prove Lemma 2. mn) while that for learning all θs,∗ is ˜O(m
+√
+√
+Proof. First, we use the chain rule of random conditional mutual information and derive
+Is,t(θs,∗; As,t, Ys,t) ≤ Is,t(θs,∗, µ∗; As,t, Ys,t) = Is,t(µ∗; As,t, Ys,t) + Is,t(θs,∗; As,t, Ys,t | µ∗) .
+Now we take the square root of both sides, apply multiply both sides by Γs,t. This yields (cid:113) (cid:113)
+Γs,t
+Is,t(θs,∗; As,t, Ys,t) ≤ Γs,t
+Is,t(µ∗; As,t, Ys,t) + Γs,t (cid:113)
+Is,t(θs,∗; As,t, Ys,t | µ∗) . (4)
+√ a + b ≤
+√
+√ a + b to the right-hand side, and
+We start with the second term in (4). Fix task s. From Γs,t ≤ Γs, followed by the Cauchy-Schwarz and Jensen’s inequalities, we have (cid:34) n (cid:88)
+E (cid:113)
+Γs,t t=1
+Is,t(θs,∗; As,t, Ys,t | µ∗)
+≤ Γs (cid:35) (cid:118) (cid:117) (cid:117) (cid:116)nE (cid:34) n (cid:88) t=1
+Is,t(θs,∗; As,t, Ys,t | µ∗)
+. (cid:35)
+Thanks to E [Is,t(θs,∗; As,t, Ys,t | µ∗)] = I(θs,∗; As,t, Ys,t | µ∗, H1:s,t) and the chain rule of mutual information, we have E [(cid:80)n
+Now we consider the ﬁrst term in (4). We bound Γs,t using Γ, then apply the Cauchy-Schwarz and
+≤ Γ(cid:112)mnI(µ∗; H1:m);
+Jensen’s inequalities, and obtain E t=1 Γs,t where we used the chain rule to get t=1 Is,t(θs,∗; As,t, Ys,t | µ∗)] = I(θs,∗; Hs | µ∗, H1:s−1). (cid:105) (cid:112)Is,t(µ∗; As,t, Ys,t) (cid:104)(cid:80)m (cid:80)n s=1 (cid:34) m (cid:88) n (cid:88)
+E s=1 t=1 (cid:35)
+Is,t(µ∗; As,t, Ys,t)
+= m (cid:88) n (cid:88) s=1 t=1
+This completes the proof. 4.2 Linear Bandit with Gaussian Rewards
+I(µ∗; As,t, Ys,t | H1:s,t) = I(µ∗; H1:m) .
+Now we derive regret bounds for linear bandits (Section 3.2). Without loss of generality, we make an assumption that the action set is bounded.
+Assumption 1. The arms are vectors in a unit ball, maxa∈A (cid:107)a(cid:107)2 ≤ 1.
+Our analysis is for AdaTS with a small amount of forced exploration in each task. This guarantees that our estimate of µ∗ improves uniformly in all directions after each task s. Therefore, we assume that the action set is diverse enough to explore in all directions. i=1 ⊆ A such that λd((cid:80)d
+Assumption 2. There exist arms {ai}d
+This assumption is without loss of generality. In particular, if such a set does not exist, the action set
+A can be projected into a lower dimensional space where the assumption holds. AdaTS is modiﬁed as follows. In each task, we initially pulls the arms {ai}d i ) ≥ η for some η > 0. i=1 to explore all directions. i=1 aia(cid:62) 6
+We start by showing that (3) holds for suitably “small” Γs,t and (cid:15)s,t. In AdaTS, in round t of task s, the posterior distribution of θs,∗ is N (ˆµs,t, ˆΣs,t), where (cid:32)
+ˆµs,t = ˆΣs,t (Σ0 + ˆΣs)−1 ˆµs + (cid:33) t−1 (cid:88) (cid:96)=1
+As,(cid:96)Ys,(cid:96)
+σ2
+,
+ˆΣ−1 s,t = (Σ0 + ˆΣs)−1 + t−1 (cid:88) (cid:96)=1
+As,(cid:96)A(cid:62) s,(cid:96)
+σ2
+, and ˆµs and ˆΣs are deﬁned in Section 3.2. Then, from the properties of Gaussian distributions and that AdaTS samples from the posterior, we get a bound on Γs,t and (cid:15)s,t as a function of a tunable parameter δ ∈ (0, 1].
+Lemma 3. For all tasks s ∈ [m], rounds t ∈ [n], and any δ ∈ (0, 1], (3) holds almost surely for (cid:115)
+Γs,t = 4 max( ˆΣs,t)
+σ2 log(1 + σ2 max( ˆΣs,t)/σ2) log(4|A|/δ) , (cid:15)s,t = (cid:113) 2δσ2 max( ˆΣs,t) + 2Es,tEs,t[(cid:107)θs,∗(cid:107)2] , where Es,t is the indicator of forced exploration in round t of task s. Moreover, for each task s, the following history-independent bound holds almost surely,
+ max( ˆΣs,t) ≤ λ1(Σ0)
+σ2
+1 +
+λ1(Σq) (cid:16) 1 + σ2
+ηλ1(Σ0) (cid:17)
+
+λ1(Σ0) + σ2/η + sλ1(Σq)
+ . (5)
+√
+Lemma 3 is proved in Appendix C.3. By using the bound in (5), we get that Γs,t = O((cid:112)log(1/δ))
+δ). Lemma 3 differs from Lu and Van Roy [33] in two aspects. First, it considers and (cid:15)s,t = O( uncertainty in the estimate of µ∗ along with θs,∗. Second, it does not require that the rewards are bounded. Our next lemma bounds the mutual information terms in Lemma 2, by exploiting the hierarchical structure of our linear bandit model (Figure 1).
+Lemma 4. For any H1:s,t-adapted action sequence and any s ∈ [m], we have (cid:16) (cid:16) (cid:17) (cid:17)
+I(θs,∗; Hs | µ∗, H1:s−1) ≤ d 2 log 1 + λ1(Σ0)n
+σ2
+,
+I(µ∗; H1:m) ≤ d 2 log 1 + λ1(Σq)m
+λd(Σ0)+σ2/n
+.
+Now we are ready to prove our regret bound for the linear bandit. We take the mutual-information bounds from Lemma 4, and the bounds on Γs,t and (cid:15)s,t from Lemma 3, and plug them into Lemma 2. max( ˆΣs,t) ≤ λ1(Σq) + λ1(Σ0) holds for any s and t by Lemma 3, which yields Γ in
+Speciﬁcally, σ2
+Lemma 2. On the other hand, Γs is bounded using the upper bound in (5), which relies on forced exploration. Our regret bound is stated below. The terms c1 to c4 are at most polylogarithmic in d, m, and n; and thus small. The term c2 arises due to summing up Γs over all tasks s.
+Theorem 5 (Linear bandit). The regret of AdaTS is bounded for any δ ∈ (0, 1] as
+√
+R(m, n) ≤ c1 dmn (cid:125) (cid:123)(cid:122) (cid:124)
+Learning of µ∗
++ (m + c2) Rδ(n; µ∗) (cid:125) (cid:123)(cid:122) (cid:124)
+Per-task regret
++ c3dm (cid:124) (cid:123)(cid:122) (cid:125)
+Forced exploration
+, where (cid:16) c2 = (cid:115) 8 c1 = (cid:18) log
+λ1(Σq)+λ1(Σ0) 1+
+λ1(Σq)+λ1(Σ0)
+σ2 (cid:19) log(4|A|/δ) log (cid:16) 1 + λ1(Σq)m
+λd(Σ0)+σ2/n (cid:17)
+, 1 + σ2
+ηλ1(Σ0)
+√
+Rδ(n; µ∗) ≤ c4 dn + (cid:112)2δλ1(Σ0)n, where (cid:17) log m, and c3 = 2(cid:112)(cid:107)µq(cid:107)2 2 + tr(Σq + Σ0). The per-task regret is bounded as (cid:115) 8 c4 = (cid:18)
+λ1(Σ0) 1+
+λ1(Σ0)
+σ2 log (cid:19) log(4|A|/δ) log (cid:16) 1 + λ1(Σ0)n
+σ2 (cid:17)
+.
+The bound in Theorem 5 is sublinear in n for δ = 1/n2. It has three terms. The ﬁrst term is the regret due to learning µ∗ over all tasks; and it is ˜O( dmn). The second term is the regret for acting in m tasks under the assumption that µ∗ is known; and it is ˜O(m dn). The last term is the regret for
+√
+√ 7
+√
+√ forced exploration; and it is ˜O(dm). Overall, the extra regret due to unknown µ∗ is ˜O( dmn + dm) and is much lower than ˜O(m dn) when d (cid:28) n. Therefore, we call AdaTS a no-regret algorithm for linear bandits. Our bound also reﬂects the fact that the regret decreases as both priors become more informative, λ1(Σ0) → 0 and λ1(Σq) → 0.
+A frequentist regret bound for linear TS with ﬁnitely-many arms is ˜O(d n) [3]. When applied to m tasks, it would be ˜O(dm d than our regret bound. To show that our bound reﬂects the structure of our problem, we compare AdaTS to two variants of linear TS that are applied independently to each task. The ﬁrst variant knows µ∗ and thus has more information.
+Its regret can bounded by setting c1 = c2 = c3 = 0 in Theorem 5 and is lower than that of AdaTS.
+The second variant knows that µ∗ ∼ N (µq, Σq) but does not model that the tasks share µ∗. This is analogous to assuming that θs,∗ ∼ N (µq, Σq + Σ0). The regret of this approach can be bounded by setting c1 = c2 = c3 = 0 in Theorem 5 and replacing λ1(Σ0) in c4 by λ1(Σq + Σ0). Since the task regret increases linearly with m and λ1(Σq + Σ0) > λ1(Σ0), this approach would ultimately have a higher regret than AdaTS as the number of tasks m increases. n) and is worse by a factor of
+√
+√
+√ 4.3 Semi-Bandit with Gaussian Rewards
+In semi-bandits (Section 3.3), we use the independence of arms to decompose the per-round regret differently. Similarly to Section 4.2, we analyze AdaTS with forced exploration, where each arm is initially pulled at least once. This is always possible in at most K rounds, since there exists at least one a ∈ A that contains any given arm.
+Let Γs,t(k) and (cid:15)s,t(k) be non-negative history-dependent constants, for each arm k ∈ [K], were we use (k) to refer to arm-speciﬁc quantities. Then an analogous bound to (3) is
+Es,t[∆s,t] ≤ (cid:88) k∈[K]
+Ps,t(k ∈ As,t) (cid:18)
+Γs,t(k) (cid:113)
+Is,t(θs,∗(k); k, Ys,t(k)) + (cid:15)s,t(k) (cid:19)
+.
+The term (k, Ys,t(k)) is a tuple of a pulled arm k and its observation in round t of task s. For any k, from the chain rule of mutual information, we have
+Is,t(θs,∗(k); k, Ys,t(k)) ≤ Is,t(µ∗(k); k, Ys,t(k)) + Is,t(θs,∗(k); k, Ys,t(k) | µ∗(k)) .
+Next we combine the mutual-information terms across all rounds and tasks, as in Lemma 2, and bound corresponding Γs,t(k) and (cid:15)s,t(k) independently of m and n. Due to forced exploration, the estimate of µ∗(k) improves for all arms k as more tasks are completed, and Γs,t(k) decreases with s.
+This leads to Theorem 6, which is proved in Appendix D.
+Theorem 6 (Semi-bandit). The regret of AdaTS is bounded for any δ ∈ (0, 1] as
+√
+KLmn
+R(m, n) ≤ c1 (cid:124) (cid:125) (cid:123)(cid:122)
+Learning of µ∗
++ (m + c2) Rδ(n; µ∗) (cid:124) (cid:125) (cid:123)(cid:122)
+Per-task regret
++ c3K 3/2m (cid:125) (cid:123)(cid:122)
+Forced exploration (cid:124)
++ c4σ
+√ 2δmn , where c1 = 4 (cid:118) (cid:117) (cid:117) (cid:116) 1
+K (cid:18) c2 = 1 + (cid:115) 1
+K c4 = (cid:88) (cid:32) k∈[K] log 0,k q,k+σ2
+σ2 q,k+σ2
+σ2
+σ2 1+ 0,k (cid:33) log(4K/δ) log (cid:16) 1 +
+σ2 q,km
+σ2 0,k+σ2/n (cid:17)
+, max k∈[K]: σ0,k>0
+σ2
+σ2 0,k (cid:19) log m , (cid:115) (cid:88) c3 = 2 (µ2 q,k + σ2 q,k + σ2 0,k) , k∈[K] (cid:88) (cid:16) 1 + log
+σ2 q,km
+σ2 (cid:17)
+. k∈[K]: σ0,k=0
+The per-task regret is bounded as Rδ(n; µ∗) ≤ c5
+√
+KLn + (cid:113) 2δ 1
+K (cid:80) k∈[K] σ2 0,kn, where c5 = 4 (cid:118) (cid:117) (cid:117) (cid:116) 1
+K (cid:88) (cid:32)
+σ2 0,k (cid:33) log(4K/δ) log (cid:16) 1 +
+σ2 0,kn
+σ2 (cid:17)
+. k∈[K]: σ0,k>0 log 1+
+σ2 0,k
+σ2
+The prior widths σq,k and σ0,k are deﬁned as in Section 3.1. 8
+Figure 2: Comparison of AdaTS to three baselines on three bandit problems.
+The bound in Theorem 6 is sublinear in n for δ = 1/n2. Its form resembles Theorem 5. Speciﬁcally,
+KLmn) and for forced exploration is ˜O(K 3/2m). Both of these the regret for learning µ∗ is ˜O( are much lower than the regret for learning to act in m tasks when µ∗ is known, ˜O(m
+KLn), for
+K (cid:28) Ln. Therefore, AdaTS is also a no-regret algorithm for semi-bandits.
+√
+√
+Theorem 6 improves upon a naive application of Theorem 5 to semi-bandits. This is because all prior width constants are averages, as opposing to the maximum over arms in Theorem 5. To the best of our knowledge, such per-arm prior dependence has not been captured in semi-bandits by any prior work. To illustrate the difference, consider a problem where σ0,k > 0 for only K (cid:48) (cid:28) K arms. This means that only K (cid:48) arms are uncertain in the tasks. Then the bound in Theorem 6 is ˜O(m
+K (cid:48)Ln), while the bound in Theorem 5 would be ˜O(m
+KLn). For the arms k where σ0,k = 0, the regret over all tasks is sublinear in m.
+√
+√ 5 Experiments
+We experiment with two synthetic problems. In both problems, the number of tasks is m = 20 and each task has n = 200 rounds. The ﬁrst problem is a Gaussian bandit (Section 3.1) with K = 2 arms.
+The meta-prior is N (0, Σq) with Σq = σ2 0IK, and the reward noise is σ = 1. We experiment with σq ≥ 0.5 and σ0 = 0.1. Since σq (cid:29) σ0, the entries of θs,∗ are likely to have the same order as in µ∗. Therefore, a clever algorithm that learns µ∗ could have very low regret. The second problem is a linear bandit (Section 3.2) in d = 2 dimensions with K = 5d arms. The action set is sampled from a unit sphere. The meta-prior, prior, and noise are the same as in the Gaussian bandit. All results are averaged over 100 runs. q IK, the prior covariance is Σ0 = σ2
+AdaTS is compared to three baselines. The ﬁrst is idealized TS with the true prior N (µ∗, Σ0) and we call it OracleTS. OracleTS shows the minimum attainable regret. The second is agnostic TS, which ignores the structure of the problem. We call it TS and implement it with prior N (0, Σq + Σ0), since
+θs,∗ can be viewed as a sample from this prior when the structure is ignored (Section 4.2). The third baseline is MetaTS of Kveton et al. [28]. All methods are evaluated by their cumulative regret up to task s, which we plot as it accumulates round-by-round within each task (Figure 2). The regret of the algorithms that do not learn µ∗ (OracleTS and TS) is obviously linear in s, as they solve s similar tasks with the same policy (Section 2). A lower slope indicates a better policy. As no algorithm can outperform OracleTS, no regret can grow sublinearly in s.
+Our results are reported in Figure 2. We start with a Gaussian bandit with σq = 0.5. This setting is identical to Figure 1b of Kveton et al.
+[28]. We observe that AdaTS outperforms TS, which does not learn µ∗, and is comparable to OracleTS, which knows µ∗. Its regret is about 30% lower than that of MetaTS. Now we increase the meta-prior width to σq = 1. In this setting, meta-parameter sampling in MetaTS leads to high biases in earlier tasks. This leads to a major increase in regret, while AdaTS performs comparably to OracleTS. We end with a linear bandit with σq = 1. In this experiment, AdaTS outperforms MetaTS again and has more than three times lower regret.
+Appendix E contains more experiments. In Appendix E.1, we exper-iment with more values of K and d, and show the robustness of AdaTS to missspeciﬁed meta-prior Q. In Appendix E.2, we apply AdaTS to 9
+Figure 3: Meta-learning of a highly rewarding digit 1.
+bandit classiﬁcation problems. In Figure 3, we show results for one of these problems, meta-learning a highly rewarding digit 1 in the bandit setting. For each method and task s, we show the average digit corresponding to the pulled arms in round 1 of task s. AdaTS learns a good meta-parameter µ∗ almost instantly, since its average digit in task 2 already resembles digit 1. 6

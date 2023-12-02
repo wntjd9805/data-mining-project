@@ -1,0 +1,179 @@
+Abstract
+Neural network robustness has become a central topic in machine learning in recent years. Most training algorithms that improve the model’s robustness to adversarial and common corruptions also introduce a large computational overhead, requiring as many as ten times the number of forward and backward passes in order to converge. To combat this inefﬁciency, we propose BulletTrain — a boundary example mining technique to drastically reduce the computational cost of robust training. Our key observation is that only a small fraction of examples are beneﬁcial for improving robustness. BulletTrain dynamically predicts these important examples and optimizes robust training algorithms to focus on the important examples. We apply our technique to several existing robust training algorithms and achieve a 2.2× speed-up for TRADES and MART on CIFAR-10 and a 1.7× speed-up for AugMix on CIFAR-10-C and CIFAR-100-C without any reduction in clean and robust accuracy. 1
+
+Introduction
+In the past decade, the performance and capabilities of deep neural networks (DNNs) have improved at an unprecedented pace. However, the reliability of DNNs is undermined by their lack of robustness against common and adversarial corruptions, raising concerns about their use in safety-critical applications such as autonomous driving (Amodei et al., 2016). Towards improving the robustness of
+DNNs, a line of recent works proposed robust training by generating and learning from corrupted examples in addition to clean examples (Cubuk et al., 2019; Ding et al., 2020; Hendrycks et al., 2020;
+Madry et al., 2018; Wang et al., 2020; Zhang et al., 2019b). While these methods have demonstrably enhanced model robustness, they are also very costly to deploy since the overall training time can be increased by up to ten times.
+Hard negative example mining techniques have shown success in improving the convergence rates of support vector machine (SVM) (Joachims, 1999), DNNs (Shrivastava et al., 2016), metric learn-ing (Manmatha et al., 2017), and contrastive learning (Kalantidis et al., 2020). Particularly, SVM with hard example mining maintains a working set of “hard” examples and alternates between training an
+SVM to convergence on the working set and updating the working set, where the “hard” examples are signiﬁcant in that they violate the margins of the current model. Partly inspired by hard example mining, we hypothesize that there exists a small subset of examples that is critical to improving the robustness of the DNN model, so that reducing the computation of the remaining examples leads to a signiﬁcant reduction in run time without compromising the robustness of the model.
+As depicted in Figure 1b, the essential idea is to predict and focus on the “important” subset of clean samples based on their geometric distance to the decision boundary (i.e., margin) of the current model. For example, the correctly classiﬁed clean examples with a large margin are unlikely to help improving robustness as the corrupted examples generated from them are still likely to be appropriately categorized by the model. We refer to “important” examples as boundary examples since they are close to the decision boundary (e.g., (cid:3) in Figure 1b). After identifying the boundary 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+(a) Existing robust neural network training algorithms — Standard robust training approaches generate corrupted samples with equal effort for all samples ((cid:3)) in a mini-batch. (b) BulletTrain — The proposed scheme focuses on a small subset of “important” clean samples ((cid:3)) and allocates more computational cost on obtaining corrupted samples for those important ones. This ﬁgure illustrates the case that only generates the corrupted samples for the important samples.
+Figure 1: Comparison between existing robust training approaches and BulletTrain on a synthetic binary classiﬁcation task — The dash line is the current decision boundary of the linear model and the solid line represents the updated decision boundary after taking a SGD step. examples, the computational effort on generating corrupted samples can be reduced for the rest of the clean examples, thus accelerating the overall robust training process.
+In this work, we propose BulletTrain1, a dynamic optimization that exploits boundary example mining to reduce the computational effort of robust DNN training. BulletTrain applies to robust training against either adversarial or common corruptions. It can substantially speed up state-of-the-art algorithms (Hendrycks et al., 2020; Wang et al., 2020; Zhang et al., 2019b) with almost no loss in clean and/or robust accuracy. Figure 1 visualizes the situation where BulletTrain generates corrupted examples only for a small fraction of clean examples, while a standard robust training scheme requires obtaining corrupted examples for all examples.
+To the best of our knowledge, BulletTrain is the ﬁrst work to exploit the idea of hard example mining in the context of accelerating robust DNN training. Unlike existing approaches which are limited to reducing the compute for all examples uniformly, BulletTrain distributes the compute for clean examples differently, focusing on a small set of boundary examples. BulletTrain is also generally applicable to robust training against common and adversarial corruptions. The end result is that
+BulletTrain can lower the running time of the adversarial training such as TRADES (Zhang et al., 2019b) and MART (Wang et al., 2020) by more than 2.1× on CIFAR-10 (Krizhevsky, 2009) and the robust training against common corruptions such as AugMix (Hendrycks et al., 2020) by 1.7× on
+CIFAR-10-C (Hendrycks and Dietterich, 2019) without compromising the clean and robust accuracy. 2 Robust Training Overview
+Preliminaries. We focus on K-class (K ≥ 2) classiﬁcation problems. Given a dataset
+{(xi, yi)}i=1,...,n with a clean example xi ∈ Rd and its associated ground truth label yi ∈ {1, ..., K}, a DNN classiﬁer hθ parameterized by θ generates the logits output hθ(xi) for each class, where hθ(xi) = (h1
+θ (xi).
+To improve the robustness of a DNN classiﬁer, state-of-the-art approaches (Hendrycks and Dietterich, 2019; Madry et al., 2018; Wang et al., 2020; Zhang et al., 2019b) generate corrupted inputs x(cid:48) i for the corresponding clean example xi at training time and minimize the loss of the classiﬁer with respect to the corrupted input. For robustness against adversarial attacks, x(cid:48) i can be obtained using
+θ (xi)). The predicted label ˆyi can be expressed as ˆyi = arg maxk hk
+θ(xi), ..., hK 1The name of BulletTrain implies robust (bullet-proof) and high-speed training. 2
+Algorithm 1: Standard robust DNN training algorithm.
+Input
+:batch size m, a N -step generation function GN for generating corrupted samples 1 while θ not converged do 2
+Read mini-batch {x1, ..., xm; y1, ..., ym} from training set for i = 1, ..., m do i ← GN (xi) x(cid:48) end
+θ ← θ − ∇θ(L({hθ(x1), ..., hθ(xm)}, {hθ(x(cid:48) 1), ..., hθ(x(cid:48) m)}))
+// L is the surrogate loss
+// GN (·) is an N -step procedure for generating perturbations 3 4 5 6 7 end adversarial attack methods such as projected gradient descent (PGD) (Madry et al., 2018). For robustness to common corruptions and perturbations, x(cid:48) i is generated by introducing different data augmentations (Hendrycks and Dietterich, 2019). Algorithm 1 shows pseudo-code for a standard robust training algorithm.
+Computational cost of robust training. Robust DNN training algorithms such as Algorithm 1 improve model robustness at the cost of paying extra computational overhead. There are two main sources of the overhead: 1) The procedure GN for generating corrupted input; 2) Forward and backward propagate using the surrogate loss L with respect to both clean and corrupted samples. We denote the extra computational cost for robust neural network training as C[GN , L]. For adversarial robustness, PGD adversarial training generates the adversarially corrupted input by solving the inner maximization maxδ∈∆ L(x + δ, y; θ) approximately using an N -step projected gradient descent method , where ∆ is the perceptibility threshold and is usually deﬁned using an lp distance metric: (∆ = {δ : (cid:107)δ(cid:107)p < (cid:15)} for some (cid:15) ≥ 0). As a result, PGD adversarial training is roughly N times more expensive than ordinary DNN training, where N is usually between 7 and 20.
+In addition, Hendrycks et al. (2020) propose to boost the robustness against common corruptions using Jensen-Shannon divergence (JSD) as the surrogate loss. JSD loss can be computed by ﬁrst generating two corrupted examples (x(cid:48) and x(cid:48)(cid:48)), calculating a linear combination of the logits as
+M = (hθ(x) + hθ(x(cid:48)) + hθ(x(cid:48)(cid:48)))/3, and then computing L(x, x(cid:48), x(cid:48)(cid:48)) = 1 3 (KL[hθ(x) (cid:107) M ] +
+KL[hθ(x(cid:48)) (cid:107) M ] + KL[hθ(x(cid:48)(cid:48)) (cid:107) M ]) , where KL stands for the Kullback–Leibler divergence. As a result, the surrogate loss for improving the robustness against common corruptions triples the cost of the ordinary training as it requires forward and backward propagation for both x, x(cid:48), and x(cid:48)(cid:48).
+Existing efﬁcient training algorithms. A number of recent efforts (Andriushchenko and Flammar-ion, 2020; Shafahi et al., 2019; Wong et al., 2020) aimed at reducing the complexity of adversarial example generation, which constitutes the main source of computational overhead in adversarial training. For instance, Wong et al. (2020) proposed a variant of the single-step fast gradient sign method (FGSM) in place of multi-step methods, which drastically reduced the computational cost.
+However, it was later shown that the single-step approaches fail catastrophically against stronger ad-versaries (Andriushchenko and Flammarion, 2020). FGSM-based methods can also cause substantial degradation in robust accuracy (Chen et al., 2020) for recently proposed adversarial training methods such as TRADES (Zhang et al., 2019b). This result suggests that the adversarial examples generated using single-step FGSM are not challenging enough for learning a robust classiﬁer.
+In addition, existing efﬁcient training approaches cannot be generalized to robust training against com-mon corruptions. The state-of-the-art robust training algorithms against common corruptions (Cubuk et al., 2019; Hendrycks et al., 2020) use data augmentations to create corrupted samples in a single pass, where the number of iterations can not be further reduced. 3 BulletTrain 3.1 Motivation
+As discussed in Section 2, robust training can lead to a signiﬁcant slowdown compared to ordinary
+DNN training. To reduce the overhead of robust training, our key insight is that different inputs contribute unequally to improving the model’s robustness (which we later show), hence we can dynamically allocate different amounts of computation (i.e., different N ) for generating corrupted samples depending on their “importance”. In detail, we ﬁrst categorize the set of all training samples into a disjoint union of three sets — outlier, robust, and boundary examples — as follows: 3
+(a) NB = 0. (b) NO = 0. (c) NR = 0.
+Figure 2: The robust accuracy of setting one of NB, NR, and NO to be zero and varying the other two between zero and seven on MNIST — All experiments are performed on a four layer convolutional neural network trained with ten epochs. The step size for each example is set to 1.7(cid:15)/N . The robust accuracy represented by color is evaluated using PGD attacks with 100 steps and 20 restarts.
+• Outlier examples xO: the clean input x is misclassiﬁed by the DNN model hθ. xO = {x | arg max k=1,...,K hk
+θ (x) (cid:54)= y} (1)
+• Boundary examples xB: the clean input x is correctly classiﬁed while the corresponding corrupted input x(cid:48) is misclassiﬁed by the DNN model hθ. xB = {x | arg max k=1,...K hk
+θ (x) = y ∧ arg max k=1,...,K
+θ (x(cid:48)) (cid:54)= y} hk (2)
+• Robust examples xR: both the clean input x and the corresponding corrupted input x(cid:48) = GN (x) are correctly classiﬁed by the DNN model hθ. hk
+θ (x) = arg max k=1,...,K xR = {x | arg max k=1,...K
+θ (x(cid:48)) = y} hk (3)
+Note that our deﬁnition of the outlier, boundary, and robust examples is dependent on the current model hθ and can dynamically shift during training. That is, an outlier example may become a boundary example later on when the robustness of the model improves. Similarly, a robust example can also become a boundary or even outlier example when robustness improves in other regions of the training distribution.
+Robust training algorithms improve the robustness of a DNN model by increasing the classiﬁcation margin for each training sample x so that its distance to the corresponding corrupted sample (i.e., (cid:107)x − x(cid:48)(cid:107)p) is smaller than the margin. We hypothesize that this per-sample margin is an indicator of the amount of contribution that provided by this sample during robust training.
+• Outlier examples xO have a negative margin because they are misclassiﬁed by the current DNN model. Therefore, it is unnecessary to generate even “harder” corrupted examples and optimize the model using these “harder” examples.
+• Boundary examples xB have a positive margin to the current decision boundary but can be perturbed to cause misclassiﬁcation. Training on a corrupted version of these samples is most helpful to increase the margin, thus making the model more robust.
+• Robust examples xR already have a margin large enough to tolerate common or adversarial corruption. As a result, training on corrupted versions of these examples would provide less beneﬁt compared to training on corrupted boundary examples.
+To test our hypothesis, we conduct an empirical study of PGD adversarial training against l∞ attack ((cid:15) = 0.3) on MNIST (LeCun et al., 2010) in a leave-one-out manner. The baseline PGD training achieves 90.6% robust accuracy by setting the number of steps for all samples to be seven. In our experiment, we ﬁx the number of PGD iterations (N ) for one of xB, xO, and xR to be zero while varying N between zero and seven for the other two classes of data. The separation between xB, xO, and xR for each mini-batch of data is oracle, which is determined using ten PGD steps. As depicted in Figure 2a, PGD training fails to achieve a robust accuracy over 40% when the number of steps for xB (NB) is zero; thus demonstrating the importance of xB. When NO equals zero (Fig. 2b), the highest robust accuracy is 1% higher than that of the baseline, indicating that setting NO to zero does 4
+Figure 3: The fraction of xR, xB, and xO over epochs on MNIST.
+Figure 4: The average signed prediction variance of xR, xB, and xO over different iterations. not impair the effectiveness of PGD training. Lastly, Figure 2c shows that PGD training can achieve a reasonable robust accuracy without paying the extra computational cost on xR. However, the highest robust accuracy achieved with this setup is 89.2%, which is 1.4% lower than the baseline. Therefore, setting a non-zero NR might help improving the robustness of the model in practice.
+This empirical observation reveals an opportunity to accelerate robust DNN training by focusing on the boundary examples. In doing so, the overhead of robust DNN training is then determined by the proportion of boundary examples among all training samples. As shown in Figure 3, the fraction of xR increases while the fraction of xO decreases over epochs as the model becomes more robust.
+Moreover, the fraction of xB is relatively small compared to the other two classes of samples since boundary examples only present within the (cid:15) vicinity of the decision boundary. Therefore, we believe that the computational cost of robust training (C[GN , L]) can be reduced substantially by attending more to the boundary examples. 3.2 Algorithm
+Separate the clean samples. First note that outlier examples can be easily separated from the other two categories because the current model misclassiﬁes them. Thus, we use the sign of prediction to identify outliers:
+Sign of prediction = (cid:26)+1, if arg maxk=1,...K hk
+θ (x) = y
+−1, otherwise (4)
+We can further distinguish between the boundary and robust examples by exploiting the fact that boundary examples are closer to the decision boundary than the robust ones. As suggested by prior work on importance sampling (Chang et al., 2017), the prediction variance (Var[Softmax(hθ(x))]) can be used to measure the uncertainty of samples in a classiﬁcation problem, where Var[·] and
+Softmax(·) stand for variance and softmax function respectively. Samples with low uncertainty are usually farther from the decision boundary than samples with high uncertainty. In other words, the prediction variance indicates the distance between the sample and the decision boundary, which can be leveraged to separate xB and xR. We multiply the sign of prediction and the prediction variance as the ﬁnal metric — signed prediction variance (SVar[·]). As shown in Figure 4, the signed prediction variances of xR, xB, and xO from different mini-batches are mostly rank correlated (SVar[xO] ≤ SVar[xB] ≤ SVar[xR]), suggesting that the proposed metric can distinguish between different types of samples. We empirically veriﬁed that other uncertainty measures such as cross-entropy loss and gradient norm (Katharopoulos and Fleuret, 2018) perform comparably to prediction variance, and hence use the signed prediction variance in this study.
+As BulletTrain aims to reduce the computational cost, it requires a lightweight approach to differenti-ate between samples. The outliers can be separated easily based on the sign of SVar. To separate between xB and xR with minimal cost, we propose to distinguish the two categories of samples by estimating the fraction of xB or xR. The fractions of xR and xB cannot be computed directly without producing the corrupted samples. Therefore, we estimate the fraction of xR (FR) of the current mini-batch using an exponential moving average of robust accuracy from previous mini-batches.
+As the robust accuracy of the model should be reasonably consistent across adjacent mini-batches, the moving average of robust accuracy from the past is a good approximation of FR of the current 5
+(a) The distribution of signed prediction variance of clean samples in a mini-batch. (b) The number of steps for each sample is assigned based on the estimated fractions FO and ¯FR.
+Figure 5: Illustration of the compute allocation scheme — The grey line shows the number of steps assigned for the clean samples in a mini-batch.
+Algorithm 2: BulletTrain.
+Input
+:batch size m, a process for generating corrupted samples GN , classiﬁcation rule f , momentum p 8 FO ← 0; FR ← 0 9 while θ not converged do 10
+Read mini-batch {x1, ..., xm; y1, ..., ym} from training set
+{z1, ..., zm} ← {hθ(x1), ..., hθ(xm)} xR, xB, xO ← f ({x1, ..., xm}, FR)
+R), x(cid:48)
+R ← GNR (x(cid:48)
+O ← GNO (xO), x(cid:48) x(cid:48)
+O; {z(cid:48) 1, ..., z(cid:48)
+R (cid:107) x(cid:48)
+{x(cid:48) 1, ..., x(cid:48)
+FR ← p · FR + (1 − p) · γ · (cid:80)m 1(arg maxk(z(cid:48) i 1, ..., z(cid:48)
+θ ← θ − ∇θ(L({z1, ..., zm}, {z(cid:48) m})) m} ← x(cid:48)
+B (cid:107) x(cid:48) i)k = yi)/m
+B ← GNB (x(cid:48)
+B) 1), ..., hθ(x(cid:48) m} ← {hθ(x(cid:48) m)} 11 12 13 14 15 16 17 end
+// Separate between examples
+// Produce corrupted examples
+// Update FR mini-batch. In addition, Figure 5a shows that xB and xR are not completely separable using the signed prediction variance. To make conservative predictions for robust examples, we scale the FR with a scaling factor γ, where γ ∈ (0, 1]. FR can be obtained by:
+FR ← p · FR + (1 − p) · γ · (cid:80)m i 1(arg maxk hk
+θ (x(cid:48) i) = yi) m (5) where 1(·) is the indicator function, x(cid:48) are the corrupted samples in the previous mini-batch, p is the momentum, and FR is initialized to be zero.
+Compute allocation scheme. After dividing the clean examples into three sets, it is relatively straightforward to assign computational effort to the samples in each category. Following our intuition discussed in Section 3.1, we spend the largest number of steps (NB) on the samples predicted as boundary examples. For the rest of the samples, we assign the second largest number of steps (NR) to robust examples and the lowest number of steps (NO) to outliers.
+Given FR, we ﬁrst compute the signed prediction variances of all clean examples as SVarm
+{SVar[hθ(x1)], ..., SVar[hθ(xm)]} and then formulate non-parametric classiﬁcation rule (f ) as: 1 = f (xi, FR) = xi ∈
+
+
+ xO, xB, xR, if SVar[hθ(xi)] < 0 if 0 ≤ SVar[hθ(xi)] < Percentile(SVarm otherwise 1 , ¯FR) (6) where ¯FR equals to 1 − FR and Percentile(X, q) returns the qth percentile of X. The computational cost of f comes mostly from obtaining the logits of clean example hθ(x), which is already computed in robust DNN training. Therefore, the additional cost for assigning compute for each sample is negligible. Figure 5 (grey line) visualizes the compute allocation scheme for a mini-batch of samples.
+It is worth noting that the proposed f resembles a discretized Gaussian function, suggesting that a more reﬁned allocation scheme can be obtained from a quantized Gaussian function. Here, we present the full algorithm of BulletTrain in Algorithm 2.
+BulletTrain ﬁrst identiﬁes the robust, boundary, and outlier samples during training time by applying the classiﬁcation rule f to signed prediction variance. The separation is relatively accurate as the 6
+Table 1: Robust accuracy and speedup of applying BulletTrain (BT) to robust neural network training against common corruptions (AugMix) on CIFAR-10 and CIFAR-100.
+Defenses
+AugMix
+AugMix − JSD loss
+AugMix + BT
+CIFAR-10
+Robust Acc. 88.8% 86.9% 88.8%
+¯FB 1
+-0.35
+Theor. Speedup Robust Acc. 1× 3× 1.8× 64.0% 60.2% 63.6%
+CIFAR-100
+¯FB 1
+-0.36 1× 3× 1.8×
+Theor. Speedup signed prediction variance can capture the margin between samples and the decision boundary of the current model. Then, clean examples take either NO, NR, or NB steps to generate the corresponding corrupted samples. Since only a small fraction of samples (i.e., boundary examples) requires executing the same number of iterations (NB) as the baseline, the computational cost is reduced signiﬁcantly. Lastly, the surrogate loss is computed with respect to the clean and corrupted samples. If both NR and NO are equal to zero, the corrupted sample remains the same as the original sample, thus eliminating the additional cost of forward and backward propagation of the corrupted samples. For simplicity, we let NB be the same as N in the original robust training, NO be zero, and
+NR ∈ [NO, NB).
+In adversarial training, since PGD-based algorithms typically employ a large number of steps, the main saving from applying BulletTrain stems from reducing the number of steps for outlier and robust examples. In training against common corruptions, the reduction in computation comes mainly from not computing surrogate loss and gradient for corrupted samples. For example, the computational overhead of AugMix can be reduced by half if we only generate corrupted samples for half of the clean samples. We will show that this leads to a large reduction in training overhead in Section 4. 4 Experiments
+Experimental setup. To demonstrate the efﬁcacy and general applicability of the proposed scheme, we leverage BulletTrain to accelerate TRADES (Zhang et al., 2019b) and MART (Wang et al., 2020) against adversarial attacks on CIFAR-10 and AugMix (Hendrycks et al., 2020) against common corruptions on CIFAR-10-C and CIFAR-100-C. To make a fair comparison, we adopt the same threat model employed in the original paper and measure the robustness of the same network architectures.
+Speciﬁcally, we evaluate the robustness against common corruptions of WideResNet-40-2 (Zagoruyko and Komodakis, 2016) using corrupted test samples in CIFAR-10-C and CIFAR-100-C. When we apply BulletTrain to AugMix, we set NO = NR = 0 and NB = 1 as it only allows to turn on or off the AugMiX data augmentation for clean samples. The adversarial robustness of WideResNet-34-10 is evaluated using PGD20 (i.e., PGD attack with 20 iterations) l∞ attack for TRADES and MART.
+The perturbation ((cid:15)) of the l∞ attacks on CIFAR-10 is set to be 0.031. Both TRADES and MART without BulletTrain are trained using 10-step PGD with a step size α = 0.007. When BulletTrain is applied, we set NB = 10 with α = 0.007, NR ∈ [0, 2] with α = 1.7(cid:15)/NR, NO = 0, and γ = 0.8.
+We use the measured average fraction of xB, xR, and xO (i.e., ¯FB, ¯FR, and ¯FO) to calculate the theoretical speedup of BulletTrain, assuming that all computations without dependencies can be parallelized with unlimited hardware resources. Speciﬁcally, in adversarial training, the N iterations for generating destructive examples and one iteration for updating the model must be executed sequentially. Therefore, the theoretical speedup can be written as follows:
+Theoretical speedup =
+N + 1
+¯FB · NB + ¯FR · NR + ¯FO · NO + 1 (7)
+Reduction in computation cost. As listed in Table 1, BulletTrain can reduce the computational cost of AugMix by 1.78× and 1.75× with no and 0.4% robust accuracy drop on CIFAR-10 and CIFAR-100, respectively. The compute savings stem from only selecting 35% of clean examples to perform the JSD loss. Compared to removing the JSD loss completely for all examples, BulletTrain improves the robust accuracy by 1.9% and 3.4% on CIFAR-10 and CIFAR-100, respectively.
+Table 2 compares clean and robust accuracy of TRADES with and without BulletTrain. Compared to the original TRADES adversarial training (TRADESλ=1/6), BulletTrain with NR = 2 achieves a 0.3% lower robust accuracy and a 0.9% higher clean accuracy. It is worth noting that the robustness 7
+Table 2: Robust accuracy and speedup of applying BulletTrain (BT) to TRADES adversarial training against the white-box PGD20 attack on CIFAR-10 — (cid:15) = 0.8 is used for TRADES with BT.
+Defenses
+TRADESλ=1
+TRADESλ= 1 6
+TRADESλ= 1 6
++ FAST
+TRADESλ=1 + YOPO-2-5
++ YOPO-2-5
+TRADESλ= 1 6
+TRADESλ= 1 6
++ BTNR=0
+TRADESλ= 1 6
++ BTNR=2 88.64% 84.92% 93.94% 88.47% 89.95% 87.50%
+Clean Acc. Robust Acc.
+¯FB 1
+¯FR 0
+¯FO 0 1 1 1 1 0 0 0 0 0 0 0 0 49.14% 56.61% 4.48% 45.28% 46.60% 52.10% 0.26 0.55 0.18 85.89% 56.35% 0.28 0.54 0.18
+Theor./Wall-clock Speedup 1× / 1× 1× / 1× 5.5× / 3.7×
+- / 3.1×
+- / 3.1× 3.0× / 2.7× 2.3× / 2.2×
+Table 3: Robust accuracy and speedup of applying BulletTrain (BT) to MART adversarial training against the white-box PGD20 attack on CIFAR-10 — (cid:15) = 0.8 is used for MART with BT.
+Defenses
+MART
+MART + FAST
+MART + BTNR=1
+MART + BTNR=2
+Clean Acc. Robust Acc. 84.17% 93.95% 87.12% 86.60% 57.39% 0.20% 58.11% 58.74%
+¯FB 1 1
+¯FR 0 0
+¯FO 0 0 0.29 0.30 0.44 0.43 0.27 0.26
+Theor./Wall-clock Speedup 1× / 1× 5.5× / 4.0× 2.5× / 2.1× 2.2× / 1.9× of BulletTrain remains comparable to TRADES against stronger attacks. Speciﬁcally, TRADES with and without BulletTrain NR=2 achieve 54.32% and 54.33% robust accuracy against PGD-100 with 10 restarts, and 54.41% and 54.49% robust accuracy against PGD-1000 with 5 restarts.
+TRADES can make trade-offs between the clean and robust accuracy by varying the value of hyperparameter λ. When aiming for a lower robust accuracy, BulletTrain can further reduce the
+NR from two to zero instead of using a smaller λ and still obtain similar clean and robust accuracy as TRADESλ=1. As a result, BulletTrain achieves 2.3× and 3.0× computation reduction over the TRADES baseline targeting at 56.3% and 49.3% robust accuracy, respectively. In addition to TRADES, we also demonstrate the effectiveness of BulletTrain on MART as listed in Table 3.
+BulletTrain with NR = 2 is able to improve the clean and robust accuracy by 2.4% and 1.3% with 2.2× less computation compared to the original MART scheme. Similar to TRADES, we can trade off robust accuracy for clean accuracy and speedup by using a smaller NR. When NR = 1,
+BulletTrain still achieves both higher clean and robust accuracy than the MART baseline and reduces the computational cost by 2.5×.
+To compare with other efﬁcient methods on adversarial training, we directly apply YOPO (Zhang et al., 2019a) and FAST (Wong et al., 2020) on TRADES and MART. In Table 2, despite the YOPO-2-5 can improve the runtime by 3.1×, the robustness accuracy of YOPO-2-5 is 10% lower than the
+TRADES baseline. In addition, the single-step FAST training algorithm also fails to obtain a robust
+DNN model against PGD attack. GradAlign (Andriushchenko and Flammarion, 2020) proposes to address the catastrophic overﬁtting problem of FAST by introducing an additional gradient alignment regularization. While GradAlign can signiﬁcantly improve the robustness of the model under stronger attacks, we ﬁnd that combining GradAlign and FAST still does not improve the accuracy of the robustness of FAST. We further compare the effectiveness of BulletTrain and a multi-step variant of
+FAST in Table 4. For BulletTrain, we change the value of NB ∈ [3, 6] while ﬁxing NR = 2, NO = 0,
+Table 4: Comparison of accuracy and theoretical speedup of a multi-step FAST and BulletTrain (BT) on CIFAR-10 — The numbers in parentheses show accuracy differences compared to TRADESλ=1/6.
+TRADES + Multi-step FAST
+TRADES + BT
+N Clean Acc. (%) Robust Acc. (%)
+Theor./Wall-clock
+Speedup
+NB Clean Acc. (%) Robust Acc. (%) 2 3 4 5 85.43 (+0.51) 50.56 (−6.05) 84.47 (−0.45) 53.52 (−3.09) 84.23 (−0.69) 53.95 (−2.66) 84.12 (−0.82) 54.45 (−2.16) 3.7× / 3.0× 2.8× / 2.5× 2.2× / 2.2× 1.8× / 1.8× 3 4 5 6 86.66 (+1.74) 55.93 (−0.68) 86.17 (+1.25) 55.77 (−0.84) 85.89 (+0.97) 56.17 (−0.44) 86.28 (+1.36) 56.0 (−0.61)
+Theor./Wall-clock
+Speedup 3.7× / 3.0× 3.3× / 2.8× 3.0× / 2.7× 2.8× / 2.6× 8
+Figure 6: The theoretical speedup vs. accuracy of TRADES+BT under different γ values — The dash line shows the clean accuracy and the solid line represents the robust accuracy.
+Figure 7: The theoretical speedup vs. accuracy of
+TRADES+BT under different NR values — The dash line shows the clean accuracy and the solid line represents the robust accuracy. and γ = 0.75 to obtain different computation costs and accuracy. Compared to the multi-step variant of FAST, BulletTrain dominates in clean accuracy, robust accuracy, and theoretical speedup. When the goal is to reduce the computational effort by 3×, BulletTrain achieves 1.4% and 2.2% improvement in clean and robust accuracy, respectively. We believe that BulletTrain outperforms existing efﬁcient robust training approaches because BulletTrain can allocate computation for each sample dynamically based on the sample’s importance instead of reducing computation for all samples equally,
+Wall-clock speedup. To measure the wall-clock speedup of BulletTrain, we benchmark the robust
+DNN training algorithms with and without BulletTrain using a single NVIDIA GPU. We ensure that no other intensive processes are running in parallel with the robust training job. BulletTrain reduces the runtime of AugMix from 1.82 hours to 1.08 hours and from 1.84 hours to 1.10 hours for
+CIFAR-10 and CIFAR-100, respectively. The runtime is reduced by 1.7× given the 1.8× theoretical speedup. TRADES baseline is trained with 76 epochs using 44.78 hours on CIFAR-10. BulletTrain is able to reduce the training time of TRADES by 2.2× compared to the theoretical speedup of 2.3×.
+Moreover, as shown in Table 4, BulletTrain achieves a wall-clock speedup similar to that of FAST when their theoretical speedups are close, suggesting that BulletTrain can be effective in achieving real-world performance gains on the GPU.
+Sensitivity of hyperparameters. We further investigate the impact of hyperparameters NR and γ on the accuracy and theoretical speedup. Figure 6 shows that the accuracy and theoretical speedup of BulletTrain under different γ ∈ [0.65, 0.9]. The clean and robust accuracy are not sensitive to the choice of γ, showing the stability of BulletTrain. On the other hand, NR controls the trade-off between the robust accuracy and clean accuracy/theoretical speedup. A smaller NR improves the clean accuracy and the speedup while reducing the robust accuracy. Unlike FAST, choosing different
+NR ∈ [0, 5] for BulletTrain does not lead to a signiﬁcant decrease in robust accuracy. 5

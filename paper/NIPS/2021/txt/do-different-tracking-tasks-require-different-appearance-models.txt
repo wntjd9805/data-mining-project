@@ -1,0 +1,207 @@
+Abstract
+Tracking objects of interest in a video is one of the most popular and widely applicable problems in computer vision. However, with the years, a Cambrian explosion of use cases and benchmarks has fragmented the problem in a multitude of different experimental setups. As a consequence, the literature has fragmented too, and now novel approaches proposed by the community are usually specialised to ﬁt only one speciﬁc setup. To understand to what extent this specialisation is necessary, in this work we present UniTrack, a solution to address ﬁve different tasks within the same framework. UniTrack consists of a single and task-agnostic appearance model, which can be learned in a supervised or self-supervised fashion, and multiple “heads” that address individual tasks and do not require training.
+We show how most tracking tasks can be solved within this framework, and that the same appearance model can be successfully used to obtain results that are competitive against specialised methods for most of the tasks considered. The framework also allows us to analyse appearance models obtained with the most recent self-supervised methods, thus extending their evaluation and comparison to a larger variety of important problems. 1
+
+Introduction
+Unlike popular image-based computer vision tasks such as classiﬁcation and object detection, which are (for the most part) unambiguous and clearly deﬁned, the problem of object tracking has been considered under different setups and scenarios, each motivating the design of a separate set of benchmarks and methods. For instance, for the Single Object Tracking (SOT) and Video Object
+Segmentation (VOS) communities [70, 29, 48], tracking means estimating the location of an arbitrary user-annotated target object throughout a video, where the location of the object is represented by a bounding box in SOT and by a pixel-wise mask in VOS. Instead, in multiple object tracking settings (MOT [41], MOTS [57] and PoseTrack [2]), tracking means connecting sets of (often given) detections across video frames to address the problem of identity association and forming trajectories.
+Despite these tasks only differing in the number of objects per frame to consider and observation format (bounding boxes, keypoints or masks), the best practices developed by the methods tackling them vary signiﬁcantly.
+∗Corresponding author 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Though the proliferation of setups, benchmarks and methods is positive in that it allows speciﬁc use cases to be thoroughly studied, we argue it makes increasingly harder to effectively study one of the fundamental problems that all these tasks have in common, i.e. what constitutes a good representation to track objects throughout a video? Recent advancements in large-scale models for language [15, 6] and vision [24, 10] have suggested that a strong representation can help addressing multiple down-stream tasks. Similarly, we speculate that a good representation is likely to beneﬁt many different tracking tasks, regardless of their speciﬁc setup. In order to validate our speculation, in this paper we present a framework that allows to adopt the same appearance model to address ﬁve different tracking tasks (Figure 2). In our taxonomy (Figure 4), we consider existing tracking tasks as problems that have either propagation or association at their core. When the core problem is propagation (as in SOT and VOS), one has to localise a target object in the current frame given its location in the previous one. Instead, in association problems (MOT, MOTS, and PoseTrack), target states in both previous and current frames are given, and the goal is to determine the correspondence between the two sets of observations. We show how most tracking tasks currently considered by the community can be simply expressed starting from the primitives of propagation or association. For propagation tasks, we employ existing box and mask propagation algorithms [5, 61, 58]. For association tasks, we propose a novel reconstruction-based metric that leverages ﬁne-grained correspondence to measure similarities between observations. In the proposed framework, each individual task is assigned to a dedicated “head” that allows to represent the object(s) in the appropriate format to compare against prior arts on the relevant benchmarks.
+Note that, in our framework, only the appearance model contains parameters that can be learned via back-propagation, and that we do not experiment with appearance models that have been trained on speciﬁc tracking tasks. Instead, we adopt models trained via recent self-supervised learning (SSL) techniques and that have already demonstrated their effectiveness on a variety of image-based tasks.
+Our motivation is twofold. First, SSL models are particularly interesting for our use-case, as they are explicitly conceived to be of general purpose. As a byproduct, our work also serves the purpose of evaluating and comparing appearance models obtained from self-supervised learning approaches (see
+Figure 1). Second, we hope to facilitate the tracking community in directly beneﬁting from the rapid advancements of the self-supervised learning literature.
+To summarise, the contributions of our work are as follows:
+• We propose UniTrack, a framework that supports ﬁve tracking tasks: SOT [70], VOS [48],
+MOT [41], MOTS [57], and PoseTrack [2]; and that can be easily extended to new ones.
+• We show how UniTrack can leverage many existing general-purpose appearance models to achieve a performance that is competitive with the state-of-the-art on several tracking tasks.
+• We propose a novel reconstruction-based similarity metric for association that preserves
+ﬁne-grained visual features and supports multiple observation formats (box, mask and pose).
+• We perform an extensive evaluation of self-supervised models, signiﬁcantly extending the empirical analysis of prior literature to video-based tasks. 2 The UniTrack Framework 2.1 Overview
+Inspecting existing tracking tasks and benchmarks, we noticed that their differences can be roughly categorised across four axes, illustrated in Figure 2 and detailed below. 1. Whether the requirement is to track a single object (SOT [70, 29], VOS [48]), or multiple objects (MOT [48], MOTS [57], PoseTrack [2]). 2. Whether the targets are speciﬁed by a user in the ﬁrst frame only (SOT, VOS), or instead are given in every frame, e.g. by a pre-trained detector (MOT, MOTS, PoseTrack). 3. Whether the target objects are represented by bounding-boxes (SOT, MOT), pixel-wise masks (VOS, MOTS) or pose annotations (PoseTrack). 4. Whether the task is class-agnostic, i.e. the target objects can be of any class (SOT, VOS); or if instead they are from a predeﬁned set of classes (MOT, MOTS, PoseTrack). 2
+Figure 1: High-level overview of the performance of sixteen self-supervised learning models on ﬁve tracking tasks: SOT, VOS, MOT, PoseTracking and MOTS. A higher rank (better performance) corresponds to a vertex nearer to the outer circle. A larger area of the pentagon signiﬁes better overall performance of its respective appearance model. Results of a vanilla ImageNet-supervised model are indicated with a gray dashed line as reference. Notice how the best model VFS [74] dominates on four out of the ﬁve tasks considered.
+Figure 2: Existing tracking problems and their respective benchmarks differ from each other under several aspects: the assumption could be that there is a single or multiple objects to track; targets can be speciﬁed by the user in the ﬁrst frame only, or assumed to be given at every frame (e.g. provided by a detector); the classes of the targets can be known (class-speciﬁc) or unknown (class-agnostic); the representation of the targets can be bounding boxes, pixel-wise masks, or pose annotations.
+Figure 3: Overview of UniTrack.
+The framework can be divided in three levels. Level-1: a trainable appearance model. Level-2: the fundamental primitives of propa-gation and association. Level-3: task-speciﬁc heads.
+Typically, in single-object tasks the target is speciﬁed by the user in the ﬁrst frame, and it can be of any class. Instead, for multi-object tasks detections are generally considered as given for every frame, and the main challenge is to solve identity association for the several objects. Moreover, in multi-object tasks the set of classes to address is generally known (e.g. pedestrians or cars).
+Figure 3 depicts a schematic overview of the proposed UniTrack framework, which can be understood as conceptually divided in three “levels”. The ﬁrst level is represented by the appearance model, responsible for extracting high-resolution feature maps from the input frame (Section 2.2). The second level consists of the algorithmic primitives addressing propagation (Section 2.3) and association (Section 2.4). Finally, the last level comprises multiple task-speciﬁc algorithms that make direct use of the primitives of the second level. In this work, we illustrate how UniTrack can be used to obtain competitive performance on all of the ﬁve tracking tasks of level-3 from Figure 3. Moreover, new tracking tasks can be easily integrated.
+Importantly, note that the appearance model is the only component containing trainable parameters.
+The reason we opted for a shared and non task-speciﬁc representation is twofold. Firstly, the large amount of different setups motivated us to investigate whether having separately-trained models for each setup is necessary. Since training on speciﬁc datasets can bias the representation towards a limited set of visual concepts (e.g. animals or vehicles) and limit its applicability to “open-world” settings, we wanted to understand how far can a shared representation go. Second, we wanted to 3
+Figure 4: Propagation v.s. Association. In the propagation problem, the goal is to estimate the target state at the current frame given the observation in the previous one. This is typically addressed for one object at the time. In the association problem, observations in both previous and current frames are given, and the goal is to determine correspondences between the two sets. provide the community with multiple baselines that can be used to better assess newly proposed contributions, and that can be immediately used on new datasets and tasks without the need of retraining. 2.2 Base appearance model
+The base appearance model φ takes as input a 2D image I and outputs a feature map X = φ(I) ∈
+RH×W ×C. Since ideally an appearance model used for object propagation and association should be able to leverage ﬁne-grained semantic correspondences between images, we choose a network with a small stride of r = 8, so that its output in feature space can have a relatively large resolution.
+We refer to the vector (along the channel dimension) of a single point in the feature map as a point 1 ∈ RC from the feature map X1 to have a high similarity with its vector. We expect a point vector xi
+“true match” point vector xˆi 2 in X2; i.e. we expect s(xi 2) > s(xi 2 in X2, while being far apart from all the other point vectors xj 1, xj 2), ∀j (cid:54)= ˆi, where s(·, ·) represents a similarity function. 1, xˆi
+In order to learn ﬁne-grained correspondences, fully-supervised methods are only amenable for synthetic datasets (e.g. Flying Chairs for optical ﬂow [16]). With real-world data, it is intractable to label pixel-level correspondences and train models in a fully-supervised fashion. To overcome this obstacle, in this paper we adopt representations obtained with self-supervision. We experiment both with models trained with approaches that leverage pixel-wise pretext tasks [27, 58] and, inspired by prior works that have pointed out how ﬁne-grained correspondences emerge in middle-level features [39, 74], with models obtained from image-level tasks (e.g. MoCo [24], SimCLR [10]). 2.3 Propagation
+Problem deﬁnition. Figure 4a schematically illustrates the problem of propagation, which we use as a primitive to address SOT and VOS tasks. Considering the single-object case, given video frames t=1 and an initial ground truth observation z1 as input, the goal is to predict object states {ˆzt}T
+{It}T t=2 for each time-step t. In this work we consider three formats to represent objects: bounding boxes, segmentation masks and pose skeletons.
+Mask propagation. In order to propagate masks, we rely on the approach popularised by recent video self-supervised methods [27, 58, 35, 31]. Consider the feature maps of a pair of consecutive frames Xt−1 and Xt, both ∈ Rs×C, and the label mask zt−1 ∈ [0, 1]s of the previous frame 2, where s = H × W indicates its spatial resolution. We compute the matrix of transitions K t t−1 = [ki,j]s×s as the afﬁnity matrix between Xt−1 and Xt. Each element ki,j is deﬁned as ki,j = Softmax(Xt−1, X (cid:62) t ; τ )ij = exp((cid:104)xi k exp((cid:104)xi (cid:80)s t−1, xj t (cid:105) /τ ) t−1, xk t (cid:105) /τ )
+, (1) where (cid:104)·, ·(cid:105) indicates inner product, and τ is a temperature hyperparameter. As in [27], we only keep the top K values for each row and set other values to zero. Then, the mask for the current frame at time t is predicted by propagating the previous prediction: zt = K t t−1zt−1. Mask propagation proceeds in a recurrent fashion: the output mask of the current frame is used as input for the next one. 2Note this corresponds to the ground-truth initialisation when t = 1, and to the latest prediction otherwise. 4
+t−1. t−1zp t = K t
+Pose propagation. In order to represent pose keypoints, we use the widely adopted Gaussian belief maps [66]. For a keypoint p, we obtain a belief map zp ∈ [0, 1]s by using a Gaussian with mean equal to the keypoint’s location and variance proportional to the subject’s body size. In order to propagate a pose, we can then individually propagate each belief map in the same manner as mask propagation, again as zp
+Box propagation. The position of an object can also be more simply expressed with a four-dimensional vector z = (u, v, w, h), where (u, v) are the coordinates of the bounding-box center, and (w, h) are its width and height. While one could reuse the strategy adopted above by simply converting the bounding-box to a pixel-wise mask, we observed that using this strategy leads to inaccurate predictions. Instead, we use the approach of SiamFC [5], which consists in performing cross-correlation (XCORR) between the target template zt−1 and the frame Xt to ﬁnd the new location of the target in frame t. Cross-correlation is performed at different scales, so that the bounding-box representation can be resized accordingly. We also provide a Correlation Filter-based alternative (DCF) [54, 61] (see Appendix B.1). 2.4 Association
+Problem deﬁnition. Figure 4b schematically illustrates the association problem, which we use as primitive to address the tasks of MOT, MOTS and PoseTrack. In this case, observations for object states { ˆZt}T t=1, typically via the output of a pre-trained detector.
+The goal here is to form trajectories by connecting observations across adjacent frames according to their identity. t=1 are given for all the frames {It}T
+Association algorithm. We adopt the association algorithm proposed in JDE [65] for MOT, MOTS and PoseTrack tasks, of which detailed description can be found in Appendix C.1. In summary, we compute an N × M distance matrix between N already-existing tracklets and M “new” detections from the last processed frame. We then use the Hungarian algorithm [30] to determine pairs of matches between tracklets and detections, using the distance matrix as input. To obtain the matrix of distances used by the algorithm, we compute the linear combination of two terms accounting for motion and appearance cues. For the former, we compute a matrix indicating how likely a detection corresponds to the object state predicted by a Kalman Filter [28]. Instead, the appearance component is directly computed by using feature-map representations obtained by processing individual frames with the appearance model (Section 2.2). While object-level features for box and mask observations can be directly obtained by cropping frame-level feature maps, when an object is represented via a pose it ﬁrst needs to be converted to a mask (via a procedure described in Appendix C.2).
+A key issue of this scenario is how to measure similarities between object-level features. We ﬁnd existing methods limited. First, objects are often compared by computing the cosine similarity of average-pooled object-level feature maps [84, 51]. However, the operation of average inherently discards local information, which is important for ﬁne-grained recognition. Approaches [18, 52] that instead to some extent do preserve ﬁne-grained information, such as those computing the cosine similarity of (ﬂattened) feature maps, do not support objects with differently-sized representation (situation that occurs for instance with pixel-level masks). To cope with the above limitations, we propose a reconstruction-based similarity metric that is able to deal with different observation formats, while still preserving ﬁne-grained information.
+Reconstruction Similarity Metric (RSM). Let {ti}N i=1 denote the object-level features of N existing tracklets, ti ∈ Rsti ×C and sti indicates the spatial size of the object, i.e. the area of the box or the mask representing it. Similarly, {dj}M j=1 denotes the object-level features of M new detections.
+With the goal of computing similarities to obtain an N × M afﬁnity matrix to feed to the Hungarian algorithm, we propose a novel reconstruction-based similarity metric (RSM) between pairs (i, j), which is obtained as
+RSM(i, j) = 1 2 (cos(ti, ˆti←j) + cos(dj, ˆdj←i)), (2) where ˆti←j represents ti reconstructed from dj and ˆdj←i represents dj reconstructed from ti. In multi-object tracking scenarios, observations are often incomplete due to frequent occlusions. As such, directly comparing features between incomplete and complete observations often fails because of misalignment between local features. Suppose dj is a detection feature representing a severely occluded pedestrian, while ti a tracklet feature representing the same person, but unoccluded. Likely, 5
+Figure 5: Reconstruction Similarity Metric (RSM): First, object-level features of existing tracklets and current detections are ﬂattened and concatenated. Then, an afﬁnity matrix between the two feature sets is computed.
+For a pair of tracklet ti and detection dj, we “extract” the corresponding sub-matrix from the entire afﬁnity matrix as linear weights and reconstruct ti from dj using these linear weights. The similarity between the original object-level feature and its reconstructed version is ﬁnally taken as the RSM. We want the metric to be symmetric, so we perform reconstruction both forward (ti ← dj) and backward (ti → dj). directly computing the cosine similarity between the two will not be very telling. RSM addresses this issue by introducing a step of reconstruction after which the co-occurring parts of point features will be better aligned, thus making the ﬁnal similarity more likely to be meaningful.
+The reconstructed object-level feature map ˆti←j is a simple linear transformation of dj, i.e.
+ˆti←j = Ri←jdj, where Ri←j ∈ Rsti ×sdj is a transformation matrix obtained as follows. We
+ﬁrst ﬂatten and concatenate all object-level features belonging to a tracklet (i.e. the set of ob-servations corresponding to an object) into a single feature matrix T ∈ R((cid:80) i sti )×C. Simi-larly, we obtain all the object-level feature maps of a new set of detections D ∈ R((cid:80) j sdj )×C.
+Then, we compute the afﬁnity matrix A = Softmax(T D(cid:62)) and “extract” individual Ri←j map-pings as sub-matrices of A with respect to the appropriate (i, j) tracklet-detection pair: Ri←j = (cid:105)3. For a schematic representation of the procedure i(cid:48)=1 si(cid:48) : (cid:80)i
+A just described, see Figure 5. i(cid:48)=1 si(cid:48), (cid:80)j−1 j(cid:48)=1 sj(cid:48) : (cid:80)j (cid:104)(cid:80)i−1 j(cid:48)=1 sj(cid:48)
+RSM can be interpreted from an attention [55] perspective. The feature map of a tracklet ti being reconstructed can be seen as a set of queries, and the “source” detection feature dj can be interpreted both as keys and values. The goal is to reconstruct the queries by linear combination of the values.
+The linear combination (attention) weights are computed using the afﬁnity between queries and keys.
+Speciﬁcally, we ﬁrst compute a global afﬁnity matrix between ti and all the dj(cid:48) for j(cid:48) = 1, ..., M , and then extract the corresponding sub-matrix for ti and dj(cid:48) as the attention weights. Our formulation leads to a desired property: if the attention weights approach zero, the corresponding reconstructed point vectors will approach zero and so the RSM between ti and dj.
+Measuring similarity by reconstruction is popular in problems such as few-shot learning [67, 80], self-supervised learning [38], and person re-identiﬁcation [26]. However, reconstruction is typically framed as a ridge regression or optimal transport problem. With O(n2) complexity, RSM is more efﬁcient than ridge regression and it has a similar computation cost to calculating the Earth Moving
+Distance for the optimal transport problem. Appendix D shows a series of ablation studies illustrating the importance of the proposed RSM for the effectiveness of UniTrack on association-type tasks. 3 Experiments
+Since UniTrack does not require task-speciﬁc training, we were able to experiment with many alternative appearance models (see Figure 3) with little computational cost. In Section 3.1 we perform an extensive evaluation to benchmark a wide variety of off-the-shelf, modern self-supervised models, showing their strengths and weaknesses on all ﬁve tasks considered. In this section we also conduct a correlation study with the so-called “linear probe” strategy [81], which became a popular 3Here we use a numpy-style matrix slicing notation to represent a submatrix, i.e. A[i : j, k : l] indicates a submatrix of A with row indices ranging from i to j and column indices ranging from k to l. 6
+way to evaluate representations obtained with self-supervised learning. Then, in Section 3.2 we compare UniTrack (equipped with supervised or unsupervised appearance models) against recent and task-speciﬁc tracking methods.
+Implementation details. We use ResNet-18 [25] or ResNet-50 as the default architecture. With
+ImageNet-supervised appearance model, we refer to the ImageNet pre-trained weights made available in PyTorch’s “Model Zoo”. To prevent excessive downsampling, we modify the spatial stride of layer3 and layer4 to 1, achieving a total stride of r = 8. We extract features from both layer3 and layer4. We report results with layer3 features when comparing against task-speciﬁc methods (Section 3.2), and with both layer3 and layer4 when evaluating multiple different representations (Section 3.1). Further implementation details are deferred to Appendix B and C.
+Datasets and evaluation metrics. For fair comparison with existing methods, we report results on standard benchmarks with conventional metrics for each task. Please refer to Appendix A for details. 3.1 UniTrack as evaluation platform of previously-learned representations
+The process of evaluating representations obtained via self-supervised learning (SSL) often involves additional training [17, 24, 10], for instance via the use of linear probes [81], which require to ﬁx the pre-trained model and train an additional linear classiﬁer on top of it. In contrast, using UniTrack as evaluation platform (1) does not require any additional training and (2) enables the evaluation on a battery of important video tasks, which have generally been neglected in self-supervised-learning papers in favour of more established image-level tasks such as classiﬁcation.
+In this section, we evaluate three types of SSL representations: (a) Image-level representations learned from images, e.g. MoCo [24] and BYOL [21]; (b) Pixel-level representations learned from images (such as DetCo [72] and PixPro [73]) and (c) videos (such as UVC [35] and CRW [27]). For all methods considered, we use the pre-trained weights provided by the authors.
+Results are shown in Table 1 and 2, where we report the results obtained by using features from either layer3 or layer4 of the pre-trained ResNet backbone. We report both results and separate them by a ‘/’ in the table. Note that, for this analysis only, for association-type tasks motion cues are discarded to better highlight distinctions between different representations and avoid potential confounding factors. Figure 1 provides a high-level summary of the results by focusing on the ranking obtained by different SSL methods on the ﬁve tasks considered (each represented by a vertex in the radar-style plot). Several observations can be made: (1) There is no signiﬁcant correlation between “linear probe accuracy” on ImageNet and overall tracking performance. The linear probe approach [81] has become a standard way to compare SSL representations. In Figure 6, we plot tracking performance on ﬁve tasks (y-axes) against ImageNet top-1 accuracy of 16 different models (x-axes), and report Pearson and Spearman (rank) correlation coefﬁcients. We observe that the correlation between ImageNet accuracy and tracking performance is small, i.e. the Pearson’s r ranges from −0.38 to +0.20, and Spearman’s ρ ranges from −0.36 to
++0.26. For most tasks, there is almost no correlation, while for VOS the two measures are mildly inversely correlated. The result suggests that evaluating SSL models on ﬁve extra tasks with UniTrack could constitute a useful complement to ImageNet linear probe evaluation, and encourage the SSL community to pursue the design of even more general purpose representations. (2) A vanilla ImageNet-trained supervised representation is surprisingly effective across the board.
+On most tasks, it reports a performance competitive with the best representation for that task. This is particularly evident from Figure 1, where its performance is outlined as a gray dashed line. This result suggests that results obtained with vanilla ImageNet features should be reported when investigating new tracking methods. (3) The best self-supervised representation ranks ﬁrst on most tasks. Recently, it has been shown how SSL-trained representations can match or surpass their supervised counterparts on ImageNet classiﬁcation (e.g.
+[21]) and many downstream tasks [17, 72]. Within UniTrack, although no individual SSL representation is able to beat the vanilla ImageNet-trained representation on every single task, we observe that the recently proposed VFS [74] ranks ﬁrst on every task, except for single-object tracking. This suggests that advancements of the self-supervised learning literature can directly beneﬁt the tracking community: it is reasonable to expect that newly-proposed representations will further improve performance across the board. 7
+Representation
+Random Init.
+ImageNet-sup.
+InsDis [71]
+MoCoV1 [24]
+PCLV1 [34]
+PIRL [42]
+PCLV2 [34]
+SimCLRV1 [10]
+MoCoV2 [12]
+SimCLRV2 [11]
+SeLaV2 [3]
+Infomin [53]
+BarLow [79]
+BYOL [21]
+DeepCluster [7]
+SwAV [8]
+VFS [74]
+PixPro [73]
+DetCo [72]
+TimeCycle [64]
+SOT [70]
+VOS [48]
+MOT [41]
+MOTS [57]
+PoseTrack [2]
+AUCXCorr ↑ AUCDCF ↑
+J -mean↑
+IDF1↑
+HOTA↑
+IDF1↑
+HOTA↑
+IDF1↑
+IDs↓ 10.3 / 9.0 58.6 / 49.5 47.6 / 47.3 50.9 / 47.9 56.8 / 31.5 43.8 / 51.0 54.9 / 50.3 47.3 / 51.9 53.7 / 47.2 50.0 / 54.7 51.0 / 9.6 48.5 / 46.8 44.5 / 55.5 48.3 / 55.5 51.5 / 52.9 49.2 / 52.4 51.1 / 45.3 40.5 / 49.2 55.0 / 47.1 43.8 / 24.2 28.0 / 20.0 62.0 / 53.9 61.8 / 51.1 62.2 / 53.7 61.3 / 35.0 61.2 / 53.4 62.5 / 51.6 61.3 / 50.7 61.5 / 53.3 61.7 / 56.8 63.1 / 14.2 61.2 / 51.9 60.5 / 60.1 58.9 / 56.8 61.2 / 61.2 61.5 / 59.4 60.3 / 43.8 57.4 / 49.3 59.0 / 53.2 57.5 / 48.7 29.3 / 33.9 62.3 / 57.9 62.6 / 60.1 61.5 / 57.9 60.4 / 38.8 60.8 / 57.7 61.2 / 52.5 60.5 / 56.5 61.2 / 54.0 61.6 / 58.4 60.2 / 40.2 58.4 / 51.1 61.7 / 57.8 58.8 / 54.3 59.3 / 53.4 59.4 / 57.0 62.8 / 56.8 56.4 / 52.2 62.3 / 56.1 51.8 / 48.9 8.4 / 8.9 75.6 / 73.2 66.7 / 73.9 69.2 / 74.1 74.8 / 68.8 62.0 / 73.4 74.9 / 72.9 66.9 / 75.6 72.0 / 74.9 67.6 / 75.7 68.8 / 68.9 66.7 / 73.4 63.7 / 74.5 65.3 / 74.9 66.9 / 75.1 65.6 / 74.4 74.1 / 77.0 61.7 / 67.7 75.3 / 72.9 68.7 / 28.2 8.4 / 8.5 63.3 / 61.8 57.9 / 61.9 59.4 / 61.9 62.8 / 59.1 54.6 / 61.9 62.7 / 61.8 57.7 / 63.2 61.2 / 62.8 58.1 / 63.3 59.0 / 59.3 57.6 / 61.9 55.4 / 62.4 56.8 / 62.9 57.8 / 63.5 56.9 / 62.3 62.6 / 63.9 54.3 / 58.6 62.8 / 61.6 59.3 / 25.5 20.8 / 23.1 68.4 / 69.4 68.4 / 68.0 70.6 / 69.3 67.6 / 65.2 66.0 / 67.4 68.3 / 66.6 65.8 / 67.6 67.5 / 67.3 69.1 / 67.4 66.8 / 66.1 66.7 / 66.3 68.7 / 67.4 70.1 / 66.8 67.7 / 67.4 68.8 / 67.0 71.0 / 68.0 64.2 / 66.2 67.8 / 66.8 69.9 / 47.1 25.9 / 28.7 70.2 / 71.0 69.6 / 70.3 71.6 / 70.9 69.7 / 67.3 66.7 / 69.9 70.5 / 69.0 67.7 / 69.5 69.6 / 69.6 70.4 / 69.4 68.7 / 68.5 68.5 / 68.8 69.5 / 69.8 70.8 / 69.3 69.4 / 69.8 69.9 /69.5 72.1 / 70.4 65.1 / 67.6 70.0 / 69.4 71.3 / 49.3 40.2 / 38.5 73.7 / 73.3 72.4 / 73.9 72.8 / 73.9 73.3 / 71.1 72.1 / 73.0 73.5 / 73.4 72.3 / 73.5 73.0 / 73.7 72.5 / 73.6 72.9 / 72.3 72.5 / 74.0 72.3 / 74.3 72.4 / 73.8 72.7 / 73.7 72.7 / 73.6 73.3 / 74.2 72.4 / 73.1 73.9 / 73.3 72.0 / 62.3 88792 / 90963 6969 / 7103 7106 / 7015 6872 / 7092 6855 / 10694 7235 / 7173 6859 / 8489 7084 / 7367 6932 / 7702 7228 / 7856 6983/ 7815 7066 / 7901 7131 / 7456 7213 / 8032 7018 / 7283 7025 / 7377 6731 / 7091 7163 / 6953 7357 / 8009 7837 / 27884
+Table 1: Tracking performance of pre-trained image-based SSL models. All methods employ a ResNet-50.
+Representation
+SOT [70]
+VOS [48]
+MOT [41]
+MOTS [57]
+PoseTrack [2]
+AUCXCorr ↑ AUCDCF ↑
+J -mean↑
+IDF1↑
+HOTA↑
+IDF1↑
+HOTA↑
+IDF1↑
+IDs↓
+Random Init.
+ImageNet-sup.
+Color. [58]+mem.
+UVC [35]
+CRW [27] 16.0 / 18.2 55.0 / 46.2 41.6 / 43.4 46.0 / 38.7 46.3 / 49.1 36.1 / 32.1 61.8 / 52.6 56.7 / 58.7 58.1 / 59.9 58.9 / 54.9 33.0 / 36.7 58.4 / 46.7 53.6 / 59.7 56.5 / 53.9 63.2 / 60.7 18.4 / 14.6 74.8 / 74.5 64.9 / 62.8 66.9 / 64.5 67.8 / 73.0 20.2 / 12.9 62.7 / 62.1 56.8 / 55.5 57.7 / 54.1 58.4 / 61.7 34.5 / 33.1 67.6 / 68.6 68.8 / 66.1 69.9 / 68.7 69.0 / 71.3 39.9 / 37.6 69.8 / 70.5 69.4 / 66.3 69.6 / 69.4 69.2 / 71.9 52.8 / 50.5 72.7 / 73.2 72.4 / 72.6 72.6 / 72.8 72.7 / 73.0 65317 / 66230 6808 / 7024 6850 / 6778 6843 / 6972 6799 / 6761
+Table 2: Tracking performance of pre-trained video-based SSL models. All methods employ a ResNet-18. In the above two tables, we report results with [layer3 / layer4] features in each cell, and the best performance between the two is bolded. We use the bolded values to rank the models in each column, and visualise (column-wise) better performance with darker cell colors. Best results in each column are underlined.
+Figure 6: Tracking performance is poorly correlated with ImageNet accuracy. On the x-axes we plot ImageNet linear probe top-1 accuracy and on the y-axes the tracking performance on ﬁve tracking datasets. Correlation coefﬁcients (Spearman’s ρ and Pearson’s r) are shown in the left bottom of each plot. (4) Pixel-level SSL representations do not seem to have a consistent advantage in pixel-level tasks.
+In Table 2 and at the bottom of Table 1 we compare recent SSL representations trained with pixel-level proxy tasks: PixPro [73], DetCo [72], TimeCycle [64], Colorization [58], UVC [35] and
+Contrastive Random Walk (CRW) [27]. Considering that pixel-level models leverage more ﬁne-grained information during training, one may expect them to outperform image-based models in the tracking tasks where this is important. It is not straightforward to compare pixel-level SSL models with image-level ones, as the two types employ different default backbone networks. However, note how good image-based models (MoCo-v1, SimCLR-v2) are on par with their supervised counterpart in all tasks, while good pixel-level models (DetCo, CRW) still have gaps with respect to their supervised counterparts in tasks like SOT and MOT. Moreover, from Table 1, one can notice how the last three rows, despite representing methods leveraging pixel-level information during training, are actually outperformed by image-level representations on the pixel-level tasks of VOS, MOTS and
+PoseTrack. (5) Video data can beneﬁt representation learning for video tasks. The top-ranking VFS is similar to MoCo, SimCLR and BYOL in terms of learning scheme: they all perform contrastive learning on image level features. The most important distinction is the training data. Previous SSL methods mostly train on still-image based datasets (typically ImageNet), while VFS employs a large-scale video dataset Kinetics [9]. Clearly, this is not very surprising, as training on video data can help closing the domain gap with the (video-based) downstream tasks considered in this paper. 8
+Methods
+IDF1↑
+IDs↓
+MOTA↑
+HOTA↑
+JDE [65]
+CTracker [47]
+TubeTK [46]
+MAT [23]
+TraDes [69]
+CSTrack [36]
+FairMOT† [82]
+UniTrack_ImageNet†
+UniTrack_VFS† 55.8 57.2 62.2 63.8 64.7 71.8 72.8 71.8 70.3 1544 1897 1236 928 1144 1071 1074 683 829 64.4 67.6 66.9 73.5 70.1 70.7 74.9 74.7 72.7
+-48.8 50.8 56.3 53.2 59.8 61.6 59.1 58.6 (a) MOT@MOT-16 [41] test split, private detection.
+Methods
+IDF1↑
+IDs↓ sMOTA↑
+TrackRCNN [57]
+SORTS [68]
+PointTrack [76]
+GMPHD [50]
+COSTA† [1]
+UniTrack_ImageNet†
+UniTrack_VFS† 42.4 57.3 42.9 65.6 70.3 67.2 68.2 567 577 868 566 421 622 342 40.6 55.0 62.3 69.0 69.5 68.9 69.7 (b) MOTS@MOTS [57] test split.
+Methods
+J -mean↑
+Methods
+AUC↑
+Methods
+IDF1↑
+IDs↓
+MOTA↑
+MDPN [22]
+OpenSVAI [44]
+Miracle [78]
+KeyTrack [49]
+TWVA [19]
+LightTrack† [43]
+UniTrack_ImageNet†
+UniTrack_VFS†
+-----52.2 73.2 74.2
+-----3024 6760 7091 50.6 62.4 64.0 66.6 64.7 64.8 63.5 63.3 (c) PoseTrack@PoseTrack2018 [2] val split.
+Supervised:
+SiamMask [62]
+FEELVOS [56]
+STM [45]
+Unsupervised:
+Colorization [58]
+TimeCylce [64]
+UVC [35]
+CRW [27]
+UniTrack_ImageNet
+UniTrack_VFS 54.3 63.7 79.2 34.6 40.1 56.7 64.8 58.4 62.8
+Supervised:
+SiamFC [5]
+SiamRPN [33]
+SiamRPN++ [32]
+Unsupervised:
+UDT [59]
+UDT+ [59]
+LUDT [60]
+LUDT+ [60]
+UniTrack_ImageNet_XCorr
+UniTrack_ImageNet_DCF
+UniTrack_VFS_DCF 58.2 63.7 69.6 59.4 63.2 60.2 63.9 55.5 61.8 60.3 (d) VOS@DAVIS-2017 [48]. (e) SOT@OTB-2015 [70].
+Table 3: Comparison with task-tailored unsupervised and supervised methods on ﬁve typical tracking tasks. † indicates methods using identical observations. 3.2 Comparison with task-speciﬁc tracking methods
+Unsupervised methods. We observe that UniTrack performs competitively against unsupervised state-of-the-art methods in both the propagation-type tasks we considered (Table 3d and 3e). For SOT,
+UniTrack with a DCF head [61] outperforms UDT [59] (a strong recent method) by 2.4 AUC points, while it is surpassed by LUDT+ [60] by 2.1 points. Considering that LUDT+ adopts an additional online template update mechanism [13] while ours does not, we believe the gap could be closed. In
+VOS, existing unsupervised methods are usually trained on video datasets [35, 27], and some of the most recent outperform UniTrack (with an ImageNet-trained representation). Nonetheless, when we use a VFS-trained representation, this performance difference is reduced to 2%. Finally, note that for association-type tasks we are not aware of any existing unsupervised learning method, and thus in this case we limit the comparison to supervised methods.
+Comparison with supervised methods. In general, UniTrack with a ResNet-18 appearance model already performs on par with several existing task-speciﬁc supervised methods, and in several tasks it even shows superior accuracy, especially for identity-related metrics. (1) For SOT, UniTrack with a
+DCF head outperforms SiamFC [5] by 3.6 AUC points. This is a signiﬁcant margin considering that
+SiamFC is trained with a large amount of crops from video datasets with annotated bounding boxes. (2) For VOS, UniTrack surpasses SiamMask [62] by 4.1 J -mean points, despite this being trained on the joint set of three large-scale video datasets [37, 14, 75]. (3) For MOT, we employ the same detections used by the state-of-the-art tracker FairMOT [82]. The appearance embedding in FairMOT is trained with 270K bounding boxes of 8.7K labeled identities, from a MOT-speciﬁc dataset. In contrast, despite our appearance model not being trained with any MOT-speciﬁc data, our IDF1 score is quite competitive (71.8 v.s. 72.8 of FairMOT), and the ID switches are considerably reduced by 36.4%, from 1074 to 683. (4) For MOTS, we start from the same segmentation masks used by the
+COSTA [1] tracker, and observe a degradation in terms of ID switches (622 vs the 421 of the state of the art), and also a gap in IDF1 and sMOTA. (5) Finally, for pose tracking, we employ the same pose estimator used by LightTrack [43]. Compared with LightTrack, the MOTA of UniTrack degrades of 1.3 points because of an increased amount of ID switches. However, the IDF-1 score is improved by a signiﬁcant margin (+21.0 points). This shows UniTrack preserves identity more accurately for long tracklets: even if ID switches occur more frequently, after a short period UniTrack is able to correct the wrong association, leading to a higher IDF-1.
+Notice how, overall, UniTrack obtains more competitive performance on tasks that have association at their core, i.e. MOT, MOTS and PoseTrack. Upon inspection, we observed that most failure cases 9
+in propagation-type tasks regard the “drift” occurring when the scale of the object is improperly estimated. In future work, this could be addressed for instance by a bounding-box regression module to reﬁne predictions, or by carefully designing a motion model. For association-type tasks, the consequences of any type of inaccuracy are isolated to individual pairs of frames, and thus much less catastrophic by nature. 4

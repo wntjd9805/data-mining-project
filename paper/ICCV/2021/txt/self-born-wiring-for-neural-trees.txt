@@ -1,0 +1,261 @@
+Abstract
+Neural trees aim at integrating deep neural networks and decision trees so as to bring the best of the two worlds, in-cluding representation learning from the former and faster inference from the latter.
+In this paper, we introduce a novel approach, termed as Self-born Wiring (SeBoW), to learn neural trees from a mother deep neural network. In contrast to prior neural-tree approaches that either adopt a pre-deﬁned structure or grow hierarchical layers in a progressive manner, task-adaptive neural trees in SeBoW evolve from a deep neural network through a construction-by-destruction process, enabling a global-level parameter optimization that further yields favorable results. Speciﬁ-cally, given a designated network conﬁguration like VGG,
+SeBoW disconnects all the layers and derives isolated ﬁl-ter groups, based on which a global-level wiring process is conducted to attach a subset of ﬁlter groups, eventually bearing a lightweight neural tree. Extensive experiments demonstrate that, with a lower computational cost, SeBoW outperforms all prior neural trees by a signiﬁcant margin and even achieves results on par with predominant non-tree networks like ResNets. Moreover, SeBoW proves its scala-bility to large-scale datasets like ImageNet, which has been barely explored by prior tree networks. 1.
+
+Introduction
+Deep Neural Networks (DNNs) [33, 11] have been ar-guably the most successful machine learning models in the last decade, dominating a large spectrum of applications such as computer vision and natural language processing.
+The unprecedented success is largely attributed to its hi-erarchical representation learning through the composition of nonlinear transformations, which alleviates the need for feature engineering. Nevertheless, DNNs are not ﬂawless: they typically suffer from the expensive computation cost,
+*Corresponding author the daunting architecture design process, as well the lack of interpretation, which hinders their more widespread appli-cations.
+Decision Trees (DTs), as an alternative category of ma-chine learning models, have also demonstrated their power in real-world applications [9, 31]. Unlike DNNs where hierarchical representations with varying abstraction are learned, DTs are characterized by learning hierarchical clusters of data, so that in each cluster a linear model suf-ﬁces to explain the data. As DTs conduct classiﬁcation through a relatively short root-to-leaf sequence, they usu-ally yield faster inference, in which the decision process is also task-adaptive. Moreover, the decisions in DTs are of-ten made directly in the original feature space, resulting in better model interpretability. Albeit these appealing prop-erties, DTs often require hand-engineering features; the ca-pacity of a single DT is also limited due to the simple rout-ing functions along the root-to-leaf path. Such attributes, unfortunately, substantially precludes DTs’ applications to more complex real-world scenarios.
+In light of the mutual exclusive beneﬁts and limitations of DNNs and DTs, it is therefore desirable to integrate
+DNNs and DTs into a single model, termed as neural trees, in the hope that the complementary merits of both worlds are preserved. Several pilot endeavours have been made towards this ambitious goal. For example, Frosst and Hin-ton adopted a soft decision tree to imitate the output of a neural network for better interpretability [8]. However, as every decision is made in the original input space and no representation learning is performed, better interpretability is achieved by sacriﬁcing the performance. Kontschieder et al. proposed Deep Neural Decision Forest (DNDF) [19], an ensemble of DTs, in which each DT is built upon In-ception V1 [35]. Despite the promising accuracy, the cum-bersome backbone and the separate optimization pipeline for network parameters and prediction distribution render both the training and the inference highly costly. The pre-deﬁned model structure also makes it not adaptive to tasks. More recently, Tanno et al. proposed Adaptive Neu-ral Trees (ANT) [36] that inherit representation learning from DNNs and lightweight inference from DTs. Unfor-tunately, ANT relies on a suboptimal progressive scheme to grow trees layer by layer, in which each operation is se-lected among several pre-deﬁned ones in a greedy manner, making it prone to local optima and hardly scalable to large datasets like ImageNet [5].
+In this paper, we propose a novel approach to learning neural trees from DNNs, termed as Self-born Wiring (Se-BoW), through which the merits of both categories are nat-urally united.
+In contrast to existing methods that either relies on growing trees progressively or restricted to a spe-ciﬁc tree structure, our task-customized neural trees evolve themselves from a user-designated mother DNN architec-ture like VGG, via a construction-by-destruction manner.
+Such a self-born learning procedure, in turn, allows for a global-level parameter optimization over the neural tree search. Neural trees derived in this way not only enjoy learnable hierarchical representations and efﬁcient infer-ence, but also yield results signiﬁcantly better than those from prior neural-tree methods and even on par with those of DNN-based ones, thanks to the global tree-architecture optimization.
+Speciﬁcally, SeBoW starts the learning process with destructing a user-designated network conﬁguration like
+VGG [33], by removing all the connections across layers and turning the network into a collection of isolated layers.
+The neurons or ﬁlters in every layer, except the ﬁrst layer that acts as the root, are further decomposed into several equal-sized ﬁlter groups, each of which has only a subset of truncated ﬁlters and acts as a feature learner. We then adopt routers to conduct wiring over these scattered ﬁlter groups so as to navigate the adaptive decision paths across different layers. In the last layer, we install a solver at the end of each
+ﬁlter group to make the ﬁnal predictions.
+The learners, the routers, and the solvers constitute the complete search space of SeBoW. Unlike prior neural trees where intermediate nodes are optimized greedily and sepa-rately, SeBoW runs over all the possible decision paths in the search space and adopts the widely used Negative Log
+Likelihood (NLL) loss to train the whole model, making the training as simple as training popular DNNs. Interest-ingly, our router design effectively imposes strong sparsity constraints on the wiring between groups across layers, re-sulting in only a few active modules with the rest silent. Fi-nally, a lightweight decision tree can be extracted by safely removing those inactive modules.
+Extensive experiments over several datasets including
+ImageNet have been conducted, in which SeBoW attains higher accuracy with lower computation cost compared to existing tree-based models. More encouragingly, SeBoW even achieves on par or sometimes superior performance when compared to non-tree networks, let alone its faster inference and better interpretability due to its endowed decision-tree nature.
+In sum, our contribution is a novel neural-tree learning scheme, termed as SeBoW, that bears a task-customized neural tree from a mother DNN, enabling the merits from both DNNs and neural trees to be by nature preserved. The construction-by-destruction learning process allows for a global-level tree architecture search, which consequently gives rise to a competent neural tree with encouraging per-formance. Experiments demonstrate that the derived trees yield performances signiﬁcantly superior to prior tree meth-ods and even on par with results obtained from popular
+DNNs on large-scale datasets such as ImageNet. 2. Self-born Wiring
+In this section, we depict the proposed method, SeBoW, to craft task-adaptive neural trees. The training data is de-noted by {(x1, y1), (x2, y2), ..., (xN , yN )}, x ∈ X , y ∈ Y.
+The goal is to learn the conditional distribution p(y|x). We
+ﬁrst introduce the model topology and operations used for neural trees. Then we describe how to design the search space for neural trees based on prevailing DNN architec-tures. Finally, we describe how the tree architecture and the parameters are simultaneously optimized. 2.1. Model Topology and Operations
+We deﬁne the model topology for neural trees as a pair (T, O), where T deﬁnes the model topology, and O de-notes the set of operations on it. In this paper, we adopt a Directed Acyclic Graph (DAG) to represent the model topology, i.e., T := {N , E}, where N is the set of nodes and E is the set of edges between them, E ⊆ N ×N . The in-ternal nodes are denoted by Nint, and leaf nodes by Nleaf .
+T consists of three primitive operations, learning, routing, and solving. Each node is assigned with operations in O, which turns the DAG into a decision tree. These operations are implemented by the following modules:
+• Learners: every internal node i ∈ Nint of the tree is as-signed with a learner lψ i , parameterized by ψ, that trans-forms data from the parent to its children. The learners are the key modules for representation learning, and they are implemented by stacking some widely used layers (de-tailed in Section 2.2), including convolution, ReLU, batch normalization, and pooling layers.
+• Routers: following each learner in internal node i ∈
+Nint, a router module, rθ
+:= Xi → [0, 1]Ni, parame-i terized by θ, is appended to send incoming data to its children nodes. Here Xi denotes the input data space for router rθ i . We make no restriction on the number of chil-dren here, which means the decision tree is not necessar-ily a binary tree, i.e., Ni ≥ 2. This relaxes the assump-tions made in previous tree-based models.
+Figure 1. An illustrative example of the proposed self-born wiring pipeline. Left: (a) VGG-13 is utilized as mother DNN to design search space. (b) Cutting the DNN into 5 sections. (c) Unpacking base learners from sections. (d) Installing a router for each internal learner, a solver for each leaf learner, then the complete search space is obtained. The red path is selected according to Sect. 2.3.2. (e) One neural tree chosen from (d). Right: Two essential components for routers. (1) Senders explore probability distributions. (2) Receivers fuse various features. “Conv3-C” denotes 3 × 3 convolution with C ﬁlters. The formulas in blue represent data, while others donate network modules.
+• Solvers: each leaf i ∈ Nleaf is assigned a solver mod-ule, sφ
+: Xi → Y, parameterized by φ, which operates i on the transformed data and outputs the estimate for the conditional distribution p(y|x). In this paper, we focus on classiﬁcation tasks, and thus implement the solver by a fully connected layer and a softmax layer.
+Note that unlike ANT [36], we do not assign any operation to edges. They are only used for data ﬂow. The model topology and the deﬁned operations sketch a broad view of a neural tree. In the following sections, we introduce how a task-adaptive neural tree is generated by SeBoW. 2.2. Search Space for Neural Trees
+To design the search space for neural trees, we use the network conﬁguration from a mother DNN like VGG [33] as the starting point, as illustrated in Figure 1 (a). This moderately relieves us of the burden of designing the search space. For example, we need not consider how many times the data should be down-pooled along the decision route in the neural tree. The pipeline of designing space is depicted in Figure 1. Then for simplicity, we describe the work of designing the tree space as a three-step process: unpacking base learners, installing routers and mounting solvers. 2.2.1 Unpacking Base Learners
+We unpack base learners, which will be used as learners in neural trees, from a widely used DNN. To this end, we
+ﬁrst cut the DNN into several sections, each with a pooling layer inside. Formally, let F denotes the function underly-ing a DNN, then assume the DNN is cut into S sections.
+The function underlying the i-th fragment is symbolized by
+Fi. Then F can be written as F = FS ◦ ... ◦ F2 ◦ F1, where the symbol ◦ denotes function composition. Each section embodies more than one convolution layer, and each convolution layer in the same section contains the same number of ﬁlters1. Let Ci denote the number of ﬁlters in the i-th section, then the ﬁlters can be denoted by a
+Wi × Hi × Ci−1 × Ci tensor. Following the idea of group convolution [20], for each i ∈ {1, 2, ..., S}, we split the i-th section into Ci/C groups, in which the convolution layers contains the ﬁxed-sized Wi × Hi × C × C ﬁlters. C is a pre-deﬁned hyper-parameter. We view these split groups as the base learners and symbolize them by L = {L1, ..., LS}, where Li = {li
+Ci/C} is the set of base learners un-packed from the i-th section, as seen in Figure 1 (b) and (c).
+These base learners play important roles in representation learning in the neural tree. For better illustration, we denote the input data of learner li j as xi j, i.e., j = li yi j and the output as yi 1, ..., li j(xi j). 2.2.2
+Installing Routers
+The number of learners determines the number of nodes in the search space. We view LS as the set of leaf learners and l ∈ L \ LS as internal learners. In this step, we install routers to turn the isolated learners into a connected DAG.
+For any two learners li p to lj q is allowed if and only if j = i + 1. In this work, we adopt two types of routers, named senders and receivers, to direct q, the data ﬂow from li p and lj 1In prevailing design philosophy, the number of ﬁlters only changes after the pooling layers.
+the data to ﬂow through the network. The senders are in-stalled after each internal learner to route the path for the output data. Ideally, for the output from a speciﬁc learner, the sender chooses only a subset of learners in the next sec-tion to pass the data, so that we devise the sender as a soft-max classiﬁer. Speciﬁcally, the sender is implemented by two convolution layers, an adaptive average pooling layer for extracting feature vectors, and a fully connected layer followed by a softmax layer. For learner li p, the installed p. It is actually a Ci+1 sender is denoted by ri
+C -way classiﬁer that makes choices among the following learners to pass the data, as seen in Figure 1 (1).
+It seems sufﬁcient to route the data to ﬂow through the network with the aid of senders. However, the learners in different sections are interleaved in such a way, which leaves the model still a neural network rather than a neu-ral tree and difﬁcult to interpret. One important char-acteristic of DTs, which brings better interpretability, is that each node in DTs receives data only from one parent node. To enforce the current learner receives data from only one learner in the previous section, we place a re-ceiver before each learner to decide on which input data the learner receives. The receiver samples a categorical value from the continuous sampling distribution. To enable the differentiability for the sampling operation, we utilize
+Gumbel-Softmax [15] to implement the receiver. Formally, for the j-th learner li j in section i, we construct a vector wi j,Ci−1/C} to represent the connec-tivity from learners in the previous section to the learner li j.
+Each element wi j,k stores the probability value that denotes how likely the output of learner li−1 k would be sampled by the receiver to pass to learner li j. During the forward prop-agation, the receiver makes a discrete decision drawn from the categorical distribution based on the distribution: j,2, ..., wi j = {wi j,1, wi hi j = one hot{arg max k (log wi j,k) + (cid:15)k}. (1)
+Here hi j is a one-hot vector with the dimension the same as the number of learners in the previous section. (cid:15) ∈ RCi/C is a vector in which the elements are i.i.d samples drawn from the Gumbel distribution (0, 1) to add a small amount of noise to avoid the argmax operation always selecting the element with the highest probability value.
+To enable differentiability of the discreet sampling func-j during tion, we use the Gumbel-Softmax trick to relax hi backward propagation as hi j = exp((log wi k exp((log wi j + (cid:15))/τ ) j,k + (cid:15)k)/τ ) (cid:80)
+, (2) where τ is the temperature that controls how sharp the dis-tribution is after the approximation. Ultimately, we for-j · Yi−1, where mula the sampling operation as: xi j = hi
+Yi−1 = [yi−1
+, yi−1 2 put of the j-th receiver in section i.
+, . . . , yi−1
+Ci−1/C] and xi 1 j donates the out-2.2.3 Mounting Solvers leaf learners, the data features become low-After dimensional. Finally, we append a solver ss p to each leaf learner ls p to make the ﬁnal task predictions. The solvers are implemented by a fully connected layer and a softmax layer. 2.3. Optimization
+As shown in Figure 1 (d), the entire search space can be viewed as a deep forest or a Hierarchical Mixture of
+Experts (HMEs) [17], each of which is implemented by a multi-layered network and a root-to-leaf decision path.
+Each expert learns some specialized features, which may be useful for different sub-tasks. The goal of optimization is training the entire model by the ﬁnal objective with implicit sparsity constraints from routers, which makes the model adapt to task and produce a lightweight neural tree. 2.3.1 Probabilistic Model and Inference
+The input x stochastically traverses the tree based on the de-cisions of the routers and undergoes a sequence of transfor-mations until it reaches a leaf node where the correspond-ing solver predicts the label y. Recalling that ψ, θ, and φ denote the parameters of the learners, the routers and the solvers, respectively. We use Θ to indicate involved param-eters, i.e., Θ = {ψ, φ, θ}. The predictive distribution is p(y|x, Θ) =
+CS /C (cid:88) j p(zj = 1|x, ψ, θ) (cid:125) (cid:123)(cid:122) (cid:124)
+Leaf-reaching probability
+, p(y|x, zj = 1, φ, ψ) (cid:123)(cid:122) (cid:125) (cid:124) solver prediction (3) where the ﬁrst term p(zj|x, ψ, θ) denotes the probability of reaching the j-th leaf. The second term p(y|x, zj = 1, φ, ψ) represents the prediction distribution produced by the j-th solver. The leaf reaching probability is calculated by propagating the routing probability from the root to the leaf nodes with the following propagation rule: p(zi j = 1|x, Θi j) =
+Ci
+C(cid:88) p(zi−1 k
+|x, Θi−1 j
+)·ri−1 k (zi j = 1|x, θ), k=1 (4) where p(zi j = 1|x, Θ) denotes the probability of reaching the j-th node in the i-th section. ri−1 denotes the routing probability produced by the sender after k-th learner in the (i − 1)-th section. Θi j denotes all the involved parameters for calculating the path probability of reaching learner li j. k
+2.3.2 Loss Functions and Tree Selection
+Training of the proposed model proceeds in two stages: search phase and retraining phase. During the search-ing phase the whole model is optimized to search for the lightweight neural tree in the large search space, as shown in
+Figure 1 (e). We adopt the Negative Log-Likelihood (NLL) loss as the objective function to optimize the model:
+J = − log p(Y|X, Θ) = −
+N (cid:88)
+Cs/C (cid:88) log(
+)p(yy(n)|x(n), Θ),
+Model
+Sender
+Learner
+Solver
+SeBoW-A
+SeBoW-B
+SeBoW-C 2× Conv3-48
++ GAP + LC 2× Conv3-96 + BN + ReLU
++ MaxPool 2× Conv3-72
++ GAP + LC 2× Conv3-144 + BN + ReLU
++ MaxPool 2× Conv3-128
++ GAP + LC 2× Conv3-256 + BN + ReLU
++ MaxPool
+GAP + LC
+GAP + LC
+GAP + LC
+Table 1. Details of the primitive modules. “Conv3-48” represents the 3 × 3 convolution with 48 ﬁlters. “GAP”, “LC”, “BN” and
+“MaxPool” denote global-average-pooling, linear classiﬁer, batch-normalization and max-pooling operations, respectively. n=1 i=1 the training inputs (5)
+{x(1), x(2), ..., x(N )} and Y = where X =
+{y(1), y(2), ..., y(N )} denote and targets, respectively. With the Gumbel-Softmax trick in the routers, all modules are differentiable with respect to their parameters, so that we adopt stochastic gradient descent to optimize the model in an end-to-end way. After the search phase, we retain the node in i-th section if its conditional probability obtained from previous senders is greater than the threshold C/(2 × Ci). After that, the retraining phase retrains the derived neural tree from scratch [23]. 3. Experiments 3.1. Experimental Settings
+Datasets. Four classiﬁcation benchmarking datasets, in-cluding CIFAR10 [2], CIFAR100 [2], tiny-ImageNet [21] and ImageNet [5], with varying complexities, are adopted to comprehensively evaluate the generalisation and effective-ness of the proposed method SeBoW. These datasets span over a range of sizes and input resolutions. CIFAR10 [5] and CIFAR100 [5] each comprises a collection of 60k 32 × 32 pixel images. Tiny-ImageNet [21] consists of 110k images in resolution 64 × 64, and the ImageNet [5] dataset contains 1.33 million images from 1000 different classes with 224 × 224 resolution.
+Network architecture. For ImageNet, we construct a search space based on the network conﬁguration of trun-cated VGG-13 [33], in which all the fully connected layers are removed. The input data are down-pooled by 5 times through the VGG-13, so we cut the model into 5 sections, as described in Section 2.2. The number of learners in each section is {1, 2, 4, 8, 8}, respectively. For CIFAR-10,
+CIFAR-100 and tiny-ImageNet, as the image resolution is much smaller than ImageNet, four times of down-pooling are sufﬁcient to extract low-dimensional features. We con-struct the search space with only the former four sections, with number of learners {1, 2, 4, 8}. To comprehensively evaluate the proposed method, we devise three variants of
+SeBoW, symbolized by SeBoW-A, SeBoW-B and SeBoW-C, with varying capacities. Details of these models are sum-marized in Table 1.
+Training details. We use SGD with the initial learning rate of 0.1. After 30 epochs, the learning rate is decayed by half for every 20 epochs until reaching 100 epochs where the training ceases. We set the batch size to 128, the weight decay to 10−4, and the Nesterov momentum to 0.9. During the network search phase, we initialize the connectivity vec-tors in all receivers with uniform distributions to encourage free exploration in the early stage. The temperature τ is set to 10 and decayed by the number of epochs to exploit the converged topology distribution in the later stage. We re-train the selected ﬁnal architecture on the training sets from scratch using the same training set in the search phase but set the weight decay to be 5 × 10−4. Please refer to the supplementary materials for more details.
+Inference schema. Thanks to the decision-tree nature of SeBoW, the inference can be executed in two man-ners: multi-path inference and single-path inference. Multi-path inference computes the weighted predictive distribu-tion by running over all possible paths in the derived neural tree, such that all solvers in the tree will contribute to the ﬁ-nal prediction. However, in the single-path inference, only the most probable paths are executed based on the routing probability from routers, which enjoys less inference cost with some accuracy drop. 3.2. Benchmark Comparisons
+We compare the performance of SeBow against three groups of existing models: (1) typical human-engineered
+DNNs, including VGG [33], ResNet [11], GoogleNet [35], and MobileNet [12]; (2) neural decision trees, including
+Adaptive Neural Trees (ANT) [36], Neual Decision Tree
+Towards Neural Graph(NDT) [37], Deep Neural Decision
+Forests (DNDF) [19], Conditional CNN [13] and Explain-able Observer-Classiﬁer (XOC) [1]; (3) as the proposed neural tree can be viewed as a multi-branch network, we also compare it with some multi-branch models widely used in multi-task learning. These models include Routing net-work [29], Learning to Branch [10] and Cross-stitch [24] networks. We implement some of these competitors with the same training settings as the proposed method.
+Experimental results in both accuracy and model com-Params.
+Accuracy (%)
+Params.
+Top-1 Acc.
+Top-5 Acc.
+Method
+MobileNet [12]
+VGG-13 [33]
+ResNet-18 [11]
+Max-Cut DT [4]
+Compact BT [25] gcForest [42]
+Conditional CNN [13]
+ANT-CIFAR10-C [36]
+ANT-CIFAR10-B [36]
+ANT-CIFAR10-A [36]
+ANT-CIFAR10-A (ensemble) [36]
+XOC [1] + ResNet-18 2.2M 28.3M 11.2M
+N/A
+N/A
+N/A
+> 0.5M 0.7M / 0.5M 0.9M / 0.6M 1.4M / 1.0M 8.7M / 7.4M
+> 11.2M 85.90 (±0.23) 92.51 (±0.15) 92.98 (±0.17) 34.90 48.56 61.78 / 61.78
+< 90.00 90.69 / 90.66 90.85 / 90.82 91.69 / 91.68 92.29 / 92.21 93.12 (±0.32) 91.98 (±0.57)
+LearnToBranch-Deep-Wide [10] 3.5M
+SeBoW-A
+SeBoW-B
+SeBoW-C 1.0M / 0.7M 93.45 (±0.12) / 93.41 2.7M / 1.6M 94.00 (±0.18) / 93.93 5.8M / 4.6M 94.33 (±0.14) / 94.24
+Table 2. Performance comparison on CIFAR-10. Underlined num-bers denote the results of single-path inference. Italic fonts mean that the results are copied from the original paper. “N/A” means not applicable.
+Method
+MobileNet [12]
+VGG-13 [33]
+ResNet-18 [11]
+Max-Cut DT [4]
+NDT [37]
+DNDF [19] + ResNet-18
+ANT-Extend [36]
+Params.
+Accuracy (%) 2.4M 28.7M 11.2M
+N/A 14.1M
+> 11.2M 53.91 (±0.32) 72.70 (±0.42) 72.28 (±0.28) 12.40 15.48 67.18 4.2M / 4.2M 65.81 (±0.12) / 65.71
+Cross Stitch [24, 29]
+Routing network [29]
+LearnToBranch-Deep-Wide [10]
+--6.7M 53.0 60.50 (±0.75) 72.04 (±0.23)
+SeBoW-B
+SeBoW-C 1.9M / 1.5M 71.79 (±0.23) / 71.59 4.2M / 4.2M 74.59 (±0.33) / 74.59
+Table 3. Performance comparisons on the CIFAR-100 dataset.
+Method
+MobileNet [12]
+GoogleNet [35]
+VGG-13 [33]
+ResNet-18 [11]
+Params. 2.5M 6.8M 28.7M 11.2M
+Accuracy (%) 46.12 (±0.73) 48.85 (±0.52) 56.10 (±0.57) 55.32 (±0.75)
+DNDF [19] + ResNet-18
+> 11.2M 44.56
+SeBoW-C 8.4M / 4.8M 58.77 (±0.39) / 58.43 (±0.45)
+Table 4. Performance comparison on the tiny-ImageNet dataset. plexity (the number of parameters) on the four bench-mark datasets are provided in Table 2, 3, 4 and 5, re-spectively. All these results are computed by averaging over three individual runs. Note that we provide the re-sults of both the multi-path and the single-path (shown in underlined font) inference for some tree-based models to give a more comprehensive view of the proposed method.
+From these results, we can make the following conclu-sions: (1) On CIFAR-10, CIFAR-100 and tiny-ImageNet,
+SeBoW yields consistently superior performance to almost all types of competitors with smaller model size. For ex-Method
+VGG-13 [33]
+ResNet-18 [11]
+Conditional CNN [13]
+XOC [1] + ResNet-152 133.0M 11.7M
+≈ 30M
+> 60.2M
+SeBow-C (Multi-Path)
+SeBow-C (Single-Path) 16.90M 14.78M 69.93 69.76
+-60.77 70.13 69.86 89.25 89.08 86.20
+-89.98 89.17
+Table 5. Performance comparison on ImageNet. Both top-1 and top-5 accuracy are provided. ample, on CIFAR-10, SeBoW achieves 94.24% accuracy with only 4.6M parameters. However, ResNet-18 reaches only 92.98% with 11.2M parameters. (2) On ImageNet, which is seldom explored by prior tree models, SeBoW still produces competitive performance with fewer parameters compared to its search space VGG-13. (3) It can be seen that the accuracy comparison result is SeBoW-A < SeBoW-B < SeBoW-C. With more ﬁlters in the base learners, the model capacity becomes larger. The larger capacity leads to a signiﬁcant performance boost. (4) For all experiments, the single path inference produces only a slight accuracy drop compared to multi-path inference. It demonstrates the ef-fectiveness of SeBoW in searching the sparsely connected tree in the densely wired search space.
+Figure 2. The accuracy curves of SeBoW and randomly wiring models. Best viewed in color. 3.3. Ablation study
+Self-born wiring versus random wiring. To validate the effectiveness of the proposed self-born wiring (SeBoW), we compare it with random wiring, where the connections be-tween different base learners are randomly determined. Ex-perimental results are provided in Table 6, and some ac-curacy curves are depicted in Figure 2. We can see that
+SeBoW produces consistently higher ﬁnal accuracy com-pared to random wiring under different experimental set-Dataset
+Method
+Architecture
+Params.
+Accuracy (%)
+CIFAR10
+CIFAR100
+SeBoW-A
+{1, 1, 1, 3}
+Random
+Randomly generated
+SeBoW-B
+{1, 1, 2, 3}
+Random
+Randomly generated
+SeBoW-B
+{1, 1, 1, 2}
+Random
+Randomly generated
+SeBoW-C
+{1, 1, 1, 1}
+Random
+Randomly generated 1.0M / 0.7M 2.9M / 0.9M 0.6M / 0.6M 1.4M / 0.7M 1.0M / 0.7M 2.7M / 1.6M 6.4M / 1.9M 1.3M / 1.3M 3.2M / 1.7M 2.7M / 1.6M 1.9M / 1.5M 6.5M / 1.9M 1.3M / 1.3M 3.3M / 1.6M 1.8M / 1.5M 4.2M / 4.2M 20.5M / 6.2M 7.0M / 4.6M 10.3M / 5.4M 6.9M / 4.6M 93.45 / 93.41 91.71 / 91.23 92.55 / 92.55 92.18 / 92.07 83.32 / 83.21 94.00 / 93.93 93.41 / 93.09 93.63 / 93.63 93.57 / 93.49 84.04 / 84.01 71.79 / 71.59 70.40 / 70.08 71.12 / 71.12 70.63 / 70.40 63.42 / 63.38 74.59 / 74.59 72.52 / 72.22 73.71 / 73.59 73.58 / 73.33 67.04 / 67.02
+Table 6. Ablation study on network architecture. “Architecture” represents the number of learners in each section. tings. These results validate the effectiveness of the pro-posed wiring method for neural trees.
+Senders and Receivers. We propose another two variants of SeBoW to validate the necessity of routers, one with-out senders and the other without receivers, in Table 7.
+The model without receivers sends data weighted with path probability rather than sampling vector, but the resulting architecture always degenerates into a single branch with sub-optimal results, i.e. {1, 1, 1, 1}-architecture. The model without senders selects the ﬁnal network architecture using the distribution given by Equation 1 but without the noise (cid:15). Notably, this model cannot calculate path probability, so single-path inference is not applicable. We ﬁnd that the model using both senders and receivers always produces the
+Dataset
+Method
+S. (cid:88)
+R.
+Params.
+Accuracy (%)
+CIFAR10
+CIFAR100
+SeBoW-A
+SeBoW-B
+SeBoW-B
+SeBoW-C
+Tiny-ImageNet
+SeBoW-C
+ImageNet
+SeBoW-C (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) 0.6M / 0.6M 1.1M 1.0M / 0.7M 1.3M / 1.3M 2.5M 2.7M / 1.6M 1.3M / 1.3M 3.9M 1.9M / 1.5M 4.2M / 4.2M 10.3M 4.2M / 4.2M 4.2M / 4.2M 18.0M 8.4M / 4.8M 5.6M / 5.6M 19.80M 92.55 / 92.55 91.33 93.45 / 93.41 93.63 / 93.63 92.72 94.00 / 93.93 71.12 / 71.12 52.89 71.79 / 71.59 74.59 / 74.59 58.12 74.59 / 74.59 54.42 / 54.42 42.01 58.77 / 58.43 68.12 / 68.12 62.29 70.13 / 69.86 (cid:88) (cid:88) 16.90M / 14.78M
+Table 7. Ablation study on architecture modules. The columns
+“S.” and “R.” denote the senders and receivers.
+Method
+VGG-13
+ANT-B
+ANT-A
+Flops
+Speed(Batches/ms.)
+Accuracy(%) 248.3M 163M / 149M 254M / 243M 64.85 87.51 / 90.43 40.00 / 41.50 92.51 90.85 / 90.82 91.69 / 91.68
+SeBoW-A 151M / 146M 89.23 / 90.91 93.45 / 93.41
+Table 8. Flops, inference speed on CIFAR-10. Underlined num-bers denote the results of single-path inference.
+Dataset
+Model
+Stage 1
+Stage2
+Time
+Epochs
+Time
+Epochs
+CIFAR10
+ANT-A [36]
+SeBoW-B
+CIFAR100
+ANT-Extend [36]
+SeBoW-C 1.7 (hr) 1.3 (hr) 1.8 (hr) 1.5 (hr) 265 100 255 100 1.5 (hr) 0.5 (hr) 2.0 (hr) 0.8 (hr) 200 100 200 100
+Table 9. Training time of ANT and SeBoW. The two stages are growth and reﬁnement phases in ANT [36], architecture search and retraining phases in SeBoW. best top-1 accuracy. We speculate that the sampling distri-bution fuses various features for more robustness architec-ture selection, and the probability distribution under multi-ple paths helps the network obtain the optimal result.
+Inference Speed. To validate the lightweight of SeBoW, we investigate the Flops and inference speed of various models. We select CIFAR-10 as experimental dataset and show the results in Table 8. Experiments are run on a sin-gle GeForce GTX 1080 Ti with batch size of 256. It can be seen that our SeBoW achieves higher test accuracy and inference speed than neural trees and mother DNN, which indicates the value of the self-born wiring.
+Training time. To demonstrate the superiority of SeBoW in training efﬁciency, we compare ANT [36] and SeBoW under a similar amount of parameters. Table 9 summarises the average time taken with three individual runs on a single
+Quadro P5000 GPU with 16GB memory. It indicates that
+SeBoW is much time-efﬁcient than ANT thanks to its global optimization in differentiable architecture spaces instead of greedy evolution for architecture growth. 3.4. Interpretability
+Here we demonstrate that SeBoW exhibits better inter-pretability to DNNs thanks to its endowed decision-tree na-ture. The training of the SeBoW is divided into two stages.
+We visualize the class distribution on the decision paths of SeBoW-C on CIFAR10 in Figure 3. The results show that
+SeBoW is able to partition categories into several groups with similar semantics or visual cues. The model ﬁrst di-vides all categories into two groups as {car, truck} and
+{animal, ship, plane}. Cars and trucks are vehicles with
+In the other wheels, which are similar in appearance. branch, since aircraft design principles are derived from bionics related to bird characteristics, such as aircraft wings
+Figure 3. Visualization of class distributions on decision paths. (a) shows that the model captures a hierarchy from complete search space. (b) exhibits the searched architecture further polarises path probabilities of samples in different classes. and bird wings, there are certain morphological similarities between these artifacts and animals. This category group is further divided into {ship, plane} and {animal} by the model, which may be due to the difference in characteris-tics between metal materials and animal fur. However, it should be pointed out that the human intuition of the cat-egory relationship is not necessarily equal to the optimal network architecture. SeBoW can explore the relationship among categories from the perspective of model itself, thus supporting the interpretability of our model. Visualizations of all learned network architectures are provided in the sup-plementary materials. 4.

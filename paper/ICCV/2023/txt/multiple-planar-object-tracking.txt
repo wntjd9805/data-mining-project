@@ -1,0 +1,94 @@
+Abstract
+Tracking both location and pose of multiple planar ob-jects (MPOT) is of great significance to numerous real-world applications. The greater degree-of-freedom of pla-nar objects compared with common objects makes MPOT far more challenging than well-studied object tracking, es-pecially when occlusion occurs. To address this challeng-ing task, we are inspired by amodal perception that humans jointly track visible and invisible parts of the target, and propose a tracking framework that unifies appearance per-ception and occlusion reasoning. Specifically, we present a dual-branch network to track the visible part of planar ob-jects, including vertexes and mask. Then, we develop an oc-clusion area localization strategy to infer the invisible part, i.e., the occluded region, followed by a two-stream attention network finally refining the prediction. To alleviate the lack of data in this field, we build the first large-scale benchmark dataset, namely MPOT-3K. It consists of 3,717 planar ob-jects from 356 videos and contains 148,896 frames together with 687,417 annotations. The collected planar objects have 9 motion patterns and the videos are shot in 6 types of indoor and outdoor scenes. Extensive experiments demon-strate the superiority of our proposed method on the newly developed MPOT-3K as well as other two popular single planar object tracking datasets. The code and MPOT-3K dataset are released on https://zzcheng.top/MPOT. 1.
+
+Introduction
+Tracking multiple planar objects (MPOT) is a funda-mental task in computer vision. It aims to explore the mo-tion of planar objects, tracking both the location and pose of multiple targets simultaneously [40, 43, 56]. The planar ob-ject is defined as a plane belonging to a specific body [28] (e.g., box, building, or wall) in the form of four ordered vertexes [43, 70]. With the help of MPOT, we can track tar-gets when multiple planar objects exist, e.g., different sur-† Corresponding author. (a) Image of ith frame (b) Different tracking tasks (c) Tracking jth frame
+Figure 1: Comparison with other vision tasks. Given an im-age (a), we present the ground truth for different tasks in (b). The corresponding Degree-of-Freedom (DoF) is reported at the bottom and the details are listed on the right side of each task. In (c), we show the tracking results for box-based tasks (e.g., VOT, RVOT), mask-based tasks (e.g., VOS), and POT, which can find the oc-cluded regions (marked by the red line area) and provide pixel-to-pixel matching correspondence (colored points across frames). faces of an object [1] or planes from various objects [27].
+It has attracted more and more attention attributed to vari-ous applications in augmented reality [57, 104], video edit-ing [4, 20, 30], and robot navigation [92].
+MPOT is closely related to well-known computer vision tasks in RGB tracking [32] (see Tab. 1). Both tasks involve tracking the target across subsequent frames of a video us-ing the ground truth provided in the initial frame. However, it is more challenging in two aspects. 1) Tracking planar ob-jects is of greater Degree-of-Freedom (DoF). As shown in
+Fig. 1(b), MPOT tracks both the pose and location of the tar-get, which is described by an arbitrary quadrangle (i.e., four independent vertexes (x1, y1, x2, y2, x3, y3, x4, y4), whose
+DoF is 8 [44]).
+In contrast, it only needs to predict the position and size of an object (x, y, w, h) in video object tracking (VOT), and Rotated VOT (RVOT) additionally re-quires the rotation angle. Even compared with video object
+Table 1: The comparison of MPOT with other video-related tasks. We compare MPOT with five RGB tracking tasks and four tasks with auxiliary modality information. The count of DoF comes from [44].
+Modality
+Task
+Object category
+Object selection
+Multiple objects
+Pixel correspondence
+DoF
+Occlusion
+Object
+Scenario
+RGB
+RGB+Depth
+RGB+LIDAR
+MOT [83]
+MOTS [75]
+VOS [66]
+VOT [21]
+RVOT [32]
+MPOT
+RGBDT [91] 6DOP [50] 6DPT [81] 3dOD [35] 3dMOT [84]
+Limited, usually pedestrians or vehicles
+Limited, usually pedestrians or vehicles
+Arbitrary
+Arbitrary
+Arbitrary
+Arbitrary
+Arbitrary
+Limited by training set
+Arbitrary
+Limited by training set
+Limited, usually vehicles
+Detected
+Detected
+User-specified in the first frame
+User-specified in the first frame
+User-specified in the first frame
+User-specified in the first frame
+User-specified in the first frame
+Detected
+User-specified in the first frame
+Detected
+Detected
+Y
+Y
+N
+N
+N
+Y
+Y
+Y
+N
+Y
+Y
+N
+N
+N
+N
+N
+Y
+N
+Y
+Y
+N
+N 4
+N/A
+N/A 4 5 8 4 6 6 7 7
+Y
+N
+N
+Y
+Y
+Y
+Y
+Y
+Y
+Y
+Y segmentation (VOS), an alternative that introduces masks at the pixel level, MPOT is a more challenging task. Be-cause MPOT provides the matched correspondence for each pixel within the object region across frames [60] (e.g., col-ored points in Fig. 1(a)&(c)), which makes it possible for applications that require positional information like texture mapping [24]. Nevertheless, VOS that tracks the target area instead of per-pixel location can hardly achieve it. 2) Oc-clusion is another challenge that comes with MPOT. Not only the one in POT that manually occludes the camera,
+MPOT but introduces the occlusion raised by the layered position of multiple targets relative to the camera [77, 96] (see Fig. 1(c)). Besides, the occlusion is more complex than the ones in multiple object tracking (MOT). As discussed above, when occlusion occurs, MPOT estimates the pixel correspondence controlled by homography matrix H [3], which tends to be sensitive and have a high condition num-ber that can reach up to 5e7 [95]. This means that a tiny movement of the invisible part is extremely difficult to track.
+To address the aforementioned limitations, our work draws the inspiration that humans consolidate the visible to-gether with invisible parts of the target for tracking [96]. We propose a tracking framework comprised of procedures for appearance Perception and occlusion Reasoning, namely
+PRTrack. To track high DoF planar objects, we reformu-late the problem of estimating homography matrix H as predicting the mask and ordered vertexes for each planar object. With the high-dimensional mask, we can accurately locate the target area at the pixel level. Besides, the ordered vertexes provide per-pixel correspondence across frames for tracking the pose of planar objects. Therefore, in the stage of appearance perception, we propose a dual branch net-work to predict the ordered vertexes and masks of planar objects based on the historical visible information. For ver-texes, we design an encoder with shifted sampling strat-egy based on the constraint that the vertexes always have a clockwise order. For mask, we aggregate the probability of multiple planar objects with a multi-layered layout, that is, a stack of occluders and occludees. Further, to solve the cases of complex occlusion, we develop an occlusion area localization strategy to indicate the occluded part, by storing the movement of each planar object (i.e., historical H). To be specific, we factorize the sensitive homography matrix, which describes the relative movement of planar objects, into parameters of transition, rotation, and pose. Finally, with the prediction from the mentioned stages, we propose a two-stream self-attention network to jointly refine the pre-dicted planar objects.
+Besides, since there is no available dataset in this field, we build a large-scale benchmark dataset, namely MPOT-3K. Specifically, we shoot 356 videos with 3,717 planar objects and 687,417 annotations. The videos are collected under 9 motion patterns, where the relative movement and occlusion are also included to simulate the real-world scene.
+The contributions of this paper are two-fold: 1) We col-lect and annotate the first large-scale benchmark dataset for MPOT, where planar objects are diversely collected ex-pelling bias. Our dataset will be released and boost research in this field. 2) We propose a tracking framework with uni-fied motion and appearance models, which can accurately predict the pose and location of planar objects. Extensive experiments demonstrate the superiority of PRTrack against state-of-the-art approaches. 2.

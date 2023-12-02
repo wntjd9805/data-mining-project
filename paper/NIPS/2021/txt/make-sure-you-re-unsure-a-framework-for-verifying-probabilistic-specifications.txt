@@ -1,0 +1,122 @@
+Abstract
+Most real world applications require dealing with stochasticity like sensor noise or predictive uncertainty, where formal speciﬁcations of desired behavior are inherently probabilistic. Despite the promise of formal veriﬁcation in ensuring the reliability of neural networks, progress in the direction of probabilistic speciﬁcations has been limited. In this direction, we ﬁrst introduce a general formulation of probabilistic speciﬁcations for neural networks, which captures both probabilistic networks (e.g., Bayesian neural networks, MC-Dropout networks) and uncertain inputs (distributions over inputs arising from sensor noise or other perturbations). We then propose a general technique to verify such speciﬁcations by generalizing the notion of Lagrangian duality, replacing standard Lagrangian multipliers with "functional multipliers" that can be arbitrary functions of the activations at a given layer. We show that an optimal choice of functional multipliers leads to exact veriﬁcation (i.e., sound and complete veriﬁcation), and for speciﬁc forms of multipliers, we develop tractable practical veriﬁcation algorithms.
+We empirically validate our algorithms by applying them to Bayesian Neural
+Networks (BNNs) and MC Dropout Networks, and certifying properties such as adversarial robustness and robust detection of out-of-distribution (OOD) data. On these tasks we are able to provide signiﬁcantly stronger guarantees when compared to prior work – for instance, for a VGG-64 MC-Dropout CNN trained on CIFAR-10 in a veriﬁcation-agnostic manner, we improve the certiﬁed AUC (a veriﬁed lower bound on the true AUC) for robust OOD detection (on CIFAR-100) from 0% → 29%. Similarly, for a BNN trained on MNIST, we improve on the (cid:96)∞ robust accuracy from 60.2% → 74.6%. Further, on a novel speciﬁcation – distributionally robust OOD detection – we improve on the certiﬁed AUC from 5% → 23%. 1
+
+Introduction
+While neural networks (NNs) have shown signiﬁcant promise in a wide-range of applications (for e.g., [He et al., 2016, Yu and Deng, 2014]), a key-bottleneck towards their wide-spread adoption in safety-critical applications is the lack of formal guarantees regarding safety and performance. In this direction, there has been considerable progress towards developing scalable methods that can provide formal guarantees regarding the conformance of NNs with desired properties [Katz et al., 2017, Dvijotham et al., 2018b, Raghunathan et al., 2018]. However, much of this progress has been in the setting where the speciﬁcations and neural networks do not exhibit any probabilistic behaviour, or is mostly specialized for speciﬁc probabilistic speciﬁcations [Weng et al., 2019, Wicker et al., 2020].
+∗Equal contribution. Authors listed in alphabetical order. Correspondance to lberrada@deepmind.com, sdathath@deepmind.com, dvij@cs.washington.edu.
+†DeepMind, London, United Kingdom. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+In contrast, we introduce a general framework for verifying speciﬁcations of neural networks that are probabilistic. The framework enables us to handle stochastic neural networks such as Bayesian
+Neural Networks or Monte-Carlo (MC) dropout networks, as well as probabilistic properties, such as distributionally robust out-of-distribution (OOD) detection. Furthermore, the speciﬁcation can be deﬁned on the output distribution from the network, which allows us to handle operations such as the expectation on functions of the neural network output.
+Probabilistic speciﬁcations are relevant and natural to many practical problems. For instance, for robotics applications, there is uncertainty arising from noisy measurements from sensors, and uncertainty regarding the actions of uncontrolled agents (e.g. uncertainty regarding the behaviour of pedestrians for a self-driving vehicle). Often these uncertainties are modelled using a probabilistic approach, where a distribution is speciﬁed (or possibly learnt) over the feasible set of events [Thrun et al., 2005]. In such cases, we want to provide guarantees regarding the network’s conformance to desired properties in the distributional setting (e.g. given a model of the pedestrian’s uncertain behaviour, guarantee that the probability of collision for the autonomous vehicle is small). A more general problem includes scenarios where there is uncertainty regarding the parameters of the distribution used to model uncertainty. Here, in this general setting, we seek to verify the property that the network behaviour conforms with the desired speciﬁcation under uncertainty corresponding to an entire set of distributions.
+The key to handling the aforementioned complexity in the speciﬁcations being veriﬁed through our framework is the generalization of the Lagrangian duality. Speciﬁcally, instead of using the standard
+Lagrange duality where the multipliers are linear, we allow for probabilistic constraints (constraints between distributions) and use functional multipliers to replace the linear Lagrange multipliers. This allows us to exploit the structure of these probabilistic constraints, enabling us to provide stronger guarantees and facilitates the veriﬁcation of veriﬁcation-agnostic networks (networks that are not designed to be veriﬁable). In our paper, we focus on veriﬁcation-agnostic networks as this is desirable for many reasons, as noted in Dathathri et al. [2020]. To summarize, our main contributions are:
+• We derive a general framework that extends Lagrangian duality to handle a wide range of probabilistic speciﬁcations. Our main theoretical result (Theorem 1) shows that our approach (i) is always sound and computes an upper bound on the maximum violation of the speciﬁcation being veriﬁed, and (ii) is expressive enough to theoretically capture tight veriﬁcation (i.e. obtaining both sound and complete veriﬁcation).
+• We develop novel algorithms for handling speciﬁc multipliers and objectives within our framework (Propositions 1, 2). This allows us to apply our framework to novel speciﬁcations (such as distributionally robust OOD detection, where input perturbations are drawn from entire sets of distributions) by better capturing the probabilistic structure of the problem.
+• We empirically validate our method by verifying neural networks, which are veriﬁcation-agnostic, on a variety of probabilistic speciﬁcations. We demonstrate that even with relatively simple choices for the functional multiplier, our method strongly outperforms prior methods, which sometimes provide vacuous guarantees only. This further points towards the potential for signiﬁcant improvements to be had by developing tractable optimization techniques for more complex and expressive multipliers within our framework. 2 Probabilistic Speciﬁcations 2.1 Notation
+Let us consider a possibly stochastic neural network φ : X → P (Y), where X is the set of possible input values to the model, Y is the set of possible output values, and P (Y) is the set of distributions over Y. We assume that Y is a subset of Rl (unless speciﬁed otherwise), where l is the number of labels, and the output of the model are logits corresponding to unnormalized log-conﬁdence scores assigned to the labels {1, . . . , l}.
+The model is assumed to be a sequence of K layers, each of them possibly stochastic. For k ∈
+{1, . . . , K}, πk (xk|xk−1) denotes the probability that the output of layer k takes value xk when its input value is xk−1. We write xk ∼ πk (xk−1) to denote that xk is drawn from the distribution over outputs of layer k given input xk−1 to layer k. We further assume that each πk (x) has the form
+σ( ˜wx + ˜b), where σ is a non-linear activation function (e.g., ReLU, sigmoid, MaxOut), and ˜w and ˜b 2
+are random variables. The stochasticity for layer πk is assumed to be statistically independent of the stochasticity at other layers. For a BNN, ˜w and ˜b follow a diagonal Gaussian distribution (i.e., a
+Gaussian distribution with a diagonal covariance matrix), and for a MC-Dropout network they follow a Bernoulli-like distribution.
+Given a distribution p0 over the inputs X , we use φ(p0) to denote (with a slight abuse) the distribution of the random variable φ(X0), where X0 ∼ p0. 2.2 Problem Formulation.
+We now introduce the general problem formulation for which we develop the veriﬁcation framework.
+Deﬁnition 1 (Probabilistic veriﬁcation problem). Given a (possibly stochastic) neural network
+φ : X → P (Y), a set of distributions over the input P0 and a functional ψ : P (Y) (cid:55)→ R, the probabilistic veriﬁcation problem is to check that the following is true:
+∀ p0 ∈ P0, ψ (φ (p0)) ≤ 0. (1) 2.3 Examples of Speciﬁcations
+Below we provide examples of probabilistic speciﬁcations which are captured by the above problem formulation, and that we further empirically validate our framework on. In Appendix A, we provide further examples of relevant speciﬁcations (e.g., ensuring reliable uncertainty calibration) that can be handled by our problem setup.
+Distributionally Robust OOD Detection. We consider the problem of verifying that a stochastic neural network assigns low conﬁdence scores to all labels for OOD inputs, even in the presence of bounded noise perturbations to the inputs. Given a noise distribution perturbing an OOD image xood, we require that the expected softmax is smaller than a speciﬁed conﬁdence threshold pmax for each label i. Since the precise noise distribution is most often unknown, we wish to consider an entire class Pnoise of noise distributions. Denoting by δx the Dirac distribution around x, the problem is then to guarantee that for every p0 in P0 = {δxood + ω : ω ∈ Pnoise} and for each possible label i, ψ(φ(p0)) := Ey∼φ(p0)[softmax (y)i] − pmax ≤ 0. Robust OOD detection under bounded (cid:96)∞ perturbations as considered in Bitterwolf et al. [2020] is a special case of this problem where Pnoise is restricted to a set of δ distributions over points with bounded (cid:96)∞ norm.
+Robust Classiﬁcation. We also extend the commonly studied robust classiﬁcation problem [Madry et al., 2017] under norm-bounded perturbations, to the setting of probabilistic neural networks (e.g. BNNs). Deﬁne P0 to be the set of δ input distributions centered at points within an (cid:15)-ball of a nominal point xnom, with label i ∈ {1, . . . , l}: P0 = {δx : (cid:107)x − xnom(cid:107) ≤ (cid:15)}. For every p0 ∈ P0, we wish to guarantee that the stochastic NN correctly classiﬁes the input, i.e. for each j, ψ(φ(p0)) := Ey∼φ(p0)[softmax (y)i − softmax (y)j] ≤ 0. Note that it is important to take the expectation of the softmax (and not logits) since this is how inference from BNNs is performed. 3 The Functional Lagrangian Framework
+We consider the following optimization version:
+OPT = max p0∈P0
+ψ (φ (p0)) , (2)
+Having OPT ≤ 0 here is equivalent to satisfying speciﬁcation (1) . However, solving problem (2) directly to global optimality is intractable in general, because it can possibly be a challenging nonlinear and stochastic optimization problem. However, to only verify that the speciﬁcation is satisﬁed, it may sufﬁce to compute an upper bound on OPT. Here, we describe how the functional
+Lagrangian framework allows to derive such bounds by decomposing the overall problem into smaller, easier sub-problems. 3.1 General Framework
+Let Xk denote the feasible space of activations at layer k, and let pk denote the distribution of activations at layer k when the inputs follow distribution p0 (so that pK = φ (p0)). 3
+Assumptions.
+In order to derive our veriﬁcation framework, we make the following assumptions: (A1): ∃ l0 ≤ u0 ∈ Rn such that for each input distribution p0 ∈ P0, Support (p0) ⊆ X0 = [l0, u0]. (A2): Each layer is such that if x ∈ Xk = [lk, uk], then Support (πk (x)) ⊆ Xk+1 = [lk+1, uk+1].
+Assumption (A1) is natural since the inputs to neural networks are bounded. Assumption (A2) can be restrictive in some cases: it requires that the layer output is bounded with probability 1, which is not true, for example, if we have a BNN with a Gaussian posterior. However, we can relax this assumption to requiring that the output is bounded with high probability, as in Wicker et al. [2020].
+Functional Lagrangian Dual. be equivalently written in the following constrained form:
+In order to derive the dual, we begin by noting that problem (2) can max p0∈P0,p1,...,pK
+ψ (pK) s.t. ∀ k ∈ {0, . . . , K − 1}, ∀ y ∈ Xk+1, pk+1 (y) = (cid:90)
+Xk
+πk (y|x) pk (x) dx.
+For the k-th constraint, let us assign a Lagrangian multiplier λk+1(y) to each possible y ∈ Xk+1.
+Note that λ (y) is chosen independently for each y, hence λ is a functional multiplier. We then integrate over y, which yields the following Lagrangian penalty to be added to the dual objective: (cid:90)
+−
+Xk+1
+λk+1 (y) pk+1 (y) dy + (cid:90)
+Xk,Xk+1
+λk+1 (y) πk (y|x) pk (x) dxdy. (3)
+We now make two observations, which are described here at a high level only and are available in more details in appendix B. First, if we sum these penalties over k and group terms by pk, it can be observed that the objective function decomposes additively over the pk distributions. Second, for k ∈ {1, . . . , K − 1}, each pk can be optimized independently (since the objective is separable), and since the objective is linear in pk , the optimal pk is a Dirac distribution, which means that the search over the probability distribution pk can be simpliﬁed to a search over feasible values xk ∈ Xk. This yields the following dual: (cid:18) max pK ∈PK
+ψ (pK) − (cid:90)
+XK
+λK (x) pK (x) dx
++ (cid:19)
+K−1 (cid:88) k=1 max x∈Xk (cid:18) (cid:90)
+Xk+1
+λk+1 (y) πk (y|x) dy − λk (x) (cid:19)
++ max p0∈P0 (cid:90) (cid:18)(cid:90)
+X0
+X1
+λ1 (y) π0 (y|x) dy p0 (x) dx, (cid:19) (4) where we deﬁne PK (cid:44) φ(P0). In the rest of this work, we refer to this dual as g (λ), and we use the following notation to simplify equation (4): g (λ) = max p0∈P0 g0(p0, λ1) +
+K−1 (cid:88) k=1 max xk∈Xk gk(xk, λk, λk+1) + max pK ∈PK gK(pK, λK). (5)
+The dual g (λ) can be seen as a generalization of Lagrangian relaxation [Bertsekas, 2015] with the two key modiﬁcations: (i) layer outputs are integrated over possible values, and (ii) Lagrangian penalties are expressed as arbitrary functions λk (x) instead of being restricted to linear functions.
+Main Result. Here, we relate the functional Lagrangian dual to the speciﬁcation objective (2).
+Theorem 1. For any collection of functions λ = (λ1, . . . , λK) ∈ RX1 × . . . × RXK , we have that g (λ) ≥ OPT. In particular, if a choice of λ can be found such that g (λ) ≤ 0, then speciﬁcation (1) is true. Further, when ψ (pK) = Ey∼pK [c (y)], the dual becomes tight: g (λ(cid:63)) = OPT if λ(cid:63) is set to:
+K (x) = c (x) ; ∀ k ∈ {K − 1, . . . , 1}, λ(cid:63)
+λ(cid:63) k (x) = E y∼πk(x) (cid:2)λ(cid:63) k+1 (y)(cid:3) .
+Proof. We give a brief sketch of the proof - the details are in Appendix B. The problem in constrained form is an inﬁnite dimensional optimization with decision variables p0, p1, . . . , pK and linear constraints relating pk and pk+1. The Lagrangian dual of this optimization problem has objective g (λ). By weak duality, we have g(λ) ≥ OPT. The second part of the theorem is easily observed by plugging in λ(cid:63) in g (λ) and observing that the resulting optimization problem is equivalent to (2). 4
+Example. Let P0 be the set of probability distributions with mean 0, variance 1, and support [−1, 1], and let N[a,b](µ, σ2) denote the normal distribution with mean µ and variance σ2 with truncated support [a, b]. Now consider the following problem, for which we want to compute an upper bound:
+OPT = max p0∈P0
+EX1 [exp(−X1)] s.t. X1|X0 ∼ N[0,1](X 2 0 , 1) and X0 ∼ p0. (6)
+This problem has two difﬁculties that prevent us from applying traditional optimization approaches like Lagrangian duality [Bertsekas, 2015], which has been used in neural network veriﬁcation
+Dvijotham et al. [2018b]. The ﬁrst difﬁculty is that the constraint linking X1 to X0 is stochastic, and standard approaches can not readily handle that. Second, the optimization variable p0 can take any value in an entire set of probability distributions, while usual methods can only search over sets of real values. Thus standard methods fail to provide the tools to solve such a problem. Since the probability distributions have bounded support, a possible way around this problem is to ignore the stochasticity of the problem, and to optimize over the worst-case realization of the random variable
+X1 in order to obtain a valid upper bound on OPT as: OPT ≤ maxx1∈[0,1] exp(−x1) = 1. However this is an over-pessimistic modeling of the problem and the resulting upper bound is loose. In contrast,
+Theorem 1 shows that for any function λ : R → R, OPT can be upper bounded by:
+OPT ≤ max x1∈[0,1],p0∈P0 exp(−x1) − λ(x1) + EX0∼p0[E
+X1|X0∼N[0,1](X 2 0 ,1)[λ(X1)]].
+This inequality holds true in particular for any function λ of the form x (cid:55)→ θx where θ ∈ R, and thus: exp(−x1) − θx1 + EX0∼p0[E
+X1|X0∼N[0,1](X 2 0 ,1)[θX1]],
+OPT ≤ inf
+θ∈R max x1∈[0,1],p0∈P0
+= inf
+θ∈R max x1∈[0,1],p0∈P0 exp(−x1) − θx1 + θEX0∼p0 [X 2 0 ],
+= inf
+θ∈R max x1∈[0,1] exp(−x1) − θx1 + θ ≈ 0.37.
+Here, our framework lets us tractably compute a bound on OPT that is signiﬁcantly tighter compared to the naive support-based bound. 3.2 Optimization Algorithm
+Parameterization. The choice of functional multipliers affects the difﬁculty of evaluating g (λ). In fact, since neural network veriﬁcation is NP-hard [Katz et al., 2017], we know that computing g (λ(cid:63)) is intractable in the general case. Therefore in practice, we instantiate the functional Lagrangian framework for speciﬁc parameterized classes of Lagrangian functions, which we denote as λ (θ) =
+{λk (x) = λk (x; θk)}K k=1. Choosing the right class of functions λ(θ) is a trade-off: for very simple classes (such as linear functions), g(λ(θ)) is easy to compute but may be a loose upper bound on (2), while more expressive choices lead to tighter relaxation of (2) at the cost of more difﬁcult evaluation (or bounding) of g(λ(θ)).
+Algorithm 1 Veriﬁcation with Functional Lagrangians
+Input: initial dual parameters θ(0), learning-rate η, number of iterations T . for t = 0, . . . , T − 1 do {optimization loop} for k = 0 to K do {potentially in parallel} (cid:21) (cid:20) d(k)
+θ = ∇θ max xk gk(xk, λk, λk+1)
+{potentially approximate maximization} end for
+θ(t+1) = θ(t) − η (cid:80)K k=0 d(k)
+θ end for
+Return: Exact value or guaranteed upper bound on g(λ(θ(T ))) {final evaluation}
+{or any gradient based optimization}
+Optimization. With some abuse of notation, for convenience, we write g0 (x0, λ0, λ1) := g0 (p0, λ1) and gK (xK, λK, λK+1) := gK (pK, λK), with λ0 = λK+1 = 0. Then the problem of obtaining the best bound can be written as: minθ k=0 maxxk gk (xk, λk, λk+1), where the inner maximizations are understood to be performed over the appropriate domains (P0 for x0, Xk for xk, (cid:80)K 5
+l = 1, . . . , K − 1 and PK for xK). The overall procedure is described in Algorithm 1: θ is minimized by a gradient-based method in the outer loop; in the inner loop, the decomposed maximization problems over the xk get solved, potentially in parallel. During optimization, the inner problems can be solved approximately as long as they provide sufﬁcient information about the descent direction for θ.
+Guaranteeing the Final Results. For the ﬁnal veriﬁcation certiﬁcate to be valid, we do require the
+ﬁnal evaluation to provide the exact value of g(λ(θ(T ))) or an upper bound. In the following section, we provide an overview of novel bounds that we use in our experiments to certify the ﬁnal results. 3.3 Bounds for Speciﬁc Instantiations
+The nature of the maximization problems encountered by the optimization algorithm depends on the veriﬁcation problem as well as the type of chosen Lagrangian multipliers. In some easy cases, like linear multipliers on a ReLU layer, this results in tractable optimization or even closed-form solutions. In other cases however, obtaining a non-trivial upper bound is more challenging. In this section, we detail two such situations for which novel results were required to get tractable bounds: distributionally robust veriﬁcation and expected softmax-based problems. To the best of our knowledge, these bounds do not appear in the literature and thus constitute a novel contribution.
+Distributionally Robust Veriﬁcation with Linexp Multipliers. We consider the setting where we verify a deterministic network with stochastic inputs and constraints on the input distribution p0 ∈ P0. In particular, we consider P0 = {µ + ω : ω ∼ Pnoise}, where Pnoise denotes a class of zero-mean noise distributions that all satisfy the property of having sub-Gaussian tails (this is true for many common noise distributions including Bernoulli, Gaussian, truncated Gaussian):
+Sub-Gaussian tail: ∀i, ∀t ∈ R, E [exp (tωi)] ≤ exp (cid:0)t2σ2/2(cid:1) .
+We also assume that each component of the noise ωi is i.i.d. The functional Lagrangian dual g (λ) only depends on the input distribution p0 via g0, which evaluates to g0 (p0, λ1) = Ex∼p0 [λ1 (x)]. If we choose λ1 to be a linear or quadratic function, then g (λ) only depends on the ﬁrst and second moments of p0. This implies that the veriﬁcation results will be unnecessarily conservative as they don’t use the full information about the distribution p0. To consider the full distribution it sufﬁces to add an exponential term which evaluates to the moment generating function of the input distribution.
+Therefore we choose λ1 (x) = αT x + exp (cid:0)γT x + κ(cid:1) and λ2 (x) = βT x. The following result then gives a tractable upper bound on the resulting maximization problems:
+Proposition 1. In the setting described above, and with s as the element-wise activation function: max p0∈P0 g0 (p0, λ1) ≤ αT (wµ + b) + exp (cid:16)(cid:13) (cid:13)wT γ(cid:13) 2 (cid:13)
+σ2/2 + γT b + κ (cid:17)
+, max x∈X1 g1 (x, λ1, λ2) ≤ max x∈X2,z=s(x)
+βT (w2z + b2) − αT x − exp (cid:0)γT x + κ(cid:1) .
+The maximization in the second equation can be bounded by solving a convex optimization problem (Appendix C.3).
+Expected Softmax Problems. Several of the speciﬁcations discussed in Section 2.3 (e.g., distributionally robust OOD detection) require us to bound the expected value of a linear function of the softmax. For speciﬁcations whose function can be expressed as an expected value:
+ψ (pK) = Ex∼pK [c (x)], by linearity of the objective w.r.t. the output distribution pK, the search over the distribution pk can be simpliﬁed to a search over feasible output values xK: max pK ∈PK
+ψ (pK) − (cid:90)
+XK
+λK (x) pK (x) dx = max x∈XK c (x) − λK (x) . (7)
+Given this observation, the following lets us certify results for linear functions of the softmax (x):
+Proposition 2. For afﬁne λK, and c(x) with the following form c (x) = µT softmax (x), maxx∈XK c (x) − λK (x) can be computed in time O(3d), where XK ⊆ Rd. 6
+We provide a proof of this proposition and a concrete algorithm for computing the solution in
+Appendix C.2. This setting is particularly important to measure veriﬁed conﬁdence and thus to perform robust OOD detection. We further note that while the runtime is exponential in d, d corresponds to the number of labels in classiﬁcation tasks which is a constant value and does not grow with the size of the network or the inputs to the network. Further, the computation is embarassingly parallel and can be done in O(1) time if 3d computations can be run in parallel. For classiﬁcation problems with 10 classes (like CIFAR-10 and MNIST), exploiting this parallelism, we can solve these problems on the order of milliseconds on a cluster of CPUs. 4

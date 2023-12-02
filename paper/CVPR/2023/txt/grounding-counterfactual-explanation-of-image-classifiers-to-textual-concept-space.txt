@@ -1,0 +1,161 @@
+Abstract
+Concept-based explanation aims to provide concise and human-understandable explanations of an image classifier.
+However, existing concept-based explanation methods typ-ically require a significant amount of manually collected concept-annotated images. This is costly and runs the risk of human biases being involved in the explanation.
+In this paper, we propose Counterfactual explanation with text-driven concepts (CounTEX), where the concepts are defined only from text by leveraging a pre-trained multi-modal joint embedding space without additional concept-annotated datasets. A conceptual counterfactual explana-tion is generated with text-driven concepts. To utilize the text-driven concepts defined in the joint embedding space to interpret target classifier outcome, we present a novel pro-jection scheme for mapping the two spaces with a simple yet effective implementation. We show that CounTEX generates faithful explanations that provide a semantic understanding of model decision rationale robust to human bias. 1.
+
+Introduction
+Explainable artificial intelligence (XAI) aims to unveil the reasoning process of a black-box deep neural network.
+In the vision field, heatmap-style explanation has been ex-tensively studied to interpret image classifiers [20, 21, 24].
+However, simply highlighting the pixels that significantly contribute to model outcome does not answer intuitive and actionable questions such as “What aspect of the region
+Is it color? Or pattern?”. On the other is important? hand, drawing human-understandable rationale from the highlighted pixels requires domain expert’s intervention and can thus be impacted by the human subjectivity [11].
+In contrast, concept-based explanation can provide a more human-understandable and high-level semantic expla-† Work done during the internship at Amazon Alexa AI
+Figure 1. (a) Conventional concept-based explanation derives a
+CAV with the target model’s embedding of manually collected concept-annotated images. (b) CounTEX derives the concept di-rection directly from texts in CLIP latent space. nation [3, 4, 7, 9, 11]. Concept fundamentally indicates an abstract idea, and it is generally equated as a word such as
+“stripe” or “red”. The earliest approach to interpret how a specific concept affects the outcome of the target image classifier is concept activation vector, or CAV [11]. A CAV represents the direction of a concept within the target clas-sifier embedding space and has been widely adopted to sub-sequent concept-based explanations [15, 19, 25].
+However, the CAVs acquisition requires collections of human annotations. The CAV of a concept is typically pre-computed via two steps as depicted in Figure 1 (a); 1) col-lecting a number of positive and negative images that best represent a concept (e.g., images with and without stripes), 2) training a linear classifier (commonly support vector ma-chine) with the images. The vector normal to the deci-sion boundary serves as a CAV. Collecting positive/negative datasets in step 1 is not only costly but also poses the risk of admitting human biases in two aspects; diverging CAVs for the same concept and unintended entanglement of multiple concepts. We will demonstrate in Section 2 that this may threaten credibility of explanation.
+To tackle such challenges, we propose Counterfactual explanation with text-driven concepts (CounTEX), which derives the concept direction only from a text by leveraging the text-image joint embedding space, CLIP [16] (Figure 1 (b)). CounTEX defines a concept direction as the direc-tion between the two CLIP text embeddings of a neutral an-chor prompt that does not contain any concept and a target prompt that includes the concept keyword, which is similar to text-guided image manipulation [8, 12].
+CounTEX outputs conceptual counterfactual explanation (CE) defined by importance scores of user-specified con-cepts, similar to the previous conceptual CE method called
+CCE [1]. Given an input image, prediction of black-box the importance scores an-classifier, and a target class, swer the question, “How much should each concept be added/subtracted to the image to change the prediction into the target class?”. Specifically, an image embedding from the target classifier is perturbed into the weighted sum of the concept directions representing various concepts, where the weights are updated until the prediction becomes the target class. The final weights serve as importance scores of cor-responding concepts, indicating the amount of contribution of the concepts to the prediction.
+The introduction of CLIP poses a significant challenge; how can we exploit concept directions obtained from CLIP latent space to generate CE for an arbitrary target image classifier? To this end, we propose a novel scheme using projection and inverse projection. The projection maps an image embedding from the intermediate layer of target clas-sifier to the CLIP latent space. The perturbation is con-ducted in the CLIP space using the text-driven concept di-rections. The inverse projection brings the perturbed em-bedding back to the target classifier space so that it can be feed-forwarded to the remaining target classifier. We found that a projector/inverse projector consisting of a simple neu-ral network can effectively map the two latent spaces of tar-get classifier and CLIP and generate faithful explanations.
+Another advantage of deriving concept directions from text is that it allows to utilize a wide variety of concepts at a marginal cost. Unlike previous studies that produce expla-nations with only a small number of concepts, we present faithful explanations consisting of a much larger number of diverse concepts derived for generic classifiers and datasets
+Our contributions can be summarized as follows: 1. We propose a novel explanation framework CounTEX to derive the concept direction only from text by lever-aging the CLIP joint embedding space. 2. We propose projection/inverse projection scheme to utilize the concept directions defined in the CLIP latent space to explain an arbitrary target image classifier. 3. We show qualitatively and quantitatively improved re-sults that verify CounTEX effectively addresses the
+Figure 2. (a) Left: PCA results of misaligned CAVs for the same concept “stripe”, Middle: Cosine similarity between two CAVs over various concepts, Right: Rank correlation between concept importance scores generated from different seeds. (b) Positive im-age examples for concept “green” and “grass” limitations of image-driven CAVs. 2. Limitations of Image-driven Concept
+This section explores two major risks of image-driven
+CAVs that can threaten the credibility of explanations. Con-cepts are often abstract words, and it is nontrivial to decide
+“good” examples that best represent a concept. The deci-sion often depends on the intuition of the annotators and can be very subjective, and there are two risks; 1) Diverg-ing CAVs and 2) unintended entanglement.
+Diverging CAVs (Figure 2 (a)) A CAV may vary upon the positive/negative dataset composition. For each positive and negative dataset of a concept, we randomly selected 30 images using two different random seeds from the concept datasets used in the CCE paper [1] and obtained CAVs re-spectively from the two compositions. If a CAV is robust to dataset composition, then the two CAVs derived from dif-ferent seeds should align for the same concept. However, the result depicted in Figure 2 (a) left shows that the CAVs for the concept “stripe” from two seeds are not aligned well, showing a low cosine similarity of 0.73. Note that the result is from principal component analysis. The cosine similarity distribution shown in Figure 2 (a) middle indicates that the misalignment is common for 170 concepts used in CCE.
+Unstable explanations are the problematic consequences of diverging CAVs. Figure 2 (a) right shows the distribu-tion of Spearman’s rank correlation coefficients between the concept importance scores generated by CCE using the two
+CAVs sets from different seeds. The rank correlation is very low, which suggests that diverging CAVs lead to very differ-ent explanations for the same outcome. This threatens the reliability of the explanation.
+Unintended entanglement (Figure 2 (b)) A CAV of a concept can suffer from an unintended entanglement with other concepts. Figure 2 (b) shows positive images for the concept “green” and “grass”. The images for the concept
+“green” are highly likely to include grass images, and most of the images for the concept “grass” are highly likely to be green colored. This unintended entanglement can lead to misleading explanations such as the “grass” concept receiv-ing a high importance score even though the image contains green but no grass at all. We observed that this kind of mis-behavior does occur in CCE but not in CounTEX (details are described in Section 4.2).
+To overcome the above-mentioned limitations of image-driven CAVs, a significant number of carefully chosen concept-annotated images are required. The limitations are alleviated in CounTEX because it does not depend on im-age collections. In addition, because it leverages the CLIP latent space pre-trained on extensively crawled large-scale datasets, the risk of unintended entanglement is reduced. 3. Method
+The key idea of CounTEX is to derive concept direction from text by leveraging the CLIP embedding space. CLIP is trained as a joint embedding space of text and images [16], and it enables us to define concept directions without any positive/negative image examples.
+This approach raises the following research questions. 1. Given concept directions textually driven in CLIP la-tent space, how can we exploit them to interpret the outcome of an arbitrary target classifier? 2. How can we obtain the text-driven concept directions using CLIP? 3. What other modeling consideration is needed to gen-erate accurate counterfactual explanation (CE)?
+Section 3.1 to 3.3 will show how we address question 1.
+Section 3.4 and 3.5 will demonstrate how we address ques-tion 2 and 3, respectively. The overall flow of CounTEX is visualized in Figure 3. 3.1. Problem definition: Counterfactual XAI
+A typical CE takes three inputs, a black-box classifier f (·), an input image x, and a target class yt. Conceptual CE takes an additional input, i.e., a predefined concept library
+C = {c1, ..., cN } with N concept keywords. The output is w ∈ RN, a vector of concept importance scores. An im-portance score wi of a concept ci indicates the amount by which ci needs to be added/subtracted to change the predic-tion to yt. Here, we define a generic perturbation function p(·), which takes four inputs; f , x, C, and w. The output is a perturbed prediction; yp = p(f, x, C, w).
+The goal of conceptual CE is to find the optimal w∗ that minimizes the gap between yt and perturbed prediction yp and to provide w∗ as an explanation. Specifically,
+Figure 3. Overall flow of CounTEX. where L is commonly defined as cross-entropy loss.
+For a misclassified image, yt can be specified as the ground truth class. In this case, CE shows the root cause of the incorrect prediction. On the other hand, when applied to a correct prediction, CE can help identify features important for making a prediction correct against an arbitrary yt. 3.2. Perturbation in CLIP latent space
+In conventional conceptual CE methods, including CCE, perturbation function p(·) is defined on embedding linearly perturbed in the embedding space of f . Specifically, p(f, x, C, w) = ftop (cid:0)fbottom(x) + w · Vf (cid:1) where fbottom(x) is the bottom layers of f , ftop(x) is the top linear layer, and Vf is a bank of CAVs of all concepts in C. The subscript f denotes that CAVs in Vf are de-fined with concept image embeddings from fbottom. How-ever, as discussed in Section 2, constructing Vf in target classifier’s embedding space requires a significant number of positive/negative examples for each c in C.
+In CounTEX, the linear perturbation is instead con-ducted in the CLIP space using the text-driven concept di-rection bank VCLIP whose details will be described in Sec-tion 3.4. This implies that we need to map the image embed-ding from the target classifier’s latent space to the CLIP’s la-tent space where the perturbation operates. We also need to map the image embedding perturbed in the CLIP space back to the target classifier’s embedding space to feed-forward it through the remaining ftop(·). We introduce projection and inverse projection functions, gproj and ginv, for this purpose.
+In summary, our perturbation p is modeled as, p(f, x, C, w) = ftop (cid:16) ginv (cid:0)gproj(fbottom(x)) + w · VCLIP (cid:1)(cid:17) min w
+L(p(f, x, C, w), yt)
+These steps are visualized in the Figure 3. gproj and ginv are
+Category
+Color
+Texture
+Scene
+Material
+Part
+Object
+Prompt template
+"A photo of {} object"
+"A photo of {} object"
+"A photo of object on {}"
+"A photo of object made of {}"
+"A photo of object containing {}"
+"A photo of object along with {}"
+Table 1. Prompt templates of ttrg for six concept categories
+We empirically found that a simple architecture as MLPs is sufficient for both projection and inverse projection. It is noteworthy that the training can be done with any other dataset different from the training dataset of f (·). The train-ing dataset does not even need any annotation as the training is conducted in an unsupervised manner. The more com-prehensive the dataset, the more accurate projection and in-verse projection can be expected. 3.4. Constructing VCLIP via Concept Prompting tsrc text ttrg.
+We construct VCLIP using only text in the CLIP la-tent space by prompting concept keywords in C. First, for each c, we generate a pair of prompts composed of source text tsrc and target is fixed through all concepts as a concept-neutral generic phrase,
+“A photo of object”, following the zero-shot classi-fication prompt strategy from the original CLIP paper [16].
+To generate syntactically and semantically correct prompts, the template for ttrg is determined according to the category of c. For concept categorization, we leverage CBRODEN [4].
+CBRODEN is one of the most widely used predefined concept libraries and provides concept categories such as “texture” and “color”. Every concept belongs to one of categories, e.g., concept “stripe” belongs to “texture”. Templates of ttrg for various concept categories are shown in Table 1.
+The generated prompt pair is then used to derive the concept direction. [tsrc, ttrg] is tokenized and encoded with
+CLIP text encoder (CLIPtext), yielding a text embedding pair [CLIPtext(tsrc), CLIPtext(ttrg)]. Then the direction vc of a concept c is computed as the difference between the two text embeddings vc = CLIPtext(ttrg) − CLIPtext(tsrc). Af-ter the computation, it is normalized to a unit vector. By iterating for ∀c ∈ C, we construct the final concept direc-tion bank VCLIP = {vc ∈ Rl|c ∈ C}, where l denotes the dimension of the CLIP text embedding. 3.5. Optimizing w
+We introduce three constraints and corresponding loss terms for optimizing w. First, the prediction on the per-turbed embedding should change to the target class. There-fore, LCE is included to minimize the cross entropy between the predicted label and the target class yt. Second, an iden-tity loss Lid enforces the minimal perturbation so that the
+Figure 4. Diagram of projection, inverse projection and cycle con-sistency. the functions with learnable parameters that are trained to map the latent spaces of f and CLIP. 3.3. Learning Projection and Inverse Projection
+We train gproj and ginv based on two desiderata which are also illustrated in Figure 4. First, ideally, an image should generate the same embedding regardless of how it is com-puted. There are two possible paths for computing an im-age embedding in CLIP latent space; 1) computing an em-bedding directly from the CLIP image encoder denoted by
+CLIPimage(x), 2) projecting the embedding fbottom(x) into the CLIP space. A projector should minimize the distance between the embeddings computed by the two paths.
+The desideratum should hold for the inverse projector as well; 1) Computing an embedding directly from fbottom and 2) projecting CLIPimage(x) into that of f via an inverse projection should result in closely located embeddings.
+We use the distance between embeddings from the two paths as the loss terms to train gproj and ginv as below:
+Lproj = ||gproj(fbottom(x)) − CLIPimage(x)||2
+Linv = ||fbottom(x) − ginv(CLIPimage(x))||2. gproj and ginv are separately trained with corresponding loss.
+The second desideratum is that projection and inverse projection should not introduce any unnecessary pertur-bation. Two loss terms defined above do not guarantee whether an image embedding will return to the same em-bedding after the sequential projection and inverse projec-tion. To reduce the “round trip” error, we introduce an ad-ditional cycle consistency loss Lcycle to fine-tune gproj and ginv. Lcycle is defined as the distance as below:
+Lcycle = ||ginv (cid:0)gproj(fbottom(x))(cid:1)−fbottom(x)||2.
+After the training of the projector and inverse projector, they are jointly fine-tuned with Lproj + Linv + Lcycle for a few epochs.
+perturbed embedding does not deviate too much from the original image embedding. Lastly, sparse weights are en-forced to ensure concise and human-understandable expla-nations. The sparseness loss Lreg imposes L1 and L2 sparse-ness of w following the conventional approach [1].
+Each loss term is formulated as follows: (cid:16) ftop (cid:0)ginv(gproj(fbottom(x)) + w · VCLIP)(cid:1), yt
+LCE = CE
+Lid = MSE(cid:0)gproj(fbottom(x)), gproj(fbottom(x)) + w · VCLIP
+Lreg = ||w||1 + ||w||2
+Ltotal = LCE + α · Lreg + β · Lid, (cid:17) where yt denotes a one-hot representation of yt. Ltotal is the sum of the three loss terms, and the hyperparameters α and
+β are numbers smaller than 1. w is updated to minimize
+Ltotal. If the prediction changes to the target class before the loss converges, then the optimization is terminated. 4. Experimental Results 4.1. Experimental settings
+Black-box Model: We adopted three image classifiers,
+CLIP+linear, ResNet18, and ResNet50. CLIP+linear is a linear probe CLIP [16] composed of a linear layer on top of a frozen CLIP image encoder with vision transformer (ViT-B/32) architecture. Unlike ResNet, CLIP+linear does not require projection as it shares the pre-trained CLIP latent space where we define concept directions.
+Datasets: We used three datasets to train the black-box models. In addition to ImageNet [6], we adopted two datasets, Animals with Attributes2 (AwA2) [23] and CUB-200-2011 (CUB) [22] for the quantitative evaluation. AwA2 has 50 classes with 85 class-wise attributes, and CUB has 200 classes and 312 class-wise attributes.
+Concept library: We used three pre-defined concept li-braries. CBRODEN is a benchmark concept library proposed from [4]. It has 1,197 general concepts ranging from color to scene. We also utilize attribute names of AwA2 and CUB datasets as concept libraries, CAwA2 and CCUB, especially for quantitative analysis. It is noteworthy that our method is not bounded to specific C. CounTEX allows to easily add/remove any concept by simply presenting text, unlike competitors require concept-annotated image datasets.
+Projector and inverse projector: We empirically found that the projector/inverse projector can be sufficiently im-plemented with multi-layer perceptron (MLP). Both are comprised of MLP with hidden dimension of (512, 512, 512). Throughout all experiments, we used the projector and inverse projector trained with ImageNet for 50 epochs.
+The investigation results are shown in Section 4.5.
+Optimization details: The weight vector w is optimized to minimize Ltotal. α and β were set to 0.1 for all exper-iments after hyper-parameter search. We used a stochas-(cid:1) tic gradient descent (SGD) optimizer with a learning rate 10−10 with the maximum iteration number set to 100. We terminate the optimization early once the predicted class changes to the target class. 4.2. Qualitative evaluation
+Identifying features contributing to correct predic-tion: We first generate CEs for correctly classified exam-ples. We intentionally select the wrong class as the target class. In this setting, a large negative score of a concept in-dicates that the concept caused an image to be classified as the correct class rather than the target class. In Figure 5, we show the concepts of the top three and bottom three in terms of importance scores along with the scores.
+The results of the proposed method are well aligned with human perceptions ranging from low-level concepts such as color and pattern to high-level concepts including scene and shape. The top-1 and bottom-1 concepts of Figure 5 (a) and (c) show that color is the most discriminative feature that helps the image to be classified to the correct class against the target class. Meanwhile, our method can also identify scenes, such as “ice” or “campsite” in (c), implying that the model relies on class-coherent backgrounds. Moreover, the explanation of CUB-trained model with CCUB shown in (d) demonstrates that our method can capture various fine-grained concepts from local parts such as “back color” to global shapes such as “duck-like shape”.
+Results of Figure 5 (a) and (b) are for ResNet-based im-age classifiers.
+It shows that CounTEX produces quality results even when the projection and inverse projection are involved. Please refer to Appendix for more examples.
+Debugging misclassification cases: We apply the pro-posed method to debug a misclassification case. We 1) identify the required features to correct the prediction using
+CounTEX, 2) edit the image based on it, and 3) test whether the prediction on the edited image actually changes to the correct class.
+We observe that CounTEX helps to correct the misclassi-fication. Figure 6 (a) shows an image of Hippopotamus misclassified to Rhinoceros by CLIP+linear trained on
+AwA2 dataset. The CE says that the concepts that need to be added and subtracted the most to correct the prediction to Hippopotamus are “water” and “field” respectively.
+We edited the background to water while preserving the ob-ject using the most recent text-guided image manipulation method [17] as shown in (b). (b) shows that the prediction on the background-edited image changes the correct class,
+Hippopotamus.
+Like this, CounTEX can help to find the root cause of a model misbehavior by investigating incorrect outcomes with generated CE. The above-mentioned example suggests that the black-box model learned the correlation with back-ground rather than the features directly related to the ob-Figure 5. CEs generated by CounTEX. The input image is shown below the original prediction and the target class is shown with represen-tative training images belong to it. The concept importance scores of top-3 and bottom-3 concepts are shown in red and blue colors, which represents positive and negative contributions, respectively. The target models and corresponding training datasets are written to the left to the input images.
+Figure 6. (a) CE generated to turn the prediction on misclassified image into correct answer. (b) Prediction changes to the correct class after top-1 concept-guided image editing. (c) Training image examples of the two classes. ject. As shown in Figure (c), we found that “field” con-sistently appears as a background across most training im-ages of Rhinoceros, while “water” frequently appears in training images of Hippopotamus. Based on this find-ing, we can improve the model by modifying the dataset, e.g., adding more training data of Hippopotamus with diverse backgrounds.
+Qualitative comparison with CCE [1]: Here, we present an example where the major CAV-based competi-tor CCE fails to generate faithful explanation while Coun-TEX succeeds. Especially, Figure 7 shows that CCE as-signs a large negative importance score to concept “grass” that does not even exist in the original image. This sup-ports that conventional CAV suffers from unintended en-tanglement as described in Section 2. On the contrary,
+Figure 7. CE generated by CCE and CounTEX for the same pre-diction. CCE assigns high score to irrelevant concept “grass” un-like CounTEX. our method successfully reveals that the “green” color con-tributes the most. The CLIP latent space trained with large-scale datasets makes explanation more robust to unintended entanglement. Note that both results are obtained by using the same concept library that contains “green”. Please refer to the Appendix for more examples. 4.3. Quantitative evaluation
+Quantitative evaluation protocol: Quantitative evalu-ation of conceptual CE is challenging for two reasons: 1)
+There is a lack of an established dataset that provides a concept-level ground-truth explanation to be compared with the output concept importance score. 2) Even if there is a ground truth, it needs to be adapted to the characteristic of CE that contrasts the original prediction against a target class. For this reason, quantitative evaluations of conceptual
+CEs have been conducted only in very limited settings [1,2].
+For more systematic evaluation, we repurpose the class-wise attributes of AwA2 and CUB datasets as concept-level ground truth. They provide a binary attribute vector ay for each class y. Each dimension indicates the pres-ence/absence of the corresponding attribute. We build con-cept libraries CAwA2 and CCUB with the attribute keywords.
+Figure 8. Example of generating ground truth CE for AwA2 dataset. Here, yo is zebra and yt is polar bear.
+We then generate CE with CAwA2 and CCUB, so that we can compare the output concept importance scores with the given binary attributes.
+We define ground truth CE by contrasting class-wise at-tributes of predicted class yo and target class yt, which is also depicted in Figure 8. An ideal CE reveals only the at-tributes that distinguish yo from yt, i.e., the attributes that exclusively appear in one class. Therefore, we first sub-tract the two attribute vectors, ayo and ayt. Then, each di-mension of the resulting vector will have one of {-1, 0, 1}, where 1 and -1 indicate an attribute that is present only in yt and yo, respectively. Here, 0 indicates that an attribute is present or absent in both yt and yo, which is out of the in-terest of CE. Therefore, we filtered out the dimensions with a value zero from yt − yo. The same dimensions are filtered out from the concept importance scores as well.
+We evaluate the performance of CE using the area under roc curve (AUROC). An ideal CE should be able to rank a concept with ground truth 1 at the top and a concept with ground truth -1 at the bottom. AUROC can measure such ranking, especially when the concept important scores are continuous values while the ground truth CE is binary.
+Competitor settings: Our primary competitor, CCE [1], did not conduct a quantitative evaluation on general im-age datasets including AwA2 and CUB. Therefore, we pre-computed CAVs for CCE with respect to CAwA2 and CCUB by collecting corresponding positive and negative concept images from Google image search. For both CCE and
+CounTEX, we randomly selected plenty images from the validation dataset and generated CEs for the various target classes. The generated explanations were compared with ground truth CE. Details are described in the Appendix.
+Quantitative results: Table 2 shows the AUROC from explanations of various black-box models and datasets. Our method outperforms CCE in assigning higher importance scores to class-discriminative features. Consistently higher
+AUROC over various models and datasets shows that the
+CEs generated with text-driven concepts are more accurate than image-driven concepts of CCE. 4.4. Effect of Concept Prompting
+CounTEX is robust to concept prompt templates, i.e., two prompts with the same semantics produce consistent
+CEs, even if the constituent words are different. We mea-Target model Dataset Library
+CCE
+Ours
+CLIP+Linear
+ResNet18
+ResNet50
+AwA2
+CUB
+AwA2
+CUB
+AwA2
+CUB
+CAwA2
+CCUB
+CAwA2
+CCUB
+CAwA2
+CCUB 0.6436 0.7066 0.6113 0.6979 0.5811 0.6811 0.8132 0.7891 0.7314 0.7750 0.7316 0.7336
+Table 2. AUROC comparison. The higher AUROC indicates the more accurate interpretation.
+Figure 9. (a) Prompting configurations. (b) Rank correlation dis-tribution between CE generated with different prompts. For the comparison, we also visualized the results of CCE with varying dataset composition in gray color. sured the Spearman’s rank correlation between the explana-tions generated with three different template configurations including the one in Table 1. The other two configurations are described in Figure 9. We replaced words in templates with different but meaning-preserving words, such as re-placing “containing” with “having”.
+The rank correlation close to 1 shown in Figure 9 in-dicates that the explanations of CounTEX are robust to the differences in prompt templates. Note that we used the same experimental settings as in Section 2. This is a stark contrast to CAVs that significantly diverge depending on the concept dataset collection. Extracting semantics from various text expressions depends on the language understanding perfor-mance of the CLIP text encoder. We can expect even more robust explanations if the text encoder further improves. 4.5. Evaluation of Projection/Inverse Projection
+The mapping capability of projector/inverse projector measured by normalized mean squared error (NMSE) shows two approximators can effectively map the embed-ding spaces of target classifier and CLIP. NMSE is de-fined as NMSE(z, ˆz) = ||z−ˆz||2
+, where z and ˆz denote
+||z||2 original and projected/inverse projected embedding, respec-tively. The lower NMSE indicates the more accurate projec-tion/inverse projection capability.
+Given that the distance between z and ˆz should be at least smaller than that between two different embeddings belonging to the same class, we use the average intra-class distance as a baseline. It is the average distance between 10 randomly selected image embeddings from the same class.
+NMSE
+Projector (fbottom → CLIP)
+Inverse projector (CLIP → fbottom) f (x)
+RN18
+RN50
+RN18
+RN50
+Intra-class
+MLP (10)
+MLP (50)
+MLP (full) 0.6810 0.3394 0.2834 0.2479 0.3871 0.2606 0.2150 0.7126 0.4370 0.3399 0.3270 0.7724 0.5928 0.3544 0.2314
+Table 3. Normalized mean squared error (NMSE) of projector and inverse projector. RN abbreviates ResNet. The numbers in paren-theses mean the number of training images per class. The lower, the better.
+The output of a projector lies in the CLIP latent space, so the intra-class NMSE measured in the CLIP latent space serves as a baseline. Likewise, the baseline NMSE for inverse pro-jector is computed in the target classifier’s latent space. In addition, to check if we can enhance the computational effi-ciency by reducing the number of training data, we trained projector and inverse projector with fewer images. The re-duced training datasets are composed of randomly sampled 10 and 50 images from each class.
+Table 3 shows the evaluation results. The numbers within parentheses show the number of images per class used for the training. Full indicates using the entire Ima-geNet training set. All evaluations are conducted with Ima-geNet validation set disjoint from the training dataset.
+There are a few notes worth mentioning: Note 1: NMSE of projector and inverse projector are all lower than the baselines. This supports that the projector and inverse pro-jector can effectively map the embeddings in the two latent spaces. Note 2: Projector/inverse projector trained with a small number of images, i.e., 50 images per class, shows comparable performance as using the full dataset. Consid-ering that the images do not need annotations, the overhead for training projector/inverse projector can be regarded as marginal. 5.

@@ -1,0 +1,155 @@
+Abstract
+Modern large-scale kernel-based tests such as maximum mean discrepancy (MMD) and kernelized Stein discrepancy (KSD) optimize kernel hyperparameters on a held-out sample via data splitting to obtain the most powerful test statistics. While data splitting results in a tractable null distribution, it suffers from a reduction in test power due to smaller test sample size. Inspired by the selective inference framework, we propose an approach that enables learning the hyperparameters and testing on the full sample without data splitting. Our approach can correctly calibrate the test in the presence of such dependency, and yield a test threshold in closed form. At the same signiﬁcance level, our approach’s test power is empirically larger than that of the data-splitting approach, regardless of its split proportion. 1
+
+Introduction
+Statistical hypothesis testing is a ubiquitous problem in numerous ﬁelds ranging from astronomy and high-energy physics to medicine and psychology [1]. Given a hypothesis about a natural phenomenon, it prescribes a systematic way to test the hypothesis empirically [2]. Two-sample testing, for instance, addresses whether two samples originate from the same process, which is instrumental in experimental science such as psychology, medicine, and economics. This procedure of rejecting false hypotheses while retaining the correct ones governs most advances in science.
+Traditionally, test statistics are usually ﬁxed prior to the testing phase. In modern-day hypothesis testing, however, practitioners often face a large family of test statistics from which the best one must be selected before performing the test. For instance, the popular kernel-based two-sample tests
+[3, 4] and goodness-of-ﬁt tests [5, 6] require the speciﬁcation of a kernel function and its parameter values. Abundant evidence suggests that ﬁnding good parameter values for these tests improves their performance in the testing phase [4, 7–9]. As a result, several approaches have recently been proposed to learn optimal tests directly from data using different techniques such as optimized kernels
+[4, 9–13], classiﬁer two-sample tests [14, 15], and deep neural networks [16, 17], to name a few. In other words, the modern-day hypothesis testing has become a two-stage “learn-then-test” problem.
+Special care must be taken in the subsequent testing when optimal tests are learned from data. If the same data is used for both learning and testing, it becomes harder to derive the asymptotic null distribution because the selected test and the data are now dependent. In this case, conducting the tests as if the test statistics are independent from the data leads to an uncontrollable false positive rate, see, e.g., our experimental results. While permutation testing can be applied [18], it is too computationally prohibitive for real-world applications. Up to now, the most prevalent solution is data splitting: the data is randomly split into two parts, of which the former is used for learning the test while the latter is used for testing. Although data splitting is simple and in principle leads to the correct false positive rate, its downside is a potential loss of power.
+In this paper, we investigate the two-stage “learn-then-test” problem in the context of modern kernel-based tests [3–6] where the choice of kernel function and its parameters play an important role. The
+∗Now with Google Research 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+key question is whether it is possible to employ the full sample for both learning and testing phase without data splitting, while correctly calibrating the test in the presence of such dependency. We provide an afﬁrmative answer if we learn the test from a vector of jointly normal base test statistics, e.g., the linear-time MMD estimates of multiple kernels. The empirical results suggest that, at the same signiﬁcance level, the test power of our approach is larger than that of the data-splitting approach, regardless of the split proportion (cf. Section 5). The code for the experiments is available at https://github.com/MPI-IS/tests-wo-splitting. 2 Preliminaries
+We start with some background material on conventional hypothesis testing and review linear-time kernel two-sample tests. In what follows, we will use [d] := {1, . . . , d} to denote the set of natural numbers up to d ∈ N, µ ≥ 0 to denote that all entries of µ ∈ Rd are non-negative, ei to denote the i-th Cartesian unit vector, and (cid:107) · (cid:107) := (cid:107) · (cid:107)2.
+Statistical hypothesis testing. Let Z be a random variable taking values in Z ⊆ Rp distributed according to a distribution P . The goal of statistical hypothesis testing is to decide whether some null hypothesis H0 about P can be rejected in favor of an alternative hypothesis HA based on empirical data [2, 19]. Let h be a real-valued function such that 0 < E (cid:2)h2(Z)(cid:3) < ∞. In this work, we consider testing the null hypothesis H0 : E [h(Z)] = 0 against the one-sided alternative hypothesis
+HA : E [h(Z)] > 0 for reasons which will become clear later. To do so, we deﬁne the test statistic
+τ (Zn) = 1 i=1 h(zi) as the empirical mean of h based on a sample Zn := {z1, ..., zn} drawn i.i.d. n from P n. We reject H0 if the observed test statistic ˆτ (Zn) is signiﬁcantly larger than what we would expect if H0 was true, i.e., if P (τ (Zn) < ˆτ (Zn)|H0) > 1 − α. Here α is a signiﬁcance level and controls the probability of incorrectly rejecting H0 (Type-I error). For sufﬁciently large n we can work with the asymptotic distribution of τ (Zn), which is characterized by the Central Limit Theorem
+[20].
+Lemma 1. Let µ := E [h(Z)] and σ2 := Var [h(Z)]. Then, the test statistic converges in distribution to a Gaussian distribution, i.e., n(τ (Zn) − µ) d→ N (0, σ2). (cid:80)n
+√
+Let Φ be the CDF of the standard normal and Φ−1 its inverse. We deﬁne the test threshold tα =
+√ nσΦ−1(1 − α) as the (1 − α)-quantile of the null distribution so that P (τ (Zn) < tα|H0) = 1 − α and we reject H0 simply if ˆτ (Zn) > tα. Besides correctly controlling the Type-I error, the test should also reject H0 as often as possible when P actually satisﬁes the alternative HA. The probability of making a Type-II error is deﬁned as P (τ (Zn) < tα | HA), i.e., the probability of failing to reject
+H0 when it is false. A powerful test has a small Type-II error while keeping the Type-I error at α.
+Since Lemma 1 holds for any µ, and thus both under null and alternative hypotheses, the asymptotic probability of a Type-II error is [4]
+P (τ (Zn) < tα | HA) ≈ Φ (cid:18)
+Φ−1(1 − α) −
+√
+µ (cid:19) n
+σ
+. (1)
+Since Φ is monotonic, this probability decreases with µ/σ, which we interpret as a signal-to-noise ratio (SNR). It is therefore desirable to ﬁnd test statistics with high SNR.
+Kernel two-sample testing. As an example that can be expressed in the above form we present kernel two-sample tests. Given two samples Xn and Yn drawn from distributions P and Q, the two-sample test aims to decide whether P and Q are different, i.e., H0 : P = Q and HA : P (cid:54)= Q. A popular test statistic for this problem is the maximum mean discrepancy (MMD) of Gretton et al. [3], which is deﬁned based on a positive deﬁnite kernel function k [21]: MMD2[P, Q] = E[k(x, x(cid:48)) + k(y, y(cid:48)) − k(x, y(cid:48)) − k(x(cid:48), y)] = E[h(x, x(cid:48), y, y(cid:48))], where x, x(cid:48) are independent draws from P , y, y(cid:48) are independent draws from Q, and h(x, x(cid:48), y, y(cid:48)) := k(x, x(cid:48)) + k(y, y(cid:48)) − k(x, y(cid:48)) − k(y, x(cid:48)).
+A minimum-variance unbiased estimator of MMD2 is given by a second-order U -statistic [20].
+However, this estimator scales quadratically with the sample size, and the distribution under H0 is not available in closed form. Thus it has to be simulated either via a bootstrapping approach or via a permutation of the samples. For large sample size, the computational requirements become prohibitive [3]. In this work, we assume we are in this regime. To circumvent these computational burdens, Gretton et al. [3] suggest a “linear-time” MMD estimate that scales linearly with sample size and is asymptotically normally distributed under both null and alternative hypotheses. Speciﬁcally, 2
+let X2n = {x1, . . . , x2n} and Y2n = {y1, . . . , y2n}, i.e., the samples are of the same (even) size.
+We can deﬁne zi := (xi, xn+i, yi, yn+i) and τ (Zn) := 1 i=1 h(zi) as the test statistic, which by n
+Lemma 1 is asymptotically normally distributed. Furthermore, if the kernel k is characteristic [22], it is guaranteed that MMD2(P, Q) = 0 if P = Q and MMD2(P, Q) > 0 otherwise. Therefore, a one-sided test is sufﬁcient. (cid:80)n
+Other well-known examples are goodness-of-ﬁt tests based on the kernelized Stein discrepancy (KSD), which also has a linear time estimate [5, 6]. In our experiments, we focus on the kernel two-sample test, but point out that our theoretical treatment in Section 3 is more general and can be applied to other problems, e.g., KSD goodness-of-ﬁt tests, but also beyond kernel methods. 3 Selective hypothesis tests
+Statistical lore tells us not to use the same data for learning and testing. We now discuss whether it is indeed possible to use the same data for selecting a test statistic from a candidate set and conducting the selected test [23]. The key to controllable Type-I errors is that we need to adjust the test threshold to account for the selection event. As before, let Zn denote the data we collected. Let T = {τi}i∈I be a countable set of candidate test statistics that we evaluate on the data Zn, and {ti
+α}i∈I the respective test thresholds. Assume that {Ai}i∈I are disjoint selection events depending on Zn and that their outcomes determine which test statistic out of T we apply. Thus, all the tests and events are generally dependent via Zn. To deﬁne a well-calibrated test, we need to control the overall Type-I error, i.e.,
+P (reject|H0). Using the law of total probability, we can rewrite this in terms of the selected tests
+P (reject|H0) = (cid:88) i∈I
+P (τi > ti
+α|Ai, H0)P (Ai|H0). (2)
+To control the Type-I error P (reject|H0) ≤ α, it thus sufﬁces to control P (τi > ti
+α|Ai, H0) ≤ α for each i ∈ I, i.e., the test thresholds need to take into account the conditioning on the selection event
+Ai. A naive approach would wrongly calibrate the test such that P (τi > ti
+α|H0) ≤ α, not accounting for the selection Ai and thus would result in an uncontrollable Type-I error. On the other hand, this reasoning directly tells us why data splitting works. There Ai is evaluated on a split of Zn that is independent of the split used to compute τi and hence P (τi > ti
+α|Ai, H0) = P (τi > ti
+α|H0). (cid:80)n
+Selecting tests with high power. Our objective in selecting the test statistic is to maximize the power of the selected test. To this end, we start from d ∈ N different base functions h1, ..., hd.
+Based on observed data Zn = {z1, . . . , zn} ∼ P n, we can compute d base test statistics i=1 hu(zi) for u ∈ [d]. Let τ := (τ1, . . . , τd)(cid:62) and µ := E [h(Z)], where
+τu := τu(Zn) = 1 n
+√ n(τ − µ) d→ N (0, Σ), with the vari-h(Z) = (h1(Z), . . . , hd(Z))(cid:62). Asymptotically, we have ance of the asymptotic distribution given by Σ = Cov[h(Z)].2 Now, for any β ∈ Rd \ {0} that is independent of τ , the normalized test statistic τβ := β(cid:62)τ is asymptotically normal, i.e., (β(cid:62)Σβ)
+√ d→ N (0, 1). Following our considerations of Section 2, the test with the (cid:18) (cid:19) 1 2 n
+τβ − β(cid:62)µ (β(cid:62)Σβ) highest power is deﬁned by 1 2
+β∞ : = argmax (cid:107)β(cid:107)=1
+β(cid:62)µ (β(cid:62)Σβ) 1 2
+=
+Σ−1µ (cid:107)Σ−1µ(cid:107)
+, (3) where the constraint (cid:107)β(cid:107) = 1 is to ensure that the solution is unique, since the objective of the maximization is a homogeneous function of order 0 in β. The explicit form of β∞ is proven in
+Appendix C.2. Obviously, in practice, µ is not known, so we use an estimate of µ to select β. The standard strategy to do so is to split the sample Zn into two independent sets and estimate τtr and
+τte, i.e., two independent training and test realizations [4, 8, 9, 13]. One can then choose a suitable
+β by using τtr as a proxy for µ. Then one tests with this β and τte. However, to our knowledge, there exists no principled way to decide in which proportion to split the data, which will generally inﬂuence the power, as shown in our experimental results in Section 5.
+√ 2 In practice, we work with an estimate ˆΣ of the covariance obtained from Zn, which is justiﬁed since n ˆΣ− 1 2 (τ − µ) d→ N (0, Id) for consistent estimates of the covariance. 3
+√
+Our approach to maximizing the utility of the observed dataset is to use it for both learning and testing. To do so, we have to derive an adjustment to the distribution of the statistic under the null, in the spirit of the selective hypothesis testing described above. We will consider three different candidate sets T of test statistics, which are all constructed from the base test statistics τ . To do so, we will work with the asymptotic distribution of τ under the null. To keep the notation concise, n dependence into τ . Thus, we will assume τ ∼ N (0, Σ), where Σ is known and we include the strictly positive. We provide the generalization to singular covariance in Appendix E.
+To select the test statistics, we maximize the SNR τβ = β(cid:62)τ /(β(cid:62)Σβ) 1 2 and thus the test power over three different sets of candidate test statistics: 1. Tbase = {τβ | β ∈ {e1, . . . , ed}}, i.e., we directly select from the base test statistics, 2. TWald = {τβ | (cid:107)β(cid:107) = 1}, where we allow for arbitrary linear combinations, 3. TOST = {τβ | Σβ ≥ 0, (cid:107)Σβ(cid:107) = 1}, where we constrain the allowed values to increase the power (see below). The rule for selecting the test statistic from these sets is simply to select the one with the highest value. To design selective hypothesis tests, we need to derive suitable selection events and the distribution of the maximum test statistic conditioned on its selection. 3.1 Selection from a ﬁnite candidate set
+τu
+σu
+, with σu := (Σuu) 1
+We start with Tbase = {τβ | β ∈ {e1, . . . , ed}} and use the test statistic τbase = maxτ ∈Tbase τ . Since the selection is from a countable set and the selected statistic is a projection of τ , we can use the polyhedral lemma of Lee et al. [24] to derive the conditional distributions. Therefore, we denote u∗ = argmaxu∈[d]
+σu∗ . The following corollary characterizes the conditional distribution. The proof is given in Appendix C.1.
+Corollary 1. Let τ ∼ N (µ, Σ), z := τ − Σeu∗ τu∗
+, and
+σ2
+TN(µ, σ2, a, b) denote a normal distribution with mean µ and variance σ2 truncated at a and b. Then the following statement holds: (cid:34) 2 , and obtain τbase = τu∗
+, V −( ˆz) = maxj∈[d],j(cid:54)=u∗ ,
+σu∗ ˆzj uσj −Σu∗ j
+σ∗ (cid:35) u∗ (cid:19)
+, z = ˆz d= TN
+, 1, V −( ˆz), V + = ∞
+, (4)
+τu∗
+σu∗ (cid:12) (cid:12) (cid:12) (cid:12) (cid:12) u∗ = argmax u∈[d]
+τu
+σu (cid:18) µu∗
+σu∗
+This scenario arises, for example, in kernel-based tests when the kernel parameters are chosen from a grid of predeﬁned values [3, 4]. Corollary 1 allows us to test using the same set of data that was used to select the test statistic, by providing the corrected asymptotic distribution (4). The only downside is its dependence on the parameter grid. To overcome this limitation, several works have proposed to optimize for the parameters directly [4, 9–12]. Unfortunately, we cannot apply Corollary 1 directly to this scenario. 3.2 Learning from an uncountable candidate set
+To allow for more ﬂexible tests, in the following we consider the candidate sets TWald and TOST that contain uncountably many tests. For these sets, we cannot directly use (2) to derive conditional tests, since the probability of selecting some given tests is 0. However, we show that it is possible in both cases to rewrite the test statistic such that we can build conditional tests based on (2). First, for TWald, we rewrite the entire test statistic including the maximization in closed form. Second, for TOST we derive suitable measurable selection events that allow us to rewrite the conditional test statistic in closed form and derive their distributions in Theorem 1.
+Wald Test. We ﬁrst allow for arbitrary linear combinations of the base test statistics τ . Therefore, deﬁne TWald = {τβ | (cid:107)β(cid:107) = 1} and τWald := maxτ ∈TWald τ . We denote the optimal β for this set as
+. This optimization problem is the same as in (3), hence βWald =
+βWald := argmax(cid:107)β(cid:107)=1
+β(cid:62)τ (β(cid:62)Σβ) 1 2
+Σ−1τ (cid:107)Σ−1τ (cid:107) , and we can rewrite the "Wald" test statistic as τWald = (cid:107)Σ− 1 2 τ (cid:107). Note that TWald contains uncountably many tests. However, instead of deriving individual conditional distributions, we can directly derive the distribution of the maximized test statistic, since
+τWald can be written in closed form. In fact, under the null, we have Σ− 1 2 τ ∼ N (0, Id) and τWald follows a chi distribution with d degrees of freedom. Surprisingly, the presented approach results in the classic Wald test statistic [25], which originally was deﬁned directly in closed form.
+= (τ (cid:62)Σ−1τ ) 1
+Waldτ
+WaldΣβWald) 2 = (β(cid:62) 1 2
+β(cid:62) 4
+µ
+One-sided test (OST). The original Wald test was deﬁned to optimally test H0 : µ = 0 against the alternative HA : µ (cid:54)= 0 [25]. Thus, it ignores the fact that we only test against the "one-sided" alternative µ ≥ 0, which sufﬁces since we consider linear-time estimates of the squared
+MMD as test statistics and their population values are non-negative. Multiplying (3) with Σ yields
+Σβ∞ = (cid:107)Σ−1µ(cid:107) . Using µ ≥ 0, we ﬁnd Σβ∞ ≥ 0. Thus, we have prior knowledge over the asymptotically optimal combination β∞. To incorporate this, we a priori constrain the considered values of β by the condition Σβ ≥ 0. Thus we deﬁne TOST = {τβ | Σβ ≥ 0, (cid:107)Σβ(cid:107) = 1}, where the norm constraint (cid:107)Σβ(cid:107) = 1 is added to make the maximum unique. We suggest using the test statistic
+τOST := maxτ ∈TOST τ . Before we derive suitable conditional distributions for this test statistic, we rewrite it in a canonical form.
+Remark 1. Deﬁne α := Σβ, ρ := Σ−1τ , and Σ(cid:48) := Σ−1ΣΣ−1 = Σ−1. This implies ρ ∼ N (0, Σ(cid:48)) and τOST := max(cid:107)Σβ(cid:107)=1,Σβ≥0
+= max(cid:107)α(cid:107)=1,α≥0
+.
+α(cid:62)ρ (α(cid:62)Σ(cid:48)α) 1 2
+β(cid:62)τ (β(cid:62)Σβ) 1 2
+Thus in the following, we focus on the canonical form, where the constraints are simply positivity constraints. For ease of notation, we stick with τ and Σ instead of ρ and Σ(cid:48). We will thus analyze the distribution of max (cid:107)β(cid:107)=1,β≥0
+β(cid:62)τ (β(cid:62)Σβ) 1 2
+=
+β∗(cid:62)τ (β∗(cid:62)Σβ∗) 1 2
+, (5)
+β(cid:62)τ (β(cid:62)Σβ) 1 2 where β∗(τ ) := argmax(cid:107)β(cid:107)=1,β≥0
+. We emphasize that β∗(τ ) is a random variable that is determined by τ . For conciseness, however, we will use β∗ and keep the dependency implicit. We
+ﬁnd the solution of (5) by solving an equivalent convex optimization problem, which we provide in Appendix B. We need to characterize the distribution of (5) under the null hypothesis, i.e.,
+τ ∼ N (0, Σ). Since we are not able to give an analytic form for β∗, it is hard to directly compute the distribution of τOST as we did for the Wald test. In Section 3.1 we were able to work around this by deriving the distribution conditioned on the selection of β∗. In the present case, however, there are uncountably many values that β∗ can take, so for some the probability is zero. Hence, the reasoning of (2) does not apply and we cannot use the PSI framework of Lee et al. [24].
+Our approach to solving this is the following. Instead of directly conditioning on the explicit value of
+β∗, we condition on the active set. For a given β∗, we deﬁne the active set as U := {u | β∗ u (cid:54)= 0} ⊆ [d].
+Note that the active set is a function of τ , deﬁned via (5). In Theorem 1 we show that given the active set, we can derive a closed-form expression for β∗, and we can characterize the distribution of the test statistic conditioned on the active set. Figure 1 depicts the intuition behind Theorem 1 and
+Appendix A contains the full proof. In the following, let χl denote a chi distribution with l degrees of freedom and TN (0, 1, a, ∞) denote the distribution of a standard normal RV truncated from below at a, i.e., with CDF F a(x) = Φ(x)−Φ(a) 1−Φ(a)
+Theorem 1. Let τ ∼ N (0, Σ) be a normal RV in Rd with positive deﬁnite covariance matrix Σ.
+τ , and V − as in
+Let β∗ be deﬁned as in (5), U := {u | β∗
+Corollary 1. Then, the following statements hold. u (cid:54)= 0}, l := |U|, z :=
+I d − Σβ∗β∗(cid:62)
+β∗(cid:62)Σβ∗ (cid:17) (cid:16)
+. 1.) If l = 1: 2.) If l ≥ 2: (cid:20) (cid:20) max (cid:107)β(cid:107)=1,β≥0
+β(cid:62)τ (β(cid:62)Σβ) 1 2 max (cid:107)β(cid:107)=1,β≥0
+β(cid:62)τ (β(cid:62)Σβ) 1 2 (cid:21) (cid:12) (cid:12) (cid:12) U, z = ˆz (cid:21) (cid:12) (cid:12) (cid:12) U d= χl. d= TN (0, 1, V −( ˆz), ∞) .
+With Theorem 1 and Remark 1, we are able to deﬁne conditional hypothesis tests with the test statistic
+τOST. First, we transform our observation ˆτ according to Remark 1 to obtain it in canonical form, i.e., ˆτ → Σ−1 ˆτ and Σ → Σ−1. Then we solve the optimization problem (5) to ﬁnd β∗. Next, we deﬁne the active set U, by checking which entries of β∗ are non-zero. Theorem 1 characterizes the distribution τOST conditioned on the selection. We can then deﬁne a test threshold tα that accounts for the selection of U, i.e., tα = (cid:26)Φ−1 ((1 − α)(1 − Φ(V −)) + Φ(V −))
+Φ−1
+χl (1 − α) if |U| = 1, if |U| = l ≥ 2, (6) 5
+l = 1
+β∗ = e2
+τ2 l = 2
+β∗ =
+ˆτ (cid:107) ˆτ (cid:107)
+τ2
+τ1
+V −
+β∗
+τ1 l = 1
+β∗ = e1
+ˆz
+ˆτ
+β∗(cid:62) ˆτ (β∗(cid:62)Σβ∗) 1 2
+Figure 1: Geometric interpretation of Theorem 1 for d = 2 and unit covariance Σ = I (denoted by the black dotted unit-circle). Left: If ˆτ is in the positive quadrant (green), the constraints of the optimization are not active and the optimal direction is the same as for the Wald test, hence the distribution of the test statistic follows χ2. When ˆτ is in the orange or purple zone, one of the constraints is active and β∗ is a canonical unit-vector. Right: If l = 1, for example when only the
+ﬁrst direction is active, we additionally condition on z = ˆz, which is independent of the value of
+β∗(cid:62)τ since z is orthogonal to β∗. For the observed value ˆz, we only select β∗ = e1 if β∗(cid:62)τ ≥ V −.
+If this was not the case, then τ would lie in the orange/vertically lined region and we would select
+β∗ = e2. This explains the truncated behavior and is in analogy to the results of Lee et al. [24]. with Φ−1
+χl being the inverse CDF of a chi distribution with l degrees of freedom, which we can evaluate using standard libraries, e.g., Jones et al. [26]. We can then reject the null, if the observed value of the optimized test statistic exceeds this threshold, i.e., ˆτOST > tα. We summarize the entire approach in Algorithm 1. 4

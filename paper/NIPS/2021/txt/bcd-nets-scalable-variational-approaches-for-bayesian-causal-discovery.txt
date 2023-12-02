@@ -1,0 +1,135 @@
+Abstract
+A structural equation model (SEM) is an effective framework to reason over causal relationships represented via a directed acyclic graph (DAG). Recent advances have enabled effective maximum-likelihood point estimation of DAGs from ob-servational data. However, a point estimate may not accurately capture the un-certainty in inferring the underlying graph in practical scenarios, wherein the true DAG is non-identiﬁable and/or the observed dataset is limited. We propose
+Bayesian Causal Discovery Nets (BCD Nets), a variational inference framework for estimating a distribution over DAGs characterizing a linear-Gaussian SEM.
+Developing a full Bayesian posterior over DAGs is challenging due to the the discrete and combinatorial nature of graphs. We analyse key design choices for scalable VI over DAGs, such as 1) the parametrization of DAGs via an expressive variational family, 2) a continuous relaxation that enables low-variance stochas-tic optimization, and 3) suitable priors over the latent variables. We provide a series of experiments on real and synthetic data showing that BCD Nets outper-form maximum-likelihood methods on standard causal discovery metrics such as structural Hamming distance in low data regimes. 1
+
+Introduction
+One of the key uses of statistical methods is learning causal relationships from observed data a.k.a. causal discovery [39]. Causal models allow us to forecast the effects of interventions and counter-factuals in several real-world domains, such as economic policy [57] and medicine [47]. Although early approaches to statistical inference emphasised that ‘correlation is not causation’ [15], it has since been shown that for certain families of data-generating processes, it is indeed possible to infer causal relationships from purely observational data [37, 29].
+One such widely studied data-generating process is the linear-Gaussian structural equation model (SEM) [37], where the causal relationships between the random variables in the model can be rep-resented via a weighted directed acyclic graph (DAG). The value of any variable in the DAG of a linear-Gaussian SEM is given by a linear combination of the values of its parent nodes and ad-ditive noise. For causal discovery, naive Monte-Carlo sampling or enumeration of the possible
+DAGs quickly becomes intractable, since the number of possible DAGs over a model grows super-exponentially with the number of variables [18]. A variety of methods have been developed over the years to efﬁciently sample or optimize over DAGs [11, 53, 51, 45]. For example, a recent line of work scales to high dimensions by maximizing the likelihood of the model (MLE) over a set of continuous relaxations of adjacency matrices using gradient-based methods and specialized DAG regularization terms. [62, 61, 35, 59]. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+x3 x2 x4 x1
+
+
+
+
+ x1 x2 x3 x4
+
+
+
+
+
+
+
+
+
+
+
+= 0 0 0 0 1.3 0 0 0 0.3 2.5 0 0 5.7 0 0 0
+
+
+
+
+
+
+
+
+
+
+ x1 x2 x3 x4
+
+
+
+
+
++
+
+
+
+
+
+
+
+
+
+ (cid:15)1 (cid:15)2 (cid:15)3 (cid:15)4
+Figure 1: A Structural Equation Model (SEM). Left: DAG with 4 nodes. Right: Linear-Gaussian
+SEM (with (cid:15) ∼ N (0, Σ))
+However, the majority of the aforementioned works for scalable causal discovery in linear-Gaussian
+SEMs focus on recovering point estimates for the underlying DAG via MLE. In many practical scenarios, however, a point estimate fails to reﬂect the uncertainty in inferring the underlying DAG.
+This includes scenarios where the true DAG is non-identiﬁable given (inﬁnite) observational data as well as practical limitations due to an imperfect optimization algorithm, model mismatch, or simply a ﬁnite dataset. In any of the above scenarios, it is desirable to obtain an explicit posterior distribution over the unobserved DAG instead of a single point estimate [19]. Causal inference is increasingly being applied in situations with important real-world consequences, where such a
+Bayesian estimation procedure could be useful to sample and reason over alternative generative mechanisms for observed data.
+To achieve this goal, we propose Bayesian Causal Discovery Nets (BCD Nets), an algorithmic framework for Bayesian causal discovery in linear-Gaussian SEMs based on modern variational inference [6]. Classical approaches to Bayesian causal discovery struggle in higher dimensions
+[23, 16], with limited improvements via Monte Carlo approximations [22, 58]. In order to scale our variational method to high dimensions, we address several design challenges. First, we describe an expressive variational family of factorized posterior distributions over the SEM parameters (edge weights and noise variance) using deep neural networks. The factorization exploits the decompo-sition of DAGs into triangular matrices and permutations for specifying the distribution over edge weights and node orderings respectively. Further, for low-variance stochastic optimization of the variational objective, we exploit recent advances in modeling and reparametrizing distributions over permutations via continuous relaxations [31, 28]. Finally, we employ a horseshoe prior [7] on the edge weights, which promotes sparsity.1
+We evaluate BCD Nets for causal discovery on a range of synthetic and real-world data benchmarks.
+Our experiments demonstrate that with ﬁnite datasets, there is considerable uncertainty in the in-ferred posterior over DAGs. Using BCD Nets, we are able to effectively quantify the uncertainty and signiﬁcantly outperform competing estimators [35, 58] on the standard Structured Hamming
+Distance metric, especially in low data regimes. 2 Preliminaries 2.1 Linear-Gaussian Structural Equation Models
+A structural equation model (SEM) is a collection of random variables x1, . . . , xd associated with a directed acyclic graph (DAG) G with d nodes [37]. The SEM consists of a series of equations xj = fj(Pa(xj), (cid:15)j), where Pa(xj) gives the values of the parents of the jth node in G and (cid:15)j is a noise variable. For a linear-Gaussian SEM, the equations fj are linear and the noise (cid:15)j is additive
+Gaussian. Considering X = [x1, . . . , xd] as a vector in Rd and W as the weighted adjacency matrix of G, we can see that X must satisfy X = W (cid:62)X + (cid:15), where (cid:15) ∼ N (0, Σ) is the additive noise (cid:9) is a diagonal noise covariance matrix. We will denote the setting vector and Σ = diag (cid:8)σ2 when all noise variances are equal i.e., σ1 = . . . = σd = σ as an “equal variance” setting and
+“non-equal variance” otherwise. Figure 1 shows an illustration. Linear SEMs have been used to model microarray data [38] and protein pathways [13], among many other systems. 1, . . . , σ2 d 1Code is available at github.com/ermongroup/BCD-Nets 2
+2.2 Causal Discovery
+Given some dataset X n 1 = {X1, X2, . . . , Xn} drawn i.i.d. from a linear-Gaussian SEM, we are interested in inferring the adjacency matrix W and the diagonal entries of the covariance matrix Σ.
+Maximum Likelihood Estimation (MLE) This approach obtains a point estimate for W and Σ by maximizing the likelihood of the dataset X n 1 . Using the fact that W is constrained to be a DAG, it can be shown that I −W (cid:62) is always invertible.2. Hence, we can rearrange to obtain X = (I − W (cid:62)) (cid:15), obtaining X as the product of a matrix and a Gaussian vector. It follows that X itself has a Gaussian distribution, X ∼ N (0, Θ−1), with precision matrix Θ = (I − W )Σ−1(I − W )(cid:62). This gives a joint log-likelihood over the dataset X n
+−1 1 as log p(X n 1 ; Σ, W ) = n 2 (log det Θ − d log(2π)) − 1 2 n (cid:88) i=1
+X (cid:62) i ΘXi, (1) where Xi runs over the n points in the dataset and Θ is given above. The space of DAG adjacency matrices W is characterised by the acyclicity constraint. When viewed as an subset of the space of all adjacency matrices (Rd×d), this is a piecewise linear manifold with a number of facets that grows super-exponentially in the dimension (roughly as d!2d2/2), rendering any approach based on enumeration over all DAGs intractable. Many approaches have been proposed to scale causal discovery via MLE to high-dimensional data. This includes recent approaches which relax the DAG constraint to a larger, continuous set of adjacency matrices, such as Rd×d in [62] or the Birkhoff polytope of doubly-stochastic matrices in [5], which enables the use of gradient-based optimization.
+However, there are a number of challenges with using point estimators for causal discovery. Fun-damentally, the true SEM parameters are identiﬁable from observational data only under speciﬁc conditions. In fact, the map between the the data distribution parameters Θ and the SEM parameters
+{W, Σ} may not be bijective even in the limit of inﬁnite data and an oracle optimizer. Theoreti-cal results on identiﬁability in linear-Gaussian SEMs currently hold only under restricted settings; notably, this only includes the equal variance setting [38]. Further, even if the noise variances are equal in the ground-truth SEM, we are limited in practice by the ﬁnite size of the dataset and MLE could still converge to an incorrect solution. Finally, such point estimators are typically not robust to potential misspeciﬁcations in the likelihood model, e.g., a non-Gaussian noise model, non-linear cause-effect relationships, etc. For the above scenarios, it is useful to characterize the uncertainty in estimating the SEM parameters to guide downstream analysis. For example, in medical applications giving a distribution of possible causal pathways, with quantiﬁed uncertainty, could be much more useful than a point estimate of the most likely pathway.
+Bayesian Estimation.
+In contrast to point estimators, Bayesian methods explicitly characterize the uncertainty in the estimated parameters [19]. That is, we treat the unknown SEM parameters
+{W, Σ} as random variables associated with a prior distribution p(W, Σ). The likelihood model p(X n 1 |Σ, W ) follows the same expression as the RHS in equation (1). Given the prior and the likeli-hood, we obtain a posterior distribution p(W, Σ|X n 1 ) over {W, Σ} via Bayes rule, which quantiﬁes the uncertainty in estimating the SEM parameters. As long as the likelihood model is well-speciﬁed and the prior includes the ground-truth SEM parameters in its support, as the dataset size increases the posterior will concentrate around a set of SEM parameters. In the equal variance case these will be the true SEM parameters. In the non-equal variance case the posterior will concentrate on the set of DAG parameters quasi-equivalent to the ground truth as deﬁned in [35]. These are the set of
+DAG parameters which generate data with the same covariance as the ground truth, and are hence indistinguishable based on data alone. We discuss this further in the appendix, Section F.
+The key challenge in Bayesian estimation is tractable computation of the posterior distribution in high-dimensional spaces. With the exception of speciﬁc prior and likelihood families e.g., conjugate distributions, computing the posterior is typically intractable.
+In the next section, we present a variational framework for scalable approximation of the posterior for Bayesian causal discovery. 2Writing W = P LP (cid:62) from Section 3, I − W (cid:62) = (I − P L(cid:62)P (cid:62)) = P (I − L(cid:62))P (cid:62). Now (I − L(cid:62)) is upper-triangular with unit diagonal, so det(I −L(cid:62)) = 1. Thus (I −W (cid:62)) has unit determinant, so is invertible. 3
+3 Causal Discovery via Bayesian Causal Discovery Nets
+As discussed previously, we are interested in learning the posterior distribution p(W, Σ | X n 1 ) over the unknown SEM parameters {W, Σ} given an observed dataset X n 1 . Unlike point estimators, such a posterior distribution will allow us to quantify the uncertainty in estimation. Our framework,
+Bayesian Causal Discovery Nets (BCD Nets) allows us to tractably estimate this posterior.
+As a ﬁrst step, our approach involves parametrizing the adjacency matrix W as the product of a per-mutation matrix P and a strictly lower-triangular matrix L, so that W = P LP (cid:62). In graphical terms,
+L is a weight matrix for a canonical DAG with a ﬁxed ordering, while pre- and post-multiplication by
+P and P (cid:62) modiﬁes the ordering of nodes. L is parameterised by a vector of weights l ∈ Rd(d−1)/2, and the constraint that P is a permutation ensures that W is the adjacency matrix of a DAG.
+Our goal is to obtain the posterior distribution p(P, L, Σ|X n 1 ). Due to the intractable partition func-tion, we cannot directly compute the posterior. We turn to variational inference to deliver a tractable approximation to the posterior [24]. The key idea here is to cast inference as an optimization prob-lem, wherein we approximate the true posterior with a tractable family of distributions qφ(P, L, Σ) parameterized by φ and optimize these parameters φ to minimize the KL divergence between the approximate and true posterior distributions:
+DKL (qφ(P, L, Σ)(cid:107)p(P, L, Σ | X n 1 ))
+= − E(P,L,Σ)∼qφ (cid:124) (cid:20) log p(X n 1 |P, L, Σ) − log (cid:123)(cid:122)
+ELBO(φ) qφ(P, L, Σ) p(P, L, Σ) (cid:21) (cid:125)
++ log p(X n 1 ). (2)
+Hence, minimizing the KL divergence above corresponds to maximizing the evidence lower bound (ELBO) w.r.t. variational parameters φ. With a sufﬁciently expressive variational family from which to choose q, maximizing the ELBO recovers the true posterior as qφ(P, L, Σ) = p(P, L, Σ|X n
+In practice, we face important modeling choices which have a substantial impact on the quality of the posterior obtained, as well as the difﬁculty of optimizing the ELBO. These include the variable ordering to use when factorizing qφ(P, L, Σ) using the chain rule, choice of variational family for the individual (conditional) factors, as well as the prior distribution p(P, L, Σ). We discuss these algorithmic design choices next. 1 ). 3.1 Factorization of Approximate Posterior
+Approaches to variational inference with multiple sets of latent variables often use a mean-ﬁeld factorization [24], in our case corresponding to qφ(P, L, Σ) = qφ(P )qφ(L)qφ(Σ). This mean-ﬁeld approach can often simplify the optimization of the ELBO, but severely limits the expressiveness of the approximate posterior. For example, consider a two-dimensional linear-Gaussian SEM with non-equal variances (and therefore has non-uniquely identiﬁable parameters). Under inﬁnite data, the posterior density concentrates on the two (observationally undistinguishable) maximum-likelihood solutions: an edge x1 → x2 with some weight l1and an edge x1 ← x2 with another weight l2. The posterior concentrates to a bimodal distribution, with density around the region (l1, P1) and around (l2, P2). A mean-ﬁeld factored posterior qφ(L)qφ(P ) cannot represent this correlated density. Em-pirically we observe that such a factored posterior leads to a worse ELBO, illustrated in ablation experiments in Section 5.6.
+For BCD Nets, we use a factorization qφ(P, L, Σ) = qφ(P |L, Σ)qφ(L, Σ), sampling L and Σ jointly
+ﬁrst, then conditionally sampling P based on these values, using a neural network to learn the parameters of the conditional distribution qφ(P |L, Σ). This leads to an ELBO
+E(L,Σ)∼qφ (cid:20)
+EP ∼qφ(·|L,Σ) (cid:20) log p(X n 1 |P, L, Σ) − log (cid:21) qφ(P |L, Σ) p(P |L, Σ)
+− log (cid:21) qφ(L, Σ) p(L, Σ) (3) 3.2 Variational Families
+An important design choice in variational methods is the variational family used. A distribution qφ over latents z used in ELBO optimization must support two operations: drawing a sample z ∼ qφ, and computing log qφ(z) − log p(z). Depending on the prior distribution p, it may be additionally 4
+possible to compute the term Ez∼qφ [log qφ(z) − log p(z)] = DKL [qφ, p] in closed form, possibly reducing variance compared to Monte Carlo estimates [43]. It is also desirable that sampling z ∼ qφ can be written as gφ(γ), γ ∼ q0, i.e. that z is obtained by sampling from a ﬁxed distribution q0 and transformed through a parameterized, differentiable sampling path gφ. This lets us use pathwise gra-dient estimators [34], which typically have lower variance than the score-function alternatives [60]. 3.2.1 Distribution over Weights & Noise Variances
+We consider two different variational families for the distribution over weights and noise variances, qφ(L, Σ), depending on the modeling assumptions over the noise. Under the equal variance model-ing assumption, we parameterize our variational family as a (diagonal covariance) normal distribu-tion, with φ directly encoding the mean and variance of the d(d − 1)/2 random variables for L and the single random variable for σ. We use this simple distribution since we expect the posterior over
+L to be relatively unimodal in the identiﬁable equal variance case.
+In the non-equal variance case, and in the experiments using real-world data, we use a normaliz-ing ﬂow [41] for qφ(L, Σ). We expect that in this case the distribution over L could be much more complicated, and so a more expressive density model is desirable. We use continuously indexed nor-malizing ﬂows [10], a recently-developed family of ﬂows offering good performance on multimodal densities. As desired, both the normal distribution and ﬂows have pathwise gradient estimators. 3.2.2 Distribution over permutations
+Since the set of d-dimensional permutation matrices Pd is discrete and its size scales combinatorially with d, it is challenging to specify a variational family of distributions over P ∈ Pd that permits both density estimation and sampling for low-variance stochastic optimization of the ELBO objective in equation (3). Since permutations are discrete, pathwise gradient estimators do not exist. Hence, we consider relaxations to distributions over permutations. Our base distribution is the Boltzmann distribution over Pd, parametrised by T ∈ Rd×d with probability PT (P ) ∝ exp(cid:104)T, P (cid:105) for P ∈ Pd.
+Density estimation. the Boltzmann distribution, (cid:80)
+PT (P ) involves an expensive enumeration and is therefore intractable to evaluate in high dimensions. In order to approximate the partition function, we follow [28] in noting that the partition function is equal to the matrix permanent perm(exp T ). This can in turn be approximated tractably via the Bethe permanent, denoted as permB(exp T ). The Bethe permanent is known to satisfy log perm T − d 2 log 2 ≤ log permB T ≤ log perm T , so that the density will be over-estimated, by no more than a factor of d 2 log 2 [3]. We refer the reader to appendix C in [32] for an efﬁcient implementation of the Bethe permanent estimator based on message passing.
+Computing the partition function for
+P ∈Pd
+Pathwise Gradient Estimation. Exact sampling from the Boltzmann distribution is challenging for similar reasons as exact density estimation. Moreover, even tractable low-rank approximations to the
+Boltzmann distribution based on Gumbel-Matching distributions [55] are not useful as they involve non-differentiable operations and so cannot be used to derive a pathwise gradient estimator. Instead, we use a relaxation to the Gumbel-Matching distribution, the Gumbel-Sinkhorn distribution [31].
+To draw a sample from the Gumbel-Sinkhorn distribution with parameters T , we calculate S((T +
+γ)/τ ), with S the Sinkhorn operator [50], γ a matrix of i.i.d standard Gumbel noise and τ a tem-perature hyperparameter. S(T ) returns the ﬁxed point obtained from repeated row and column normalization, starting from the elementwise exp of T . In the limit of an inﬁnite number of itera-tions, this returns a doubly stochastic matrix. As τ approaches zero, the samples approach samples from Pd, with a distribution given by the Gumbel-Matching distribution. A proof of this fact is given in the appendix of [31]. As the Sinkhorn algorithm is a differentiable function of standard
+Gumbel noise, we can use a pathwise gradient estimator of gradients involving samples from the
+Gumbel-Sinkhorn distribution. Additional implementation details for our Sinkhorn approach are in the appendix, Section B. 3.3 Prior Distributions
+A key aspect of any probabilistic model is the choice of prior distribution for the unknown param-eters. The prior incorporates domain knowledge into the problem. Moreover, speciﬁc choices of prior can be computationally friendly. 5
+Gaussian Prior. We show in the appendix (Section A) that if we choose the prior over edge weights to be an isotropic Gaussian, we can analytically marginalize out the weights, only requiring the distribution over P to characterise the full posterior. Once we have P , it is straightforward to obtain
+L, since it is a regression problem which can be solved tractably [54]. Although it is very convenient to avoid modeling a distribution over L, in practice we ﬁnd that the Gaussian generative assumption on the weights is not particularly useful for datasets which we would like to analyse, for which the underlying DAGs are typically sparse. A sample from the distribution over DAGs with Gaussian edge weights will likely have many large- or moderate-weight edges.
+Laplace Prior. Previous work ﬁnding the maximum-likelihood solution of equation (1) has added a term λ(cid:107)W (cid:107)1 penalizing the L1 norm of the adjacency matrix [35, 62], which can be interpreted as imposing an isotropic Laplace prior. The Laplace prior is known to induce sparsity in the posterior
+[54], but there is generally no way to choose the regularization coefﬁcient λ without cross-validation.
+Horseshoe Prior. Given the limitations of the above choices of priors, we instead propose to use a horseshoe prior on L. The horseshoe prior has a sharp peak at zero and relatively ﬂat tails which tend to induce sparsity in the posterior while not signiﬁcantly penalizing larger coefﬁcients [7].
+Mathematically, a variable βi has a horseshoe distribution if it is the result of ﬁrst drawing a random variable λi ∼ C +(0, 1) from a half-Cauchy distribution, then sampling βi ∼ N (0, λ2 i η2). The parameter η can be adjusted to encode the prior belief on the degree of the DAG generating the data.
+Based roughly on [40], we suggest a rule of thumb of setting η ≈ ρ/(d n), with ρ the prior belief of the average degree of the DAG. This results in a sparsity prior that penalises more stringently with more data, similarly to the BIC score [46].
+√ 3.4 Overall Approach
+Incorporating all the above design choices, we obtain our overall algorithm for BCD Nets. The pseudocode is shown in Algorithm 1. Here, qφ(L, Σ) is parameterized as either a normal distribution or a normalizing ﬂow depending on the modeling assumption of equal or non-equal variances. The distribution qφ(P |L, Σ) is a Gumbel-Sinkhorn relaxation of the Gumbel-Matching distribution over permutations, parameterized by a function hφ conditioned on L, Σ. For the function hφ, we use a simple two-layer multi-layer perceptron. For stochastic optimization w.r.t. this distribution, we additionally ﬁnd it useful to use the straight-through gradient estimator [4]. This means that on the forward pass of the backpropogation algorithm, we obtain the τ → 0 limiting value of the Sinkhorn relaxation using the Hungarian algorithm [27], giving a hard permutation P . On the backward pass the gradients are taken with respect to the ﬁnite-τ doubly-stochastic matrix ˜P . The prior is given by p(P, L, Σ) = p(P )p(L)p(Σ) where p(L) is a horseshoe prior, p(P ) is a uniform prior over permutations and p(Σ) is a relatively uninformative Gaussian prior on log Σ.
+Algorithm 1: Bayesian Causal Discovery Nets (BCD Nets)
+Input : data X n
+Initialize parameterized distribution qφ, neural network hφ(L, Σ) while not converged do 1 , Gradient-based optimizer step, temperature hyperparameter τ
+Draw L, Σ ∼ qφ(L, Σ)
+Compute logits T = hφ(L, Σ)
+Draw γ ∈ Rd×d i.i.d from standard Gumbel
+Compute soft ˜P = S((T + γ)/τ ), hard P = Hungarian( ˜P )
+Compute g = ∇φ [ELBO(φ)] from equation (3) with sampled P, L, Σ, using P in the forward pass and ˜P in the backward pass
+Update φ via step using gradient g end 4

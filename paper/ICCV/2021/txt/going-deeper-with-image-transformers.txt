@@ -1,0 +1,213 @@
+Abstract
+Transformers have been recently adapted for large scale image classiﬁcation, achieving high scores shaking up the long supremacy of convolutional neural networks. However the optimization of vision transformers has been little stud-ied so far. In this work, we build and optimize deeper trans-former networks for image classiﬁcation. In particular, we investigate the interplay of architecture and optimization of such dedicated transformers. We make two architec-ture changes that signiﬁcantly improve the accuracy of deep transformers. This leads us to produce models whose per-formance does not saturate early with more depth, for in-stance we obtain 86.5% top-1 accuracy on Imagenet when training with no external data, we thus attain the current sate of the art with less ﬂoating-point operations and pa-rameters. Our best model establishes the new state of the art on Imagenet with Reassessed labels and Imagenet-V2 / match frequency, in the setting with no additional training data. We share our code and models1. 1.
+
+Introduction
+Residual architectures are prominent in computer vision since the advent of ResNet [27]. They are deﬁned as a se-quence of functions of the form xl+1 = gl(xl) + Rl(xl), (1) where the function gl and Rl deﬁne how the network up-dates the input xl at layer l. The function gl is typ-ically identity, while Rl is the main building block of the network: many variants in the literature essentially differ on how this residual branch Rl is constructed or parametrized [51, 63, 73]. Residual architectures highlight the strong interplay between optimization and architecture design. As pointed out by He et al. [27], residual networks do not offer a better representational power. They achieve better performance because they are easier to train: shortly after their seminal work, He et al. discussed [28] the im-portance of having a clear path both forward and backward, and advocate setting gl to the identity function. 1https://github.com/facebookresearch/deit
+The vision transformers [19] instantiate a particular form of residual architecture: after casting the input image into a set x0 of vectors, the network alternates self-attention layers (SA) with feed-forward networks (FFN), as x
+′ l = xl + SA(η(xl))
+′
+′ l)) l + FFN(η(x xl+1 = x (2) where η is the LayerNorm operator [1]. This deﬁnition fol-lows the original architecture of Vaswani et al. [67], ex-cept the LayerNorm is applied before the block (pre-norm) in the residual branch, as advocated by He et al. [28].
+Child et al. [13] adopt this choice with LayerNorm for train-ing deeper transformers for various media, including for im-age generation where they train transformers with 48 layers.
+How to normalize, weigh, or initialize the residual blocks of a residual architecture has received signiﬁcant at-tention both for convolutional neural networks [7, 8, 28, 76] and for transformers applied to NLP or speech tasks [2, 34, 76]. In Section 2, we revisit this topic for transformer archi-tectures solving image classiﬁcation problems. Examples of approaches closely related to ours include Fixup [76], T-Fixup [34], ReZero [2] and SkipInit [16].
+Following our analysis of the interplay between different initialization, optimization and architectural design, we pro-pose an approach that is effective to improve the training of deeper architecture compared to current methods for image transformers. Formally, we add a learnable diagonal matrix on the output of each residual block, initialized close to (but not at) 0. Adding this simple layer after each residual block improves the training dynamic, allowing us to train deeper high-capacity image transformers that beneﬁt from depth.
+We refer to this approach as LayerScale.
+Section 3 introduces our second contribution, namely class-attention layers, that we present in Figure 2. It is akin to an encoder/decoder architecture, in which we explicitly separate the transformer layers involving self-attention be-tween patches, from class-attention layers that are devoted to extract the content of the processed patches into a single vector so that it can be fed to a linear classiﬁer. This explicit separation avoids the contradictory objective of guiding the attention process while processing the class embedding. We refer to this new architecture as CaiT (Class-Attention in
+Image Transformers).
+In the experimental Section 4, we empirically show the effectiveness and complementary of our approaches:
+• LayerScale signiﬁcantly facilitates the convergence and improves the accuracy of image transformers at larger depths. It adds a few thousands of parameters to the network at training time (negligible with respect to the total number of weights).
+• Our architecture with speciﬁc class-attention offers a more effective processing of the class embedding.
+• Our best CaiT models establish the new state of the art on Imagenet-Real [6] and Imagenet V2 matched frequency [53] with no additional training data. On
+ImageNet1k-val [55], our model is on par with the state of the art (86.5%) while requiring less FLOPs (329B vs 377B) and having less parameters than the best competing model (356M vs 438M).
+• We also achieve competitive results on Transfer Learn-ing, see Section C in supplemental material.
+We discuss related works along this paper and in the ded-icated Section 5, before we conclude in Section 6. 2. Deeper image transformers with LayerScale
+Our goal is to increase the stability of the optimization when training transformers for image classiﬁcation derived from the original architecture by Vaswani et al. [67], and especially when we increase their depth. We consider more speciﬁcally the vision transformer (ViT) architecture pro-posed by Dosovitskiy et al. [19] as the reference architec-ture and adopt the data-efﬁcient image transformer (DeiT) optimization procedure of Touvron et al. [64].
+In both works, there is no evidence that depth can bring any beneﬁt when training on Imagenet only: the deeper ViT architec-tures have a lower performance, while DeiT only considers transformers with 12 blocks of layers. Section 4 will con-ﬁrm that DeiT does not train deeper models effectively.
+Figure 1 depicts the main variants we compare to facil-itate the optimization. They cover recent choices from the literature: as discussed in the introduction, the architecture (a) of ViT and DeiT is a pre-norm architecture [19, 64], in which the layer-normalisation η occurs at the beginning of the residual branch. Note that the original architecture of
+Vaswani et al. [67] applies the normalization after the block, but in our experiments the DeiT training does not converge with post-normalization.
+Fixup [76], ReZero [2] and SkipInit [16] introduce learn-able scalar weighting αl on the output of residual blocks, while removing the pre-normalization and the warmup, see
+Figure 1(b). This amounts to modifying Eqn. 2 as x
+′ l = xl + αl SA(xl)
+′ l FFN(x
+′ l + α xl+1 = x
+′ l). (3)
+FFN or SA
+FFN or SA
+FFN or SA
+FFN or SA (a) (b) (c) (d) (a)
+Figure 1. Normalization strategies for transformer blocks.
+The ViT image classiﬁer adopts pre-normalization like Child et al. [13]. (b) ReZero/Skipinit and Fixup remove the η normal-ization and the warmup (i.e., a reduced learning rate in the early training stage) and add a learnable scalar initialized to α = 0 and
+α = 1, respectively. Fixup additionally introduces biases and mod-iﬁes the initialization of the linear layers. Since these methods do not converge with deep vision transformers, (c) we adapt them by re-introducing the pre-norm η and the warmup. Our main pro-posal (d) introduces a per-channel weighting (i.e, multiplication with a diagonal matrix diag(λ1, . . . , λd), where we initialize each weight with a small value as λi = ε.
+ReZero simply initializes this parameter to α = 0. Fixup initializes this parameter α = 1 and makes other modiﬁca-tions: it adopts different policies for the initialization of the block weights, and adds several weights to the parametriza-tion. In our experiments, these approaches do not converge even with some adjustment of the hyper-parameters.
+Our empirical observation is that removing the warmup and the layer-normalization is what makes training unstable in Fixup and T-Fixup. Therefore we re-introduce these two ingredients so that Fixup and T-Fixup converge with DeiT models, see Figure 1(c). As we see in the experimental sec-tion, these amended variants of Fixup and T-Fixup help with convergence. The main contributing factor is the learnable
+αl, which when initialized at a small value do help the con-vergence when we increase the depth.
+Our proposal LayerScale is a per-channel multiplication of the vector produced by each residual block, as opposed to a single scalar, see Figure 1(d). Our objective is to group the updates of the weights associated with the same output channel. Formally, LayerScale is a multiplication by a diag-onal matrix on output of each residual block. In other terms, we modify Eqn. 2 as x
+′ l = xl + diag(λl,1, . . . , λl,d) × SA(η(xl))
+′
+′
+′ l,1, . . . , λ l,d) × FFN(η(x l)),
+′ l + diag(λ xl+1 = x (4) where the parameters λl,i and λ′ l,i are learnable weights.
+The diagonal values are all initialized to a ﬁxed small value
+ε: we set it to ε = 0.1 until depth 18, ε = 10−5 for 24 and ε = 10−6 for deeper networks. This formula is akin to other normalization strategies ActNorm [37] or LayerNorm but executed on output of the residual block. Yet we seek a
+different effect: ActNorm is a data-dependent initialization that calibrates activations so that they have zero-mean and unit variance, like batchnorm [35]. In contrast, we initialize the diagonal with small values so that the initial contribution of the residual branches to the function implemented by the transformer is small. In that respect our motivation is there-fore closer to that of ReZero [2], SkipNorm [16], Fixup [76] and TFixup [34]: we start to train closer to the identity func-tion and let the network integrate the additional parameters progressively during the training. However, LayerScale of-fers more diversity in the optimization than just adjusting the whole layer by a single learnable scalar as in ReZe-ro/SkipNorm, Fixup and T-Fixup. As we will show empiri-cally, offering the freedom to do so per channel is a decisive advantage of LayerScale over existing approaches.
+Formally, adding these weights does not change the ex-pressive power of the architecture since they can be inte-grated into the previous matrix of the SA and FFN layers. 3. Specializing layers for class attention
+In this section, we introduce the CaiT architecture, de-picted in Figure 2 (right). This design aims at circumvent-ing one of the problems of the ViT architecture: the learned weights are asked to optimize two contradictory objectives: (1) guiding the self-attention between patches while (2) summarizing the information useful to the linear classiﬁer.
+Our proposal is to explicitly separate the two stages.
+Later class token. As an intermediate step towards our proposal, we insert the so-called class token, denoted by
+CLS, later in the transformer. This choice eliminates the discrepancy on the ﬁrst layers of the transformer, which are therefore fully employed for performing self-attention between patches only. As a baseline that does not suffer from the contradictory objectives, we also consider average pooling of all the patches on output of the transformers, as typically employed in convolutional architectures.
+Architecture. Our CaiT network consists of two distinct processing stages visible in Figure 2: 1. The self-attention stage is identical to the ViT trans-former, but with no class embedding (CLS). 2. The class-attention stage is a set of layers that com-piles the set of patch embeddings into a class embed-ding CLS that is subsequently fed to a linear classiﬁer.
+This class-attention alternates in turn a layer that we re-fer to as a multi-head class-attention (CA), and a FFN layer.
+In this stage, only the class embedding is updated. Similar to the one fed in ViT and DeiT on input of the transformer, it is a learnable vector. The main difference is that, in our architecture, we do no copy information from the class em-bedding to the patch embeddings during the forward pass. class class class
+FFN
+SA
+FFN
+SA
+FFN
+SA
+FFN
+SA
+CLS
+CLS
+FFN
+SA
+FFN
+SA
+FFN
+SA
+FFN
+SA
+CLS
+FFN
+CA
+FFN
+CA
+FFN
+SA
+FFN
+SA c l a s s
+-a t t e n t i o n s e l f
+-a t t e n t i o n
+Figure 2. In the ViT transformer (left), the class embedding (CLS) is inserted along with the patch embeddings. This choice is detri-mental, as the same weights are used for two different purposes: helping the attention process, and preparing the vector to be fed to the classiﬁer. We put this problem in evidence by showing that inserting CLS later improves performance (middle). In the CaiT architecture (right), we further propose to freeze the patch embed-dings when inserting CLS to save compute, so that the last part of the network (typically 2 layers) is fully devoted to summarizing the information to be fed to the linear classiﬁer.
+Only the class embedding is updated by residual in the CA and FFN processing of the summarize stage.
+Multi-heads class attention. The role of the CA layer is to extract the information from the set of processed patches.It is identical to a SA layer, except that it relies on the attention between (i) the class embedding xclass (initial-ized at CLS in the ﬁrst CA) and (ii) itself plus the set of frozen patch embeddings xpatches.
+Considering a network with h heads and p patches, and denoting by d the embedding size, we parametrize the multi-head class-attention with several projection ma-trices, Wq, Wk, Wv, Wo ∈ Rd×d, and the corresponding biases bq, bk, bv, bo ∈ Rd. With this notation, the compu-tation of the CA residual block proceeds as follows. We
+ﬁrst augment the patch embeddings (in matrix form) as z = [xclass, xpatches], which makes the CA closer to a SA layer in that we guarantee that there is at least a key cor-responding to the query. We then perform the projections:
+Q = Wq xclass + bq,
+K = Wk z + bk,
+V = Wv z + bv.
+The class-attention weights are given by
+A = Softmax(Q.K T / p d/h) (5) (6) (7) (8)
+where Q.K T ∈ Rh×1×p. This attention is involved in the weighted sum A × V to produce the residual output vector outCA = Wo A V + bo, (9) which is in turn added to xclass for subsequent processing.
+The CA layers extract the useful information from the patches embedding to the class embedding. In preliminary experiments, we empirically observed that the ﬁrst CA and
+FFN give the main boost, and a set of 2 blocks of layers (2 CA and 2 FFN) is sufﬁcient to cap the performance.
+In the experimental section, we denote by 12+2 a trans-former when it consists of 12 blocks of SA+FFN layers and 2 blocks of CA+FFN layers.
+Complexity. The layers contain the same number of pa-rameters in the class-attention and self-attention stages: CA is identical to SA in that respect, and we use the same parametrization for the FFNs. However the processing of these layers is much faster: the FFN only processes matrix-vector multiplications.
+The CA function is also less expensive than SA in term of memory and computation because it computes the at-tention between the class vector and the set of patch em-beddings: Q ∈ Rd means that Q.K T ∈ Rh×1×p.
+In contrast, in the “regular self-attention” layers SA, we have
+Q ∈ Rp×d and therefore Q.K T ∈ Rh×p×p.
+In other words, the initially quadratic complexity in the number of patches becomes linear in our extra CaiT layers. 4. Experiments
+In this section, we report our experimental results related to LayerScale and CaiT. Note that we provide complemen-in Appendix A we tary results in supplemental material: provide some experiments that have guided our architecture design and hyper-parameter optimization. Experiment in
+Transfer learning are reported in Appendix C and we show additional visualizations in Appendix D.
+Experimental setting. Our implementation is based on the Timm library [69]. Unless speciﬁed otherwise, for this analysis we make minimal changes to hyper-parameters compared to the DeiT training scheme [64], except for mi-nor adjustments of the learning rate in case we do not ob-serve convergence. All our experiments are carried out on ImageNet [55], and also evaluated on two variations
+ImageNet-Real [6] that corrects and give a more of it: detailed annotation, and ImageNet-V2 [53] (matched fre-quency) that provides a separate test set. 4.1. Preliminary analysis with deeper architectures
+Table 1. Improving convergence at depth on ImageNet-1k. The baseline is DeiT-S. Several methods include a ﬁx scalar learnable weight α per layer as in Figure 1(c). We have adapted Rezero,
+Fixup, T-Fixup, since the original methods do not converge: we have re-introduced the Layer-normalization η and warmup. We have adapted the drop rate dr for all the methods, including the baseline (otherwise it does not converge). The column α = ε reports the performance when initializing the scalar with the same value as for LayerScale. depth baseline scalar α weighting
+LayerScale
+[dr]
+Rezero T-Fixup
+Fixup α = ε 12 18 24 36 79.9 [0.05] 80.7 [0.10] 81.0 [0.20] 81.9 [0.25] 78.3 80.1 80.8 81.6 79.4 81.7 81.5 82.1 80.7 82.0 82.3 82.4 80.4 81.6 81.1 81.6 80.5 81.7 82.4 82.9
+Deit-Small model during 300 epochs to allow a direct com-parison with the results reports by Touvron et al. [64]. For all the variants we adjust the drop-rate of stochastic depth to the depth of the network, see Appendix A for a more de-tailed discussion. This is required to achieve convergence when increasing the depth to 36 layers. We measure the per-formance on the Imagenet1k [17, 55] classiﬁcation dataset as a function of the depth. 4.1.1 Comparison of normalization strategies
+As discussed in Section 2, Rezero, Fixup and T-Fixup do not converge when training DeiT off-the-shelf. However, if we re-introduce LayerNorm2 and warmup, Fixup and T-Fixup achieve congervence and even improve training com-pared to the baseline DeiT. We report the results for these
+“adaptations” of Fixup and T-Fixup in Table 1.
+The modiﬁed methods are able to converge with more layers without saturating too early. ReZero converges, we show (column α = ε) that it is better to initialize α to a small value instead of 0, as in LayerScale. Fixup and t-Fixup are competitive with LayerScale in the regime of a relatively low number of blocks (12–18). However, they are more complex than LayerScale: they employ different ini-tialization rules depending of the type of layers, and they re-quire more changes of the transformer architecture. There-fore we only use LayerScale in subsequent experiments, which is much simpler as it only makes a single change and is parametrized by a single hyper-parameter ε.
+Note, all the methods have a beneﬁcial effect on con-vergence and they tend to reduce the need for stochas-tic depth, these drop rate accord-ingly per method. Figure 3 provides the performances as the function of for LayerScale.
+We empirically use the following formula to set up the therefore we adjust the drop rate dr
+We ﬁrst carry out an empirical study of the normalization methods discussed in Section 2. At this stage we consider a 2Bachlechner et al. report that batchnorm is complementary to ReZero, while removing LayerNorm in the case of transformers.
+)
+% ( y c a r u c c a 1
+-p o t 82 80 78 0.0 12 blocks 18 blocks 24 blocks 36 blocks 48 blocks 0.1 0.2 stochastic depth coefficient 0.3 0.4
+Figure 3. We measure the impact of stochastic depth on ImageNet with a DeiT-S with LayerScale for different depths. The drop rate of stochastic depth needs to be adapted to the network depth. drop-rate for the CaiT-S models derived from on Deit-S: dr = min (cid:16)0.1 × depth 12 − 1, 0(cid:17) .This formulaic choice avoids cross-validating this parameter and overﬁtting. We further increase (resp. decrease) it by a constant for larger (resp. smaller) working dimensionality d. 4.1.2 Analysis of Layerscale
+Statistics of branch weighting. We evaluate the impact of Layerscale for a 36-layer transformer by measuring the ratio between the norm of the residual activations and the norm of the activations of the main branch ∥gl(x)∥2/∥x∥2.
+The results are shown in Figure 4. We can see that train-ing a model with Layerscale makes this ratio more uniform across layers, and seems to prevent some layers from having a disproportionate impact on the activations. While trans-lating this empirical observation to a provable conclusion, similar to prior works [2, 76] we hypothetize that the ben-eﬁt is mostly the impact on optimization, which we try to support by the control experiment below.
+Re-training. LayerScale makes it possible to get in-creased performance by training deeper models. At the end of training we obtain a speciﬁc set of scaling factors for each layer.
+Inspired by the lottery ticket hypothesis [23], one question that arises is whether what matters is to have the right scaling factors, or to include these learnable weights in the optimization procedure. In other terms, what happens if we re-train the network with the scaling factors obtained by a previous training?
+The table below empirically answers that question.
+Depth → 12 18 24 36
+LayerScale
+Re-trained with ﬁxed weights 80.5 80.6 81.7 81.5 82.4 81.2 82.9 81.6
+In this experiment, we compare the performance (top-1 validation accuracy, %) on ImageNet-1k with DeiT-S ar-Figure 4. Analysis of the contribution of the residual branches (Top: Self-attention ; Bottom: FFN) for a network comprising 36 layers, without (red) or with (blue) Layerscale. The ratio between the norm of the residual and the norm of the main branch is shown for each layer of the transformer and for various epochs (darker shades correspond to the last epochs). For the model trained with layerscale, the norm of the residual branch is on average 20% of the norm of the main branch. We observe that the contribution of the residual blocks ﬂuctuates more for the model trained without layerscale and in particular is lower for some of the deeper layers. chitectures of differents depths. Everything being identical otherwise, in the ﬁrst experiment we use LayerScale, i.e. we have learnable weights initialized at a small value ε. In the control experiment we use ﬁxed scaling factors initialised at values obtained by the LayerScale training.
+We can see that the control training with ﬁxed weights also converges without suffering from instabilities with the deepest architectures. Nevertheless, the results are lower than those obtained with the learnable weighting factors.
+This suggests that the evolution of the parameters during training has a beneﬁcial effect on the deepest models. 4.2. Class attention layers
+In Table 2 we study the impact on performance of the de-sign choices related to class embedding. We depict some of them in Figure 2. As a baseline, average pooling of patches embeddings with a vanilla DeiT-Small achieves a better per-formance than using a class token. This choice, which does not employ any class embedding, is typical in con-volutional networks, but possibly weaker with transformers when transferring to other tasks [20].
+Late insertion. The performance increases when we in-sert the class embedding later in the transformer. It is max-imized two layers before the output. Our interpretation is that the attention process is less perturbed in the 10 ﬁrst lay-   
+Table 2. Variations on CLS with Deit-Small (no LayerScale): we change the layer at which the class embedding is inserted. In ViT and DeiT, it is inserted at layer 0 jointly with the projected patches.
+We evaluate a late insertion of the class embedding, as well as our design choice to introduce speciﬁc class-attention layers. depth: SA+CA insertion layer top-1 acc.
+#params
+FLOPs
+Baselines: DeiT-S and average pooling 12: 12 + 0 12: 12 + 0 0 n/a 79.9 80.3 22M 22M
+Late insertion of class embedding 12: 12 + 0 12: 12 + 0 12: 12 + 0 12: 12 + 0 12: 12 + 0 2 4 8 10 11 80.0 80.0 80.0 80.5 80.3 22M 22M 22M 22M 22M
+DeiT-S with class-attention stage (SA+FFN) 12: 9 + 3 12: 10 + 2 12: 11 + 1 13: 12 + 1 14: 12 + 2 15: 12 + 3 9 10 11 12 12 12 79.6 80.3 80.6 80.8 80.8 80.6 22M 22M 22M 24M 26M 27M 4.6B 4.6B 4.6B 4.6B 4.6B 4.6B 4.6B 3.6B 4.0B 4.3B 4.7B 4.7B 4.8B ers, yet it is best to keep 2 layers for compiling the patches embedding into the class embedding via the class-attention, otherwise the processing gets closer to a weighted average.
+Our class-attention layers are designed on the assump-tion that there is no beneﬁt in copying information from the class embedding back to the patch embeddings in the for-ward pass. Table 2 supports that hypothesis: if we compare the performance for a total number of layers ﬁxed to 12, the performance of CaiT with 10 SA and 2 CA layers is identical to average pooling and better than the DeiT-Small baseline with a lower number of FLOPs. If we set 12 layers in the self-attention stage, which dominates the complex-ity, we increase the performance signiﬁcantly by adding two blocks of CA+FFN.
+Visualization of class-attention maps.
+In Figure 5 we show the attention map related to our ﬁrst class-attention layer. In CaiT, the ﬁrst class-attention layer conveniently concentrates all the spatial-class relationship. The second class-attention layer seems to focus more on the context, see Appendix D for complementary visualizations. 4.3. Our CaiT models
+Figure 5. Visualization of the class-attention (ﬁrst CA layer) ob-tained with a CaiT XXS-12 model. We show the attention map for each head in appendix. top: original image; middle: attention between all patches and class token; bottom: thresholded map. our case is related to the number of heads h as d = 48 × h, since we ﬁx the number of components per head to 48.
+This choice is a bit smaller than the value used in DeiT.
+We also adopt the crop-ratio of 1.0 optimized for DeiT by
+Wightman [69]. Table A.4 and A.5 in Appendix support these choices.
+We incorporate talking-heads attention [56] into our model. It increases the performance on Imagenet of DeiT-Small from 79.9% to 80.3%.
+The hyper-parameters are identical to those provided in
+DeiT [64], except mentioned otherwise. The main param-eters are as follows: we use a batch size of 1024 sam-ples and train during 400 epochs with repeated augmenta-tion [5, 29]. The learning rate of the AdamW optimizer [44] is set to 0.001 and associated with a cosine training sched-ule, 5 epochs of warmup and a weight decay of 0.05.
+We report in Table 3 the two hyper-parameters that we modify depending on the model complexity, namely the drop rate dr associated with uniform stochastic depth, and the initialization value ε associated with LayerScale.
+Our CaiT models are built upon ViT: the only difference is that we incorporate LayerScale in each residual block (see Section 2) and the two-stages architecture with class-attention layers described in Section 3. Table 3 describes our different models. The design parameters governing the capacity are the depth and the working dimensionality d. In
+Fine-tuning at higher resolution (↑) and distillation (Υ).
+We train all our models at resolution 224, and optionally
+ﬁne-tune them at a higher resolution to trade performance against accuracy [19, 64, 65]: we denote the model by ↑384 models ﬁne-tuned at resolution 384×384. We also train models with distillation (Υ) as suggested by Touvron et
+Table 3. CaiT models: The design parameters are depth and d. The mem columns correspond to the memory usage. The speed is the throughput at inference time for a batch of 128 images with FP16 precision on one GPU V100 32GB (PyTorch 1.8 [48], CUDA 11). The only parameters that we adjust per model are the drop rate dr of stochastic depth and the LayerScale initialization ε. All models are initially trained at resolution 224 during 400 epochs, the complexity measures (FLOPs, speed and mem) are reported for this resolution. We also
+ﬁne-tune these models at resolution 384 (identiﬁed by ↑384) or train them with distillation (Υ).
+CAIT model ↓
+XXS-24
+XXS-36
+XS-24
+XS-36
+S-24
+S-36
+S-48
+M-24
+M-36 depth (SA+CA) 24 + 2 36 + 2 24 + 2 36 + 2 24 + 2 36 + 2 48 + 2 24 + 2 36 + 2 d 192 192 288 288 384 384 384 768 768
+#params (×106) @224 @384 @224 @384 @224 @384 speed (im/s) mem. (MB)
+FLOPs (×109) 12.0 17.3 26.6 38.6 46.9 68.2 89.5 185.9 270.9 2.5 3.7 5.4 8.1 9.4 13.9 18.6 36.0 53.7 9.6 14.3 19.3 28.8 32.2 48.0 63.8 116.1 173.3 1012.8 680.9 737.6 496.7 573.6 386.6 291.5 262.9 176.8 182.3 122.0 134.8 90.2 104.1 69.8 52.5 38.3 25.6 403 434 614 682 860 983 1106 2165 2661 2126 2156 3130 3198 4165 4287 4410 8634 9128 0.1 0.1 0.1 0.2 hparams
+ε dr 10−5 10−6 10−5 10−6 10−5 10−6 10−6 10−5 10−6 0.1 0.2 0.3 0.2 0.3
+Top-1 acc. (%) on Imagenet1k-val
+↑384 @224Υ ↑384Υ
+@224 77.6 79.1 81.8 82.6 82.7 83.3 83.5 83.4 83.8 80.4 81.8 83.8 84.3 84.3 85.0 85.1 84.5 84.9 78.4 79.7 82.0 82.9 83.5 84.0 83.9 84.7 85.1 80.9 82.2 84.1 84.8 85.1 85.4 85.3 85.8 86.1
+Table 4. Ablation: we present the ablation path from DeiT-S to our
+CaiT models. We highlight the complementarity of our approaches and optimized hyper-parameters †: training failed.
+Improvement top-1 acc. #params FLOPs
+DeiT-S [d=384,300 epochs]
+−6]
++ More heads [8]
++ Talking-heads
++ Depth [36 blocks]
++ Layer-scale [init ε = 10
++ Stochastic depth adaptation [dr=0.2]
++ CA [CaiT ]
++ Longer training [400 epochs]
++ Inference at higher resolution [256]
++ Fine-tuning at higher resolution [384]
++ Hard distillation [teacher: RegNetY-16GF]
++ Adjust crop ratio [0.875 → 1.0] 79.9 80.0 80.5 69.9† 80.5 83.0 83.2 83.4 83.8 84.8 85.2 85.4 22M 4.6B 4.6B 22M 22M 4.6B 64M 13.8B 64M 13.8B 64M 13.8B 68M 13.9B 68M 13.9B 68M 18.6B 68M 48.0B 68M 48.0B 68M 48.0B al. [64]. We use a RegNet-16GF [51] as teacher and adopt the simple “hard distillation” [64] for its simplicity. 4.4. Results
+Table 3 provides different complexity measures for our models. As a general observation, we observe a subtle in-terplay between the width and the depth, both contribute to the performance as reported by Dosovitskiy et al. [19] with longer training schedules. But if one parameter is too small the gain brought by increasing the other is not worth the additional complexity.
+Fine-tuning to size 384 (↑) systematically offers a large boost in performance without changing the number of pa-rameters. It also comes with a higher computational cost.
+In contrast, leveraging a pre-trained convnet teacher with hard distillation as suggested by Touvron et al. [64] pro-vides a boost in accuracy without affecting the number of parameters nor the speed.
+Comparison with the state of the art.
+In Table 5 we compare some of our models with the state of the art on
+Imagenet classiﬁcation without external data. We focus on the models CaiT-S36 and CaiT-M36, at different resolu-tions and with or without distillation.
+On Imagenet-val, we achieve 86.5% of top-1 accuracy, which is a signiﬁcant improvement over DeiT (85.2%). It is the state of the art except for a very recent concurrent work [8] that also reports a top-1 accuracy of 86.5%. Our
+CaiT-M36↑384Υ model obtains 85.9% top-1 accuracy on
+Imagenet-1k-val: this network is more efﬁcient that the best performing NFNet convnets w.r.t. FLOPs and even more in terms of throughput (images processed per second on a
+V100 GPU), thanks to the lower memory usage.
+Our approach is on par with the state of the art on
+Imagenet with reassessed labels, and outperforms it on
+Imagenet-V2, which has a distinct validation set which makes it harder to overﬁt.
+Ablation.
+In Table 4 we present how to gradually trans-form the Deit-S [64] architecture to CaiT-36, and measure at each step the performance/complexity changes. One can see that CaiT is complementary with LayerScale and of-fers an improvement without signiﬁcantly increasing the
+FLOPs. As already reported in the literature, the resolution is another important step for improving the performance and ﬁne-tuning instead of training the model from scratch saves a lot of computation at training time. Last but not least, our models beneﬁt from longer training schedules. 5.

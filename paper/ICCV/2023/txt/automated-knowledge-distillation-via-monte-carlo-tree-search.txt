@@ -1,0 +1,297 @@
+Abstract
+In this paper, we present Auto-KD, the ﬁrst automated search framework for optimal knowledge distillation design.
+Traditional distillation techniques typically require hand-crafted designs by experts and extensive tuning costs for different teacher-student pairs. To address these issues, we empirically study different distillers, ﬁnding that they can be decomposed, combined, and simpliﬁed. Based on these observations, we build our uniform search space with ad-vanced operations in transformations, distance functions, and hyperparameters components. For instance, the trans-formation parts are optional for global, intra-spatial, and inter-spatial operations, such as attention, mask, and multi-scale. Then, we introduce an effective search strategy based on the Monte Carlo tree search, modeling the search space as a Monte Carlo Tree (MCT) to capture the dependency among options. The MCT is updated using test loss and representation gap of student trained by candidate distillers as the reward for better exploration-exploitation balance. To accelerate the search process, we exploit ofﬂine processing without teacher inference, sparse training for student, and proxy settings based on distillation properties. In this way, our Auto-KD only needs small costs to search for optimal distillers before the distillation phase. Moreover, we expand
+Auto-KD for multi-layer and multi-teacher scenarios with training-free weighted factors. Our method is promising yet practical, and extensive experiments demonstrate that it generalizes well to different CNNs and Vision Transformer models and attains state-of-the-art performance across a range of vision tasks, including image classiﬁcation, object detection, and semantic segmentation. Code is provided at https://github.com/lilujunai/Auto-KD. 1.
+
+Introduction
+Various visual tasks [18, 34, 53] have been successfully tackled by Deep Neural Networks (DNNs). Despite the ap-*Corresponding author, † equal contribution.
+Figure 1. Illustration on distiller search space on intermediate fea-tures. Recent sadvancements in distillation methods (e.g., SP [69],
+ICKD [49], CWD [64], LKD [42] and LR [55]) can be searched with various options of transforms, distances and weights search. pealing performance, the prevailing DNNs usually have large numbers of parameters, leading to heavy costs of memory and computation. Conventional techniques such as pruning weights from networks [19, 36] and quantizing networks to use low-bit parameters [10, 57, 85] have proven to be effective for mitigating this computational burden. Recently,
+Knowledge Distillation (KD) [70, 24], another promising solution family to train compact yet accurate models, has attracted increasing attention. The objective of knowledge distillation (KD) is to transfer the acquired knowledge from a high-capacity DNN model (i.e., teacher) to a lower-capacity target DNN model (i.e., student), effectively balancing accu-racy and efﬁciency during runtime.
+Problem Statement: While numerous KD methods [54, 66, 82] have been proposed, one major challenge is the sen-sitivity of their performance to hyperparameters and teacher-student architecture pairs. Different hyperparameters, such as the weighted factor used in the loss function, can have a signiﬁcant impact on the ﬁnal performance of the distilled student model (see Figure 2 (Left)). Similarly, the same distiller performs quite differently under various teachers (see Figure 2 (Right)). Therefore, the practical usage of KD
+Figure 2. Left: Top-1 mean accuracy (%) achieved by KD meth-ods via various loss weights for ResNet20 (69.06%) with teacher
+ResNet110 on CIFAR-100. Right: Top-1 mean accuracy (%) of
+KD methods with different teachers for ResNet20 on CIFAR-100. always involves time-consuming tuning of speciﬁc hyperpa-rameter settings. Another problem is that existing distillation methods depend on manual human design and expert knowl-edge. Handcrafted distillations can be highly task or dataset-speciﬁc, limiting their generalizability to new scenarios. For these issues, an intuitive solution is to explore automated tuning ways. However, it is not easy to implement such an automatic search framework because of the following aspects: (1) knowledge distillation involves various hyper-parameter settings, loss functions, and transformation types, making it more complex than traditional hyperparameter optimization [21]. This complexity presents a signiﬁcant obstacle in designing a uniﬁed search space and identifying optimal solutions. (2) In contrast to weight-sharing meth-ods [27, 47] for acceleration, such a multi-variate joint search task needs to use the expensive multi-trial route to prevent weight-sharing errors and optimization collapse.
+Our New Observations. To effectively build uniﬁed search spaces and optimize search costs, we conduct detailed analyses and experiments on different existing distillation methods. For the search space, we ﬁnd that (1) Decompos-ability. Most advanced distillers can be decomposed into basic transformation and distance functions units. As shown in Figure 1, both SP [69] and ICKD [49] employ similar distance functions but differ in transformation. Conversely,
+ICKD [49] and CWD [64] share similar feature transfor-(2) Com-mations but adopt distinct distance functions. binability between different transformations and distance functions. As shown in Figure 3 (Left), the attention [82] and mask [78] transformations can be combined with multi-scale operation [55] with additional gains. Sample-wise transformations in SP with KL loss alternative to G − L2 loss yield better performance than the original form (see
+Figure 3 (Right)). (3) Simpliﬁability. Some distillation op-tions can be ignored in building the search space because of their consistently poorer results (e.g., L1 in Figure 3 (Right)).
+In addition, most distillers can obtain good results within limited hyperparameter selections (e.g., four values of loss weight in Figure 2 (left)). These observations inspire us
+Figure 3. Left: Top-1 mean accuracy (%) of combinations of different transformations for distilling ResNet20 (69.06%) with teacher ResNet110 on CIFAR-100. Right: Top-1 mean accuracy (%) of combinations of transformations and distances for ResNet20 on CIFAR-100. Mask-C and Mask-H×W denote channel-wise mask and spatial-wise mask. MS-channnel and MS-sample refer to our new combination transformations Multi-scale→Channel and
+Multi-scale→Sample. to build search spaces shown in Figure 1 that include vary-ing key distillation operations in transformations, distance functions, and weights. Regarding efﬁciency, we ﬁnd that ofﬂine storage of knowledge, sparse training for students, and advanced distillation properties, such as data efﬁciency and fast convergence, can be used to accelerate the distil-lation process. These ﬁndings offer valuable insights that contribute to the design of search space and the reduction of search budget.
+Our New Search Framework. Based on the exciting ob-servations described above, we present Auto-KD, an efﬁ-cient and effective automated search framework that ﬁnds optimal knowledge distillation designs for distilling a given teacher-student model. Speciﬁcally, Auto-KD consists of three important components: the uniﬁed tree-like distiller search space, Monte Carlo tree search, and search acceler-ation strategies. We organize the search space for feature distillers into a tree-like structure consisting of different options from global, intra-spatial, and inter-spatial feature transformations, feature distance functions, and weight fac-tors. The transformation options include attention [82, 83], mask [78], multi-scale [6], sample-wise [69], and channel-wise [49, 64, 86] operations. The distance functions include
+KL, L2, G − L2. Following most logits KD [24], we also further build a search space by extending the search for logits distance function and temperature values. To ﬁnd the optimal candidate efﬁciently, we choose a powerful Monte Carlo tree search to select, expand, simulate, and reward the values of various nodes in the search tree. The reward determines the test loss of the student and the representation gap between teacher and student. To accelerate the search process, we use ofﬂine storage of knowledge to replace teacher inference, sparse training for student models with proxy training set-tings (i.e., subsets and early stop). These strategies result in at least 40× faster training and 15× more training parame-ters and memory savings. Finally, we extend Auto-KD to multi-feature and multi-teacher distillation with train-free
+ﬁne-grained weighted factors, which condition on teacher feature entropy and feature similarity of teacher-student.
+Valuation and Evaluation In principle, our Auto-KD dif-fers from previous hand-designed distillation methods and opens new doors to automated distillation designs. Its merits can be highlighted in three aspects: (1) Effective. Auto-KD solves the distiller’s hyperparameter and architecture-sensitive problem and helps to obtain stable distillation gain in different scenarios. Extensive experiments on visual tasks and models demonstrate the leading performance of
+Auto-KD. On the CIFAR-100 dataset, Auto-KD achieves 3% ∼ 7% gain for CNN and 2% ∼ 13% gain for ViT models, surpassing other SOTA methods with signiﬁcant margins. On the large-scale ImageNet dataset, ResNet18 and MobileNet with Auto-KD reach a 3% absolute gain over the baseline model. For downstream tasks, Auto-KD also improves the detector with 3.7 AP on MS-COCO and the segmenter with 3.1% ∼ 3.7% mIOU in the cityscape. (2) Efﬁciency. Auto-KD employs bags of efﬁcient training strategies based on the distillation properties and achieves signiﬁcant speed-ups. This framework greatly beneﬁts the following search methods and the application of distilla-tion. (3) Insightful. Auto-KD in-depth analyzes existing advanced distillation designs and explores their combina-tions to generate many new distillers. Auto-KD not only provides guidelines for practical applications, but also de-velops a new research direction. We anticipate that our endeavors in automating the design of distillers will, to some degree, support and advance future research on automated knowledge distillation.
+Main Contributions:
+• By exploring the decomposability, combinability and simpliﬁability of distillation methods, we propose a new automated distillation search framework for optimal distiller design, which, to the best of our knowledge, is not achieved in the area of knowledge distillation.
+• Auto-KD organizes the uniﬁed distiller search space as a Monte Carlo tree and performs Monte Carlo tree search. In addition, Auto-KD leverages bags of efﬁcient strategies and achieves signiﬁcant search acceleration.
+• We perform thorough evaluations on classiﬁcation, de-tection, and segmentation. Auto-KD achieves state-of-the-art performance across multiple datasets and ar-chitectures (e.g., CNN and vision transformer). We also successfully extend Auto-KD in multi-layer and multi-teacher distillation. 2. Automated Knowledge Distillation
+Figure 4 presents the search process in Auto-KD. In this section, we ﬁrst specify its three key components: search space design, MCT search, and acceleration strategies. Then, we introduce its applications and extensions. 2.1. Search Space Design
+Problem formulation The aim of KD is to train a smaller student model (S) to learn from the teacher model (T ). More speciﬁcally, the teacher model’s outputs, referred to as pT and fT , correspond to the logits and features, respectively.
+Meanwhile, the outputs of the student model, denoted as pS, fS, are trained to match those of the teacher by minimizing:
+LKD = Wf × Df (cid:0)Tf (cid:10)fS, fT (cid:11)(cid:1) + Wp × Dp (pS/τ, pT /τ ) , (1) where Wf is the loss weighted factor, Tf is feature transfor-mations, Df (·, ·) and Dp(·, ·) is distance function measuring the difference of feature representations and logits.
+Uniﬁed tree-structured search space. For efﬁcient search and optimal accuracies, we organize key operations in KD into a tree-like structure in Table 1. (1) For feature trans-forms, we observe that existing designs can be decomposed into three categories: global feature, intra-spatial, and inter-spatial transformations, respectively. For example, atten-tion KD [82] generates attention factors to re-align teacher-student features. Then, these features can be pooled into multi-scale ones [6] and transformed by channel transforms to achieve better channel-wise alignment [64]. The com-bination of diverse operations allows our search space to capture the transformations in recent SOTA KDs and many new forms. For other transform parts, we employ a pooling layer to align feature scales and 1 × 1 Conv to align ﬁlter numbers. For converting logits KD, we apply intra-class and inter-class transform [29] to improve performance. (2)
+For the distance function, we select some potential distances for the feature KD and logits KD. Other distances are not included in our search space because of their poor perfor-mance. (3) For the hyperparameters of loss weights and temperature factors, we select common values as candidates for loss weights of feature KDs and temperature factors for logits KD. Our search space is highly uniform and tight, and we achieve advanced searches on it, detailed in the following sections.
+Extended Search Space. In addition, we also extend the search space with some distillation designs that we have explored ourselves: (1) G − L2 and Renyi entropy for em-bedding feature distillation. (2) Logits normalization with a scaling factor for KL divergence in logits KD. (3) Additional options for setting warm-up and early-stop for loss weights.
+Figure 4. The overall framework of Auto-KD, which models the search space into a MCT, then searches the optimal design of knowledge distillation using Monte Carlo tree search (left) and search acceleration strategies (right).
+Table 1. Various distillation operations and their forms in our search space, which will be detailed in the Appendix.
+Type
+Operation
+Expression
+Global Tf
+Intra-spatial Tf
+Inter-spatial Tf
+Distance Df
+Distance Dp
+Weight Wf
+Weight Wp
+Temperature τ
+Attention
+Mask
+Original
+Multi-scale
+Local
+Original
+Sample
+Channel
+Original
+G − L2
+LKL
+L2
+LKL
+LP earson
+Constant
+Constant
+Constant
+α × fS, α × fT , α ∼ (fS, fT )
+M × fS, M × fT , M ∈ (0, 1) fS, fT f N,C,H/2,4,W/2,4
+S 2×N,C,H/n,W/n f n
+S fS, fT f N,CHW
+S f C,N HW
+S fS, fT
+, f N,CHW
+, f C,N HW
+T
+T
+, f N,C,H/2,4,W/2,4
+T
+, f n
+T 2×N,C,H/n,W/n
+T /||fT · f ⊺ fS · f ⊺
+S|| − fT · f ⊺
+S/||fS · f ⊺ (cid:12) (cid:12) (cid:12) (cid:12)
+σ(fT ) × log[σ(fT )/σ(fS)]
+||fS − fT ||2
+σ(pT ) × log[σ(pT )/σ(pS)] 1 − cov(pS, pT )/(cid:0)std(pS) · std(pT )(cid:1)
+T ||(cid:12) (cid:12) 2 (cid:12) (cid:12) 1,5,25,50 0.1, 0.5, 1, 5 1,2,4,8 2.2. Monte Carlo Tree Search
+We perform the Monte Carlo Tree Search (MCTS) [71] for the following reasons: (1) MCTS is a powerful and efﬁ-cient sampling-based tree search method to solve complex decision problems [3, 65]. (2) MCTS could capture corre-lations of operation candidates in our distiller search space, improving interpretability and stability. The main steps of the algorithm can be summarized as follows.
+Selection: In this step, the algorithm selects the best node from the current tree using an Upper Conﬁdence Bound (UCB) formula. The UCB formula balances exploration and exploitation, allowing the algorithm to choose the node with the highest potential for improvement. For a node ni, the
+UCB is computed by:
+ν(ni) = Ri/Ni + C · p2 · ln Nb/Ni, where Ri represents the reward for node ni, while Ni and Nb (2) indicate the number of visits to node ni and its parent node nb, respectively. The control parameter C determines the extent of exploration. In our approach, the reward value R is dependent on the L CE(pS, Y ) loss of the student model and the similarity between the teacher and student on the validation set, as deﬁned below:
+R = 1 − (cid:0)LCE(pS, Y ) + LCKA(fS, fT )(cid:1), (3) where LCKA(·, ·) is Centered Kernel Alignment (CKA) met-ric [32] for representation similarity.
+Expansion: During this step, the algorithm generates addi-tional child nodes for the selected node, representing poten-tial future states of the system.
+Simulation: Following the expansion of the selected node, the newly added node undergoes evaluation through a tra-jectory of random actions until a terminal state is reached.
+The outcome of the simulation is then utilized to estimate the quality of the child node.
+Backpropagation: In the ﬁnal step, the algorithm updates the estimated quality of the parent nodes based on the simula-tion results. The updated quality values are used to inﬂuence future selections in the tree. 2.3. Search Acceleration Strategies
+Ofﬂine processing and sparse training. Our approach employs ofﬂine processing to reduce computational costs without requiring teacher inference. Speciﬁcally, we store the feature maps generated by the teacher after a single for-ward pass and apply the same data augmentation techniques used during training to ensure spatial alignment. In addition, we introduce sparse training to reduce the memory budget and computation. In distillation, we ﬁrst set up a random mask [50] to force certain weights of the student model to be zero and then conﬁgure a dynamic strategy [15] to preserve the distillation gains. The results in Table 2 indicate that ofﬂine processing effectively reduces inference parameters
+Table 2. Ablation on acceleration techniques (i.e., ofﬂine process-ing, student training with 50% sparsity, subsets & early-stop with 20% of original dataset & epochs) for ResNet-20 (69.09%) via teacher ResNet-110 on CIFAR-100. Training time (GPU-seconds) is measured on a single 2080Ti GPU and × represents the improv-ing ratios than traditional KD. Acc-1. denotes student accuracy (%) of candidate distiller in the search phase and Acc-2. represents the
+ﬁnal results (%) of our searched distiller in the distillation phase.
+Acc-1. Acc-2.
+Params (M)
+Time (S)
+Method
+Baseline
++ Ofﬂine
++ Sparse-50%
++ Subsets-20%
++ Early-stop-20% 1.97 0.27 (7.29×) 0.13 (15.15×) 0.13 (15.15×) 0.13 (15.15×) 6,036 4,654 (1.29×) 3,816 (1.58×) 793.2 (7.6×) 150.6 (40.07×) 71.00 70.82 70.66 66.52 48.98 72.65 72.65 72.61 72.55 72.52 and training time. Similarly, sparse student training sub-stantially reduces training costs and marginally improves searched accuracy.
+Proxy settings. With diverse and informative knowledge learned from a teacher, student models offer advantages in terms of data efﬁciency and faster training speeds. Based on these properties, we employ subsets and early stop the train-ing process once the student model performs well enough to determine the quality of the candidate distillation and use the intermediate model to compute the reward signal. As shown in Table 2, adopting proxy settings reduces search overhead and ensures stability in the ﬁnal searched accuracy. 2.4. Applications and Extensions
+After the distiller search phase, we train the student net-work S using the discovered distiller, denoted by LAuto−KD.
+The optimization objectives are deﬁned as follows, where
+LCE is the cross-entropy loss:
+LS = LCE(pS, Y ) + LAuto−KD, (4)
+Extension for multi-layer & multi-teacher distillation.
+Augmenting various features supervision from different lay-ers of a single teacher or multiple teachers can enhance the quality of distillation, but this approach also presents chal-lenges in weight tuning. To address this issue, we scale the weight of loss with Train-Free (TF) factors in multi-feature distillation based on the information bottleneck theory. The
+TF factors are determined by the information entropy of teacher features and the similarity of teacher-student feature pairs. Consider Q as a set comprising layer location pairs for feature distillation. The optimization objective function can be deﬁned as follows:
+LAuto−KD+T F = Wf X q∈Q
+µq × Df (cid:0)Tf (cid:10)f q
+S, f q
+T (cid:11)(cid:1),
+µq = Dentropy(f q
+T ) × DCKA(f q
+S, f q
+T ). (5) (6) where µq is the Train-Free (TF) ﬁne-grained weighted factor,
+Dentropy is the standard entropy metric and DCKA is the
+CKA feature distance metric, respectively. TF factor µq allows efﬁcient adjustment of Wf in multi-layer, cross-layer, and multi-teacher KD and achieves comparable results. 2.5. Detailed Analysis of Searched Distillers
+A thorough understanding of the speciﬁc task and the characteristics of the teacher-student network architecture should guide the choice of knowledge distillation opera-tion. From the searched distillers of Auto-KD for different models, we can summarize some observations regarding the applicability of different knowledge distillation methods as: 1. Channel-wise distillation operation is recommended for wider teacher-student networks. By aligning the feature maps of the teacher and student networks, this method facilitates the transfer of knowledge from the teacher to the student network. 2. Multi-scale distillation operation is a useful method when there is a signiﬁcant semantic gap between the teacher-student networks. It can help to gain more in most cases, especially for downstream tasks. 3. Mask distillation operation is more appropriate for teacher-student with relatively large distillation gaps, but it may also result in knowledge loss in the transfer process. 4. Attention distillation operation is more advantageous in heterogeneous teacher-student architectures, particu-larly for Vision Transformer models. 5. Local distillation operations are recommended for multi-label or local information-critical tasks, with av-erage performance on datasets such as CIFAR-10/100. 6. Sample-wise distillation operation can beneﬁt different models, but it is inﬂuenced by the corresponding task and batch size. 7. LKL has better generalizability for different tasks, and
+LP earson is more practical for complex tasks. 8. Adjusting the temperature coefﬁcient is useful for most tasks, and the optimal value of feature weights is gener-ally between 1 and 25. 3. Experiments
+In this section, we assess the efﬁcacy of our proposed
+Auto-KD approach on classiﬁcation, detection, and segmen-tation tasks, while also comparing its performance against other knowledge distillation methods. To ensure fair com-parisons, we employ identical training settings and report the mean results obtained from multiple trials conducted throughout the experiments. For more comprehensive imple-mentation details, please refer to the Supplementary Materi-als.
+Table 3. Comparison of results on CIFAR-100. Most of the results of other methods refer to the original papers [6, 66]. W40-2, R32×4,
+R8×4, MV2, SV1 and SV2 stand for WRN-40-2, ResNet32×4, ResNet8×4, MobileNetV2, ShufﬂeNetV1 and ShufﬂeNetV2. We report top-1 “mean ” accuracies (%) for Auto-KD over 3 runs.
+Model
+Teacher
+Student
+Same architectural style
+Different architectural style
+W-40-2
+W-16-2
+R56
+R20
+R110
+R20
+R110
+R32
+R32×4
+R8×4
+VGG13
+VGG8
+VGG13
+MNetV2
+R32×4
+SNetV1
+R32×4
+SNetV2
+W-40-2
+SNetV1
+Teacher
+Student
+FitNets [61]
+AT [82]
+SP [69]
+RKD [54]
+CRD [66]
+LR [55]
+Auto-KD
+KD [24]
+DIST [29]
+CRD+KD [67]
+ICKD-C [49]
+Auto-KD 75.61 73.26 73.58 74.08 73.83 73.35 75.48 76.12 76.62±0.18 74.92 75.35 75.64 75.57 76.86±0.23 72.34 69.06 69.21 70.55 69.67 69.61 71.16 71.89 72.12±0.17 70.66 71.78 71.63 71.69 72.44±0.15 74.31 69.06 68.99 70.22 70.04 69.25 71.46 71.82 72.23±0.19 70.67 71.68 71.56 71.91 72.52±0.22 74.31 71.14 71.06 72.31 72.69 71.82 73.48 73.89 74.29±0.18 73.08 73.86 73.75 74.11 74.60±0.18 79.42 72.50 73.50 73.44 72.94 71.90 75.51 75.63 77.35±0.21 73.33 75.79 75.46 75.48 77.61±0.36 74.64 70.36 71.02 71.43 72.68 71.48 73.94 74.84 75.06±0.16 72.98 73.86 74.29 73.88 75.36±0.15 74.64 64.60 64.14 59.40 66.30 64.52 69.73 70.37 70.42±0.12 67.37 69.17 69.94 69.53 70.58±0.18 79.42 70.50 73.59 71.73 73.48 72.28 75.11 77.25 77.26±0.17 74.07 75.23 75.12 74.86 77.56±0.21 79.42 71.82 73.54 72.73 74.56 73.21 75.65 77.18 77.31±0.34 74.45 76.08 76.05 75.86 77.52±0.16 75.61 70.50 73.73 73.32 74.52 72.21 76.05 77.14 77.21±0.36 74.83 75.85 76.27 76.12 77.46±0.32
+D
+K s t i g o l o
+/ w
+D
+K s t i g o l w
+Table 4. Accuracy results on ImageNet. Results of other methods quote the original papers report [6, 66].
+Teacher
+Student
+Acc.
+Teacher
+Student KD [24] AT [82] OFD [22]
+SRRL [30] CRD [66] KR [55] MGD [78] Auto-KD
+ResNet-34 ResNet-18
+ResNet-50 MobileNet
+Top-1
+Top-5
+Top-1
+Top-5 73.40 91.42 76.16 92.86 69.75 89.07 70.13 89.49 70.66 89.88 70.68 90.30 70.69 90.01 70.72 90.03 70.81 89.98 71.25 90.34 71.73 90.60 72.49 90.92 71.17 90.13 71.37 90.41 71.61 90.51 72.56 91.00 71.58 90.35 72.35 90.71 72.45 90.69 73.26 91.17 3.1. Experiments on CIFAR 100
+Dataset and Implementation. CIFAR-100 dataset [33] is a widely evaluated classiﬁcation benchmark in distilla-tion. During the distiller search phase, we adopt a basic tree structure search space and training acceleration settings, including 48 early-stop training epochs, 20% training data subsets, 50% sparsity of student model training, and ofﬂine storage of teacher’s knowledge. Our MCT search performs 100 iterations for each teacher-student pair. In the distillation phase, the teacher-student networks are trained with standard training settings, employing a training epoch of 200. A mini-batch size of 128 and a standard SGD optimizer are utilized.
+The learning rate follows a multi-step schedule, starting at 0.1 and decaying by 0.1 at 100 and 150 epochs.
+Comparison results. Table 3 presents a comparative anal-ysis of our Auto-KDf method (without logits KD) with state-of-the-art (SOTA) feature distillations and Auto-KD with other KD methods. For teacher-student pairs with the same architectural style, Auto-KDf and Auto-KD outper-form the baselines by margins ranging from 3% ∼ 5% and 3% ∼ 5%, respectively. Compared with other KDs, our approach achieves absolute accuracy gains of 1% ∼ 3% for Auto-KDf and 1% ∼ 3% for Auto-KD. Notably, our approach exhibits even stronger performance when dealing with different architectural styles. At the same time, most of the other KD methods suffer from a noticeable reduction in accuracy compared to the same architecture. Speciﬁcally,
+Auto-KD outperforms the baseline by margins of 5% ∼ 7% and the random search results by margins of 1% ∼ 3%, demonstrating the effectiveness of our design for different structures. Compared with other SOTA multi-layer KD meth-ods, our method achieves an additional gain of 0.3% ∼ 2% with only a single layer of feature knowledge. Finally, when combined with the distillation of output logits, Auto-KD provides additional improvements and clearly outperforms complex methods like CRD+KD, and ICKD. These results show that Auto-KD can improve each student model with simple settings under different teacher-student pairs. 3.2. Experiments on ImageNet
+Dataset and Implementation. We additionally perform ex-periments on the ImageNet dataset (ILSVRC12)[62]. Due to computational limitations, it is difﬁcult to search directly on the original ImageNet. Consequently, we address this issue by searching on a subset of ImageNet, namely ImageNet-100.
+This subset is randomly selected from the original training set and consists of 500 instances of 100 categories. Fol-lowing experiments on the CIFAR-100 dataset, we employ similar MCT search settings to identify optimal distillers for ImageNet. Subsequently, we conduct full student model training on the entire ImageNet dataset using standard ar-chitectures such as ResNet-18[20] and MobileNet[26]. The training conﬁguration aligns with the majority of distilla-tion methods, entailing a 100-epoch training duration with a multi-step learning rate. The learning rate commences at 0.1 and undergoes decay by a factor of 0.1 at 30, 60, and 90 epochs.
+Comparison results. In Table 3, we present the performance results of our auto-kd on the ImageNet dataset. Our Auto-KD method signiﬁcantly improves over baseline models, as we observe gains of 2% ∼ 3% in Top-1 accuracy for ResNet-18 and MobileNet, respectively. Notably, Auto-KD performs better than other KD methods and outperforms CKD with margins ranging from 1% ∼ 2%. These results demonstrate the superiority of Auto-KD over other methods on a large-scale dataset. These results demonstrate the effectiveness of
+Auto-KD for improving the performance of DNNs on the
+ImageNet dataset.
+Table 5. Top-1 mean accuracy (%) comparison on CIFAR-100.
+Student
+Vanilla KD [25] AT [82]
+SP [69] LG [37] Auto-KD
+DeiT-Ti [68]
+T2T-ViT-7 [81]
+PiT-Ti [23]
+PVT-Ti [72]
+PVTv2-B0 [73] 65.08 69.37 73.58 69.22 77.44 73.25 74.15 75.47 73.60 78.81 73.51 74.01 76.03 74.66 78.64 67.36 72.26 74.97 70.48 78.33 78.15 78.35 78.48 77.07 79.30 78.58 ±0.32 78.62 ±0.18 78.51 ±0.21 77.48 ±0.35 79.37 ±0.24 3.3. Experiments on Vision Transformer
+Implementation. Distillation techniques allow Vision Trans-former (ViT) to be trained from scratch easily with CNNs as teachers. To assess the efﬁcacy of Auto-KD, we search
+ViT-based distillation strategies on the CIFAR-100 dataset.
+We perform the MCT search with the same settings as the
+CNN experiment. Subsequently, we train the ViT with the optimal distiller obtained and ResNet-56 as CNN teacher.
+The training process involves images of 224×224 resolution and spans 300 epochs. The initial learning rate is set to 5e-4, and a weight decay of 0.05 is applied using the AdamW optimizer.
+Comparison results. Table 5 presents the results of the vanilla and distillation models employing different distilla-tion methods. The results indicate that Auto-KD can signiﬁ-cantly improve the performance of vision transformers with 2% ∼ 13% margins and consistently yields superior perfor-mance than other methods. In addition, it is noteworthy that our proposed method applies to various ViT architectures, thereby validating its effectiveness. 3.4. Experiments on Object Detection
+Datasets and implementation. We perform experiments on the MS-COCO dataset [46], which consists of 80 object categories. The training set comprises 120k images, while the testing set consists of 5k validation images. To evaluate the optimal distiller of Auto-KD on the MS-COCO dataset, we utilize the widely used open-source framework MMDe-tection citemmdetection as the strong baseline. Our application of Auto-KD includes two-stage detectors such as Faster R-CNN [60] and one-stage detectors like RetinaNet [45], both well-established object detection frameworks. Following established practices [45], all models are trained using a 2× learning schedule spanning 24 epochs. The models are trained using the SGD optimizer with a momentum of 0.9 and a weight decay of 0.0001.
+Comparison results. As shown in Table 6, Auto-KD demon-strates its effectiveness and generality by surpassing other state-of-the-art methods [64, 77, 83] for both object detec-tors, improving the average precision (AP) by 3.7 on Reti-naNet and 4.0 on Faster R-CNN. This success in tackling challenging object detection tasks showcases the broad ap-plicability and efﬁcacy of Auto-KD.
+Table 6. Results comparison of object detection on MS-COCO. T: teacher; S: student. CM RCNN: Cascade Mask RCNN.
+Model
+AP
+APL APM
+APS
+Two-stage detectors
+CM RCNN-X101[T]
+Faster RCNN-R50[S]
+KD [24]
+FKD [83]
+CWD [64]
+DIST [29]
+FGD [77]
+MGD [78]
+Auto-KD 45.60 38.40 39.70 41.50 41.70 40.40 42.00 42.10 42.40 26.20 21.50 23.20 23.50 23.30 23.90 23.80 23.70 24.20
+One-stage detectors
+RetinaNet-X101[T]
+RetinaNet-R50[S]
+KD [24]
+FKD [83]
+CWD [64]
+DIST [29]
+FGD [77]
+MGD [78]
+Auto-KD 41.00 37.40 37.20 39.60 40.80 39.80 40.70 41.00 41.10 23.90 20.00 20.40 22.70 22.70 22.00 22.90 23.40 23.30 49.60 42.10 43.30 45.00 45.50 44.60 46.40 46.40 46.70 45.20 40.70 40.40 43.30 44.50 43.70 45.00 45.30 45.50 60.00 50.30 51.70 55.30 55.50 52.60 55.50 56.10 55.90 54.00 49.70 49.50 52.50 55.30 53.00 54.70 55.70 55.80 3.5. Experiments on Semantic Segmentation
+Datasets and implementation. We conduct an evaluation of Auto-KD on the CityScapes dataset [9], which comprises 2,975 training images, 500 validation images, and 1,525 testing images. Following previous research, we employ
+PSPNet-ResNet101 [84] as the teacher model, while the student models consist of PSPNet and DeepLabV3 [5] with the ResNet18 backbone. During the distillation process, we use a batch size of 8 and train the models for 40,000 iterations using the SGD optimizer with a momentum of 0.9 and a weight decay of 0.0005. The results are reported based on the mean Intersection-over-Union (mIoU) under
+the single-scale evaluation setting.
+Comparison results. As shown in Table 7, the student Psp-Net and DeepLabV3 get 3.1 and 3.7 mIoU improvement by adding our Auto-KD loss. The obtained results clearly demonstrate that our method outperforms the current state-of-the-art distillation approach for semantic segmentation.
+This ﬁnding provides strong evidence that the searched dis-tillers effectively enhance the learning process of the student model.
+Visualizations. Figure 5 showcases the visualization re-sults of DeepLabV3-ResNet18 trained with Auto-KD and traditional KD methods. The Auto-KD approach results in more consistent dense-pixel classiﬁcation, as demonstrated through the superior segmentation performance of the re-sulting segmenter. Accurate and consistent pixel labeling is of utmost importance for downstream tasks like object recognition and tracking, making this particularly crucial for image segmentation tasks [56]. The results of the study indi-cate that the proposed Auto-KD approach is more suitable for distilling knowledge from a teacher to a student model, resulting in enhanced segmentation performance.
+Table 7. mIoU (%) results of CityScapes segmentation.
+Teacher
+DeepLabV3-R101(78.07)
+Student
+SKD [52]
+IFVD [74]
+CWD[64]
+CIRKD [75]
+Auto-KD
+DeepLabV3-R18(74.21) 75.42 (1.21↑) 75.59 (1.38↑) 75.55 (1.34↑) 76.38 (2.17↑) 77.35 (3.14↑)
+PSPNet-R18(72.55) 73.29 (0.74↑) 73.71 (1.16↑) 74.36 (1.81↑) 74.73 (2.18↑) 76.25 (3.70↑) 3.6. Ablation Study
+In this section, We analyze the impact of each component of Auto-KD in isolation and explore different variations of these components.
+Search space & algorithm. Our well-designed search space with a tree-based structure reduces the problem’s complex-ity, enabling the MCT search to explore promising distillers more efﬁciently. Results in Table 8 illustrate the clear ad-vantages of our search method over na¨ıve organizations. In addition, we involve other advanced distillation operations into the extended space, resulting in additional gains. For the search algorithm, our MCT search obtains stable beneﬁts compared to random search.
+Table 8. Ablation of search space for ResNet-20 on CIFAR-100.
+Space
+Na¨ıve
+Ours
+Ours+ Extension
+Random 69.82%±0.44 70.32%±0.24
+MCTS 71.55%±0.51 72.52%±0.22 71.98%±0.42 72.65%±0.16
+Comparing different reward functions. The design of the reward function is crucial as it guides the search for optimal
+Table 9. Ablation on reward for ResNet-20 on CIFAR-100.
+LCE +LCKA
+LCE +LL1
+LCE
+Acc.
+Reward
+Top-1 (%) 72.25± 0.25 72.36±0.21 72.45±0.18 72.52±0.22 solutions for the MCT search. In Table 9, we compare the performance of using accuracy, LCE, and other losses of the student models on the validation set. The results indicate that employing the loss value is better than direct accuracy and involving the CKA distance or L1 distance of the teacher model results in stable improvements. 3.7. Multi Layer & Multi Teacher Extensions
+Multi-layer distillation. As a generic framework, Auto-KD can be naturally used in multi-layer and cross-layer scenarios with our Train-Free factor (TF). To explore its potential, we choose KR and DistPro [11] as the references and train the student model with the same setting. Table 10 shows the results from which we can observe Auto-KD combined with
+TF can achieve better performance than KR+DistPro. In addition, the TF strategy with KD also achieves competitive gain over DistPro and is superior in efﬁciency by avoiding the meta-optimization process.
+Table 10. Top-1 accuracy (%) of different multi-layer distillations.
+Method
+KR [55]
+KR+DistPro [11] KR+TF
+Auto-KD+TF
+Multi-layer
+Cross-layer 71.89±0.05 71.92±0.16 71.93±0.26 72.03±0.28 72.05±0.12 72.18±0.18 72.55±0.08 72.62±0.17
+Multi-Teacher distillation. Our Auto-KD with a train-free factor can also be employed for multi-teacher distillation incorporating intermediate features. The results in Table 11 demonstrate that TF and Auto-KD+TF consistently outper-form AVEG and AEKD. The experimental results validate the applicability of Auto-KD in multi-teacher KD.
+Table 11. Top-1 accuracy (%) ofdifferent multi-teacher distillations.
+Model
+Teacher-3
+Student
+ResNet8×4 ResNet20×4 ResNet32×4 VGG8
+Teacher-3
+Teacher-2
+Vanilla Acc 72.79 78.39 79.31
+KD [24]
+AVEG [63] AEKD [63]
+TF 70.74±0.40
+Auto-KD-TF
+KD Acc. 74.55±0.24 74.69±0.29 75.38±0.25 76.52±0.15 4.

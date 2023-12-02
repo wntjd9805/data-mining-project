@@ -1,0 +1,288 @@
+Abstract
+Recent work has argued that classiﬁcation losses utiliz-ing softmax cross-entropy are superior not only for ﬁxed-set classiﬁcation tasks, but also by outperforming losses de-veloped speciﬁcally for open-set tasks including few-shot learning and retrieval. Softmax classiﬁers have been stud-ied using different embedding geometries—Euclidean, hy-perbolic, and spherical—and claims have been made about the superiority of one or another, but they have not been systematically compared with careful controls. We conduct an empirical investigation of embedding geometry on soft-max losses for a variety of ﬁxed-set classiﬁcation and im-age retrieval tasks. An interesting property observed for the spherical losses lead us to propose a probabilistic classiﬁer based on the von Mises–Fisher distribution, and we show that it is competitive with state-of-the-art methods while producing improved out-of-the-box calibration. We provide guidance regarding the trade-offs between losses and how to choose among them. 1.
+
+Introduction
+Almost on a weekly basis, novel loss functions are pro-posed that claim superiority over standard losses for super-vised learning in vision. At a coarse level, these loss func-tions can be divided into classiﬁcation based and similarity based. Classiﬁcation-based losses [5, 7, 10, 12, 14, 16, 36, 37, 38, 44, 45, 46, 58, 60, 61, 66, 67, 68, 77] have generally been applied to ﬁxed-set classiﬁcation tasks (i.e., tasks in which the the set of classes in training and testing is identi-cal). The prototypical classiﬁcation-based loss uses a soft-max function to map an embedding to a probability distribu-tion over classes, which is then evaluated with cross-entropy
+[5]. Similarity-based losses [2, 6, 9, 15, 17, 20, 23, 24, 25, 26, 32, 34, 35, 40, 41, 47, 48, 51, 54, 55, 56, 57, 59, 62, 63, 64, 69, 70, 71, 72, 74, 76, 78] have been designed specif-∗Work performed during an internship at Google Research. ically for open-set tasks, which include retrieval and few-shot learning. Open-set tasks refer to situations in which the classes at testing are disjoint from, or sometimes a superset of, those available at training. The prototypical similarity-based method is the triplet loss which discovers embeddings such that an instance is closer to instances of the same class than to instances of different classes [51, 72].
+Recent efforts to systematically compare losses support a provocative hypothesis: on open-set tasks, classiﬁcation-based losses outperform similarity-based losses by leverag-ing embeddings in the layer immediately preceding the log-its [4, 39, 58, 61, 77]. The apparent advantage of classi-ﬁers stems from the fact that similarity losses require sam-pling informative pairs, triplets, quadruplets, or batches of instances in order to train effectively [4, 14, 38, 66, 67, 68, 77]. However, all classiﬁcation losses are not equal, and we ﬁnd systematic differences among them with regard to a fundamental choice: the embedding geometry, which deter-mines the similarity structure of the embedding space.
+Classiﬁcation losses span three embedding geometries:
+Euclidean, hyperbolic, and spherical. Although some com-parisons have been made between geometries, the com-parisons have not been entirely systematic and have not covered the variety of supervised tasks. We ﬁnd this fact somewhat surprising given the many large-scale compar-isons of loss functions. Furthermore, the comparisons that have been made appear to be contradictory. The face ver-iﬁcation community has led the push for spherical losses, claiming superiority of spherical over Euclidean. How-ever, this work is limited to open-set face-related tasks
+[14, 36, 45, 46, 66, 67, 68]. The deep metric-learning community has recently refocused its attention to classi-ﬁcation losses, but it is unclear from empirical compar-isons whether the best-performing geometry is Euclidean
+Independently, Khrulkov et or spherical [4, 39, 44, 77]. al. [25] show that a hyperbolic prototypical network is a strong performer on common few-shot learning bench-marks, and additionally a hyperbolic softmax classiﬁer out-performs the Euclidean variant on person re-identiﬁcation.
+Unfortunately, these results are in contention with Tian et al. [61], where the authors claim a simple Euclidean soft-max classiﬁer learns embedding that are superior for few-shot learning.
+One explanation for the discrepant claims are confounds that make it impossible to determine whether the causal fac-tor for the superiority of one loss over another is embedding geometry or some other ancillary aspect of the loss. An-other explanation is that each bit of research examines only a subset of losses or a subset of datasets. Also, as pointed out in Musgrave et al. [39], experimental setups (e.g., using the test set as a validation signal, insufﬁcient hyperparam-eter tuning, varying forms of data augmentation) make it difﬁcult to trust and reproduce published results. The goal of our work is to take a step toward rigor by reconciling dif-ferences among classiﬁcation losses on both ﬁxed-set and image-retrieval benchmarks.
+As discussed in more detail in Section 2.3, our investi-gations led us to uncover an interesting property of spheri-cal losses, which in turn suggested a probabilistic spherical classiﬁer based on the von Mises–Fisher distribution. While our loss is competitive with state-of-the-art alternatives and produces improved out-of-the-box calibration, we avoid un-equivocal claims about its superiority. We do, however, believe that it improves on previously proposed stochastic classiﬁers (e.g., [41, 52]), in, for example, its ability to scale to higher-dimensional embedding spaces.
+Contributions.
+In our work, (1) we characterize clas-(2) siﬁcation losses in terms of embedding geometry, we systematically compare classiﬁcation losses in a well-controlled setting on a range of ﬁxed- and open-set tasks, examining both accuracy and calibration, (3) we reach the surprising conclusion that spherical losses generally outper-form the standard softmax cross-entropy loss that is used almost exclusively in practice, (4) we propose a stochas-tic spherical loss based on von Mises–Fisher distributions, scale it to larger tasks and representational spaces than pre-vious stochastic losses, and show that it can obtain state-of-the-art performance with signiﬁcantly lower calibration error, and (5) we discuss trade-offs between losses and fac-tors to consider when choosing among them. 2. Classiﬁcation Losses
+We consider classiﬁcation losses that compute the cross-entropy between a predicted class distribution and a one-hot target distribution (or equivalently, as the negative log-likelihood under the model of the target class). The geome-try determines the speciﬁc mapping from a deep embedding to a class posterior, and in a classiﬁcation loss, this mapping is determined by a set of parameters learned via gradient de-scent. We summarize the three embedding geometries that serve to differentiate classiﬁcation losses. 2.1. Euclidean
+Euclidean embeddings lie in an n-dimensional real-valued space (i.e., Rn or sometimes Rn
++). The commonly-used dot-product softmax [5], which we refer to as STAN-DARD, has the form: p(y z) =
+| exp(wT yz) j exp(wT j z) (cid:80)
+, (1) z z
+||
+− wj wj 2 +
+|| 2 =
+|| where z is an embedding and wj are weights for class j. The dot product is a measure of similarity in Eu-clidean space, and is related to the Euclidean distance by 2 j z. (Classiﬁers using
+||
+||
+Euclidean distance have been explored, but gradient-based training methods suffer from the curse of dimensionality be-cause gradients go to zero when all points are far from one another. Prototypical networks [54] do succeed using a Eu-clidean distance posterior, but the weights are determined by averaging instance embeddings, not gradient descent.) 2wT
+−
+|| 2.2. Hyperbolic c =
+We follow Ganea et al. [16] and Khrulkov et al. [25] and consider the Poincar´e ball model of hyperbolic geom-etry deﬁned as Dn 0
+}
+∈ where c is a hyperparameter controlling the curvature of the ball. Embeddings thus lie inside a hypersphere of radius 1/√c. To perform multi-class classiﬁcation, we employ the hyperbolic softmax generalization derived in [16], hereafter
+HYPERBOLIC: 2 < 1, c (cid:107)
+Rn : c z
+{
+≥ z (cid:107) p(y z)
+| exp
+∝
+
+λc py (cid:107)
+√c
+ ay (cid:107) sinh−1
+
+ (cid:16) 1 2√c py ⊕ (cid:104)− c (cid:13) py ⊕ (cid:13)
+−
+− c z, ay 2(cid:17) c z(cid:13) (cid:13) (cid:105) ay (cid:107)
+
+
+
+ , (cid:107) (2)
+Dn 1 are learnable 0 c and aj where pj ∈
+}
+∈ parameters for class j, λc
+. is the conformal factor of pj, pj (cid:105) (cid:104) c is the M¨obius addition operator. is the dot product, and
+Further details can be found in [16, 25]. c \ {
+Tpj
+⊕
+Dn 2.3. Spherical
+Spherical embeddings lie on the surface of an n-dimensional unit-hypersphere (i.e., Sn−1). The traditional loss, hereafter COSINE, uses cosine similarity [77]: p(y z) =
+| exp(β cos θy) j exp(β cos θj) (cid:80)
+, (3) where β > 0 is an inverse-temperature parameter, wj (cid:107)
+= 1, j, and θj is the angle between z and wj. Note z (cid:107)
+= 1
+∀ (cid:107) (cid:107) 1TxDn c denotes the tangent space of Dn c at x.
+that, in contrast to STANDARD, the (cid:96)2-norms are factored out of the weight vectors and embeddings, thus only the direction determines class association.
+Many variants of COSINE have been proposed, particu-larly in the face veriﬁcation community [14, 36, 45, 46, 66, 67, 68], some of which are claimed to be superior. For com-pleteness, we also experiment with ArcFace [14], one of the top-performing variants, hereafter ARCFACE: exp(β cos(θy + m)) z) = p(y
+| exp(β cos(θy + m)) + (cid:80) j(cid:54)=y exp(β cos θj)
+, (4) 0 is an additive-angular-margin hyperparam-where m eter penalizing the true class. (Note that we are coloring the loss name by geometry; COSINE and ARCFACE are both spherical losses.)
+≥ (cid:107)
+Early in our investigations, we noticed an interesting z property of spherical losses: encodes information about (cid:107) uncertainty or ambiguity. For example, the left and right frames of Figure 1 show MNIST [33] test images that, when trained with COSINE, produce embeddings that have small and large (cid:96)2-norms, respectively. This result is perfectly in-tuitive for STANDARD since the norm affects the conﬁdence or peakedness of the class posterior distribution (veriﬁed in
+[42, 46]), but for COSINE, the norm has absolutely no ef-fect on the posterior. Because the norm is factored out by the cosine similarity, there is no force on the model during training to reﬂect the ambiguity of an instance in the norm.
+Despite ignoring it, the COSINE model better discriminates correct versus incorrect predictions with the norm than does the STANDARD model (see COSINE and STANDARD rows of
+Table 1; note that the row for VMF corresponds to a loss we introduce in the next section).
+Why does the COSINE embedding convey a conﬁdence signal in the norm? One intuition is that when an instance is ambiguous, it could be assigned many different labels in the training set, each pulling the instance’s embedding in different directions. If these directions roughly cancel, the embedding will be pulled to the origin. (cid:107) (cid:107) z
+Due to COSINE having claimed advantages over STAN-DARD, and also discarding important information conveyed
+, we sought to develop a variant of COSINE that uses by the (cid:96)2-norm to explicitly represent uncertainty in the em-bedding space, and thus to inform the classiﬁcation deci-sion. We refer to this variant as the von Mises–Fisher loss or VMF.
+Figure 1. MNIST test images corresponding to embeddings with the (left) smallest (cid:107)z(cid:107) and (right) largest (cid:107)z(cid:107); trained with CO-SINE. The left grid clearly contains “noisier” or unorthodox digits.
+MNIST
+Fashion
+MNIST
+CIFAR10 CIFAR100
+STANDARD
+HYPERBOLIC
+COSINE
+ARCFACE
+VMF 0.92 0.91 0.93 0.95 0.97 0.84 0.81 0.84 0.89 0.88 0.84 0.87 0.90 0.90 0.82 0.66 0.70 0.84 0.80 0.80
+Table 1. The mean AUROC indicating how well the norm of an embedding, (cid:107)z(cid:107), discriminates correct and incorrect classiﬁer out-puts for ﬁve losses (rows) and four data sets (columns). Chance is 0.5; perfect is 1.0. Boldface indicates the highest value. Error bars are negligible across ﬁve replications. Although the embed-ding norm signals classiﬁer accuracy for all losses, spherical losses yield the strongest signal. tion, κ. The pdf for an n-dimensional unit vector x is: p(x; µ, κ) = Cn(κ) exp(κµTx) with
+κn/2−1 (2π)n/2In/2−1(κ)
+Cn(κ) =
+, (5) where x, µ
+Bessel function of the ﬁrst kind at order v.
+≥
+Sn−1, κ
+∈ 0, and Iv denotes the modiﬁed
+The von Mises–Fisher loss, hereafter VMF, uses the same form of the posterior as COSINE (Equation 3), al-though z and are now vMF random variables, deﬁned in terms of the deterministic output of the network, ˜z, and the learnable weight vector for each class j, ˜wj: wj
+{
+}
+µ =
+, κ = (cid:18) vMF z
+∼ wj
+∼ vMF (cid:18)
+˜z
+˜z (cid:107) (cid:107)
+˜wj
+µ =
+˜wj (cid:107) (cid:19)
+.
+, κ =
+˜wj (cid:107) (cid:107) (cid:107) (cid:19)
+˜z (cid:107) (cid:107)
+, (6) 2.3.1 von Mises–Fisher Loss
+The von Mises–Fisher (vMF) distribution is the maximum-entropy distribution on the surface of a hypersphere, param-eterized by a mean unit vector, µ, and isotropic concentra-(cid:107)
+. (cid:107)
+The norm directly controls the spread of the distribution with a zero norm yielding a uniform distribution over the hypersphere’s surface. The loss remains the negative log-likelihood under the target class, but in contrast to COSINE, it is necessary to marginalize over the the embedding and
+weight-vector uncertainty: (y, z; w1:Y ) = Ez,w1:Y [
+− (cid:34)
+L log p(y z, w1:Y )]
+| exp(β cos θy)) j exp(β cos θj) (cid:80)
+= Ez,w1:Y log
+− (cid:35)
+, (7) where Y is the total number of classes in the training set.
+Applying Jensen’s inequality, we obtain an upper-bound on and obtain which allows us to marginalize over the
+L a form expressed in terms of an expectation over z: wj
+{
+} (y, z; w1:Y ) (cid:32) (cid:34)
+L
+Ez log
+≤ (cid:88) j exp(log Cn( (cid:107)
+˜wj
+) (cid:107) (cid:33)(cid:35) (8) log Cn(
+˜wj + βz (cid:107)
+)) (cid:107)
+−
+−
+βE[wy]E[z],
+.
+} where E[z] = (In/2(κ)/In/2−1(κ))µz. This objective can be approximated by sampling only from z and we ﬁnd that during both training and testing, 10 samples is sufﬁcient. At test time, VMF approximates Ez,w1:Y [p(y z, w1:Y )] using
+| wj
+Monte Carlo samples from each of z and
+{
+To sample, we make use of a rejection-sampling repa-rameterization trick [11]. However, [11] computes modiﬁed
+Bessel functions on the CPU with manually-deﬁned gradi-ents for backpropagation, substantially slowing both the for-ward and backwards passes through the network. Instead, we borrow tight bounds for In/2(κ)/In/2−1(κ) from [50] and log Cn(κ) from [31], which together make Equation 8 efﬁcient and tractable to compute. We ﬁnd that the rejection sampler is stable and efﬁcient in embedding spaces up to at least 512D, adding little overhead to the training and testing procedures (see Appendix G). A full derivation of the loss is provided in Appendix A. Additional details regarding the bounds for In/2(κ)/In/2−1(κ) and log Cn(κ) can be found in Appendix B.
+}
+˜wj
+{
+The network fails to train when the initial are cho-sen using standard initializers, particularly in higher dimen-sional embedding spaces. We discovered the failure to be due to near-zero gradients for the ratio of modiﬁed Bessel functions when the vector norms are small (see ﬂat slope in
+Figure 2 for small κ). We derived a dimension-equivariant initialization scheme (see Appendix C) that produces norms that yield a strong enough gradient for training. We also include a ﬁxed scale-factor on the embedding, ˜z, for the same reason. The points in Figure 2 show the scaling of ini-tial parameters our scheme produces for various embedding dimensionalities, designed to ensure the ratio of modiﬁed
+Bessel functions has a constant value of 0.4. The expected norms are plotted as individual points with matching color
+Figure 2. The ratio of modiﬁed Bessel functions versus κ for var-ious embedding dimensionalities (colored curves). Our initializer for κ ensures the ratio of modiﬁed Bessel functions is constant re-gardless of the dimensionality. The value of κ provided by the ini-tializer for each dimensionality is plotted as a single point. A per-fect initializer would ensure the point sits exactly on the matching-colored curve. For this simulation, we initialized such that the y-axis had a constant value of 0.4.
+Figure 3. Cars196 test images corresponding to VMF embeddings with the (left) smallest κz and (right) largest κz. Instances that are more difﬁcult to classify or ambiguous correspond to small κz. and we ﬁnd they produce a near-perfect ﬁt for greater than 8D, lying on-top of their corresponding curves.
+To demonstrate that VMF learns explicit uncertainty structure, we train it on Cars196 [28], a dataset where the class is determined by the make, model, and year of a pho-tographed car. In Figure 3, we present images correspond-ing to embeddings whose distributions have the most un-certainty (smallest κz) and least uncertainty (largest κz) in the test set. VMF behaves quite sensibly: the most uncer-tain embeddings correspond to images of cars that are far from the camera or at poses where it’s difﬁcult to extract the make, model, and year; and the most certain embed-dings correspond to images of cars close to the camera in a neutral pose.
+Figure 4. 3D embeddings of the MNIST test set for each of the ﬁve classiﬁcation variants. Instances are colored by their ground-truth class.
+The plotted instances for VMF correspond to µz. Note that HYPERBOLIC, COSINE, ARCFACE, and VMF are showing embeddings prior to the normalization/projection step. Best viewed in color.
+STANDARD
+HYPERBOLIC
+COSINE
+ARCFACE
+VMF
+MNIST 98.92 0.03
+± 98.92 0.03
+± 0.03 98.99
+± 99.13 ± 0.02 0.04 99.02
+± 3. Experimental Results
+Fashion
+MNIST
+CIFAR10
+CIFAR100 90.31 0.12
+± 90.31 0.13
+± 0.09 90.39
+± 90.73 ± 0.12 90.82 ± 0.14 94.13 ± 0.05 94.11 ± 0.05 0.10 93.99
+± 94.15 ± 0.05 94.00 ± 0.12 0.18 69.21
+± 69.85 0.07
+± 70.57 ± 0.54 69.08 0.57
+± 69.94 ± 0.18
+Table 2. Mean classiﬁcation accuracy (%) of each loss across four ﬁxed-set classiﬁcation tasks. Error bars repre-sent ±1 standard-error of the mean.
+Boldface indicates the best-performing the loss(es). Note that on average, three spherical losses outperform HY-PERBOLIC and STANDARD.
+We experiment with four ﬁxed-set classiﬁcation datasets—MNIST [33], FashionMNIST [75], CIFAR10
+[29], and CIFAR100 [29]—as well as three common datasets for image retrieval—Cars196 [28], CUB200-2011
+[65], and Stanford Online Products (SOP) [57]. MNIST and FashionMNIST are trained with 3D embeddings,
+CIFAR10 and CIFAR100 with 128D embeddings, and all open-set datasets with 512D embeddings. We perform a hyperparameter search for all losses on each dataset. The hyperparameters associated with the best performance on the validation set are then used to train ﬁve replications of the method. Reported test performance represents the average over the ﬁve replications. Additional details including the network architecture, dataset details, and hyperparameters are included in Appendix D. 3.1. Fixed-Set Classiﬁcation
+We begin by comparing representations learned by the
+ﬁve losses we described: STANDARD, HYPERBOLIC, CO-SINE, ARCFACE, and VMF. The latter three have spherical geometries. ARCFACE is a minor variant of COSINE claimed to be a top performer for face veriﬁcation [14]. VMF is our probabilistic extension of COSINE. Using a 3D embed-ding on MNIST, we observe decreasing intra-class angular variance for the losses appearing from left to right in Fig-ure 4. The intra-class variance is related to inter-class dis-criminability, as the 10 classes are similarly dispersed for all losses. The three losses with spherical geometry obtain the lowest variance, with ARCFACE lower than COSINE due to a margin hyperparameter designed to penalize intra-class variance; and VMF achieves the same, if not lower variance still, as a natural consequence of uncertainty reduction.
+The test accuracy for each of the ﬁxed-set classiﬁcation datasets and the ﬁve losses is presented in Table 2. Across all datasets, spherical losses outperform STANDARD and
+HYPERBOLIC. Among the spherical losses, ARCFACE and
+COSINE are deﬁcient on at least one dataset, whereas VMF is a consistently strong performer.
+Table 3 presents the top-label expected calibration error (ECE) for each dataset and loss. The top-label expected cal-ibration error approximates the disparity between a model’s conﬁdence output, maxy p(y z), and the ground-truth like-| lihood of being correct [30, 49]. The left four columns show out-of-the-box ECE on the test set (i.e., prior to any post-hoc calibration). VMF has signiﬁcantly reduced ECE com-pared to other losses, with relative error reductions of 40-70% for FashionMNIST, CIFAR10, and CIFAR100. The right four columns show ECE after applying post-hoc tem-perature scaling [19]. STANDARD and HYPERBOLIC greatly beneﬁt from temperature scaling, with STANDARD exhibit-ing the lowest calibration error.
+Post-hoc calibration requires a validation set, but many settings cannot afford the data budget to reserve a size-able validation set, which makes out-of-the-box calibration a desirable property. For example, in few-shot and transfer learning, one may not have enough data in the target domain to both ﬁne tune the classiﬁer and validate.
+Temperature scaling is not as effective when applied to spherical losses as when applied to STANDARD and HYPER-BOLIC. The explanation, we hypothesize, is that the spher-ECE
+ECE with Temperature Scaling
+MNIST 0.2 2.4
+± 2.8 0.1
+± 1.8 ± 0.2 2.3 0.1
+± 1.6 ± 0.1
+Fashion
+MNIST 0.8 12.4
+± 0.4 13.2
+± 0.5 7.9
+± 11.0 0.5
+± 4.2 ± 0.5
+CIFAR10
+CIFAR100
+MNIST 0.1 8.8
+± 0.1 8.9
+± 0.2 8.9
+± 10.0 0.1
+± 5.9 ± 0.2 0.2 20.6
+± 0.2 22.0
+± 1.2 21.8
+± 26.4 0.4
+± 7.9 ± 0.3 0.4 ± 0.1 0.1 1.4 0.1 1.6 0.1 1.7 0.1 1.5
+±
+±
+±
+±
+Fashion
+MNIST 5.5 ± 1.3 7.2 0.7
+± 4.2 ± 0.1 0.4 7.2 0.2 5.0
+±
+±
+CIFAR10
+CIFAR100 2.7 ± 0.2 2.8 ± 0.1 0.2 6.4 0.1 8.7 0.2 5.3
+±
+±
+± 2.2 ± 0.1 0.1 2.6 0.8 10.8 0.2 15.7 0.2 8.0
+±
+±
+±
+±
+STANDARD
+HYPERBOLIC
+COSINE
+ARCFACE
+VMF
+Table 3. Mean expected calibration error (%), computed with 15 equal-mass bins, before post-hoc calibration (leftmost four columns) and after temperature scaling (rightmost four columns) across the four ﬁxed-set classiﬁcation tasks. Error bars represent ±1 standard-error of the mean. Boldface indicates the loss(es) with the lowest error.
+Cars196
+CUB200-2011
+SOP
+STANDARD
++ COSINE AT TEST
+HYPERBOLIC
++ COSINE AT TEST
+COSINE
+ARCFACE
+VMF 0.2 21.3
+± 0.1 23.2
+± 0.3 22.9
+± 0.4 25.0
+± 24.6 0.4
+± 27.4 ± 0.2 27.2 ± 0.1 0.2 20.0
+± 0.2 21.4
+± 0.3 20.1
+± 21.8 0.2
+± 22.8 ± 0.1 23.1 ± 0.3 0.1 22.1
+± 0.1 39.7
+± 0.1 42.1
+± 0.2 41.0
+± 44.0 0.1
+± 44.3 ± 0.1 0.3 40.8 0.2 38.3
+±
+±
+Table 4. Mean mAP@R (%) across the three open-set im-age retrieval tasks. Error bars represent ±1 standard-error of the mean. Boldface indicates the best-performing loss(es).
+“+ Cosine at Test” replaces the default met-ric for the geometry (i.e., Euclidean for STANDARD and
+Poincar´e for HYPERBOLIC) with cosine distance to com-pare instances. ical losses incorporate a learned temperature parameter β (which we discuss below), which is unraveled by the cal-ibration temperature. We leave it as an open question for how to properly post-hoc calibrate spherical losses. 3.2. Open-Set Retrieval
+For open-set retrieval, we follow the data preprocessing pipeline of [4] where each dataset is ﬁrst split into a train set and test set with disjoint classes. We additionally split off 15% of the training classes for a validation set, a de-cision that has been left out of many training procedures of similarity-based losses [39]. We evaluate methods using mean-average-precision at R (mAP@R), a metric shown to be more informative than Recall@1 [39]. For the stochas-tic loss, VMF, we compute Ez1:N [mAP@R(z1:N , y1:N )], where N is the number of test instances.
+Table 4 presents the retrieval performance for each loss.
+As with ﬁxed-set classiﬁcation, there is no consistent win-ner across all datasets, but spherical losses tend to out-perform STANDARD and HYPERBOLIC. Boudiaf et al. [4]
+ﬁnd that retrieval performance can be improved for STAN-DARD by employing cosine distance at test time. Although no principled explanation is provided, we note from Fig-ure 4 that introduces a large source of intra-class vari-ance in STANDARD and HYPERBOLIC. This variance is fac-tored out automatically by the spherical losses. As shown in Table 4, cosine distance at test improves both STANDARD and HYPERBOLIC, though not to the level of the best per-forming spherical loss. z (cid:107) (cid:107) to other
+In contrast stochastic losses
+[41, 52],
+VMF scales to high-dimensional embeddings—512D in this case—and can be competitive with state-of-the-art.
+However, it has the worst performance on SOP which has 9,620 training classes; many more than all other datasets.
+In Section 2.3.1, we mentioned that to marginalize out the weight distributions, we successively apply Jensen’s in-equality to their expectations. The decision resulted in a tractable loss, but it is an upper-bound on the true loss and the bound very likely becomes loose as the number of train-ing classes increases. We hypothesize the inferior perfor-mance is due to this design choice, and despite experimen-tation with curriculum learning techniques to condition on a subset of classes during training, results did not improve. 3.3. Role of Temperature
+−
+Due to spherical losses using cosine similarity, the log-1, 1]. Consequently, it is necessary its are bounded in [ to scale the logits to a more suitable range. In past work, spherical losses have incorporated an inverse-temperature constant, β > 0 [14, 66, 68, 77]. Past efforts to turn β into a trainable parameter ﬁnd that it either does not work as well as ﬁxing it, or no comparison is made to a ﬁxed value
+[45, 46, 67].
+In COSINE, ARCFACE, and VMF, we compare a ﬁxed β to a trained β, using ﬁxed values common in the literature.
+Under a suitable initialization and parameterization of tem-perature, the trained β performs at least as well as a ﬁxed value and avoids the manual search (Figure 5). In partic-stochastic embeddings or stochastic logits, but they sug-gest Gaussians instead of vMFs. Chang et al. [7] sup-pose stochastic embeddings, but deterministic classiﬁcation weights, and train a classiﬁer using Monte Carlo samples.
+They also add a KL-divergence regularizer between the em-bedding distribution and a zero-mean, unit-variance Gaus-sian. Collier et al. [10] propose a classiﬁcation loss with stochastic logits that uses a temperature-parameterized soft-max. They show it can train under the inﬂuence of het-eroscedastic label noise with improved accuracy and cali-bration. Shi and Jain [53] convert deterministic face embed-dings into Gaussians by training a post-hoc network to esti-mate the covariances. Their objective maximizes the mutual likelihood of same-class embeddings. Scott et al. [52] and
+Oh et al. [41] propose similarity-based losses that are the stochastic analogs of the prototypical network [54] and pair-wise contrastive loss [20], respectively. Neither loss shows promise with high-dimensional embeddings. The loss from
+[52] struggles to compete with a standard prototypical net-work in 64D, and [41] omits any results with embeddings larger than 3D. Gaussian distributions suffer from the curse of dimensionality [11]; one possible explanation for the in-ferior performance compared to deterministic alternatives.
+The work most closely related to ours is Kornblith et al. [27], which compares STANDARD, COSINE, and an assortment of alternatives including mean-squared error, sigmoid cross-entropy, and various regularizers applied to
+STANDARD. In contrast, we focus on multiple variants of spherical losses and comparing geometries. Their ﬁndings are compatible with ours. 5. Conclusions
+In this work, we perform a systematic compari-son of classiﬁcation losses that span three embedding geometries—Euclidean, hyperbolic, and spherical—and at-tempt to reconcile the discrepancies in past work regarding their performance. Our investigations have led to a stochas-tic spherical classiﬁer where embeddings and class weight vectors are von Mises–Fisher random variables. Our pro-posed loss is on par with other classiﬁcation variants and also produces consistently reduced out-of-the-box calibra-tion error. Our loss encodes instance ambiguity using the concentration parameter of the vMF distribution.
+Consistent with the no-free-lunch theorem [73], we ﬁnd there is no one loss to rule them all. Scanning arXiv, this conclusion is uncommon, and it is even rarer in published work. The performance jump claimed for novel losses of-ten vanishes with rigorous, systematic comparsions in con-trolled settings—in settings where the network architec-ture is identical, hyperparameters are optimized with equal vigor, regularization and data augmentation is matched, and a held-out validation set is used to choose hyperparameters.
+Musgrave et al. [39] reach a similar conclusion: the gap be-Figure 5. Comparison between a learned temperature and vari-ous values of a ﬁxed temperature on (left) CIFAR100 and (right)
+Cars196. Learning the temperature performs at least as well as
+ﬁxing it, with exception to VMF on Cars196. ular, rather than performing constrained optimization in β, we perform unconstrained optimization in τ = log(β). De-tails can be found in Appendix E. 4.

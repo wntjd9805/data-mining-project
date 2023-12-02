@@ -1,0 +1,78 @@
+Abstract
+From a simpliﬁed analysis of adaptive methods, we de-rive AvaGrad, a new optimizer which outperforms SGD on vision tasks when its adaptability is properly tuned. We ob-serve that the power of our method is partially explained by a decoupling of learning rate and adaptability, greatly simplifying hyperparameter search. In light of this obser-vation, we demonstrate that, against conventional wisdom,
+Adam can also outperform SGD on vision tasks, as long as the coupling between its learning rate and adaptability is taken into account. In practice, AvaGrad matches the best results, as measured by generalization accuracy, de-livered by any existing optimizer (SGD or adaptive) across image classiﬁcation (CIFAR, ImageNet) and character-level language modelling (Penn Treebank) tasks. When training
+GANs, AvaGrad improves upon existing optimizers.1 1.
+
+Introduction
+Deep neural networks are notoriously difﬁcult and costly to train due to the non-convexity of the underlying objective coupled with limitations of ﬁrst-order methods, like vanish-ing and shattered gradients [15, 16, 2]. Architectural designs such as normalization layers [19, 1] and residual connections
+[12] facilitate training by improving gradient statistics, and are broadly used in practice. However, modern architectures often contain modules with different functionalities, such as attention heads [41] and gating mechanisms [17], whose parameter gradients naturally present distinct statistics.
+Adaptive gradient methods such as AdaGrad [8] and
+Adam [21] are particularly suitable for training complex networks, as they designate per-parameter learning rates which are dynamically adapted based on individual gradient statistics collected during training. Although widely adopted, recent works have shown shortcomings in both theoretical and practical aspects of adaptive methods, such as noncon-vergence [34] and poor generalization [42].
+Moreover, SGD is still dominant when training relatively simple architectures such as ResNets [12, 13] and DenseNets
+[18], where model-based methods [19, 12] sufﬁce to over-come the obstacles of training deep networks.
+A clear trend in the literature is that SGD is more com-monly adopted in computer vision tasks, where convolu-tional networks are prominent [35, 4, 40], while adaptive methods are typically employed in natural language process-ing tasks, where the most successful networks are either recurrent [17, 30] or attention-based [7, 41]. This situation persists despite the fact that considerable effort has been put into the design of sophisticated adaptive methods, with the goal of providing SGD-like performance in computer vision tasks and formal convergence guarantees.
+Newly-proposed optimizers typically offer convergence guarantees for stochastic convex problems [34, 27, 37], but, as we will see, either fail to match SGD’s performance when training simpler networks, or behave similarly to SGD and thus underperform Adam when training complex models.
+The behavior of recently-proposed adaptive methods when training deep networks is unclear due to the scarcity of non-convex guarantees and analyses.
+In this paper, we focus on the question of whether an optimizer can be dominant in multiple domains. That is, we are concerned with ﬁnding conditions and properties for which an optimization method trains convolutional networks as well as SGD, while at the same time being able to train more complex models as well as Adam. We refer to this property as domain-independent dominance.
+O
+We start in Section 3 by analyzing the convergence of adaptive methods for stochastic non-convex problems, pro-(1/√T ) conver-viding a sufﬁcient condition to guarantee a gence rate – the same as SGD. Moreover, we later (Section 8) propose a simple procedure that, given an arbitrary adaptive method, produces a similar optimizer that satisﬁes said con-(1/√T ) convergence dition and hence offers a guaranteed rate for stochastic non-convex problems. From this result, we also show how Adam can provably achieve SGD-like convergence in stochastic non-convex problems given proper tuning of its adaptability parameter ǫ, and show how this does not contradict [34].
+O 1AvaGrad is available at github.com/lolemacs/avagrad
+Further inspecting the convergence rate of adaptive meth-116286
+ods and the relation with ǫ motivates AvaGrad, a new adap-tive method that decouples the learning rate and the adapt-ability parameter ǫ. In light of our theoretical results, Av-aGrad (introduced in Section 4) is uniquely attractive as it virtually removes the interaction between the learning rate – the hyperparameter that requires the most tuning to achieve strong generalization – and the adaptability parameter ǫ – which we show to be strongly connected to convergence.
+Section 5 demonstrates through extensive experiments that, against conventional wisdom, Adam can be superior to SGD when training ResNets, even in challenging tasks such as ImageNet [36] classiﬁcation. The caveat is that achieving SGD-like performance on vision tasks requires extensive tuning of both the learning rate and ǫ, inducing high computational costs due to their interaction.
+Our experiments also show that AvaGrad is not merely a theoretical exercise, as it performs as well as both SGD and
+Adam in their respectively favored usage scenarios without requiring extensive hyperparameter tuning. Section 7 quanti-ﬁes these differences by measuring suboptimality w.r.t. hy-perparameters given a ﬁxed training budget.
+Contributions. We offer marked improvements to adap-tive optimizers, from theoretical and practical perspectives:
+• We show that Adam can provably converge for non-convex problems given a proper tuning of its adaptability parameter ǫ. We address the apparent contradiction with
+[34], providing new insights on the role of ǫ in terms of convergence and performance of adaptive methods.
+• Extensive experiments show that Adam can outperform
+SGD in tasks where adaptive methods have found little success. As suggested by our theoretical results, tuning ǫ is key to achieving optimal results with adaptive methods.
+• We propose AvaGrad, a theoretically-motivated adap-tive method that decouples the learning rate α and the adaptability parameter ǫ. Quantifying the hyperparame-ter tuning cost using a zeroth-order method, we observe that AvaGrad is signiﬁcantly cheaper to tune than Adam.
+Matching the generalization accuracy of SGD and other adaptive methods across tasks and domains, AvaGrad offers performance dominance given low tuning budgets. 2. Preliminaries
+∈ a1 , 1
+Notation.
+Rd we use 1
+For vectors a = [a1, a2, . . . ], b = a = [ 1 a2 , . . . ] for element-wise
+[b1, b2, . . . ] division, √a = [√a1, √a2, . . . ] for element-wise square root, and a b = [a1b1, a2b2, . . . ] for element-wise multi-denotes the ℓ2-norm, while other norms are plication. speciﬁed whenever used. The subscript t is used to denote a vector related to the t-th iteration of an algorithm, while i is used for coordinate indexing. When used together, t
+Rd. precedes i: wt,i ∈
+R denotes the i-th coordinate of wt ∈
+⊙ a k k
+Stochastic Non-Convex Optimization. We consider problems of the form f (w) := Es
+[fs(w)] ,
+∼D (1) min
+Rd w
+∈ is a probability distribution over a set of “data where
+D
+R are not necessarily convex and indi-points”, fs : Rd
+→ cate the instant loss for each data point s
+. As is typically done in non-convex optimization, we assume throughout the paper that f is M -smooth, i.e. there exists M such that
+∈ S
+S for all w, w′ f (w)
+Rd. k∇
+∈ f (w′)
+M w k
+− w′ k k ≤
+− ∇ (2)
+We also assume that the instant losses have bounded and all for some G fs(w)
+G k∞ ≤
+∞
+∞ gradients, i.e.
+, w s
+Rd. k∇
+∈
+∈ S
+Following the literature on stochastic non-convex opti-mization [9], we evaluate optimization methods in terms of number of gradient evaluations required to achieve small loss gradients. We assume that the algorithm takes a sequence of data points S = (s1, . . . , sT ) from which it sequentially and deterministically computes iterates w1, . . . , wT , using a single gradient evaluation per iterate.
+The algorithm then constructs a distribution
+S) over and outputs wt′ . We say an (t
+P
+| 1, . . . , T t algorithm has a convergence rate of
+, samples t′
+}
+∼ P
+∈ { (g(T )) if
+O (g(T )) , (3)
+E f (wt) 2 k k∇
+≤ O h i where the expectation is over the draw of the T data points
+S
+T and the chosen iterate wt, t
+∼ D

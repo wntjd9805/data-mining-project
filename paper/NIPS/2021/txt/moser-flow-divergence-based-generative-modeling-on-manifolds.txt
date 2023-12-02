@@ -1,0 +1,216 @@
+Abstract
+We are interested in learning generative models for complex geometries described via manifolds, such as spheres, tori, and other implicit surfaces. Current extensions of existing (Euclidean) generative models are restricted to speciﬁc geometries and typically suffer from high computational costs. We introduce Moser Flow (MF), a new class of generative models within the family of continuous normalizing
+ﬂows (CNF). MF also produces a CNF via a solution to the change-of-variable formula, however differently from other CNF methods, its model (learned) density is parameterized as the source (prior) density minus the divergence of a neural network (NN). The divergence is a local, linear differential operator, easy to approximate and calculate on manifolds. Therefore, unlike other CNFs, MF does not require invoking or backpropagating through an ODE solver during training.
+Furthermore, representing the model density explicitly as the divergence of a NN rather than as a solution of an ODE facilitates learning high ﬁdelity densities.
+Theoretically, we prove that MF constitutes a universal density approximator under suitable assumptions. Empirically, we demonstrate for the ﬁrst time the use of
+ﬂow models for sampling from general curved surfaces and achieve signiﬁcant improvements in density estimation, sample quality, and training complexity over existing CNFs on challenging synthetic geometries and real-world benchmarks from the earth and climate sciences. 1
+
+Introduction
+The major successes of deep generative models in recent years are primarily in domains involving
+Euclidean data, such as images (Dhariwal and Nichol, 2021), text (Brown et al., 2020), and video (Ku-mar et al., 2019). However, many kinds of scientiﬁc data in the real world lie in non-Euclidean spaces speciﬁed as manifolds. Examples include planetary-scale data for earth and climate sciences (Mathieu and Nickel, 2020), protein interactions and brain imaging data for life sciences (Gerber et al., 2010;
+Chen et al., 2012), as well as 3D shapes in computer graphics (Hoppe et al., 1992; Kazhdan et al., 2006). Existing (Euclidean) generative models cannot be effectively applied in these scenarios as they would tend to assign some probability mass to areas outside the natural geometry of these domains.
+An effective way to impose geometric domain constraints for deep generative modeling is to design normalizing ﬂows that operate in the desired manifold space. A normalizing ﬂow maps a prior (source) distribution to a target distribution via the change of variables formula (Rezende and Mohamed, 2015; Dinh et al., 2016; Papamakarios et al., 2019). Early work in this direction proposed invertible architectures for learning probability distributions directly over the speciﬁc manifolds deﬁned over spheres and tori (Rezende et al., 2020). Recently, Mathieu and Nickel (2020) proposed to extend continuous normalizing ﬂows (CNF) (Chen et al., 2018) for generative modeling over Riemannian manifolds wherein the ﬂows are deﬁned via vector ﬁelds on manifolds and computed as the solution to an associated ordinary differential equation (ODE). CNFs have the advantage that the neural 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+network architectures parameterizing the ﬂow need not be restricted via invertibility constraints.
+However, as we show in our experiments, existing CNFs such as FFJORD (Grathwohl et al., 2018) and Riemannian CNFs (Mathieu and Nickel, 2020) can be slow to converge and the generated samples can be inferior in capturing the details of high ﬁdelity data densities. Moreover, it is a real challenge to apply Riemannian CNFs to complex geometries such as general curved surfaces.
+To address these challenges, we propose Moser Flows (MF), a new class of deep generative models within the CNF family. An MF models the desired target density as the source density minus the divergence of an (unrestricted) neural network. The divergence is a local, linear differential operator, easy to approximate and calculate on manifolds. By drawing on classic results in differential geometry by Moser (1965) and Dacorogna and Moser (1990), we can show that this parameterization induces a CNF solution to the change-of-variables formula speciﬁed via an ODE. Since MFs directly parameterize the model density using the divergence, unlike other CNF methods, we do not require to explicitly solve the ODE for maximum likelihood training. At test-time, we use the ODE solver for generation. We derive extensions to MFs for Euclidean submanifolds that efﬁciently parameterize vector ﬁelds projected to the desired manifold domain. Theoretically, we prove that Moser Flows are universal generative models over Euclidean submanifolds. That is, given a Euclidean submanifold
+M and a target continuous positive probability density µ over M, MFs can push arbitrary positive source density ν over M to densities ¯µ that are arbitrarily close to µ.
+We evaluate Moser Flows on a wide range of challenging real and synthetic problems deﬁned over many different domains. On synthetic problems, we demonstrate improvements in convergence speed for attaining a desired level of details in generation quality. We then experiment with two kinds of complex geometries. First, we show signiﬁcant improvements of 49% on average over Riemannian
+CNFs (Mathieu and Nickel, 2020) for density estimation as well as high-ﬁdelity generation on 4 earth and climate science datasets corresponding to global locations of volcano eruptions, earthquakes,
+ﬂoods, and wildﬁres on spherical geometries. Next and last, we go beyond spherical geometries to demonstrate for the ﬁrst time, generative models on general curved surfaces. 2 Preliminaries
+A dV is the volume of the set A ⊂ M.
+Riemannian manifolds. We consider an orientable, compact, boundaryless, connected n-dimensional Riemannian manifold M with metric g. We denote points in the manifold by x, y ∈ M.
+At every point x ∈ M, TxM is an n-dimensional tangent plane to M. The metric g prescribes an inner product on each tangent space; for v, u ∈ TxM, their inner product w.r.t. g is denoted by (cid:104)v, u(cid:105)g. X(M) is the space of smooth (tangent) vector ﬁelds to M; that is, if u ∈ X(M) then u(x) ∈ TxM, for all x ∈ M, and if u written in local coordinates it consists of smooth functions.
+We denote by dV the Riemannian volume form, deﬁned by the metric g over the manifold M. In particular, V (A) = (cid:82)
+We consider probability measures over M that are represented by strictly positive continuous density functions µ, ν : M → R>0, where µ by convention represents the target (unknown) distribution and
+ν represents the source (prior) distribution. µ, ν are probability densities in the sense their integral w.r.t. the Riemannian volume form is one, i.e., (cid:82)
+M νdV . It is convenient to consider the volume forms that correspond to the probability measures, namely ˆµ = µdV and ˆν = νdV .
+Volume forms are differential n-forms that can be integrated over subdomains of M, for example, pν(A) = (cid:82)
+Continuous Normalizing Flows (CNF) on manifolds operate by transforming a simple source distribution through a map Φ into a highly complex and multimodal target distribution. A manifold
+CNF, Φ : M → M, is an orientation preserving diffeomorphism from the manifold to itself (Mathieu and Nickel, 2020; Lou et al., 2020; Falorsi and Forré, 2020). A smooth map Φ : M → M can be used to pull-back the target ˆµ according to the formula:
+A ˆν is the probability of the event A ⊂ M.
+M µdV = 1 = (cid:82) (Φ∗ ˆµ)z(v1, . . . , vn) = ˆµΦ(z)(DΦz(v1), . . . , DΦz(vn)), where v1, . . . , vn ∈ TzM are arbitrary tangent vectors, DΦz : TzM → TΦ(z)M is the differential of Φ, namely a linear map between the tangent spaces to M at the points z and Φ(z), respectively.
+By pulling-back ˆµ according to Φ and asking it to equal to the prior density ν, we get the manifold version of the standard normalizing equation: (1)
+ˆν = Φ∗ ˆµ. 2 (2)
+If the normalizing equation holds, then for an event A ⊂ M we have that pν(A) = (cid:90) (cid:90)
+ˆν =
+A
+A (cid:90)
+Φ∗ ˆµ =
+Φ(A)
+ˆµ = pµ(Φ(A)).
+Therefore, given a random variable z distributed according to ν, then x = Φ(z) is distributed according to µ, and Φ is the generator.
+One way to construct a CNF Φ is by solving an ordinary differential equation (ODE) (Chen et al., 2018; Mathieu and Nickel, 2020). Given a time-dependent vector ﬁeld vt ∈ X(M) with t ∈ [0, 1], a one-parameter family of diffeomorphisms (CNFs) Φt : [0, 1] × M → M is deﬁned by d dt
+Φt = vt(Φt), (3) where this ODE is initialized with the identity transformation, i.e., for all x ∈ M we initialize
+Φ0(x) = x. The CNF is then deﬁned by Φ(x) = Φ1(x).
+Example: Euclidean CNF. Let us show how the above notions boil down to standard Euclidean CNF for the choice of M = Rn, and the standard Euclidean metric; we denote z = (z1, . . . , zn) ∈ Rn.
+The Riemannian volume form in this case is dz = dz1∧dz2∧· · ·∧dzn. Furthermore, ˆµ(z) = µ(z)dz and ˆν(z) = ν(z)dz. The pull-back formula (equation 1) in coordinates (see e.g., Proposition 14.20 in Lee (2013)) is
+Φ∗ ˆµ(z) = µ(Φ(z)) det(DΦz)dz, where DΦz is the matrix of partials of Φ at point z, (DΦz)ij = ∂Φi we get the Euclidean normalizing equation:
+∂zj (z). Plugging this in equation 2
+ν(z) = µ(Φ(z)) det(DΦz). (4) 3 Moser Flow
+Moser (1965) and Dacorogna and Moser (1990) suggested a method for solving the normalizing equation, that is equation 2. Their method explicitly constructs a vector ﬁeld vt, and the ﬂow it deﬁnes via equation 3 is guaranteed to solve equation 2. We start by introducing the method, adapted to our needs, followed by its application to generative modeling. We will use notations introduced above. 3.1 Solving the normalizing equation
+Moser’s approach to solving equation 2 starts by interpolating the source and target distributions. That is, choosing an interpolant αt : [0, 1] × M → R>0, such that α0 = ν, α1 = µ, and (cid:82)
+M αtdV = 1 for all t ∈ [0, 1]. Then, a time-dependent vector ﬁeld vt ∈ X(M) is deﬁned so that for each time t ∈ [0, 1], the ﬂow Φt deﬁned by equation 3 satisﬁes the continuous normalization equation:
+Φ∗ t ˆαt = ˆα0, (5) where ˆαt = αtdV is the volume form corresponding to the density αt. Clearly, plugging t = 1 in the above equation provides a solution to equation 2 with Φ = Φ1. As it turns out, considering the continuous normalization equation simpliﬁes matters and the sought after vector ﬁeld vt is constructed as follows. First, solve the partial differential equation (PDE) over the manifold M div(ut) = − d dt
+αt, (6) where ut ∈ X(M) is an unknown time-dependent vector ﬁeld, and div is the Riemannian generaliza-tion to the Euclidean divergence operator, divE = ∇·. This manifold divergence operator is deﬁned by replacing the directional derivative of the Euclidean space with its Riemannian version, namely the covariant derivative, (cid:104)∇eiu, ei(cid:105)g , (7) div(u) = n (cid:88) i=1 3
+where {ei}n i=1 is an orthonormal frame according to the Riemannian metric g, and ∇ξu is the
+Riemannian covariant derivative. Note that here we assume that M is boundaryless, otherwise we need ut to be also tangent to the boundary of M. Second, deﬁne vt = ut
+αt
+. (8)
+Theorem 2 in Moser (1965) implies:
+Theorem 1 (Moser). The diffeomorphism Φ = Φ1, deﬁned by the ODE in equation 3 and vector
+ﬁeld vt in equation 8 solves the normalization equation, i.e., equation 2.
+The proof of this theorem in our case is provided in the supplementary for completeness. A simple choice for the interpolant αt that we use in this paper was suggested in
+Dacorogna and Moser (1990):
+αt = (1 − t)ν + tµ. (9)
+The time derivative of this interpolant, i.e., d dt αt = µ − ν, does not depend on t. Therefore the vector ﬁeld can be chosen to be constant over time, ut = u, and the PDE in equation 6 takes the form div(u) = ν − µ, and consequently vt takes the form vt = u (1 − t)ν + tµ
+. (10) (11)
+Figure 1 shows a one dimensional illustration of Moser Flow. 3.2 Generative model utilizing Moser Flow
+Figure 1: 1D example of Moser Flow: source density ν in green, target µ in blue. The vector ﬁeld vt (black) is guaranteed to push ν to interpolated density αt at time t, i.e., (1−t)ν +tµ.
+We next utilize MF to deﬁne our generative model. Our model (learned) density ¯µ is motivated from equation 10 and is deﬁned by (12) where u ∈ X(M) is the degree of freedom of the model. We model this degree of freedom, u, with a deep neural network, more speciﬁcally, Multi-Layer Perceptron (MLP). We denote θ ∈ Rp the learnable parameters of u. We start by noting that, by construction, ¯µ has a unit integral over M:
+Lemma 1. If M has no boundary, or u|∂M ∈ X(∂M), then (cid:82)
+¯µ = ν − div(u),
+M ¯µdV = 1.
+This lemma is proved in the supplementary and a direct consequence of Stokes’ Theorem. If ¯µ > 0 over M then, together with the fact that (cid:82)
+M ¯µdV = 1 (Lemma 1), it is a probability density over M.
+Consequently, Theorem 1 implies that ¯µ is realized by a CNF deﬁned via vt:
+Corollary 1. If ¯µ > 0 over M then ¯µ is a probability distribution over M, and is generated by the
+ﬂow Φ = Φ1, where Φt is the solution to the ODE in equation 3 with the vector ﬁeld vt ∈ X(M) deﬁned in equation 11.
+Since ¯µ > 0 is an open constraint and is not directly implementable, we replace it with the closed constraint ¯µ ≥ (cid:15), where (cid:15) > 0 is a small hyper-parameter. We deﬁne
+¯µ+(x) = max {(cid:15), ¯µ(x)} ;
+¯µ−(x) = (cid:15) − min {(cid:15), ¯µ(x)} .
+As can be readily veriﬁed:
+¯µ+, ¯µ− ≥ 0, and ¯µ = ¯µ+ − ¯µ−. (13)
+We are ready to formulate the loss for training the generative model. Consider an unknown target distribution µ, provided to us as a set of i.i.d. observations X = {xi}m i=1 ⊂ M. Our goal is to maximize the likelihood of the data X while making sure ¯µ ≥ (cid:15). We therefore consider the following loss: (cid:96)(θ) = −Eµ log ¯µ+(x) + λ
+¯µ−(x)dV (14) (cid:90)
+M 4
+where λ is a hyper-parameter. The ﬁrst term in the loss is approximated by the empirical mean computed with the observations X , i.e.,
+Ex∼µ log ¯µ+(x) ≈ 1 m m (cid:88) i=1 log ¯µ+(xi).
+This term is merely the negative log likelihood of the observations.
+The second term in the loss penalizes the deviation of ¯µ from satisfying ¯µ ≥ (cid:15). According to Theorem 1, this measures the deviation of ¯µ from being a density function and realizing a CNF. One point that needs to be veriﬁed is that the combination of these two terms does not push the minimum away from the target density µ. This can be veriﬁed with the help of the generalized Kullback–Leibler (KL) divergence providing a distance measure between arbitrary positive functions f, g : M → R>0: (cid:19) (cid:90) (cid:90) (cid:90)
+D(f, g) = f log dV − f dV + gdV. (15) (cid:18) f g
+M
+M
+M
+Using the generalized KL, we can now compute the distance between the positive part of our model density, i.e., ¯µ+, and the target density:
+D(µ, ¯µ+) = Eµ log (cid:18) µ
+¯µ+ (cid:19) (cid:90)
+−
+M
+µdV +
+= Eµ log µ − Eµ log ¯µ+ + (cid:90)
+M
+¯µ+dV
+¯µ−dV (cid:90)
+M where in the second equality we used Lemma 1. The term Eµ log µ is the negative entropy of the unknown target distribution µ. The loss in equation 14 equals D(µ, ¯µ+) − Eµ log µ + (λ − 1) (cid:82)
+M ¯µ−dV . Therefore, if λ ≥ 1, and minx∈M µ(x) > (cid:15) (we use the compactness of M to infer existence of such a minimal positive value), then the unique minimum of the loss in equation 14 is the target density, i.e., ¯µ = µ. Indeed, the minimal value of this loss is −Eµ log µ and it is achieved by setting ¯µ = µ. Uniqueness follows by considering an arbitrary minimizer ¯µ. Since such a minimizer satisﬁes D(µ, ¯µ+) = 0 and (cid:82)
+Theorem 2. For λ ≥ 1 and sufﬁciently small (cid:15) > 0, the unique minimizer of the loss in equation 14 is ¯µ = µ.
+M ¯µ−dV = 0, necessarily ¯µ = µ. We proved:
+Variation of the loss. Lemma 1 and equation 13 imply that (cid:82) an equivalent loss to the one presented in equation 14 is:
+M ¯µ+dV = (cid:82)
+M ¯µ−dV +1. Therefore, (cid:96)(θ) = −Eµ log ¯µ+(x) + λ− (cid:90)
+M
+¯µ−dV + λ+ (cid:90)
+M
+¯µ+dV (16) with λ− + λ+ ≥ 1. Empirically we found this loss favorable in some cases (i.e., with λ+ > 0).
+Integral approximation. The integral (cid:82) mated by considering a set Y = {yj}l and taking a Monte Carlo estimate
+M ¯µ−dV in the losses in equation 16 and 14 is approxi-j=1 of i.i.d. samples according to some distribution η over M (cid:90)
+M
+¯µ−dV ≈ 1 l l (cid:88) j=1
+¯µ−(yj)
+η(yj)
+. (17) (cid:82)
+M ¯µ+dV is approximated similarly. In this paper we opted for the simple choice of taking η to be the uniform distribution over M. 4 Generative modeling over Euclidean submanifolds
+In this section, we adapt the Moser Flow (MF) generative model to submanifolds of Euclidean spaces.
+That is we consider an orientable, compact, boundaryless, connected n-dimensional submanifold
+M ⊂ Rd, where n < d. Examples include implicit surfaces and manifolds (i.e., preimage of a regular value of a smooth function), as well as triangulated surfaces and manifold simplicial complexes. We 5
+denote points in Rd (and therefore in M) with x, y ∈ Rd. As the Riemannian metric of M we take the induced metric from Rd; that is given arbitrary tangent vectors v, u ∈ TxM the metric is deﬁned by (cid:104)v, u(cid:105)g = (cid:104)v, u(cid:105), where the latter is the Euclidean inner product. We denote by π : Rd → M the closest point projection on M, i.e., π(x) = miny∈M (cid:107)x − y(cid:107), with (cid:107)y(cid:107)2 = (cid:104)y, y(cid:105) the Euclidean norm in Rd. Lastly, we denote by Px ∈ Rd×d the orthogonal projection matrix on the tangent space TxM; in practice if we denote by N ∈ Rd×k the matrix with orthonormal columns spanning
+NxM = (TxM)⊥ (i.e., the normal space to M at x) then, Px = I − N N T .
+We parametrize the vector ﬁeld u required for our MF model (in equation 12) by deﬁning a vector
+ﬁeld u ∈ X(Rd) such that u|M ∈ X(M). We deﬁne u(x) = Pπ(x)vθ(π(x)), where vθ : Rd → Rd is an MLP with Softplus activation (β = 100) and learnable parameters θ ∈ Rp.
+By construction, for x ∈ M, u(x) ∈ TxM. (18)
+To realize the generative model, we need to compute the divergence div(u(x)) for x ∈ M with respect to the Riemannian manifold M and metric g. The vector ﬁeld u in equation 18 is constant along normal directions to the manifold at x (since π(x) is constant in normal directions).
+If n ∈ NxM, then in particular d dt (cid:12) (cid:12) (cid:12)t=0 u(x + tn) = 0. (19)
+We call vector ﬁelds that satisfy equation 19 inﬁnitesimally constant in the normal direction. As we show next, such vector ﬁelds u ∈ X(M) have the useful property that their divergence along the manifold M coincides with their Euclidean divergence in the ambient space Rd:
+Lemma 2. If u ∈ X(Rd), u|M ∈ X(M) is inﬁnitesimally constant in normal directions of M, then for x ∈ M, div(u(x)) = divE(u(x)), where divE denotes the standard Euclidean divergence.
+This lemma simply means we can compute the Euclidean divergence of u in our implementation.
+Given a set of observed data X = {xi}m i=1 ⊂ M ⊂ Rd, and a set of uniform i.i.d. samples
+Y = {yj}l j=1 ⊂ M over M, our loss (equation 14) takes the form (cid:96)(θ) = − 1 m m (cid:88) i=1 log max {(cid:15), ν(xi) − divEu(xi)} +
+λ(cid:48)
+− l l (cid:88) (cid:16) j=1 (cid:15) − min {(cid:15), ν(yj) − divEu(yj)} (cid:17)
+, where λ(cid:48)
+− = λ−V (M ). We note the volume constant can be ignored by considering an un-normalized source density V (M )ν ≡ 1, see supplementary for details. The loss in equation 16 is implemented similarly, namely, we add the empirical approximation of λ+ (cid:82)
+M ¯µ+dV .
+We conclude this section by stating that the MF generative model over Euclidean submanifolds (deﬁned with equations 12 and 18) is universal. That is, MFs can generate, arbitrarily well, any continuous target density µ on a submanifold manifold M ⊂ Rd.
+Theorem 3. Given an orientable, compact, boundaryless, connected, differentiable n-dimensional submanifold M ⊂ Rd, n < d, and a target continuous probability density µ : M → R>0, there exists for each (cid:15) > 0 an MLP vθ and a choice of weights θ so that ¯µ deﬁned by equations 12 and 18 satisﬁes max x∈M
+|µ(x) − ¯µ(x)| < (cid:15). 5 Experiments
+In all experiments, we modeled a manifold vector ﬁeld as a multi-layer perceptron (MLP) uθ ∈
+X(M), with parameters θ. All models were trained using Adam optimizer (Kingma and Ba, 2014), and in all neural networks the activation is Softplus with β = 100. Unless stated otherwise, we set
+λ+ = 0. We used an exact calculation of the divergence divE(u(x)). We experimented with two kinds of manifolds.
+Flat Torus. To test our method on Euclidean 2D data, we used M as the ﬂat torus, that is the unit square [−1, 1]2 with opposite edges identiﬁed. This deﬁnes a manifold with no boundary which is lo-cally isometric to the Euclidean plane. Due to this local isometry the Riemannian divergence on the ﬂat 6
+input data samples density input data samples density
+Figure 2: Moser Flow trained on 2D datasets. We show generated samples and learned density ¯µ+. torus is equivalent to the Euclidean divergence, div = divE. To make uθ a well deﬁned smooth vector
+ﬁeld in M we use periodic positional encoding, namely uθ(x) = vθ(τ (x)), where vθ is a standard
+MLP and τ : R2 → R4k is deﬁned as τ (x) = (cos(ω1πx), sin(ω1πx), ..., cos(ωkπx), sin(ωkπx)), where wi = i, and k is a hyper-parameter that is application dependent. Since any periodic function can be approximated by a polynomial acting on eiπx, even for k = 1 this is a universal model for continuous functions on the torus. As described by Tancik et al. (2020), adding extra features can help with learning higher frequencies in the data. To solve an ODE on the torus we simply solve it for the periodic function and wrap the result back to [−1, 1]2.
+Implicit surfaces. We experiment with surfaces as submanifolds of R3. We represent a surface as the zero level set of a Signed Distance Function (SDF) f : R3 → R. We experimented with two surfaces. First, the sphere, represented with the SDF f (x) = (cid:107)x(cid:107) − 1, and second, the Stanford
+Bunny surface, representing a general curved surface and represented with an SDF learned with (Gropp et al., 2020) from point cloud data. To model vector ﬁelds on an implicit surface we follow the general equation 18, where for SDFs
+π(x) = x − f (x)∇f (x), and Px = I − ∇f (x)∇f (x)T .
+In the supplementary, we detail how to replace the global projection π(x) with a local one, for cases the SDF is not exact. 5.1 Toy distributions
+First, we consider a collection of challenging toy 2D datasets explored in prior works (Chen et al., 2020; Huang et al., 2021). We scale samples to lie in the ﬂat torus [−1, 1]2 and use k = 1 for the positional encoding. Figure 2 depicts the input data samples, the generated samples after training, and the learned distribution ¯µ. In the top six datasets, the MLP architecture used for Moser Flows consists of 3 hidden layers with 256 units each, whereas in the bottom two we used 4 hidden layers with 256 neurons due to the higher complexity of these distributions. We set λ− = 2. 5.2 Choice of hyper-parameter λ
+We test the effect of the hyper-parameter λ ≥ 1 on the learned density. Figure 3 shows, for different values of λ, our density estimation µ+, the push-forward density Φ∗ν, and their absolute difference.
+To evaluate Φ∗ν from the vector ﬁeld vt, we solve an ODE as advised in Grathwohl et al. (2018). 7
+µ+
+Φ∗ν
+|Φ∗ν − µ+|
+µ+
+Φ∗ν
+|Φ∗ν − µ+| 1
+=
+λ 0 1
+=
+λ 2
+=
+λ 0 0 1
+=
+λ
+Figure 3: As λ is increased, the closer ¯µ+ is to the generated density Φ∗ν; column titled |¯µ+ − Φ∗ν| shows the absolute pointwise difference between the two; note that some of the errors in the
+|¯µ+ − Φ∗ν| column are due to numerical inaccuracies in the ODE solver used to calculate Φ∗ν. density 1k samples 1k density 5k samples 5k w o l
+F r e s o
+M
+D
+R
+O
+J
+F
+F
+Figure 4: Comparing learned density and generated samples with MF and FFJORD at different times (in k-sec); top right shows NLL scores for both MF and FFJORD at different times; bottom right shows time per iteration (in log-scale, sec) as a function of total running time (in sec); FFJORD iterations take longer as training progresses; A second example of the same experiment on a different image is provided in the supplementary. Flickr image (license CC BY 2.0): Bird by Flickr user
+"lakeworth" https://www.flickr.com/photos/lakeworth/46657879995/.
+As expected, higher values of λ lead to closer modeled density ¯µ+ and Φ∗ν. This is due to the fact that a higher value of λ leads to a lower value of (cid:82)
+M ¯µ−, meaning ¯µ is a better representation of a probability density. Nonetheless, even for λ = 1 the learned and generated density are rather consistent. 5.3 Time evaluations
+To compare our method to Euclidean CNF methods, we compare Moser Flow with FFJORD (Grath-wohl et al., 2018) on the ﬂat torus. We consider a challenging density with high frequencies obtained via 800x600 images (Figure 4). We generate a new batch every iteration by sampling each pixel location with probability which is proportional to the pixel intensity. The architectures of both vθ and the vector ﬁeld deﬁned in FFJORD are the same, namely an MLP with 4 hidden layers of 256 neurons each. To capture the higher frequencies in the image we use a positional encoding with k = 8 for both methods. We used a batch size of 10k. We used learning rate of 1e-5 for Moser Flow and 1e-4 for FFJORD. We used λ− = 2. Learning was stopped after 5k seconds. Figure 4 presents the results. Note that Moser Flow captures high-frequency details better than FFJORD. This is also expressed in the graph on the top right, showing how the NLL decreases faster for MF than FFJORD.
+Furthermore, as can be inspected in the per iteration time graph on the bottom-right, MF per iteration time does not increase during training, and is roughly 1-2 order of magnitudes faster than FFJORD iteration. 8
+Volcano
+Earthquake
+Flood
+Fire
+Figure 5: Moser Flow trained on earth sciences data gathered by Mathieu and Nickel (2020). The learned density is colored green-blue (blue indicates larger values); Blue and red dots represent training and testing datapoints, respectively. See Table 1 for matching quantitative results.
+Earthquake 0.59±0.01 0.43±0.04 0.19±0.04
+Moser Flow (MF) −2.02±0.42 −0.09±0.02
+Volcano
+−0.31±0.07
+−0.64±0.20
+−0.97±0.15
+Mixture vMF
+Stereographic
+Riemannian
+Flood
+Fire 1.09±0.01 −0.23±0.02 0.99±0.04 −0.40±0.06 0.90±0.03 −0.66±0.05 0.62±0.04 −1.03±0.03
+Data size 829 6124 4877 12810
+Table 1: Negative log-likelihood scores of the earth sciences datasets. 5.4 Earth and climate science data
+We evaluate our model on the earth and climate datasets gathered in Mathieu and Nickel (2020).
+The projection operator π in this case is simply π(x) = x (cid:107)x(cid:107) . We parameterize vθ as an MLP with 6 hidden layers of 512 neurons each. We used full batches for the NLL loss and batches of size 150k for our integral approximation. We trained for 30k epochs, with learning rate of 1e-4. We used
+λ− = 100. The quantitative NLL results are reported in Table 1 and qualitative visualizations in 5.
+Note that we produce NLL scores smaller than the runner-up method by a large margin. 5.5 Curved surfaces
+We trained an SDF f for the Stanford Bunny surface M using the method in Gropp et al. (2020).
+To generate uniform (ν) and data (µ) samples over M we ﬁrst extract a mesh M(cid:48) from f using the Marching Cubes algorithm (Lorensen and Cline, 1987) setting its resolution to 100x100x100.
+Then, to randomly choose a point uniformly from M(cid:48) we ﬁrst randomly choose a face of the mesh with probability proportional to its area, and then randomly choose a point uniformly within that face. For target µ we used clamped manifold harmonics to create a sequence of densities with increased complexity. To that end, we ﬁrst computed the k-th eigenfunction of the Laplace-Beltrami operator over M(cid:48) (we provide details on this computation in the supplementary), for the frequencies (eigenvalues) k ∈ {10, 50, 500}. Next, we sampled the eigenfunctions at the faces’ centers, clamped their negative values, and normalized to get discrete probability densities over the faces of M(cid:48). Then, to sample a point, we ﬁrst choose a face at random based on this probability, and then random a point uniformly within that face. We take 500k i.i.d. samples of this distribution as our dataset. We take vθ to be an MLP with 6 hidden layers of dimension 512. We use batch size of 10k for both the NLL loss and for the integral approximation; we ran for 1000 epochs with learning rate of 1e-4. We used
+λ− = λ+ = 1. Figure 6 depict the results. Note that Moser Flow is able to learn the surface densities for all three frequencies. 6

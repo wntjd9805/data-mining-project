@@ -1,0 +1,193 @@
+Abstract
+Causal graph discovery refers to the process of discovering causal relation graphs from purely observational data. Like other statistical data, a causal graph might
+In this paper, we leak sensitive information about participants in the dataset. present a differentially private causal graph discovery algorithm, Priv-PC, which improves both utility and running time compared to the state-of-the-art. The de-sign of Priv-PC follows a novel paradigm called sieve-and-examine which uses a small amount of privacy budget to ﬁlter out “insigniﬁcant” queries, and leverages the remaining budget to obtain highly accurate answers for the “sig-niﬁcant” queries. We also conducted the ﬁrst sensitivity analysis for condi-tional independence tests including conditional Kendall’s τ and conditional Spear-man’s ρ. We evaluated Priv-PC on 7 public datasets and compared with the state-of-the-art. The results show that Priv-PC achieves 10.61 to 293.87 times speedup and better utility. The implementation of Priv-PC, including the code used in our evaluation, is available at https://github.com/sunblaze-ucb/
+Priv-PC-Differentially-Private-Causal-Graph-Discovery. 1
+
+Introduction
+Causal graph discovery refers to the process of discovering causal relation graphs from purely ob-servational data. Causal graph discovery has seen wide deployment in areas like genomics, ecology, epidemiology, space physics, clinical medicine, and neuroscience. The PC algorithm [30] is one of the most popular causal discovery algorithms. It is comprised of a series of independence tests like
+Spearman’s ρ [29], Kendall’s τ [14], G-test [20] or χ2-test [21]. The algorithm starts by connecting all variables in the graph. If an independence test indicates that two variables are independent, the edge between the two variables will be removed from the causal graph. The process will continue until the edges between independent variables are totally removed.
+Like other statistical data, a causal graph can leak information about participants in the dataset.
+For instance, Genome-Wide Association Studies involve ﬁnding causal relations between Single
+Nucleotide Polymorphisms (SNPs) and diseases. In this case, a causal link between a speciﬁc SNP and a disease may indicate the participation of a minority patient. However, the problem of effective causal graph discovery with differential privacy remains largely unsolved.
+State-of-the-art. The most straightforward solution is to perturb all the independence tests in the
+PC algorithm with calibrated noise such as Laplace or Gaussian noise [9]. However, as pointed out in [33], the numerous independence tests incur too much noise to output meaningful causal graphs.
+Even tight composition techniques based on R´enyi differential privacy [1, 22, 32] cannot address the issue. The state-of-the-art solution to differentially private causal graph discovery is EM-PC [33], a modiﬁcation of the PC algorithm which uses the exponential mechanism to guarantee differential
+Instead of perturbing each independence test with noise, EM-PC randomly selects how privacy. many and which edges to delete using the exponential mechanism. In this way, EM-PC manages to achieve a relative balance between utility and privacy. However, EM-PC has two severe defects. First, 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+EM-PC suffers from extremely slow computation because: 1) many independence tests which should have been pruned have to be computed because the exponential mechanism can only deal with off-line queries; 2) the utility function used in applying the exponential mechanism is computationally intensive. In fact, the computation overhead of the utility score is so large that the implementation from the original paper [33] uses a greedy search to approximate the solution presented in the paper.
+It is unclear whether the differential privacy still holds given this compromise since the original sensitivity bound does not hold anymore. Second, EM-PC also suffers from low utility because it changes the intrinsic workﬂow of the PC algorithm. Concretely, EM-PC explicitly decides how many edges to delete while PC makes this decision in an on-line fashion. Thus, EM-PC does not converge to the PC algorithm and cannot achieve perfect accuracy even with substantial privacy budget.
+Proposed solution.
+In this paper, we proposed Priv-PC, a differentially private causal graph discovery algorithm with much less running time and better result utility compared to EM-PC.
+The design of Priv-PC follows a novel paradigm called sieve-and-examine.
+Intuitively, sieve-and-examine spends a small amount of privacy budget to ﬁlter out “insigniﬁcant” queries and answers the rest of queries carefully with substantial privacy budget. The proof that Priv-PC is differentially private is straightforward. The challenge is to understand why it also gives less running time and better utility.
+Sieve-and-examine, as the name indicates, comprises two sub-processes executing alternately: sieve and examine. In the context of causal graph discovery, the sieve process uses sub-sampled sparse vector technique [9, 2] to ﬁlter out variable pairs unlikely to be independent with a little privacy budget. Then the examine process uses Laplace mechanism [9] to carefully check the remaining variable pairs and decide whether they are really independent with substantial privacy budget.
+We choose sparse vector technique for its nice properties. First, sparse vector technique can answer a large number of threshold queries but only pay privacy cost for those whose output is above the threshold1. Fortunately, in causal graph discovery, only a few independence tests will yield results above the threshold so with sparse vector technique, we can save much privacy cost. Second, sparse vector technique can deal with online queries, so redundant independence tests can be pruned adap-tively once their target edge is removed due to a previous independence test. Thus, with sparse vector technique, we can get rid of the unnecessary independence tests in EM-PC and signiﬁcantly acceler-ate private causal discovery. We propose to further accelerate the execution and reduce privacy cost by augmenting the sparse vector technique using sub-sampling without replacement [2]. the accuracy of sieve-and-examine. Actually,
+However, sparse vector technique is known for its poor utility [19], which raises concern about two types of errors in sieve-and-examine. Type I error refers to mistakenly ﬁltering out truly independent pairs. Type
+II error refers to the failure to ﬁlter out variable pairs that are not independent. To reduce the errors, we take a two-step approach. First, we suppress type I error by tweaking the threshold lower so the noise is more unlikely to ﬂip over the output from independence to the opposite. The tweak, on the other hand, will increase the number of type II errors. Fortunately, type II errors can be corrected by the examine process with a high probability. Furthermore, the threshold tweak typically only increases type II errors slightly because a meaningful threshold should be far away from the clusters of both independent pairs and dependent pairs. there exist
+Independence tests in Priv-PC. The noise magnitude in Priv-PC grows proportionally to the sensitivity of the independence test (Section 2.1). Thus, to obtain an appropriate noise level, we conducted rigorous sensitivity analysis for commonly used conditional independence tests including conditional Kendall’s τ [16, 31] and conditional Spearman’s ρ [31] (Appendix D, E). We ﬁnally chose Kendall’s τ in Priv-PC because of its small sensitivity. It also remains an interesting open question how to integrate independence tests with inﬁnite sensitivity such as G-test [20] or χ2-test [21] in Priv-PC. 2 Preliminaries
+In this section, we review necessary background knowledge about differential privacy and causal graph discovery. 1Sparse vector technique can also only pay for queries below the threshold. For clarity, we only focus on the above-threshold queries throughout the paper. 2
+2.1 Differential Privacy
+Differential privacy, formally introduced by Dwork et al. [8] has seen rapid development during the past decade and is accepted as the golden standard for private analysis.
+Deﬁnition 1 (((cid:15), δ)-differential privacy). A (randomized) algorithm A with input domain D and output range R is ((cid:15), δ)-differentially private if ∀ neighboring datasets D, D(cid:48) ∈ D, and ∀S ⊆ R, we have that:
+P[A(D) ∈ S] ≤ e(cid:15)P[A(D(cid:48)) ∈ S] + δ
+If δ = 0, it is called (cid:15)-differential privacy or pure differential privacy.
+Intuitively, the deﬁnition requires a differentially private algorithm to produce similar outputs on similar inputs. A common approach to achieving differential privacy is to perturb the output with noise. The noise is carefully calibrated to appropriately mask the maximum difference of the output deﬁned as sensitivity.
+Deﬁnition 2 ((cid:96)k-sensitivity). The (cid:96)k-sensitivity of a function f : D → R is:
+∆f = max x,y∈D,(cid:107)x−y(cid:107)=1 (cid:107)f (x) − f (y)(cid:107)k
+Since all the independence tests in this paper output scalars, we omit the used norm and refer to the value as sensitivity uniformly.
+Composability is an important property of differential privacy. If several mechanisms are differen-tially private, so is their composition. The privacy parameters of the composed mechanism can be derived using standard composition theorem like advanced composition [9] and moments accoun-tant [1]. The sparse vector technique [9] can be viewed as a special case for composition because it can answer a large number of threshold queries while only paying privacy cost for queries above the threshold. We refer the interested readers to Appendix B for more details. 2.2 Causal Graph Discovery
+In statistics, causal graphs are directed acyclic graphs (DAGs) used to encode assumptions about the data-generating process, which are formally deﬁned as follows.
+Deﬁnition 3 (Causal Graph). A causal graph G is a directed acyclic graph (DAG) represented by a vertex set V = {v1, v2, · · · , vk} and an edge set E ⊆ V × V . Adj(G, vi) represents the adjacent set of node vi in graph G. The skeleton of a DAG is the undirected version of the graph.
+Causal graph discovery refers to the process of discovering causal graphs under an observed distri-bution such as a dataset. The output of a causal graph discovery algorithm is a completed, partially directed acyclic graph (CPDAG) because the directions of some edges cannot be determined only based on the observational distribution.
+There exist a variety of causal graph discovery algorithms and the PC algorithm is one of the most popular ones. The ﬁrst step in the PC algorithm is to ﬁnd the skeleton of the causal graph using conditional independence tests. Then the edges are directed based on some auxiliary information from the independence tests to obtain CPDAG. Because the second step does not touch the data, we only focus on the ﬁrst step given the post-processing theorem [9] in differential privacy. The details of the PC algorithm is introduced in Section 3.2 and Appendix A. 2.3 Conditional Independence Test
+Conditional independence test is an important building block in many causal discovery algorithms. It is used to test whether two random variables are independent conditional on another set of variables.
+Deﬁnition 4 (Conditional independence test). A conditional independence test f : V × V × 2V ×
+D → {0, 1} decides whether variable i (cid:54)= j ∈ V are independent conditional on another set of variables k ⊆ V, i, j /∈ k. f is composed of a dependence score s : V × V × 2V × D → R and a threshold T ∈ R. (cid:26)0, 1,
+, where 1 represents “independent” and 0 represents “not independent”. f is called |k|-order conditional independence test where |k| is the size of the conditional set. s(D) ≤ T s(D) > T f (D) = 3
+Commonly used independence tests include Spearman’s ρ, Kendall’s τ , G-test and χ2-test. Note that some independence tests like Kendall’s τ output 1 when the dependence score is below the threshold.
+However, for clarity, we assume all the independence tests output 1 when the dependence score is above the threshold without loss of generality. In this paper, we focus on Kendall’s τ because of its small sensitivity (Section 3.3). 3 Differentially Private Causal Graph Discovery
+In this section, we proposed Priv-PC to effectively discover causal graphs following sieve-and-examine paradigm. Concretely, Priv-PC leverages the sieve process to sift out vari-able pairs unlikely to independent using a little privacy cost and then carefully examines the re-maining ones with substantial privacy budget. We ﬁrst introduce sieve-and-examine mechanism and then demonstrate how to apply sieve-and-examine to the PC algorithm to obtain Priv-PC. At last, we bridge sieve-and-examine and Priv-PC by providing sensitivity analysis for Kendall’s
+τ . 3.1 Sieve-and-examine Mechanism
+Most causal graph discovery algorithms like the PC algorithm need to answer many independence tests – too many to obtain an acceptable privacy guarantee using independent perturbation mech-anisms like Laplace mechanism [9]. EM-PC is the ﬁrst step towards reconciling the contradiction between utility and privacy in private causal discovery. However, EM-PC suffers from extremely slow running time because it additionally runs a large number of independence tests that should have been pruned. A straightforward solution is to replace the exponential mechanism [9] with the sparse vec-tor technique [9, 19]. Sparse vector technique allows adaptive queries so unnecessary independence tests can be pruned early. Besides, the privacy cost of sparse vector technique only degrades with the number of queries above the threshold. Fortunately, only a few independence tests in causal discovery yield values above the threshold so the sparse vector technique can also save considerable privacy budget in causal discovery. However, sparse vector technique suffers from low accuracy as pointed out in [19], which is not acceptable in many use cases such as medical or ﬁnancial analysis.
+To address the issue, we propose a novel paradigm called sieve-and-examine which alternately executes sub-sampled sparse vector technique and output perturbation. Intuitively, the sieve pro-cess uses sub-sampled sparse vector technique to ﬁlter out independence tests unlikely to be above the threshold with small privacy budget. Then the left queries are examined carefully with substan-tial privacy budget using output perturbation.
+One-off sieve-and-examine. For simplicity, we ﬁrst introduce one-off sieve-and-examine shown in Algorithm 1, a simpliﬁed version of sieve-and-examine that halts after seeing one query above the threshold. We prove that one-off sieve-and-examine is (cid:15)-differentially private.
+The result can be generalized to multiple above-threshold queries using composition theorem.
+Algorithm 1: One-off sieve-and-examine mechanism.
+Input: D: dataset, {fi}: queries, T : threshold, t: threshold tweak, m: subset size, (cid:15): privacy parameters, ∆: sensitivity of f 1 . Function Sieve and examine(D, {fi}, T, t, m, (cid:15), ∆): 2 3 4 5 6 7 8 9 10
+D(cid:48) $← D, n = |D|, m = |D(cid:48)|;
+Let (cid:15)(cid:48) = ln( n m (e(cid:15)/2 − 1) + 1);
+Let ˆT = T − t + Lap( 2∆ for Each query i do (cid:15)(cid:48) ); if fi(D(cid:48)) + Lap( 4∆
+Let k = i;
+Break; if fk(D) + Lap( 2∆ else Output ⊥; (cid:15)(cid:48) ) ≥ ˆT then (cid:15) ) ≥ T then Output k ;
+Theorem 1. Algorithm 1 is (cid:15)-differentially private. 4
+Proof Sketch. We separately prove that sieve and examine are both (cid:15)/2-differentially private. The main body of sieve is a sparse vector technique with (cid:15)(cid:48) = ln( n m (e(cid:15)/2 − 1) + 1) privacy cost.
+Sub-sampling reduces the cost to (cid:15)/2 following Theorem 9 from [2]. Examine process is a (cid:15)/2-differentially private Laplace mechanism. Thus, sieve-and-examine is (cid:15)-differentially private using composition theorem.
+Result Utility. The differential privacy proof is straightforward. The challenge will be to under-stand when it also gives utility. Thus, we bound the probability of type I error and type II error in
+Algorithm 1 separately and provide the proof in Appendix C.
+Theorem 2 (Error bound).
+• (Type I error) Let Eα 1 denotes the event that Algorithm 1 ﬁlters out f (D) ≥ T + α. 1 4 (cid:15)(cid:48)(α + t) 6∆ (cid:15)(cid:48)(α + t) 3∆ 1 ] ≤ exp(− exp(−
+P[Eα
+) −
+)
+• (Type II error) Let Eα 2 denotes the event that Algorithm 1 fails to ﬁlter out f (D) ≤ T − α.
+.
+If α ≥ t, then
+P[Eα 2 ] ≤ exp(− 12(cid:15)α + (cid:15)(cid:48)(α − t) 6∆
+) − 1 4 exp(− 6(cid:15)α + (cid:15)(cid:48)(α − t) 3∆
+)
+.
+Intuitively, theorem 2 bounds the probability of errors conditional on the distance from the depen-dence score to the threshold. An interesting observation is the tweak on the threshold t decreases the probability of type I errors and increases the probability of type II errors at the same time. Because each type II error increases the privacy cost by (cid:15), the question is “will the increment of type II errors add too much privacy cost?” Fortunately, the answer is “no” because the increment of type II errors also depends on the distribution of dependence scores. Generally the empirical distribution of an independence score is a twin-peak curve and the threshold locates in the middle valley. In this case, the threshold tweak only slightly increases the number of type II errors because most dependence scores are far from the threshold2. 3.2 Priv-PC Algorithm
+In this section, we demonstrate how to apply sieve-and-examine to PC algorithm to obtain
+Priv-PC. We ﬁrst give an overview of Priv-PC. Then we discuss how to optimize the sub-sampling rate in Priv-PC.
+Priv-PC algorithm. The complete pseudo-code for Priv-PC is shown in Algorithm 2. Priv-PC follows the same workﬂow as the PC algorithm. It starts from a complete undirected graph (line 1) and gradually increases the order of the independence tests (line 6, 17). Within a ﬁxed order,
+Priv-PC traverse all the variable pairs with large enough adjacent set (line 8). It selects the con-ditional variables from the adjacent set (line 9-10) and then executes the conditional independence test to decide whether the edge will be removed from the graph. the conditional
+To achieve differential privacy, independence tests are augmented with sieve-and-examine. Concretely, Priv-PC ﬁrst sub-samples a subset D(cid:48) from D, derives pri-vacy parameter for the sieve process and tweaks the threshold (line 3-5). Then, Priv-PC executes the sieve process by adding noise to both the tweaked threshold (line 5) and the independence test (line 11). Note that the noise parameters here are different from standard sieve-and-examine (Algorithm 1) because the sensitivity for Kendall’s τ is dependent on the dataset size (Section 3.3).
+Once an independence test on the sub-sampled dataset exceeds the threshold (line 11), the examine process will run the independence test again on the complete dataset with substantial privacy bud-get. If the result still exceeds the un-tweaked threshold (line 12), the edge is removed from the graph (line 13). Then, the sub-sampled dataset and the threshold are refreshed for the next round of sieve-and-examine (line 14-15). 2A complete explanation contains two parts. First, since most of the dependence scores are far from the threshold, the threshold tweak does not directly change the test results for most queries. Second, because the dependence scores are far from the threshold, the absolute increase of type II error probability is small. Thus, the increment of type II errors is small. 5
+3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18
+Algorithm 2: Priv-PC Algorithm with Kendall’s τ . The highlighted parts are different from PC algorithm.
+Input: V : vertex set, D: dataset, T : threshold, t: threshold tweak, m: subset size, (cid:15): privacy parameter, ∆: sensitivity on the full dataset. 1 Function Priv PC(V, D, T, t, m, (cid:15), ∆): 2
+G = complete graph on V, ord = 0
+D(cid:48) $← D, n = |D|, m = |D(cid:48)|
+Let (cid:15)(cid:48) = ln( n m (e(cid:15)/2 − 1) + 1)
+√
+Let ˆT = T − t + Lap( 2 n∆√ m(cid:15)(cid:48) ) while ∃ vi s.t. |Adj(G, vi) − vj| ≥ ord do while ∃ edge (vi, vj) s.t. |Adj(G, vi) − vj| ≥ ord that has not been tested do select edge (vi, vj) in G s.t. |Adj(G, vi) − vj| ≥ ord while ∃ S ⊆ Adj(G, vi) − vj that has not been tested do choose S ⊆ Adj(G, vi) − vj, |S| = ord
+√ m(cid:15)(cid:48) ) ≥ ˆT then n∆√ if τ (ij|S) +Lap( 4 if τ (ij|S) + Lap( 2∆ (cid:15) ) ≥ T then delete (vi, vj) from G
+D(cid:48) $← D, |D(cid:48)| = m
+ˆT = T − t + Lap( 2 break
+√ n∆√ m(cid:15)(cid:48) ) ord = ord + 1
+Output G, compute the total privacy cost ((cid:15)tot, δtot) with advanced composition.
+√
+Optimize sub-sampling rate in Priv-PC.
+In Algorithm 2, we require the caller of the function to explicitly give the size of the sub-sampling set. However, since the sensitivity of Kendall’s τ also depends on the data size (Section 3.3), we can actually derive an optimal sub-sampling size which adds the smallest noise under the same privacy guarantee. This requires to minimize the noise level m (exp((cid:15)/2)−1)+1) . Although there is no explicit solution for the optimization problem, we can ln( n obtain an approximate solution with numerical solver such as BFGS [24]. On the other hand, when (cid:15) is small, the optimal sub-sampling size is also too small to yield meaningful independence test results. Thus we take the optimal sub-sampling size by clipping the solution to range ( n n/m 20 , n). 3.3
+Independence Tests in Priv-PC
+The last missing piece is the sensitivity of the conditional independence test functions. We ﬁnally choose conditional Kendall’s τ for its small sensitivity. Conditional Spearman’s ρ is another can-didate but it can only be used on large datasets because of the large coefﬁcient in its sensitivity (Appendix E).
+The sensitivity of Kendall’s τ is inversely proportional3 to the training set size as pointed out in [17].
+However, in our scenario, the conditional version of Kendall’s τ is needed while [17] only gives the sensitivity for non-conditional Kendall’s τ . In order to ﬁll the gap, we derive the sensitivity of the conditional Kendall’s τ , and leave the proof to Appendix D.
+Theorem 3. (Sensitivity of conditional Kendall’s τ .) The sensitivity of conditional Kendall’s τ in
+Deﬁnition 6 (Appendix D) is c1√ n where n is the size of the input dataset and c1 is an explicit constant approaching 9/2 when the dataset size grows. 4 Evaluation
+In this section, we evaluate the effectiveness of Priv-PC by answering the following two questions. 1) How accurate is the result of Priv-PC? 2) How much running time does Priv-PC save? 3Note that this requires the size of the dataset to be public which is a common case. 6
+4.1 Experiment Setup
+In order to answer the above questions, we selected 7 datasets. The detailed information about the datasets is shown in Table 1.
+Dataset
+Earthquake [15]
+Cancer [15]
+Asia [18]
+Survey [27]
+Alarm [3]
+Sachs [26]
+Child [4]
+Table 1: Datasets used in the evaluation.
+# Edges 4 4 10 6 46 17 25
+# Samples 100K 100K 100K 100K 100K 100K 100K
+# Features 5 5 8 6 37 11 20
+Type
+Binary
+Binary
+Binary
+Discrete
+Discrete
+Discrete
+Discrete
+To directly compare EM-PC and Priv-PC, we ran the two algorithms on the datasets with 21 different privacy parameters and presented the results with accumulated privacy cost between 1 and 100.
+Furthermore, to demonstrate the utility improvement due to sieve-and-examine, we also directly applied sparse vector technique to PC algorithm (SVT-PC) and evaluated it under the same setting.
+For each privacy parameter, we ran the three algorithms for 5 times and recorded the mean and standard deviation of the utility of the output graph and the running time. We ﬁx δ = 1e-3 for both
+EM-PC and Priv-PC across all the experiments. Utility is measured in terms of F 1-score4. All the experiments were run on a Ubuntu18.04 LTS server with 32 AMD Opteron(TM) Processor 6212 with 512GB RAM. 4.2 Utility e r o c
+S 1
+F 1.2 1 0.8 0.6 0.4 0.2 0 100 e r o c
+S 1
+F 1.2 1 0.8 0.6 0.4 0.2 0 100 101
+Total (cid:15) 102 101
+Total (cid:15) 102 (a) Earthquake. (b) Cancer. e r o c
+S 1
+F 1.2 1 0.8 0.6 0.4 0.2 0 100 e r o c
+S 1
+F 1.2 1 0.8 0.6 0.4 0.2 0 100 101
+Total (cid:15) 102 101
+Total (cid:15) 102 e r o c
+S 1
+F 1.2 1 0.8 0.6 0.4 0.2 0 100 e r o c
+S 1
+F 1.2 1 0.8 0.6 0.4 0.2 0 100 e r o c
+S 1
+F 1.2 1 0.8 0.6 0.4 0.2 0 100 102 101
+Total (cid:15) (c) Asia. 101
+Total (cid:15) 102 101
+Total (cid:15) 102 (d) Survey.
+PRIV-PC
+EM-PC
+SVT-PC (e) Alarm. (f) Sachs. (g) Child.
+Figure 1: F 1-Score vs. Privacy Budget.
+In the evaluation, Priv-PC achieves better utility than EM-PC when the privacy budget is reasonably large as shown in Figure 1. Priv-PC always converges to perfect accuracy when privacy cost grows while EM-PC does not. The reason is that Priv-PC converges to PC when privacy cost grows but
+EM-PC does not because it contains a unique sub-routine to explicitly decide the number of edges to delete. The sub-routine intrinsically inhibits the accuracy of EM-PC. On the other hand, EM-PC achieves better utility under small privacy budget5 because the exponential mechanism has better utility than the sparse vector technique under small privacy budget as pointed out in [19]. 4If a causal graph discovery outputs G = (V, E) and the ground truth is G(cid:48) = (V, E(cid:48)). Then F 1-score is deﬁned as: F 1 = 2·Precision·Recall
+Precision+Recall , Precision = |E∩E(cid:48)|
+|E|
+, Recall = |E∩E(cid:48)|
+|E(cid:48)| 5The line for EM-PC is almost ﬂat in Figure 1 because the rising segment appears under small privacy budget out of the axis scope (approximately 0.01 ∼ 0.1 according to our evaluation). 7
+Compared with SVT-PC, Priv-PC always achieves much better utility in the medium privacy region (Figure 1). The improvement should be attributed to sieve-and-examine because it effectively suppresses type I and type II errors in sparse vector technique 3.1. Second, because the sensitivity of Kendall’s τ is inversely proportional to the size of the input dataset, the noise is typically small when the dataset is large. Thus, the noise does not severely harm the utility while preserving rigorous privacy. 4.3 Running Time
+Priv-PC Priv-PC w/o sub-sampling
+Average Running Time
+Earthquake [15]
+Cancer [15]
+Asia [18]
+Survey [27]
+Alarm [3]
+Sachs [26]
+Child [4]
+SVT 3.38s 2.94s 10.06s 1.21s 71.23s 4.29s 32.85s
+Table 2: Running time when privacy budget for each sieve-and-examine is 1.
+EM-PC 176.04s 64.62s 531.80s 68.13s 10601.33s 4858.42s 25140.67s 11.01s 10.83s 19.40s 5.12s 315.32s 72.98s 191.31s 6.62s 6.09s 16.19s 2.13s 143.01s 16.65s 85.55s
+Priv-PC achieves 10.61 to 32.85 times speedup on small graphs and 74.13 to 293.87 times speedup on larger graphs compared with EM-PC as shown in Table 2. The improvement is due to two reasons. First, Priv-PC can deal with online queries while EM-PC cannot. Thus, if an edge is removed due to a previous independence test, later tests on the same edge can be skipped to avoid ex-tra computation overhead. Second, in the sieve pro-cess, Priv-PC only runs independence tests on a subset of the dataset which further accelerates the process. This also explains why Priv-PC sometimes runs faster than
+SVT-PC.
+#IDP tests
+Asia
+Cancer
+Earthquake
+Survey
+Alarm
+Sachs
+Child
+Priv-PC 95 37 40 29 1843 165 1162
+EM-PC 216 57 61 38 12979 1224 7393
+Table 3: The number of independence tests in Priv-PC and EM-PC.
+To better understand how the two factors contribute to the speedup, we run Priv-PC without sub-sampling under the same setting and include the results in Table 2. The results show that on small graphs, the ﬁrst factor provides 5.97 to 27.41 times speedup and sub-sampling provides 1.20 to 2.40 times speedup; on larger graphs, the ﬁrst factor provides 33.62 to 131.41 times speedup and sub-sampling provides 2.20 to 4.38 times speedup.
+To better illustrate the source of the speedup, we measure the number of independence tests con-ducted in EM-PC and Priv-PC as shown in Table 3. The results show that Priv-PC saves 34.4% to 56.0% independence tests on small graphs and 84.3% to 86.8% on larger graphs compared to
+EM-PC. 5

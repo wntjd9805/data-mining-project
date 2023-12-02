@@ -1,0 +1,154 @@
+Abstract
+State-of-the-art Graph Neural Networks (GNNs) have limited scalability with re-spect to the graph and model sizes. On large graphs, increasing the model depth often means exponential expansion of the scope (i.e., receptive ﬁeld). Beyond just a few layers, two fundamental challenges emerge: 1. degraded expressivity due to oversmoothing, and 2. expensive computation due to neighborhood explosion. We propose a design principle to decouple the depth and scope of GNNs – to generate representation of a target entity (i.e., a node or an edge), we ﬁrst extract a localized subgraph as the bounded-size scope, and then apply a GNN of arbitrary depth on top of the subgraph. A properly extracted subgraph consists of a small number of critical neighbors, while excluding irrelevant ones. The GNN, no matter how deep it is, smooths the local neighborhood into informative representation rather than oversmoothing the global graph into “white noise”. Theoretically, decoupling improves the GNN expressive power from the perspectives of graph signal pro-cessing (GCN), function approximation (GraphSAGE) and topological learning (GIN). Empirically, on seven graphs (with up to 110M nodes) and six backbone
+GNN architectures, our design achieves signiﬁcant accuracy improvement with orders of magnitude reduction in computation and hardware cost. 1
+
+Introduction
+Graph Neural Networks (GNNs) have now become the state-of-the-art models for graph mining [48, 13, 58], facilitating applications such as social recommendation [35, 52, 37], knowledge understanding
+[40, 38, 59] and drug discovery [43, 32]. With the numerous architectures proposed [22, 12, 44, 49], it still remains an open question how to effectively scale up GNNs with respect to both the model size and graph size. There are two fundamental obstacles when we increase the number of GNN layers:
+• Expressivity challenge (i.e., oversmoothing [30, 36, 39, 17]): iterative mixing of neighbor features collapses embedding vectors of different nodes into a ﬁxed, low-dimensional subspace.
+Correspondence to: Muhan Zhang, muhan@pku.edu.cn 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+• Scalability challenge (i.e., neighbor explosion [7, 8, 9, 55]): recursive expansion of multi-hop neighborhood results in exponentially growing receptive ﬁeld size (and thus computation cost).
+To address the expressivity challenge, most remedies focus on neural architecture exploration:
+[44, 12, 49, 29] propose more expressive aggregation functions when propagating neighbor features.
+[50, 28, 18, 34, 1, 33, 31] use residue-style design components to construct ﬂexible and dynamic receptive ﬁelds. Among them, [50, 28, 18] use skip-connection across multiple GNN layers, and
+[34, 1, 33, 31] encourage multi-hop message passing within each single layer. As for the scalability challenge, sampling methods have been explored to improve the training speed and efﬁciency.
+Importance based layer-wise sampling [8, 7, 61] and subgraph-based sampling [54, 9, 55] alleviate neighbor explosion, while preserving training accuracy. Unfortunately, such sampling methods cannot be naturally generalized to inference without accuracy loss (see also Section 4).
+The above lines of research have only guided us to partial solutions. Yet what is the root cause of both the expressivity and scalability challenges? Setting aside the design of GNN architectures or sampling schemes, we provide an alternative perspective by interpretting the data in a different way.
+Two views on the graph. Given an input graph G with node set V, the most straightforward way to understand G is by viewing it as a single global graph. So any two nodes u and v belong to the same G, and if u and v lie in the same connected component, they will ultimately see each other in their own neighborhood no matter how far away u and v are. Alternative to the above global view, we can take a local view on G. For each node v, there is a latent G[v] surrounding it which captures the characteristics of just v itself. The full G is observed (by the data collection process) as the union of all such G[v]. Consequently, V[v] rather than V deﬁnes v’s neighborhood: if u (cid:54)∈ V[v], v will never consider u as a neighbor. Our “decoupling” design is based on the local view.
+Scope of GNNs. Both the expressivity and scalability challenges are closely related to the en-largement of the GNN’s scope (i.e., receptive ﬁeld). More importantly, how we deﬁne the scope is determined by how we view G. With the global view above, an L-layer GNN has the scope of the full L-hop neighborhood. With the local view, the GNN scope is simply V[v] regardless of the GNN depth. The two existing lines of research, one on architectural exploration and the other on sampling, both take the global view. Consequently, the depth (i.e., number of layers) and scope of such GNNs are tightly coupled. Such coupling signiﬁcantly limits the design space exploration of GNNs with various depths [53]. Consider the example of ogbn-products, a medium-scale graph in Open Graph
+Benchmark [16]. The average number of 4-hop neighbors is around 0.6M, corresponding to 25% of the full graph size. To generate representation of a single target node, a 4-layer coupled GNN needs to propagate features from the 0.6M neighbors. Such propagation can be inefﬁcient or even harmful since most nodes in the huge neighborhood would be barely relevant to the target node.
+Decoupling the GNN depth and scope. Taking the local view on G, we propose a general design principle to decouple the GNN depth and scope. To generate the representation of the target node v, we ﬁrst extract from G a small subgraph G[v] surrounding v. On top of G[v], we apply a GNN whose number of layers and message passing functions can be ﬂexibly chosen. “Decoupling” means we treat the scope extraction function and GNN depth as two independently tuned parameters – effectively we introduce a new dimension in the GNN design space. We intuitively illustrate the beneﬁts of decoupling by an example GNN construction, where the scope is the L-hop neighborhood and depth is L(cid:48) (L(cid:48) > L). When we use more layers (L(cid:48)) than hops (L), each pair of subgraph nodes may exchange messages multiple times. The extra message passing helps the GNN better absorb and embed the information within scope, and thus leads to higher expressivity. We further justify the above intuition with multifaceted theoretical analysis. From the graph signal processing perspective, we prove that decoupled-GCN performs local-smoothing rather than oversmoothing, as long as the scopes of different target nodes are different. From the function approximation perspective, we construct a linear target function on neighbor features and show that decoupling the GraphSAGE model reduces the function approximation error. From the topological learning perspective, we apply deep GIN-style message passing to differentiate non-regular subgraphs of a regular graph. As a result, our model is more powerful than the 1-dimensional Weisfeiler-Lehman test [41].
+Practical implementation: SHADOW-GNN. The decoupling principle leads to a practical im-plementation, SHADOW-GNN: Decoupled GNN on a shallow subgraph. In SHADOW-GNN, the scope is a shallow yet informative subgraph, only containing a fraction of the 2- or 3-hop neighbors of G (see Section 5). On the other hand, the model of SHADOW-GNN is deeper (e.g., L(cid:48) = 5).
+To efﬁciently construct the shallow scope on commodity hardware, we propose various subgraph 2
+extraction functions. To better utilize the subgraph node embeddings after deep message pass-ing, we propose neural architecture extensions such as pooling and ensemble. Empirically, our
+“decoupling” design improves both the accuracy and scalability. On seven benchmarks (includ-ing the largest ogbn-papers100M graph with 111M nodes) and across two graph learning tasks,
+SHADOW-GNNs achieve signiﬁcant accuracy gains compared to the original models. Meanwhile, the computation and hardware costs are reduced by orders of magnitude. Our code is available at https://github.com/facebookresearch/shaDow_GNN 2 Preliminaries
+Let G (V, E, X) be an undirected graph, with node set V, edge set E ⊆ V × V and node feature matrix
+X ∈ R|V|×d. Let Nv denote the set of v’s direct neighbors in G. The uth row of X corresponds to the length-d feature of node u. Let A be the adjacency matrix of G where Au,v = 1 if edge (u, v) ∈ E
+∗ A∗D− 1 and Au,v = 0 otherwise. Let D be the diagonal degree matrix of A. Denote (cid:101)A = D− 1 as the adjacency matrix after symmetric normalization (“∗” means augmented with self-edges), and (cid:98)A = D−1A (or D−1
+∗ A∗) as the one after random walk normalization. Let subscript “[u]” mark the quantities corresponding to a subgraph surrounding node u. For example, the subgraph itself is G[u]. Subgraph matrices X[v] and A[v] have the same dimension as the original X and A. Yet, row vector (cid:2)X[v] (cid:3) u,w = 0 if either u (cid:54)∈ V[v] or w (cid:54)∈ V[v].
+For an L-layer GNN, let superscript “((cid:96))” denote the layer-(cid:96) quantities. Let d((cid:96)) be the number of channels for layer (cid:96); H ((cid:96)−1) ∈ R|V|×d((cid:96)−1) be the input and output features.
+So H (0) = X and d(0) = d. Further, let σ be the activation and W ((cid:96)) be the learnable weight. (cid:16)
+For example, a GCN layer performs H ((cid:96)) = σ
+. A GraphSAGE layer performs u = 0 for u (cid:54)∈ V[v]. Element (cid:2)A[v] (cid:3) and H ((cid:96)) ∈ R|V|×d((cid:96)) (cid:101)AH ((cid:96)−1)W ((cid:96))(cid:17)
+∗ 2 2
+H ((cid:96)) = σ (cid:16)
+H ((cid:96)−1)W ((cid:96)) 1 + (cid:98)AH ((cid:96)−1)W ((cid:96)) 2 (cid:17)
+.
+Our analysis in Section 3 mostly focuses on the node classiﬁcation task. Yet our design can be generalized to the link prediction task, as demonstrated by our experiments in Section 5.
+Deﬁnition 2.1. (Depth of subgraph) Assume the subgraph G[v] is connected. The depth of G[v] is deﬁned as maxu∈V[v] d (u, v), where d (u, v) denotes the shortest path distance from u to v.
+The above deﬁnition enables us to make comparison such as “the GNN is deeper than the subgraph”.
+For “decoupling the depth and scope”, we refer to the model depth rather than the subgraph depth. 3 Decoupling the Depth and Scope of GNNs
+“Decoupling the depth and scope of GNNs” is a design principle to improve the expressivity and scalability of GNNs without modifying the layer architecture. We name a GNN after decoupling a SHADOW-GNN (see Section 3.6 for explanation of the name). Compared with a normal GNN,
+SHADOW-GNN contains an additional component: the subgraph extractor EXTRACT. To generate embedding of a target node v, SHADOW-GNN proceeds as follows: 1. We use EXTRACT (v, G) to return a connected G[v], where G[v] is a subgraph containing v, and the depth of G[v] is L. 2. We build an L(cid:48)-layer GNN on G[v] by treating G[v] as the new full graph and by ignoring all nodes / edges not in G[v]. So G[v] is the scope of SHADOW-GNN. The key point reﬂecting “decoupling” is that L(cid:48) > L.
+A normal GNN is closely related to a SHADOW-GNN. Under the normal setup, an L-layer GNN operates on the full G and propagates the inﬂuence from all the neighbors up to L hops away from v.
+Such a GNN is equivalent to a model where EXTRACT returns the full L-hop subgraph and L(cid:48) = L.
+We theoretical demonstrate how SHADOW-GNN improves expressivity from three different angles.
+On SHADOW-GCN (Section 3.1), we come from the graph signal processing perspective. The GCN propagation can be interpreted as applying ﬁltering on the node signals [47]. Deep models correspond to high-pass ﬁlters. Filtering the local graph G[v] preserves richer information than the global G. On
+SHADOW-SAGE (Section 3.2), we view the GNN as a function approximator. We construct a target function and study how decoupling reduces the approximation error. On SHADOW-GIN (Section 3.3), we focus on learning topological information. We show that decoupling helps capture local graph structure which the 1D Weisfeiler-Lehman test fails to capture. 3
+3.1 Expressivity Analysis on SHADOW-GCN: Graph Signal Processing Perspective
+GCNs [22] suffer from “oversmoothing” [30] – Each GCN layer smooths the features of the direct (i.e., 1-hop) neighbors, and many GCN layers smooths the features of the full graph. Eventually, such repeated smoothing process propagates to any target node just the averaged feature of all V.
+“Oversmoothing” thus incurs signiﬁcant information loss by wiping out all local information.
+Formally, suppose the original features X reside in a high-dimensional space R|V|×d. Oversmoothing pushes X towards a low-dimensional subspace R|V|×d(cid:48)
+, where d(cid:48) < d. Corresponding analysis comes from two perspectives: oversmoothing by a deep GCN, and oversmoothing by repeated GCN-style propagation. The former considers the full neural network with non-linear activation, weight and bias. The later characterizes the aggregation matrix M = limL→∞ (cid:101)ALX. It is shown that even with the vanilla architecture, a deep GCN with bias parameters does not oversmooth [17]. In addition, various tricks [60, 39, 34] can prevent oversmoothing from the neural network perspective. However, a deep GCN still suffers from accuracy drop, indicating that the GCN-style propagation (rather than other GCN components like activation and bias) may be the fundamental reason causing difﬁculty in learning. Therefore, we study the asymptotic behavior of the aggregation matrix M under the normal and SHADOW design. In other words, here in Section 3.1, we ignore the non-linear activation and bias parameters. Such setup is consistent with many existing literature such as [30, 33, 34, 60].
+Proposition 3.1. ∞ number of feature propagation by SHADOW-GCN leads to m[v] = (cid:2)e[v] (cid:3) v · (cid:16) eT
+[v]X[v] (cid:17) (1) where e[v] is deﬁned by (cid:2)e[v] (cid:3) u = (cid:114) δ[v](u) w∈V[v] (cid:80)
+δ[v](w) ; δ[v] (u) returns the degree of u in G[v] plus 1.
+Oversmoothing by normal GCN propagation. With a large enough L, the full L-hop neighbor-hood becomes V (assuming connected G). So ∀ u, v, we have G[u] = G[v] = G, implying e[u] = e[v] and X[u] = X[v] = X. From Proposition 3.1, the aggregation converges to a point where no feature and little structural information of the target is preserved. The only information in m[v] is v’s degree.
+Local-smoothing by SHADOW-GCN propagation. With a ﬁxed subgraph, no matter how many times we aggregate using (cid:101)A[v], the layers will not include the faraway irrelevant nodes. From
+Proposition 3.1, m[v] is a linear combination of the neighbor features X[v]. Increasing the number of layers only pushes the coefﬁcients of each neighbor features to the stationary values. The domain X[v] of such linear transformation is solely determined by EXTRACT and is independent of the model depth.
+Intuitively, if EXTRACT picks non-identical subgraphs for two nodes u and v, the aggregations should be different due to the different domains of the linear transformation. Therefore, SHADOW-GCN preserves local feature information whereas normal GCN preserves none. For structural information in m[v], note that e[v] is a normalized degree distribution of the subgraph around v, and (cid:2)e[v] (cid:3) v indicates the role of the target node in the subgraph. By simply letting EXTRACT return the 1-hop subgraph, (cid:2)e[v] v alone already contains all the information preserved by a normal GCN, which is v’s degree in G. For the general EXTRACT, e[v] additionally reﬂects v’s ego-net structure. Thus, a deep
+SHADOW-GCN preserves more structural information than a deep GCN. (cid:3)
+Theorem 3.2. Let m[v] = φG (v) · m[v] where φG is any non-zero function only depending on the structural property of v. Let M = {m[v] | v ∈ V}. Given G, EXTRACT and some continuous probability distribution in R|V|×d to generate X, then m[v] (cid:54)= m[u] if V[u] (cid:54)= V[v], almost surely.
+Corollary 3.2.1. Consider EXTRACT1, where ∀v ∈ V, (cid:12) (cid:12) (cid:12) ≤ n. Then |M| ≥ (cid:12)V[v] a.s. (cid:109) (cid:108) |V| n
+Corollary 3.2.2. Consider EXTRACT2, where ∀ u, v ∈ V, V[v] (cid:54)= V[u]. Then |M| = |V| a.s.
+Theorem 3.2 proves SHADOW-GCN does not oversmooth: 1. A normal GCN pushes the aggregation of same-degree nodes to the same point, while SHADOW-GCN with EXTRACT2 ensures any two nodes (even with the same degree) have different aggregation. 2. A normal GCN wipes out all information in X after many times of aggregation, while SHADOW-GCN always preserves feature information. Particularly, with φG (v) = (cid:0)δ[v](v)(cid:1)−1/2
+, a normal GCN generates only one unique value of m for all v. By contrast, SHADOW-GNN generates |V| different values for any φG function. 4
+3.2 Expressivity Analysis on SHADOW-SAGE: Function Approximation Perspective (cid:18)(cid:16)
+We compare the expressivity by showing 1. SHADOW-SAGE can express all functions GraphSAGE can, and 2. SHADOW-SAGE can express some function GraphSAGE cannot. Recall, a GraphSAGE (cid:17)(cid:19) layer performs the following: h((cid:96))
+W ((cid:96)) 1
+We can prove Point 1 by making an L(cid:48)-layer SHADOW-SAGE identical to an L-layer GraphSAGE with the following steps: 1. let EXTRACT return the full L-hop neighborhood, and 2. set W ((cid:96)) 1 = I, (cid:1) = 2 = 0 for L + 1 ≤ (cid:96) ≤ L(cid:48). For point 2, we consider a target function: τ (cid:0)X, G[v]
+W ((cid:96))
+C · (cid:80)
+δ[v] (u) · xu for some neighborhood G[v], scaling constant C and δ[v] (u) as deﬁned in
+Proposition 3.1. An expressive model should be able to learn well this simple linear function τ . (cid:17)T (cid:16) 1
+|Nv| h((cid:96)−1) u h((cid:96)−1) v v = σ
+W ((cid:96)) 2 u∈V[v] u∈Nv (cid:17)T (cid:80)
++ (cid:16)
+.
+GraphSAGE cannot learn τ accurately, while SHADOW-SAGE can. We ﬁrst show the GraphSAGE case. Let the depth of G[v] be L. Firstly, we need GraphSAGE to perform message passing for exactly
+L times (where such a model can be implemented by, e.g., L layers or L(cid:48) layers with W2 = 0 for
+L(cid:48) − L layers). Otherwise, the extra L(cid:48) − L message passings will propagate inﬂuence from nodes v(cid:48) (cid:54)∈ V[v], violating the condition that τ is independent of v(cid:48). Next, suppose GraphSAGE can learn a (cid:17) function ζ such that on some G(cid:48)
+. We construct another G(cid:48)(cid:48)
+= τ
+[v] by adding an extra edge e connecting two depth-L nodes in G(cid:48)
+[v]. Edge e changes the degree distribution δ[v] (·), and thus τ
+. On the other hand, there is no way for GraphSAGE to propagate the inﬂuence of edge e to the target v, unless the model performs at least L + 1 message passings. So regardless of the activation function and weight parameters. Therefore, ζ (cid:54)= τ .
+ζ
+[v], we have ζ
+G(cid:48)(cid:48)
+[v]
+= ζ (cid:54)= τ
+G(cid:48)
+G(cid:48)
+G(cid:48)
+G(cid:48)
+[v]
+[v]
+[v] (cid:17) (cid:16) (cid:16) (cid:16) (cid:16) (cid:17) (cid:16) (cid:17) (cid:17) (cid:17) (cid:16)
+[v]
+G(cid:48)(cid:48)
+[v] 1 = 0 and W ((cid:96))
+For SHADOW-SAGE, let EXTRACT return G[v]. Then the model can output ζ (cid:48) = we 1. set W ((cid:96)) 2 = I for all layers, and 2. either remove the non-linear activation or bypass ReLU by shifting X with bias. With known results in Markov chain convergence theorem
+[27], we derive the following theorem by analyzing the convergence of (cid:98)AL(cid:48)
+Theorem 3.3. SHADOW-SAGE can approximate τ with error decaying exponentially with depth.
+[v] when L(cid:48) → ∞.
+[v]X after v,: (cid:104) (cid:98)AL(cid:48) (cid:105)
+We have the following conclusions from above: 1. SHADOW-SAGE is more expressive than Graph-SAGE. 2. appropriate EXTRACT function improves SHADOW-GNN expressivity, 3. There exists cases where it may be desirable to set the SHADOW-GNN depth much larger than the subgraph depth. 3.3 Expressivity Analysis on SHADOW-GIN: Topological Learning Perspective
+While GCN and GraphSAGE are popular architectures in practice, they are not the theoretically most discriminative ones. The work in [49] establishes the relation in discriminativeness between GNNs and 1-dimensional Weisfeiler-Lehman test (i.e., 1-WL). And GIN [49] is an example architecture achieving the same discriminativeness as 1-WL. We show that applying the decoupling principle can further improve the discriminativeness of such GNNs, making them more powerful than 1-WL. v v u 1-WL is a graph isomorphism test aiming at distinguishing graphs of different structures. A
+GNN as expressive as 1-WL thus well captures the topological property of the target node. While 1-WL is already very powerful, it may still fail in some cases. e.g., it cannot distinguish certain non-isomorphic, regular graphs. To understand why SHADOW-GNN works, we ﬁrst need to un-derstand why 1-WL fails. In a regular graph, all nodes have the same degree, and thus the “regular” property describes a global topological symmetry among nodes. Unfortunately, 1-WL (and the corresponding normal GNN) also operates globally on G. Intuitively, on two different regular graphs, there is no way for 1-WL (and the normal GNN) to assign different labels by breaking such symmetry.
+Figure 1: Example 3-regular graph and the 1-hop subgraphs of the target nodes u and v.
+G1
+[u]
+G1
+[v]
+G u
+On the other hand, SHADOW-GNN can break such symmetry by applying decoupling. In Section 1, we have discussed how SHADOW-GNN is built from the local perspective on the full graph. The 5
+key property beneﬁting SHADOW-GNN is that a subgraph of a regular graph may not be regular.
+Thus, SHADOW-GNN can distinguish nodes in a regular graph with the non-regular subgraphs as the scope. We illustrate the intuition with the example in Figure 1. The graph G is 3-regular and we assume all nodes have identical features. Our goal is to discriminate nodes u and v since their neighborhood structures are different. No matter how many iterations 1-WL runs, or how many layers the normal GNN has, they cannot distinguish u and v. On the other hand, a SHADOW-GNN with 1-hop EXTRACT and at least 2 layers can discriminate u and v.
+Theorem 3.4. Consider GNNs whose layer function is deﬁned by (cid:32) v = f ((cid:96)) h((cid:96)) 1 h((cid:96)−1) v
+, (cid:88) (cid:16) f ((cid:96)) 2 h((cid:96)−1) v
+, h((cid:96)−1) u (cid:33) (cid:17)
+, u∈Nv (2) where f ((cid:96)) such SHADOW-GNN is more discriminative than the 1-dimensional Weisfeiler-Lehman test. 2 are the update and message functions of layer-(cid:96), implemented as MLPs. Then, 1 and f ((cid:96))
+The theorem also implies that SHADOW-GIN is more discriminative than a normal GIN due to the correspondence between GIN and 1-WL. See Appendix A for the proof of all theorems in Section 3. 3.4 Subgraph Extraction Algorithms
+Our decoupling principle does not rely on speciﬁc subgraph extraction algorithms. Appropriate
+EXTRACT can be customized given the characteristic of G, and different EXTRACT leads to different implementation of our decoupling principle. In general, we summarize three approaches to design
+EXTRACT: 1. heuristic based, where we pick graph metrics that reﬂect neighbor importance and then design EXTRACT by such metrics; 2. model based, where we assume a generation process on G and set
+EXTRACT as the reverse process, and 3. learning based, where we integrate the design of EXTRACT as part of the GNN training. In the following, we present several examples on heuristic based EXTRACT, which we also empirically evaluate in Section 5. We leave detailed evaluation on the model based and learning based EXTRACT as future work. See also Appendix C for details.
+Example heuristic based EXTRACT. The algorithm is derived from the selected graph metrics. For example, with the metric being shortest path distance, we design a L-hop extractor. i.e., EXTRACT returns the full set or randomly selected subset of the target node’s L-hop neighbors in G. Picking the random walk landing probability as the metric, we can design a PPR-based extractor. i.e., we
+ﬁrst run the Personalized PageRank (PPR) algorithm on G to derive the PPR score of other nodes relative to the target node. Then EXTRACT deﬁne V[v] by picking the top-K nodes with the highest
+PPR scores. The subgraph G[v] is the node-induced subgraph1 of G from V[v]. One can easily extend this approach by using other metrics such as Katz index [20], SimRank [19] and feature similarity. 3.5 Architecture
+Subgraph pooling.
+For a normal GNN performing node classiﬁcation, the multi-layer message passing follows a “tree structure”. The nodes at level L of the tree correspond to the L-hop neighbor-hood. And the tree root outputs the ﬁnal embedding of the target node. Thus, there is no way to apply subgraph pooling or READOUT on the ﬁnal layer output, since the “pool” only contains a single vector. For a SHADOW-GNN, since we decouple the Lth layer from the L-hop neighborhood, it is natural to let each layer (including the ﬁnal layer) output embeddings for all subgraph nodes. This leads to the design to READOUT all the subgraph node embeddings as the target node embedding.
+We can understand the pooling for SHADOW-GNN from another perspective. In a normal GNN, the target node at the ﬁnal layer receives messages from all neighbors, but two neighbor nodes may not have a chance to exchange any message to each other (e.g., two nodes L-hop away from the target may be 2L-hop away from each other). In our design, a SHADOW-GNN can pass messages between any pair of neighbors when the model depth is large enough. Therefore, all the subgraph node embeddings at the ﬁnal layer capture meaningful information of the neighborhood.
+In summary, the power of the decoupling principle lies in that it establishes the connection between the node- / link-level task and the graph-level task. e.g., to classify a node is seen as to classify 1Unlike other PPR-based models [23, 6] which rewire the graph by treating top PPR nodes as direct neighbors, our PPR neighborhood preserves the original multi-hop topology by returning node-induced subgraph. 6
+the subgraph surrounding the node. From the neural architecture perspective, we can apply any subgraph pooling / READOUT operation originally designed for graph classiﬁcation (e.g., [57, 24, 4]) to enhance the node classiﬁcation / link prediction of SHADOW-GNN. In particular, in the vanilla
+SHADOW-GNN, we can implement a trivial READOUT as “discarding all neighbor embeddings”, corresponding to performing center pooling. See Appendix D and F.3 for algorithm and experiments.
+Subgraph ensemble.
+It may be challenging in practice to design a single EXTRACT capturing all meaningful characteristics of the neighborhood. We can use multiple EXTRACT to jointly deﬁne the receptive ﬁeld, and then ensemble multiple SHADOW-GNN at the subgraph level. Consider R candidates {EXTRACTi}, each returning Gi
+[v]. To generate v’s embedding, we ﬁrst use R branches of
+L(cid:48)-layer GNN to obtain intermediate embeddings for each Gi v, and then aggregate the R embeddings by some learnable function g. In practice, we design g as an attention based aggregation function (see
+Appendix D.2). Subgraph ensemble is useful both when {EXTRACTi} consists of different algorithms and when each EXTRACTi performs the same algorithm under different parameters.
+CASE STUDY Consider PPR-based EXTRACTi with different threshold θi on the neighbor PPR score.
+A SHADOW-GNN-ensemble can approximate PPRGo [6]. PPRGo generates embedding as: ξv =
+πuhv, where πu is u’s PPR score and hv = MLP (xv). We can partition V[v] = (cid:83)R (cid:80)
+[v] s.t. (cid:16)(cid:80) (cid:17)
+[v] have similar PPR scores denoted by (cid:101)πi, and (cid:101)πi ≤ (cid:101)πi+1. So ξv = (cid:80)R hu
+, u∈V[v] nodes in V i where ρi = (cid:101)πi − (cid:80) j<i (cid:101)πj and V (cid:48)
+[v]. Now for each branch of SHADOW-GNN-ensemble, let parameter θi = (cid:101)πi so that EXTRACTi returns V (cid:48) hu (e.g., by a simple “mean” READOUT). Finally, set the ensemble weight as ρi. SHADOW-GNN-ensemble learns ξv. As EXTRACT also preserves graph topology, our model can be more expressive than PPRGo. i can then learn (cid:80) i. The GNN on V (cid:48) i = (cid:83)R k=i V k i=1 V i i=1 ρi u∈V (cid:48) i u∈V (cid:48) i 3.6 Practical Design: SHADOW-GNN
+We now discuss the practical implementation of decoupled GNN – SHADOW-GNN. As the name suggests, in SHADOW-GNN, the scope is a shallow subgraph (i.e., with depth often set to 2 or 3).
+In many realistic scenarios (e.g., citation networks, social networks, product recommendation graphs), a shallow neighborhood is both necessary and sufﬁcient for the GNN to learn well. On “sufﬁciency”, we consider the social network example: the friend of a friend of a friend may share little commonality with you, and close friends may be at most 2 hops away. Formally, by the γ-decaying theorem [56], a shallow neighborhood is sufﬁcient to accurately estimate various graph metrics. On “necessity”, since the neighborhood size may grow exponentially with hops, a deep neighborhood would be dominated by nodes irrelevant to the target. The corresponding GNN would ﬁrst need to differentiate the many useless nodes from the very few useful ones, before it can extract meaningful features from the useful nodes. Finally, a shallow subgraph ensures scalability by avoiding “neighborhood explosion”.
+So far we have deﬁned a decoupled model as having the model depth L(cid:48)
+Remark on decoupling. larger than the subgraph depth L. Strictly speaking, a decoupled model also admits L(cid:48) = L. For example, suppose in the full L-hop neighborhood, there are 70% nodes L hops away. Applying decoupling, the EXTRACT excludes most of the L-hop neighbors, and the resulting subgraph G[v] contains only 20% nodes L hops away. Then it is reasonable to consider an L-layer model on such a depth-L subgraph as also a decouple model. Compared with an L-layer model on the full L-hop neighborhood, an L-layer model on such a depth-L G[v] propagates much less information from nodes
+L hops away. So the L message passings are indeed decoupled from the full L-hop neighborhood.
+Remark on neighborhood. The “sufﬁciency” and “necessity” in shallow neighborhood are not universal. In many other applications, long-range dependencies can be critical, as studied in [2]. In such cases, our practical implementation of SHADOW-GNN would incur accuracy loss. However, our decoupling principle in general may still be beneﬁcial – “shallow subgraph” is a practical guideline rather than a theoretical requirement. We leave the study on such applications as future work. 4

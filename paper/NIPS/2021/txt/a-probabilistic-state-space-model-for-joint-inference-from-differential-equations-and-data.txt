@@ -1,0 +1,112 @@
+Abstract
+Mechanistic models with differential equations are a key component of scientiﬁc applications of machine learning. Inference in such models is usually computation-ally demanding, because it involves repeatedly solving the differential equation.
+The main problem here is that the numerical solver is hard to combine with standard inference techniques. Recent work in probabilistic numerics has developed a new class of solvers for ordinary differential equations (ODEs) that phrase the solution process directly in terms of Bayesian ﬁltering. We here show that this allows such methods to be combined very directly, with conceptual and numerical ease, with latent force models in the ODE itself. It then becomes possible to perform approximate Bayesian inference on the latent force as well as the ODE solution in a single, linear complexity pass of an extended Kalman ﬁlter / smoother — that is, at the cost of computing a single ODE solution. We demonstrate the expressiveness and performance of the algorithm by training, among others, a non-parametric
+SIRD model on data from the COVID-19 outbreak. 1
+
+Introduction
+Mechanistic models based on ordinary differential equa-tions (ODEs) are popular across a wide range of scientiﬁc disciplines. To increase the descriptive power of such models, it is common to consider parametrized versions of
+ODEs and ﬁnd a set of parameters such that the dynamics reproduce empirical observations as accurately as possi-ble. Algorithms for this purpose typically involve repeated forward simulations in the context of, e.g., Markov-chain
+Monte Carlo or optimization. The need for iterated com-putation of ODE solutions may demand simpliﬁcations in the model to meet limits in the computational budget.
+This work describes an algorithm that merges mechanistic knowledge in the form of an ODE with a non-parametric model over the parameters controlling the ODE – a latent force that represents quantities of interest. The algorithm then infers a trajectory that is informed
+Figure 1: Inferring an unknown func-tion with a Gaussian Process and differ-ent sources of information. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+by the observations but also follows sensible dynamics, as deﬁned by the ODE, in the absence of observations (Figure 1). The main insight enabling this approach is that if probabilistic ODE solvers use the language of (extended) Kalman ﬁlters, conditioning on observations and solving the ODE itself is possible in one and the same process of Bayesian ﬁltering and smoothing. Instead of iterated computation of ODE solutions, a posterior distribution arises from a single forward simulation, which has complexity equivalent to numerically computing an ODE solution, once, with a ﬁltering-based, probabilistic ODE solver [32]. Intuitively, one can think of this as opening up the black box ODE solver and acknowledging that each task – solving the ODE and discovering a latent force – is probabilistic inference in a state-space model.
+The main contribution of this work is formalizing this intuition. Several experiments empirically prove the efﬁciency and the expressivity of the resulting algorithm. In particular, a practical model for the dynamics of the COVID-19 pandemic is considered, in which a non-parametric latent force captures the effect of policy measures that continuously change the contact rate among the population. 2 Problem setting
+Let x : [t0, tmax] → Rd be a process that is observed at a discrete set of points T OBS
+N ) 0 , ..., tOBS through a sequence of measurements y0:N := (y0, ..., yN ) ∈ R(N +1)×k. Assume that these measure-ments are subject to additive i.i.d. Gaussian noise, according to the observation model
+N := (tOBS yn = Hx(tn) + (cid:15)n, (cid:15)n ∼ N (0, R), (1) for n = 0, ..., N and matrices H ∈ Rk×d and R ∈ Rk×k. Further suppose that x(t) solves the ODE
+˙x(t) = f (x(t); u(t)), (2) and satisﬁes the initial condition x(t0) = x0 ∈ Rd. The vector ﬁeld f : Rd × R(cid:96) → Rd is assumed to be autonomous, which is no loss of generality (e.g. [19]) but simpliﬁes the notation. The latent force u : [t0, tmax] → R(cid:96) parametrizes f and shall be unknown.
+Susceptible
+β
+Infectious
+γ
+η
+Recovered
+Deceased
+SIR-type models (e.g. [7]) are a common choice to describe the evo-lution of the COVID-19 pandemic. In SIR-type models, a population partitions into a discrete set of compartments. The differential equation then describes the transition of counts of individuals between these com-partments. For example, the SIRD model [10] formulates the transitions between susceptible, infectious, recovered, and deceased people as
+˙S(t) = −β(t)S(t)I(t)/P,
+˙I(t) = β(t)S(t)I(t)/P − γI(t) − ηI(t),
+˙R(t) = γI(t),
+˙D(t) = ηI(t), (3)
+Figure 2: SIRD dynamics. governed by contact rate β(t) : [t0, tmax] → [0, 1], recovery rate γ ∈
+[0, 1], and mortality rate η ∈ [0, 1] (Figure 2). S, I, R, and D evolve over time, but the total population P (as the sum of the compartments) is assumed to remain constant. In this context, the contact rate β(t) is the latent force and varies over time (in the notation from Eq. (2), β is u). A time-varying contact rate provides a model for the impact of governmental measures on the dynamics of the pandemic. The experiments in Section 5 isolate the impact of the contact rate on the course of the infection counts, by assuming that γ and η are ﬁxed and known. The method is by no means restricted to inference over a single latent force, as will also be shown in Section 5.1. In this SIRD setting, the goal is to infer an (approximate) joint posterior over
+β(t) and the dynamics of S(t), I(t), R(t), and D(t) as well as to use the reconstructed dynamics to extrapolate into the future. Section 3 explains the conceptual details, Section 4 distinguishes the method from related work, and Section 5 evaluates the performance. 3 Method
+This section explains how to infer the unknown process u(t) and the ODE solution x(t) in a single forward solve. Section 3.1 deﬁnes the prior model, Section 3.2 describes the probabilistic numerical
+ODE inference setup, and Section 3.3 describes approximate Gaussian ﬁltering and smoothing in this context. Section 3.4 summarizes the resulting algorithm. The exposition of classic concepts here is necessarily compact. In-depth introductions can be found, e.g., in the book by Särkkä and Solin [28]. 2
+3.1 Gauss–Markov prior
+Let ν ∈ N. Deﬁne two independent Gauss–Markov processes U : [t0, tmax] → R(cid:96) and
+X : [t0, tmax] → Rd(ν+1) that solve the linear, time-invariant stochastic differential equations [25], dU(t) = FUU(t) dt + LU dWU(t), dX(t) = FXX(t) dt + LX dWX(t), (4) with drift matrices FU ∈ R(cid:96)×(cid:96) and FX ∈ Rd(ν+1)×d(ν+1), as well as dispersion matrices LU ∈ R(cid:96)×s and LX ∈ Rd(ν+1)×d. WU : [t0, tmax] → Rs and WX : [t0, tmax] → Rd are Wiener processes. U and X satisfy the Gaussian initial conditions,
+U(t0) ∼ N (mU, PU), X(t0) ∼ N (mX, PX), (5) deﬁned by mU ∈ R(cid:96), PU ∈ R(cid:96)×(cid:96), mX ∈ Rd(ν+1), and PU ∈ Rd(ν+1)×d(ν+1). U(t) models the unknown function u(t) and can be any Gauss–Markov process that admits a representation as the solution of a linear SDE with Gaussian initial conditions. X(t) = (X(0)(t), ..., X(ν)(t)) ∈ Rd(ν+1) models the ODE dynamics, in light of which we require X(i)(t) = di dti X(0)(t) ∈ Rd, i = 0, ..., ν.
+In other words, the ﬁrst element in X(t) is an estimate for x(t), the second element is an estimate for d dt x(t), et cetera. Encoding that the state X consists of a model for x(t) as well as its ﬁrst ν derivatives imposes structure on FX and LX (see e.g. [18]). Examples include the Matérn, integrated
+Ornstein-Uhlenbeck, and integrated Wiener processes; the canonical choice for probabilistic ODE solvers would be integrated Wiener processes [29, 32, 4, 19].
+The class of Gauss–Markov priors inherits its wide generalizability from Gaussian process models; recall that Gauss–Markov processes like U and X are Gaussian processes with the Markov property.
+While not every Gaussian process with one-dimensional input space is Markovian, a large number of descriptions of Gauss–Markov processes emerge by translating a covariance function into an (approximate) SDE representation [28, Chapter 12]. For example, this applies to (quasi-)periodic, squared-exponential, or rational quadratic kernels; in particular, sums and products of Gauss–Markov processes admit a state-space representation [30, 28]. Recent research has considered approximate
+SDE representations of general Gaussian processes in one dimension [20]. With these tools, prior knowledge over U or X can be encoded straightforwardly into the model. 3.2 Two likelihoods: for observations and for the ordinary differential equation
+A functional relationship between the processes U(t), X(t) and the data y0:N emerges by combining two likelihood functions: one for the observations y0:N (recall Equation (1)), and one for the ordinary differential equation. The present section formalizes both. Let T = T OBS
+M be the union of the observation-grid T OBS
+N , which has been introduced in Section 2, and an ODE-grid
+T ODE
+M ) . The name “ODE-grid” expresses that this grid contains the locations on
+M := (tODE which the ODE information will enter the inference problem, as described below.
+N contains the locations of y0:N , in light of which the ﬁrst of two observation models is
+T OBS
+N ∪ T ODE 0 , ..., tODE
+Yn | X(tOBS n ) ∼ N (cid:16)
+HX(0)(tOBS n ), R (cid:17)
+, (6) for n = 0, . . . , N . This is a reformulation of the relationship between process x and observations y0:N in Eq. (1) in terms of X (instead of x, which is modeled by X(0)). Including this ﬁrst measurement model ensures that the inferred solution remains close to the data points. T ODE
+M contains the locations on which U(t) connects to X(t) through the ODE. Speciﬁcally, the set of random variables Z0:M ∈
+R(M +1)×d, deﬁned as
+Zm | X(tODE m ), U(tODE m ) ∼ δ (cid:16)
+X(1)(tODE m ) − f (cid:16)
+X(0)(tODE m ) m ); U(tODE (cid:17)(cid:17)
+, (7) where δ is the Dirac delta, describes the discrepancy between the current estimate of the derivative of the ODE solution (i.e. X(1)) and its desired value (i.e. f (X(0); U)), as prescribed by the vector
+ﬁeld f . If the random variables Z0:M realize small values everywhere, X (0) solves the ODE as parametrized by U . This motivates introducing artiﬁcial data points z0:M ∈ R(M +1)×d that are equal to zero, zm = 0 ∈ Rd, m = 0, ..., M . Conditioning the stochastic processes X and U on attaining this (artiﬁcial) zero data ensures that the inferred solution follows ODE dynamics throughout the domain. Figure 3 shows the discretized state-space model. 3
+Data
+X0
+ODE
+U0
+Yn
+Xi
+Ui
+. . .
+. . .
+. . .
+. . .
+Xj
+Zm
+Uj
+. . .
+. . .
+Yn(cid:48)
+Xk
+Zm(cid:48)
+Uk
+. . .
+. . .
+YN
+XT
+UT
+Figure 3: Instance of the described state-space model, visualized as a directed graphical model.
+Shaded variables are observed. Either only data, only mechanistic knowledge, or both sources of information can be conditioned on during inference (recall Figure 1). 3.3 Approximate inference with an extended Kalman ﬁlter
+Both X and U enter the likelihood in Eq. (7) through a possibly non-linear vector ﬁeld f . Therefore, the posterior distribution (recall z0:M = 0) p(cid:0)U(t), X(t) | Z0:M = z0:M , Y0:N = y0:N is intractable, but can be approximated efﬁciently. Even though the problem is discretized, the posterior distribution is continuous [28, Chapter 10]. There are mainly two approaches to computing a tractable approximation of the intractable posterior distribution in Eq. (8): approximate Gaussian
+ﬁltering and smoothing [27], which computes a cheap, Gaussian approximation of this posterior, and sequential Monte Carlo methods [24], whose approximate posterior may be more descriptive, but also more expensive to compute. Like the literature on probabilistic ODE solvers [32, 4], this work uses approximate Gaussian ﬁltering and smoothing techniques for their low computational complexity. (8) (cid:1)
+The continuous-discrete state-space model inherits its non-linearity from the ODE vector ﬁeld f .
+Linearizing f with a ﬁrst-order Taylor series expansion creates a tractable inference problem; more speciﬁcally, it gives rise to the extended Kalman ﬁlter (EKF) [13, 22]. Loosely speaking, if the random variable Z is large in magnitude, then X and U are poor estimates for the ODE and its parameter. An EKF update, based on the ﬁrst-order linearization of f , approximately corrects this misalignment. If sufﬁciently many ODE measurements z0:M are available, a sequence of such updates preserves sensible ODE dynamics over time. An alternative to a Taylor-series linearization is the unscented transform, which yields the unscented Kalman ﬁlter [34, 15]. The computational complexity of both algorithms is linear in the number of grid points and cubic in the dimension of the state-space. Detailed implementation schemes can be found, for instance, in the book by Särkkä [27].
+The EKF approximates the ﬁltering distribution p (U(t), X(t) | Z0:m = z0:m, Y0:n = y0:n, such that tODE m , tOBS n ≤ t) . (9)
+It describes the current state of the system given all the previous measurements and allows updates in an online fashion as soon as new observations emerge. If desired, the Rauch-Tung-Striebel smoother turns the ﬁltering distribution into an approximation of the full (smoothing) posterior (in Eq. (8)). In doing so, all observations – that is, measurements according to both Eq. (6) and Eq. (7) – are taken into account for the posterior distribution at each location t. As special cases, this setup recovers: (i) a Kalman ﬁlter/Rauch-Tung-Striebel smoother [16] if the ODE likelihood (Eq. (7)) is omitted; (ii) an ODE solver [32], if the data likelihood (Eq. (6)) is omitted. In the present setting, however, both likelihoods play an important role. 3.4 Algorithm and implementation
+The procedure is summarized in Algorithm 1. The prediction step is determined by the prior and is available in closed-form (Appendix A.2). At times at which data is observed according to the linear Gaussian measurement model in Eq. (6), the update step follows the rules of the standard
+Kalman ﬁlter. Before updating on pseudo-observations according to the ODE likelihood (Eq. (7)), the non-linear measurement model is linearized at the predicted mean. More details are provided 4
+Algorithm 1 Compute the ﬁltering distribution by conditioning on both y0:N and z0:M .
+N ∪ T ODE
+M , vector ﬁeld f , mX, PX, mU, PU
+Input: data y0:N , time grid T = T OBS
+Output: Filtering distribution
+Initialize X0 = N (mX, PX) and U0 = N (mU, PU) for tj ∈ T do
+Predict Xj from Xj−1 and predict Uj from Uj−1
+N then update Xj on yj end if if tj ∈ T OBS
+M then linearize measurement model and update Xj and Uj on zj end if if tj ∈ T ODE end for
+[Eq. (9)]
+[Eq. (5)]
+[Eq. (6)]
+[Eq. (7)] in Appendix A. The ﬁltering distribution can be turned into a smoothing posterior by running a backwards-pass with a Rauch-Tung-Striebel smoother (e.g. [27]).
+The computational cost of obtaining either, the ﬁltering or the smoothing posterior, are both linear in the number of grid points and cubic in the dimension of the state-space, i.e. O((N + M )(d3ν3 + (cid:96)3)).
+Only a single forward-backward pass is required. If desired, the approximate Gaussian posterior can be reﬁned iteratively by means of posterior linearization and iterated Gaussian ﬁltering and smoothing, which yields the maximum-a-posteriori (MAP) estimate [2, 31]. The experiments presented in Section 5 show how a single forward-backward pass already approximates the MAP estimate accurately. 4

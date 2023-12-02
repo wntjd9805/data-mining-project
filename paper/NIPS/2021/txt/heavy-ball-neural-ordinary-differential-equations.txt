@@ -1,0 +1,243 @@
+Abstract
+We propose heavy ball neural ordinary differential equations (HBNODEs), lever-aging the continuous limit of the classical momentum accelerated gradient descent, to improve neural ODEs (NODEs) training and inference. HBNODEs have two properties that imply practical advantages over NODEs: (i) The adjoint state of an
+HBNODE also satisﬁes an HBNODE, accelerating both forward and backward
+ODE solvers, thus signiﬁcantly reducing the number of function evaluations (NFEs) and improving the utility of the trained models. (ii) The spectrum of HBNODEs is well structured, enabling effective learning of long-term dependencies from complex sequential data. We verify the advantages of HBNODEs over NODEs on benchmark tasks, including image classiﬁcation, learning complex dynamics, and sequential modeling. Our method requires remarkably fewer forward and backward NFEs, is more accurate, and learns long-term dependencies more ef-fectively than the other ODE-based neural network models. Code is available at https://github.com/hedixia/HeavyBallNODE. 1
+
+Introduction
+Neural ordinary differential equations (NODEs) are a family of continuous-depth machine learning (ML) models whose forward and backward propagations rely on solving an ODE and its adjoint equation [4]. NODEs model the dynamics of hidden features h(t) ∈ RN using an ODE, which is parametrized by a neural network f (h(t), t, θ) ∈ RN with learnable parameters θ, i.e., dh(t) dt
+= f (h(t), t, θ). (1)
+Starting from the input h(t0), NODEs obtain the output h(T ) by solving (1) for t0 ≤ t ≤ T with the initial value h(t0), using a black-box numerical ODE solver.
+The number of function evaluations (NFEs) that the black-box ODE solver requires in a sin-gle forward pass is an analogue for the continuous-depth models [4] to the depth of
+The loss between NODE prediction h(T ) and the ground networks in ResNets [16]. truth is denoted by L(h(T )); we update parameters θ using the following gradient
+∗Co-ﬁrst author
+†Please correspond to: wangbaonj@gmail.com 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+dL(h(T )) dθ
+= (cid:90) T t0 a(t)
+∂f (h(t), t, θ)
+∂θ dt, (2) where a(t) := ∂L/∂h(t) is the adjoint state, which satisﬁes the following adjoint equation da(t) dt
+= −a(t)
+∂f (h(t), t, θ)
+∂h
+. (3)
+Figure 1: Contrasting NODE, ANODE, SONODE,
+HBNODE, and GHBNODE for CIFAR10 classiﬁca-tion in NFEs, training time, and test accuracy. (Toler-ance: 10−5, see Sec. 5.2 for experimental details.)
+NODEs are ﬂexible in learning from irregularly-sampled sequential data and particularly suitable for learning complex dynamical systems [4, 42, 56, 35, 9, 24], which can be trained by efﬁcient algo-rithms [40, 7, 58]. NODE-based continuous genera-tive models have computational advantages over the classical normalizing ﬂows [4, 15, 55, 12]. NODEs have also been generalized to neural stochastic dif-ferential equations, stochastic processes, and graph
+NODEs [21, 28, 38, 49, 20, 34]. The drawback of NODEs is also prominent. In many ML tasks,
+NODEs require very high NFEs in both training and inference, especially in high accuracy settings where a lower tolerance is needed. The NFEs increase rapidly with training; high NFEs reduce computational speed and accuracy of NODEs and can lead to blow-ups in the worst-case scenario
+[15, 10, 29, 35]. As an illustration, we train NODEs for CIFAR10 classiﬁcation using the same model and experimental settings as in [10], except using a tolerance of 10−5; Fig. 1 shows both forward and backward NFEs and the training time of different ODE-based models; we see that NFEs and computational times increase very rapidly for NODE, ANODE [10], and SONODE [35]. More results on the large NFE and degrading utility issues for different benchmark experiments are available in Sec. 5. Another issue is that NODEs often fail to effectively learn long-term dependencies in sequential data [26], as discussed in Sec. 4. 1.1 Contribution
+We propose heavy ball neural ODEs (HBNODEs), leveraging the continuous limit of the classical momentum accelerated gradient descent, to improve NODE training and inference. At the core of
+HBNODE is replacing the ﬁrst-order ODE (1) with a heavy ball ODE (HBODE), i.e., a second-order
+ODE with an appropriate damping term. HBNODEs have two theoretical properties that imply practical advantages over NODEs:
+• The adjoint equation used for training a HBNODE is also a HBNODE (see Prop. 1 and Prop. 2), accelerating both forward and backward propagation, thus signiﬁcantly reducing both forward and backward NFEs. The reduction in NFE using HBNODE over existing benchmark ODE-based models becomes more aggressive as the error tolerance of the ODE solvers decreases.
+• The spectrum of the HBODE is well-structured (see Prop. 4), alleviating the vanishing gradient issue in back-propagation and enabling the model to effectively learn long-term dependencies from sequential data.
+To mitigate the potential blow-up problem in training HBNODEs, we further propose generalized
+HBNODEs (GHBNODEs) by integrating skip connections [17] and gating mechanisms [19] into the
+HBNODE. See Sec. 3 for details. 1.2 Organization
+We organize the paper as follows: In Secs. 2 and 3, we present our motivation, algorithm, and analysis of HBNODEs and GHBNODEs, respectively. We analyze the spectrum structure of the adjoint equation of HBNODEs/GHBNODEs in Sec. 4, which indicates that HBNODEs/GHBNODEs can learn long-term dependency effectively. We test the performance of HBNODEs and GHBNODEs on benchmark point cloud separation, image classiﬁcation, learning dynamics, and sequential modeling in Sec. 5. We discuss more related work in Sec. 6, followed by concluding remarks. Technical proofs and more experimental details are provided in the appendix. 2
+(5) (6) 2 Heavy Ball Neural Ordinary Differential Equations 2.1 Heavy ball ordinary differential equation
+Classical momentum method, a.k.a., the heavy ball method, has achieved remarkable success in accelerating gradient descent [39] and has signiﬁcantly improved the training of deep neural networks
+[46]. As the continuous limit of the classical momentum method, heavy ball ODE (HBODE) has been studied in various settings and has been used to analyze the acceleration phenomenon of the momentum methods. For the ease of reading and completeness, we derive the HBODE from the classical momentum method. Starting from initial points x0 and x1, gradient descent with classical momentum searches a minimum of the function F (x) through the following iteration xk+1 = xk − s∇F (xk) + β(xk − xk−1), where s > 0 is the step size and 0 ≤ β < 1 is the momentum hyperparameter. For any ﬁxed step size s, let mk := (xk+1 − xk)/ s, where γ ≥ 0 is another hyperparameter.
+Then we can rewrite (4) as s, and let β := 1 − γ (4)
+√
+√ mk+1 = (1 − γ s)mk − s∇F (xk); xk+1 = xk + smk+1.
+√
+√
+√
+Let s → 0 in (5); we obtain the following system of ﬁrst-order ODEs, dx(t) dt
+= m(t); dm(t) dt
+= −γm(t) − ∇F (x(t)).
+This can be further rewritten as a second-order heavy ball ODE (HBODE), which also models a damped oscillator, d2x(t) dt2 + γ dx(t) dt
+= −∇F (x(t)). (7)
+In Appendix E.6, we compare the dynamics of HBODE (7) and the following ODE limit of the gradient descent (GD) dx dt
+= −∇F (x). (8)
+In particular, we solve the ODEs (7) and (8) with F (x) deﬁned as a Rosenbrock [41] or Beale [14] function. The comparisons show that HBODE can accelerate the dynamics of the ODE for a gradient system, which motivates us to propose HBNODE to accelerate forward propagation of NODE. 2.2 Heavy ball neural ordinary differential equations
+Similar to NODE, we parameterize −∇F in (7) using a neural network f (h(t), t, θ), resulting in the following HBNODE with initial position h(t0) and momentum m(t0) := dh/dt(t0), d2h(t) dt2 + γ dh(t) dt
+= f (h(t), t, θ), (9) where γ ≥ 0 is the damping parameter, which can be set as a tunable or a learnable hyperparmater with positivity constraint. In the trainable case, we use γ = (cid:15) · sigmoid(ω) for a trainable ω ∈ R and a ﬁxed tunable upper bound (cid:15) (we set (cid:15) = 1 below). According to (6), HBNODE (9) is equivalent to dh(t) dt
+= m(t); dm(t) dt
+= −γm(t) + f (h(t), t, θ). (10)
+Equation (9) (or equivalently, the system (10)) deﬁnes the forward ODE for the HBNODE, and we can use either the ﬁrst-order (Prop. 2) or the second-order (Prop. 1) adjoint sensitivity method to update the parameter θ [35].
+Proposition 1 (Adjoint equation for HBNODE). The adjoint state a(t) := ∂L/∂h(t) for the
+HBNODE (9) satisﬁes the following HBODE with the same damping parameter γ as that in (9), d2a(t) dt2 − γ da(t) dt
+= a(t)
+∂f
+∂h (h(t), t, θ). (11)
+Remark 1. Note that we solve the adjoint equation (11) from time t = T to t = t0 in the backward propagation. By letting τ = T − t and b(τ ) = a(T − τ ), we can rewrite (11) as follows, d2b(τ ) dτ 2 + γ db(τ ) dτ
+= b(τ )
+∂f
+∂h (h(T − τ ), T − τ, θ). (12)
+Therefore, the adjoint of the HBNODE is also a HBNODE and they have the same damping parameter. 3
+We can also employ (10) and its adjoint for the forward and backward propagations, respectively.
+Proposition 2 (Adjoint equations for the ﬁrst-order HBNODE system). The adjoint states ah(t)
+:= ∂L/∂h(t) and am(t) := ∂L/∂m(t) for the ﬁrst-order HBNODE system (10) satisfy dah(t) dt
+= −am(t)
+∂f
+∂h (h(t), t, θ); dam(t) dt
+= −ah(t) + γam(t). (13)
+Remark 2. Let ˜am(t) = dam(t)/dt, then am(t) and ˜am(t) satisﬁes the following ﬁrst-order heavy ball ODE system dam(t) dt (h(t), t, θ) + γ ˜am(t). d˜am(t) dt
+= ˜am(t);
+= am(t)
+∂f
+∂h (14)
+Note that we solve this system backward in time in back-propagation. Moreover, we have ah(t) =
+γam(t) − ˜am(t).
+Similar to [35], we use the coupled ﬁrst-order HBNODE system (10) and its adjoint ﬁrst-order
+HBNODE system (13) for practical implementation, since the entangled representation permits faster computation [35] of the gradients of the coupled ODE systems. 3 Generalized Heavy Ball Neural Ordinary Differential Equations
+In this section, we propose a generalized version of
+HBNODE (GHBNODE), see (15), to mitigate the po-tential blow-up issue in training ODE-based models. In our experiments, we observe that h(t) of ANODEs [10],
+SONODEs [35], and HBNODEs (10) usually grows much faster than that of NODEs. The fast growth of h(t) can lead to ﬁnite-time blow up. As an illustration, we compare the performance of NODE, ANODE, SON-ODE, HBNODE, and GHBNODE on the Silverbox task as in [35]. The goal of the task is to learn the voltage of an electronic circuit that resembles a Dufﬁng oscil-lator, where the input voltage V1(t) is used to predict the output V2(t). Similar to the setting in [35], we ﬁrst augment ANODE by 1 dimension with 0-augmentation and augment SONODE, HBNODE, and GHBNODE with a dense network. We use a simple dense layer to parameterize f for all ﬁve models, with an extra input term for V1(t)3. For both HBNODE and GHBNODE, we set the damping parameter γ to be sigmoid(−3). For GHBNODE (15) below, we set σ(·) to be the hardtanh function with bound
+[−5, 5] and ξ = ln(2). The detailed architecture can be found in Appendix E. As shown in Fig. 2, compared to the vanilla NODE, the (cid:96)2 norm of h(t) grows much faster when a higher order NODE is used, which leads to blow-up during training. Similar issues arise in the time series experiments (see Sec. 5.4), where SONODE blows up during long term integration in time, and HBNODE suffers from the same issue with same initialization.
+Figure 2: Contrasting h(t) for different models. h(t) in ANODE, SONODE, and
+HBNODE grows much faster than that in
+NODE. GHBNODE controls the growth of h(t) effectively when t is large.
+To alleviate the problem above, we propose the following generalized HBNODE dh(t) dt
+= σ(m(t)); dm(t) dt
+= −γm(t) + f (h(t), t, θ) − ξh(t), (15) where σ(·) is a nonlinear activation, which is set as tanh in our experiments. The positive hyper-parameters γ, ξ > 0 are tunable or learnable. In the trainable case, we let γ = (cid:15) · sigmoid(ω) as in
+HBNODE, and ξ = softplus(χ) to ensure that γ, ξ ≥ 0. Here, we integrate two main ideas into the design of GHBNODE: (i) We incorporate the gating mechanism used in LSTM [19] and GRU [6], which can suppress the aggregation of m(t); (ii) Following the idea of skip connection [17], we add the term ξh(t) into the governing equation of m(t), which beneﬁts training and generalization of
+GHBNODEs. Fig. 2 shows that GHBNODE can indeed control the growth of h(t) effectively.
+Proposition 3 (Adjoint equations for GHBNODEs). The adjoint states ah(t) := ∂L/∂h(t), am(t) := ∂L/∂m(t) for the GHBNODE (15) satisfy the following ﬁrst-order ODE system (cid:17)
+= −am(t) (h(t), t, θ) − ξI
+,
+= −ah(t)σ(cid:48)(m(t)) + γam(t). (16)
+∂ah(t)
+∂t (cid:16) ∂f
+∂h
+∂am(t)
+∂t 3Here, we exclude an h3 term that appeared in the original Dufﬁng oscillator model because including it would result in ﬁnite-time explosion. 4
+Though the adjoint state of the GHBNODE (16) does not satisfy the exact heavy ball ODE, based on our empirical study, it also signiﬁcantly reduces the backward NFEs. 4 Learning long-term dependencies – Vanishing gradient
+It is known that the vanishing and exploding gradients are two bottlenecks for training recurrent neural networks (RNNs) with long-term dependencies [2, 37] (see Appendix C for a brief review on the exploding and vanishing gradient issues in training RNNs). The exploding gradients issue can be effectively resolved via gradient clipping, training loss regularization, etc [37, 11]. Thus in practice the vanishing gradient is the major issue for learning long-term dependencies [37]. As the continuous analogue of RNN, NODEs as well as their hybrid ODE-RNN models, may also suffer from vanishing in the adjoint state a(t) := ∂L/∂h(t) [26]. When the vanishing gradient issue happens, a(t) goes to 0 quickly as T − t increases, then dL/dθ in (2) will be independent of these a(t). We have the following expressions for the adjoint states of the NODE and HBNODE (see Appendix C for details):
+• For NODE, we have
+∂L
+∂ht
+• For GHBNODE4, from (13) we can derive (cid:21)
+∂L
+∂hT
+∂hT
+∂ht
+=
+=
+∂L
+∂hT (cid:2) ∂L
+∂ht
+∂L
+∂mt (cid:3) = (cid:2) ∂L
+∂hT (cid:3)
+∂L
+∂mT (cid:20) ∂hT
+∂ht
+∂mT
+∂ht
+∂hT
+∂mt
+∂mT
+∂mt (cid:110)
+− exp (cid:90) t
+T
+∂f
+∂h (h(s), s, θ)ds (cid:111)
+.
+= (cid:2) ∂L
+∂hT
+∂L
+∂mT (cid:110) (cid:3) exp
+− (cid:90) t (cid:20) 0
+T (cid:124) (cid:0) ∂f
+∂h − ξI(cid:1) −γI (cid:123)(cid:122)
+:=M
+∂σ
+∂m (17) (cid:21) (cid:111)
+. ds (cid:125) (18)
+Note that the matrix exponential is directly related to its eigenvalues. By Schur decomposition, there exists an orthogonal matrix Q and an upper triangular matrix U , where the diagonal entries of U are eigenvalues of Q ordered by their real parts, such that
+Let v(cid:62) := (cid:2) ∂L
+∂L
+∂hT
+∂mT (cid:3) = (cid:2) ∂L
+∂hT (cid:2) ∂L
+∂ht
+∂L
+∂mt
+−M = QU Q(cid:62) =⇒ exp{−M } = Q exp{U }Q(cid:62). (cid:3) Q, then (18) can be rewritten as (cid:3) exp{−M } = (cid:2) ∂L
+∂hT
+∂L
+∂mT
+∂L
+∂mT (cid:3) Q exp{U }Q(cid:62) = v(cid:62) exp{U }Q(cid:62).
+By taking the (cid:96)2 norm in (20) and dividing both sides by (cid:13) (cid:13) (cid:13)v(cid:62) exp{U }Q(cid:62)(cid:13) (cid:13) (cid:13)2 (cid:107)v(cid:62)Q(cid:62)(cid:107)2 (cid:13) (cid:2) ∂L (cid:13)
+∂hT (cid:3)(cid:13) (cid:13)2 (cid:3)(cid:13) (cid:13)2 (cid:13)e(cid:62) exp{U }(cid:13)
+= (cid:13) (cid:13)2 (cid:13) (cid:2) ∂L (cid:13)
+∂ht (cid:13) (cid:2) ∂L (cid:13)
+∂hT (cid:2) ∂L
+∂L
+∂mt
+∂ht
+∂L
+∂mt
+∂L
+∂mT (cid:3)(cid:13) (cid:13)2
+∂L
+∂mT (cid:2) ∂L
+∂hT (cid:13)v(cid:62) exp{U }(cid:13) (cid:13) (cid:13)2 (cid:107)v(cid:107)2
+=
+= (cid:3)(cid:13) (cid:13)2
+= (cid:13) i.e., (cid:13)
+∂L (cid:13)
+∂mT
+Proposition 4. The eigenvalues of −M can be paired so that the sum of each pair equals (t − T )γ. where e = v/(cid:107)v(cid:107)2. (cid:3)(cid:13) (cid:13)2 (cid:13)e(cid:62) exp{U }(cid:13) (cid:13)2 ,
+, we arrive at (19) (20) (21)
+For a given constant a > 0, we can group the upper triangular matrix exp{U } as follows
+, (22) exp{U } := (cid:21)
+P exp{UV } (cid:20)exp{UL} 0 where the diagonal of UL (UV ) contains eigenvalues of −M that are no less (greater) than (t − T )a.
+Then, we have (cid:107)e(cid:62) exp{U }(cid:107)2 ≥ (cid:107)e(cid:62)
+L exp{UL}(cid:107)2 where the vector eL denotes the ﬁrst m columns of e with m be the number of columns of UL. By choosing 0 ≤ γ ≤ 2a, for every pair of eigenvalues of −M there is at least one eigenvalue whose real part is no less than (t − T )a. Therefore, exp{UL} decays at a rate at most (t − T )a, and the dimension of UL is at least N × N . We avoid exploding gradients by clipping the (cid:96)2 norm of the adjoint states similar to that used for training RNNs.
+In contrast, all eigenvalues of the matrix (cid:82) t
+T ∂f /∂hds in (17) for NODE can be very positive or negative, resulting in exploding or vanishing gradients. As an illustration, we consider the benchmark Walker2D kinematic simulation task that requires learning long-term dependencies effectively [26, 3]. We train ODE-RNN [42] and (G)HBNODE-RNN on this benchmark dataset, and the detailed experimental settings are provided in Sec. 5.4. Figure 4 plots (cid:107)∂L/∂ht(cid:107)2 for ODE-RNN and (cid:107)[∂L/∂ht ∂L/∂mt](cid:107)2 for (G)HBNODE-RNN, showing that the adjoint state of ODE-RNN vanishes quickly, while that of (G)HBNODE-RNN does not vanish even when the gap between T and t is very large. 4HBNODE can be seen as a special GHBNODE with ξ = 0 and σ be the identity map. 5
+Figure 3: Plot of the the (cid:96)2-norm of the adjoint states for ODE-RNN and (G)HBNODE-RNN back-propagated from the last time stamp. The adjoint state of ODE-RNN vanishes quickly when the gap between the ﬁnal time T and intermediate time t becomes larger, while the adjoint states of (G)HBNODE-RNN decays much more slowly.
+This implies that (G)HBNODE-RNN is more effective in learning long-term dependency than ODE-RNN. 5 Experimental Results
+In this section, we compare the performance of the proposed HBNODE and GHBNODE with existing
+ODE-based models, including NODE [4], ANODE [10], and SONODE [35] on the benchmark point cloud separation, image classiﬁcation, learning dynamical systems, and kinematic simulation. For all the experiments, we use Adam [25] as the benchmark optimization solver (the learning rate and batch size for each experiment are listed in Table 1) and Dormand–Prince-45 as the numerical ODE solver.
+For HBNODE and GHBNODE, we set γ = sigmoid(θ), where θ is a trainable weight initialized as
+θ = −3. The network architecture used to parameterize f (h(t), t, θ) for each experiment below are described in Appendix E. All experiments are conducted on a server with 2 NVIDIA Titan Xp GPUs.
+Table 1: The batch size and learning rate for different datasets.
+Dataset
+Point Cloud
+MNIST
+CIFAR10
+Plane Vibration
+Walker2D
+Batch Size
+Learning Rate 50 0.01 64 0.001 64 0.001 64 0.0001 256 0.003
+Figure 4: Comparison between NODE, ANODE, SONODE, HBNODE, and GHBNODE for two-dimensional point cloud separation. HBNODE and GHBNODE converge better and require less NFEs in both forward and backward propagation than the other benchmark models. 5.1 Point cloud separation
+In this subsection, we consider the two-dimensional point cloud separation benchmark. A total of 120 points are sampled, in which 40 points are drawn uniformly from the circle (cid:107)r(cid:107) < 0.5, and 80 points are drawn uniformly from the annulus 0.85 < (cid:107)r(cid:107) < 1.0. This experiment aims to learn effective features to classify these two point clouds. Following [10], we use a three-layer neural network to parameterize the right-hand side of each ODE-based model, integrate the ODE-based model from t0 = 0 to T = 1, and pass the integration results to a dense layer to generate the classiﬁcation results. We set the size of hidden layers so that the models have similar sizes, and the number of parameters of NODE, ANODE, SONODE, HBNODE, and GHBNODE are 525, 567, 528, 568, 6
+Figure 5: Contrasting NODE [4], ANODE [10], SONODE [35], HBNODE, and GHBNODE for MNIST classiﬁcation in NFE, training time, and test accuracy. (Tolerance: 10−5). and 568, respectively. To avoid the effects of numerical error of the black-box ODE solver we set tolerance of ODE solver to be 10−7. Figure 4 plots a randomly selected evolution of the point cloud separation for each model; we also compare the forward and backward NFEs and the training loss of these models (100 independent runs). HBNODE and GHBNODE improve training as the training loss consistently goes to zero over different runs, while ANODE and SONODE often get stuck at local minima, and NODE cannot separate the point cloud since it preserves the topology [10]. 5.2
+Image classiﬁcation
+We compare the performance of HBNODE and GHBNODE with the existing ODE-based models on MNIST and CIFAR10 classiﬁcation tasks using the same setting as in [10]. We parameterize f (h(t), t, θ) using a 3-layer convolutional network for each ODE-based model, and the total number of parameters for each model is listed in Table 2. For a given input image of the size c × h × w, we
+ﬁrst augment the number of channel from c to c + p with the augmentation dimension p dependent on each method5. Moreover, for SONODE, HBNODE and GHBNODE, we further include velocity or momentum with the same shape as the augmented state.
+Table 2: The number of parameters for each models for image classiﬁcation.
+Model
+#Params (MNIST)
+#Params (CIFAR10)
+NODE 85,315 173,611
+ANODE
+SONODE
+HBNODE
+GHBNODE 85,462 172,452 86,179 171,635 85,931 172,916 85,235 172,916
+NFEs. As shown in Figs. 1 and 5, the NFEs grow rapidly with training of the NODE, resulting in an increasingly complex model with reduced performance and the possibility of blow up. Input augmentation has been veriﬁed to effectively reduce the NFEs, as both ANODE and SONODE require fewer forward NFEs than NODE for the MNIST and CIFAR10 classiﬁcation. However, input augmentation is less effective in controlling their backward NFEs. HBNODE and GHBNODE require much fewer NFEs than the existing benchmarks, especially for backward NFEs. In practice, reducing NFEs implies reducing both training and inference time, as shown in Figs. 1 and 5.
+Accuracy. We also compare the accuracy of different ODE-based models for MNIST and CIFAR10 classiﬁcation. As shown in Figs. 1 and 5, HBNODE and GHBNODE have slightly better classiﬁcation accuracy than the other three models; this resonates with the fact that less NFEs lead to simpler models which generalize better [10, 35].
+Figure 6: NFE vs. tolerance (shown in the colorbar) for training ODE-based models for CIFAR10 classiﬁcation.
+Both forward and backward NFEs of HBNODE and GHBNODE grow much more slowly than that of NODE,
+ANODE, and SONODE; especially the backward NFEs. As the tolerance decreases, the advantage of HBNODE and GHBNODE in reducing NFEs becomes more signiﬁcant.
+NFEs vs. tolerance. We further study the NFEs for different ODE-based models under different tolerances of the ODE solver using the same approach as in [4]. Figure 6 depicts the forward and backward NFEs for different models under different tolerances. We see that (i) both forward 5We set p = 0, 5, 4, 4, 5/0, 10, 9, 9, 9 on MNIST/CIFAR10 for NODE, ANODE, SONODE, HBNODE, and
+GHBNODE, respectively. 7
+and backward NFEs grow quickly when tolerance is decreased, and HBNODE and GHBNODE require much fewer NFEs than other models; (ii) under different tolerances, the backward NFEs of
+NODE, ANODE, and SONODE are much larger than the forward NFEs, and the difference becomes larger when the tolerance decreases. In contrast, the forward and backward NFEs of HBNODE and GHBNODE scale almost linearly with each other. This reﬂects that the advantage in NFEs of (G)HBNODE over the benchmarks become more signiﬁcant when a smaller tolerance is used. 5.3 Learning dynamical systems from irregularly-sampled time series
+In this subsection, we learn dynamical systems from experimental measurements. In particular, we use the ODE-RNN framework [4, 42], with the recognition model being set to different ODE-based models, to study the vibration of an airplane dataset [33]. The dataset was acquired, from time 0 to 73627, by attaching a shaker underneath the right wing to provide input signals, and 5 attributes are recorded per time stamp; these attributes include voltage of input signal, force applied to aircraft, and acceleration at 3 different spots of the airplane. We randomly take out 10% of the data to make the time series irregularly-sampled. We use the ﬁrst 50% of data as our train set, the next 25% as validation set, and the rest as test set. We divide each set into non-overlapping segments of consecutive 65 time stamps of the irregularly-sampled time series, with each input instance consisting of 64 time stamps of the irregularly-sampled time series, and we aim to forecast 8 consecutive time stamps starting from the last time stamp of the segment. The input is fed through the the hybrid methods in a recurrent fashion; by changing the time duration of the last step of the ODE integration, we can forecast the output in the different time stamps. The output of the hybrid method is passed to a single dense layer to generate the output time series. In our experiments, we compare different
+ODE-based models hybrid with RNNs. The ODE of each model is parametrized by a 3-layer network whereas the RNN is parametrized by a simple dense network; the total number of parameters for
+ODE-RNN, ANODE-RNN, SONODE-RNN, HBNODE-RNN, and GHBNODE-RNN with 16, 22, 14, 15, 15 augmented dimensions are 15,986, 16,730, 16,649, 16,127, and 16,127, respectively. To avoid potential error due to the ODE solver, we use a tolerance of 10−7.
+In training those hybrid models, we regularize the models by penalizing the L2 distance between the
+RNN output and the values of the next time stamp. Due to the second-order natural of the underlying dynamics [35], ODE-RNN and ANODE-RNN learn the dynamics very poorly with much larger training and test losses than the other models even they take smaller NFEs. HBNODE-RNN and
+GHBNODE-RNN give better prediction than SONODE-RNN using less backward NFEs.
+Figure 7: Contrasting ODE-RNN, ANODE-RNN, SONODE-RNN, HBNODE-RNN, and GHBNODE-RNN for learning a vibrational dynamical system. Left most: The learned curves of each model vs. the ground truth (Time: <66 for training, 66-75 for testing). 5.4 Walker2D kinematic simulation
+In this subsection, we evaluate the performance of HBNODE-RNN and GHBNODE-RNN on the
+Walker2D kinematic simulation task, which requires learning long-term dependency effectively [26].
+The dataset [3] consists of a dynamical system from kinematic simulation of a person walking from a pre-trained policy, aiming to learn the kinematic simulation of the MuJoCo physics engine [48]. The dataset is irregularly-sampled with 10% of the data removed from the simulation. Each input consists of 64 time stamps fed though the the hybrid methods in a recurrent fashion, and the output is passed to a single dense layer to generate the output time series. The goal is to provide an auto-regressive forecast so that the output time series is as close as the input sequence shifted one time stamp to the right. We compare ODE-RNN (with 7 augmentation), ANODE-RNN (with 7 ANODE style augmentation), HBNODE-RNN (with 7 augmentation), and GHBNODE-RNN (with 7 augmentation) 6 The RNN is parametrized by a 3-layer network whereas the ODE is parametrized by a simple dense 6Here, we do not compare with SONODE-RNN since SONODE has some initialization problem on this dataset; the ODE solver encounters failure due to exponential growth over time. 8
+network. The number of parameters of the above four models are 8,729, 8,815, 8,899, and 8,899, respectively. In Fig. 8, we compare the performance of the above four models on the Walker2D benchmark; HBNODE-RNN and GHBNODE-RNN not only require signiﬁcantly less NFEs in both training (forward and backward) and in testing than ODE-RNN and ANODE-RNN, but also have much smaller training and test losses.
+Figure 8: Contrasting ODE-RNN, ANODE-RNN, SONODE-RNN, HBNODE-RNN, and GHBNODE-RNN for the Walker-2D kinematic simulation. 6

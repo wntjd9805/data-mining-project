@@ -1,0 +1,155 @@
+Abstract
+We introduce a new unsupervised pre-training method for reinforcement learning called APT, which stands for Active Pre-Training. APT learns behaviors and representations by actively searching for novel states in reward-free environments.
+The key novel idea is to explore the environment by maximizing a non-parametric entropy computed in an abstract representation space, which avoids challenging density modeling and consequently allows our approach to scale much better in environments that have high-dimensional observations (e.g., image observations).
+We empirically evaluate APT by exposing task-speciﬁc reward after a long unsuper-vised pre-training phase. In Atari games, APT achieves human-level performance on 12 games and obtains highly competitive performance compared to canonical fully supervised RL algorithms. On DMControl suite, APT beats all baselines in terms of asymptotic performance and data efﬁciency and dramatically improves performance on tasks that are extremely difﬁcult to train from scratch. 1
+
+Introduction
+Reinforcement learning (RL) provides a general framework for solving challenging sequential decision-making problems. When combined with function approximation, it has achieved remarkable success in advancing the frontier of AI technologies. These landmarks include outperforming humans in computer games [40, 51, 64, 5] and solving complex robotic control tasks [3, 1]. Despite these successes, they have to train from scratch to maximize extrinsic reward for every encountered task.
+This is in sharp contrast with how intelligent creatures quickly adapt to new tasks by leveraging previously acquired behaviors. Unsupervised pre-training, a framework that trains models without expert supervision, has obtained promising results in computer vision [43, 23, 14] and natural language modeling [63, 16, 11]. The learned representation, when ﬁne-tuned on the downstream tasks, can solve them efﬁciently in a few-shot manner. With the models and datasets growing, performance continues to improve predictably according to scaling laws.
+Driven by the signiﬁcance of massive unlabeled data, we consider an analogy setting of unsupervised pre-training in computer vision where labels are removed during training. The goal of pre-training is to have data efﬁcient adaptation for some downstream task deﬁned in the form of rewards. In
+RL with unsupervised pre-training, the agent is allowed to train for a long period without access to environment reward, and then only gets exposed to the reward during testing. We ﬁrst test an array of existing methods for unsupervised pre-training to identity which gaps and challenges exist, we evaluate count-based bonus [10], which encourages the agent to visit novel states. We apply count-based bonus to DrQ [33] which is current state-of-the-art RL for training from pixels. We also evaluate ImageNet pre-trained representations. The results are shown in Figure 1. We can see that count-based bonus fails to outperform train DrQ from scratch. We hypothesize that the ineffectiveness stems from density modeling at the pixel level being difﬁcult. ImageNet pre-training does not outperform training from scratch either, which has also been shown in previous research 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+in real world robotics [29]. We believe the reason is that neither of existing methods can provide enough diverse data. Count-based exploration faces the difﬁcult of estimating high dimensional data density while ImageNet dataset is out-of-distribution for DMControl.
+To address the issue of obtaining diverse data for
+RL with unsupervised pre-training, we propose to actively collect novel data by exploring unknown ar-eas in the task-agnostic environment. The underlying intuition is that a general exploration strategy has to visit, with high probability, any state where the agent might be rewarded in a subsequent RL task.
+Concretely, our approach relies on the entropy maxi-mization principle [27, 53]. Our hope is that by doing so, the learned behavior and representation can be trained on the whole environment while being as task agnostic as possible. Since entropy maximization in high dimensional state space is intractable as an oracle density model is not available, we resort to the particle-based entropy estimator [55, 8]. This estimator is nonparametric and asymptotically un-biased. The key idea is computing the average of the Euclidean distance of each particle to its near-est neighbors for a set of samples. We consider an abstract representation space in order to make the distance meaningful. To learn such a representation space, we adapt the idea of contrastive representation learning [14] to encode image observations to a lower dimensional space. Building upon this insight, we propose Unsupervised Active Pre-Training (APT) since the agent is encouraged to actively explore and leverage the experience to learn behavior.
+Figure 1: Comparison of state-of-the-art pixel-based RL with unsupervised pre-training. APT (ours) and count-based bonus (both based on
+DrQ [33]) are trained for a long unsupervised pe-riod (5M environment steps) without access to en-vironment reward, and then gets exposure to the en-vironment reward during testing. APT signiﬁcantly outperform training DrQ from scratch, count-based bonus, and ImageNet pre-trained model.
+Our approach can be applied to a wide-range of existing RL algorithms. In this paper we consider applying our approach to DrQ [33] which is a state-of-the-art visual RL algorithm. On the Atari 26 games subset, APT signiﬁcantly improves DrQ’s data-efﬁciency, achieving 54% relative improvement.
+On the full suite of Atari 57 games [40], APT signiﬁcantly outperforms prior state-of-the-art, achieving a median human-normalized score 3× higher than the highest score achieved by prior unsupervised
+RL methods and DQN. On DeepMind control suite, APT beats DrQ and unsupervised RL in terms of asymptotic performance and data efﬁciency and solving tasks that are extremely difﬁcult to train from scratch. The contributions of our paper can be summarized as: (i) We propose a new approach for unsupervised pre-training for visual RL based a nonparametric particle-based entropy maximization. (ii) We show that our pre-training method signiﬁcantly improves data efﬁciency of solving downstream tasks on DMControl and Atari suite. 2 Problem Setting
+Reinforcement Learning (RL) An agent interacts with its uncertain environment over discrete timesteps and collects reward per action, modeled as a Markov Decision Process (MDP) [48], deﬁned by hS, A, T, ρ0, r, γi where S ⊆ RnS is a set of nS -dimensional states, A ⊆ RnA is a set of nA-dimensional actions, T : S × A × S → [0, 1] is the state transition probability distribution. ρ0 : S →
+[0, 1] is the distribution over initial states, r : S × A → R is the reward function, and γ ∈ [0, 1) is the discount factor. At environment state s ∈ S, the agent take actions a ∈ A, in the (unknown) environment dynamics deﬁned by the transition probability T (s′|s, a), and the reward function yields a reward immediately following the action at performed in state st. We deﬁne the discounted return
+∞ l=0 γlr(st+l, at+l) as the discounted sum of future rewards collected by the agent. In
+G(st, at) = value-based reinforcement learning, the agent learns an estimate of the expected discounted return, a.k.a, state-action value function Qπ(st, at) = Est+1,at+1,...
+. A common way of deriving a new policy from a state-action value function is to act ǫ-greedily with respect to the action values (discrete) or to use policy gradient to maximize the value function (continuous).
+∞ l=0 γlr(st+l, at+l) (cid:2)P
+P (cid:3)
+Unsupervised Pre-Training RL In pretrained RL, the agent is trained in a reward-free MDP hS, S0, A, T, Gi for a long period followed by a short testing period with environment rewards R provided. The goal is to learn a pretrained agent that can quickly adapt to testing tasks deﬁned 2
+by rewards to maximize the sum of expected future rewards in a zero-shot or few-shot manner.
+This is also known as the two phases learning in unsupervised pretraining RL [20]. The current state-of-the-art methods maximize the mutual information (I) between policy-conditioning variable (w) and the behavior induced by the policy in terms of state visitation (s). max I(s; w) = max H(w) − H(w|s), where w is sampled from a ﬁxed distribution in practice as in DIAYN [17] and VISR [20]. The objective can then be simpliﬁed as max −H(w|s). Due to it being intractable to directly maximize this negative conditional entropy, prior work propose to maximize the variational lower bound of the negative conditional entropy instead [7]. The training then amounts to learning a posterior of task variable conditioning on states q(w|s).
+−H(w|s) ≥ Es,w [log q(w|s)] .
+Despite successful results in learning meaningful behaviors from reward-free interactions [e.g. 41, 18, 26, 17, 20], these methods suffer from insufﬁcient exploration because they contain no explicit exploration.
+Another category considers the alternative direction of maximizing the mutual information [12]. max I(s; w) = max H(s) − H(s|w).
+This intractable quantity can be similarly lowered bound by a variational approximation [7].
+I(s; w) ≥ Es,w [qθ(s|w)] − Es [log p(s)] , where Es [log p(s)] can then be approximated by a posterior of state given task variables
+Es [log p(s)] ≈ Es,w [log q(s|w)]. Despite their successes, this category of methods do not ex-plore sufﬁciently since the agent receives larger rewards for visiting known states than discovering new ones as theoretically and empirically evidenced by Campos et al. [12]. In addition, they have only been shown to work from explicit state-representations and it remains unclear how to modify to learning from pixels.
+In the next section, we introduce a new nonparametric unsupervised pre-training method for RL which addresses these issues and outperforms prior state-of-the-arts on challenging visual-domain
+RL benchmarks. 3 Unsupervised Active Pre-Training for RL
+We want to incentivize the agent with a reward rt to maximize entropy in an abstract representation space. Prior work on maximizing entropy relies on estimating density of states which is challenging and non-trivial, instead, we take a two-step approach. First, we learn a mapping fθ : RnS → RnZ that maps state space to an abstract representation space ﬁrst. Then, we propose a particle-based nonparametric approach to maximize the entropy by deploying state-of-the-art RL algorithms.
+We introduce how to maximize entropy via particle-based approximation in Section 3.1, and describe how to learn representation from states in Section 3.2 3.1 Particle-Based Entropy Maximization
+Our entropy maximization objective is built upon the nonparametric particle-based entropy estimator proposed by Singh et al. [55] and Beirlant [8] and has has been widely studied in statistics [28].
+Its key idea is to measure the sparsity of the distribution by considering the distance between each sampled data point and its k nearest neighbors. Concretely, assuming we have number of n data points {zi}n i=1 from some unknown distribution, the particle-based approximation can be written as
+Hparticle(z) = − 1 n n log k nvk i n
++ b(k) ∝ log vk i , (1) i=1
+X where b(k) is a bias correction term that only depends on the hyperparameter k, and vk of the hypersphere of radius kzi − z(k) i k between zi and its k-th nearest neighbor z(k)
+Euclidean distance. i=1
+X i i is the volume
+. k · k is the vk i = kzi − z(k) i knZ · πnZ /2
+Γ (nZ /2 + 1)
+, (2) 3
+Expected Reward
+Contrastive Loss
+Particle-based Entropy 
+Maximation
+Normalization representation
+Projection
+Encoder observations
+Minibatch representations representation
+K-nearest neighbors distance
+Reward representation
+Figure 2: Diagram of the proposed method APT. On the left shows the objective of APT, which is to maximize the expected reward and minimize the contrastive loss. The contrastive loss learns an abstract representation from observations induced by the policy. We propose a particle-based entropy maximization based reward function such that we can deploy state-of-the-art RL methods to maximize entropy in an abstraction space of the induced by the policy. On the right shows the idea of our particle-based entropy, which measures the distance between each data point and its k nearest neighbors. where Γ is the gamma function. Intuitively, vk tion (1) is proportional to the average of the volumes around each particle. i reﬂects the sparsity around each particle and equa-By substituting equation (2) into equation (1), we can simplify the particle-based entropy estimation as a sum of the log of the distance between each particle and its k-th nearest neighbor. n
+Hparticle(z) ∝ log kzi − z(k) i knZ . (3)
+Rather than using equation (3) as the entropy estimation, we ﬁnd averaging the distance over all k nearest neighbors leads to a more robust and stable result, yielding our estimation of the entropy. i=1
+X
+Hparticle(z) := n i=1
+X log  c + 1 k
+
+
+Xz(j) i ∈Nk(zi)
+
+ kzi − z(j) i knZ
+,
+ (4) where Nk(·) denotes the k nearest neighbors around a particle, c is a constant for numerical stability (ﬁxed to 1 in all our experiments).
+We can view the particle-based entropy in equation (4) as an expected reward with the reward function i knZ for each particle zi. This makes it possible to being r(zi) = log deploy RL algorithms to maximize entropy, concretely, for a batch of transitions {(s, a, s′)} sampled from the replay buffer. We consider the representation of each s′ as a particle in the representation space and the reward function for each transition is given by i ∈Nk(zi) kzi − z(j) z(j) c + 1 k
+P (cid:17) (cid:16) r(s, a, s′) = log c +
+ 1 k kfθ(s) − z(j)knZ
+ (5)
+Xz(j)∈Nk(z=fθ(s))
+In order to keep the rewards on a consistent scale, we normalize the intrinsic reward by dividing it by a running estimate of the mean of the intrinsic reward. See Figure 2 for illustration of the formulation.
+
+ 3.2 Learning Contrastive Representations
+Our aforementioned entropy maximization is modular of the representation learning method we choose to use, the representation learning part can be swapped out for different methods if necessary.
+However, for entropy maximization to work, the representation needs to contain a compressed repre-sentation of the state. Recent work, CURL [35], ATC [56] and SPR [52], show contrastive learning (with data augmentation) helps learn meaningful representations in RL. We choose contrastive repre-sentation learning since it maximally distinguishes an observation st1 from alternative observations st2 according to certain distance metric in representation space, we hypothesize is helpful for learning meaningful representations for our nearest neighbors based entropy maximization. Our contrastive 4
+learning is based on the contrastive loss from SimCLR [14], chosen for its simplicity. We also use the same set of image augmentations as in DrQ [33] consisting of small random shifts and color jitter. Concretely, we randomly sample a batch of states (images) from the replay buffer {si}n i=1. For each state si, we apply random data augmentation and obtain two randomly augmented views of the same state, denoted as key sk i = aug(si). The augmented observations are encoded into a small latent space using the encoder z = fθ(·) followed by a deterministic projection hφ(·) where a contrastive loss is applied. The goal of contrastive learning is to ensure that after the encoder and projection, sk j=1,j6=i. i than any of the data points {sk i is relatively more close to sv i = aug(si) and query sv j , sv j }n min
+θ,φ
+− 1 2n log n i=1 "
+X
+P exp(hφ(fθ(sk i ))T hφ(fθ(sv i )))
+[j6=i](exp(hφ(fθ(sk i ))T hφ(fθ(sk j ))) + exp(hφ(fθ(sk i ))T hφ(fθ(sv j )))) #
+. n i=1
+I
+Following DrQ, the representation encoder fθ(·) is implemented by the convolutional residual network followed by a fully-connected layer, a LayerNorm and a Tanh non-linearity. We decrease the output dimension of the fully-connected layer after the convnet from 50 to 15. We ﬁnd it helps to use spectral normalization [39] to normalize the weights and use ELU [15] as the non-linearity in between convolutional layers.
+Table 1 positions our new approach with respect to existing ones. Figure 2 shows the resulting model.
+Training proceeds as in other algorithms maximizing extrinsic reward: by learning neural encoder f and computing intrinsic reward r and then trying to maximize this intrinsic return by training the policy. Algorithm 1 shows the pseudo-code of APT, we highlight the changes from DrQ to APT in color.
+Algorithm 1: Training APT
+Randomly Initialize f encoder
+Randomly Initialize π and Q networks for e := 1, ∞ do for t := 1, T do i)}N
+Receive observation st from environment
+Take action at ∼ π(·|st), receive observation st+1 and ❩rt from environment
+D ← D ∪ (st, at, ❩rt , s′ t)
+{(si, ai, ❩ri , s′ i=1 ∼ D
+Train neural encoder f on mini batch for each i = 1..N do a′ i ∼ π(·|s′ i) i, a′
+ˆQi = Qθ′ (s′ i)
+Compute rAPT with equation (5) yi ← rAPT + γ ˆQi
+// sample a mini batch
+// representation learning
+// particle-based entropy reward end lossQ = Pi(Q(si, ai) − yi)2
+Gradient descent step on Q and π end end
+// standard actor-critic
+Table 1: Methods for pre-training RL in reward-free setting. Exploration: the method can explore efﬁciently. Vi-sual: the method works well in visual RL. Off-policy: the method is compatible with off-policy RL optimization.
+⋆ means only in state-based RL. c(s) is count-based bonus. ψ(s, a): successor feature, φ(s): state representation.
+Algorithm
+Objective
+Visual Exploration Off-policy
+Pre-Trained model max Es [c(s)]
+MaxEnt [22] max H(s)
+CBB [10]
+MEPOL [42] max H(s)
+VISR [20]
+DIAYN [17] max −H(z|s) + H(a|z, s)
+DADS [54]
+EDL [12] max H(s) − H(s|z) max H(s) − H(s|z) max −H(z|s)
+APT max H(s)
+✓⋆
+✓
+✓⋆
+✗
+✓⋆
+✗
+✓⋆
+✓
+✗
+✓
+✗
+✓
+✓
+✓
+✓
+✓
+π(a|s)
+π(a|s)
+π(a|s)
+ψ(s, z), φ(s)
+π(a|s, z)
+π(a|s, z), q(s′|s, z)
+π(a|s, z)
+π(a|s), Q(s, a)
+✗
+✗
+✗
+✓
+✗
+✗
+✗
+✓ 5
+4

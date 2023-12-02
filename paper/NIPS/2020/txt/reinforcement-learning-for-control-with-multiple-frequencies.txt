@@ -1,0 +1,109 @@
+Abstract
+Many real-world sequential decision problems involve multiple action variables whose control frequencies are different, such that actions take their effects at differ-ent periods. While these problems can be formulated with the notion of multiple action persistences in factored-action MDP (FA-MDP), it is non-trivial to solve them efﬁciently since an action-persistent policy constructed from a stationary policy can be arbitrarily suboptimal, rendering solution methods for the standard
+FA-MDPs hardly applicable. In this paper, we formalize the problem of multiple control frequencies in RL and provide its efﬁcient solution method. Our proposed method, Action-Persistent Policy Iteration (AP-PI), provides a theoretical guar-antee on the convergence to an optimal solution while incurring only a factor of
+|A| increase in time complexity during policy improvement step, compared to the standard policy iteration for FA-MDPs. Extending this result, we present Action-Persistent Actor-Critic (AP-AC), a scalable RL algorithm for high-dimensional control tasks. In the experiments, we demonstrate that AP-AC signiﬁcantly out-performs the baselines on several continuous control tasks and a trafﬁc control simulation, which highlights the effectiveness of our method that directly optimizes the periodic non-stationary policy for tasks with multiple control frequencies. 1
+
+Introduction
+In recent years, reinforcement learning (RL) [23] has shown great promise in various domains, such as complex games [14, 21, 22] and high-dimensional continuous control [11, 19]. These problems have been mostly formulated as discrete-time Markov decision processes (MDPs) [17], assuming all decision variables are simultaneously determined at every time step. However, many real-world sequential decision-making problems involve multiple decision variables whose control frequencies are different by requirement. For example, when managing a ﬁnancial portfolio of various assets, the frequency of rebalancing may need to be different for each asset, e.g. weekly for stock and monthly for real estate. Similarly, robotic systems typically consist of a number of controllers operating at different frequencies due to their system speciﬁcation.
+Different control frequencies can be formulated with the notion of different action persistence in the discrete-time factored-action MDP (FA-MDP), where the base time interval is determined by the reciprocal of the least common multiple of the control frequencies. However, while algorithms for single action persistence has been proposed in order to improve the empirical performance of online
+[9] or ofﬂine [13] RL agents, to the best of our knowledge, addressing multiple action persistences in RL has been mostly unexplored due to its difﬁculty involved in the non-stationarity nature of the optimal policy.
+In this paper, we formalize the problem of multiple action persistences in FA-MDPs. We ﬁrst show that any persistent policy induced by a stationary policy can be arbitrarily bad via a simple example. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Then, we introduce efﬁcient methods for FA-MDPs that directly optimize a periodic non-stationary policy while circumventing the exponential growth of time complexity with respect to the periodicity of action persistence. We ﬁrst present a tabular planning algorithm, Action-Persistent Policy Iteration (AP-PI), which provides the theoretical guarantee on the convergence to an optimal solution while incurring only a factor of |A| time complexity increase in the policy improvement step compared to the policy iteration for standard FA-MDPs. We then present Action-Persistent Actor-Critic (AP-AC), a scalable learning algorithm for high-dimensional tasks via practical approximations to AP-PI, with a neural network architecture designed to facilitate the direct optimization of a periodic non-stationary policy. In the experiments, we demonstrate that AP-AC signiﬁcantly outperforms a number of baselines based on SAC, from the results on modiﬁed Mujoco continuous control benchmarks [3, 26] and the SUMO trafﬁc control simulation [8], which highlights the effectiveness of our method that directly optimizes the periodic non-stationary policy for tasks with multiple control frequencies. 2 Preliminaries
+We assume the environment modeled as discrete-time factored-action MDP (FA-MDP) M = (cid:104)S, A, P, R, γ(cid:105) where S is the set of states s, A is the set of vector-represented actions a = (a1, . . . , am), P (s(cid:48)|s, a) = Pr(st+1 = s(cid:48)|st = s, at = a) is the transition probability, R(s, a) ∈ R is the immediate reward for taking action a in state s, and γ ∈ [0, 1) is the discount factor. A policy π = (πt)t≥0 ∈ Π is a sequence of functions where πt : H → ∆(A) is a mapping from history ht = (s0, a0, . . . , st−1, at−1, st) to a probability distribution over A, πt(at|ht) = Pr(at|ht).
+We call πt Markovian if πt depends only on the last state st and call it stationary if πt does not depend on t. The policy πt is called deterministic if it maps from history to some action
+: H → A. For simplicity, we will only con-with probability 1 and can be denoted as πt t |ht) = (cid:81)m t (ak sider the fully factorized policy πt(a1 t |ht), which comprises the set Π of all fully factorized policies. The action-value function Qπ t of policy π is deﬁned as
+Qπ
+τ =t γτ −tR(sτ , aτ )|st = s, at = a]. t (s, a) = Eπ [(cid:80)∞ t , . . . , am k=1 πk
+We consider the sequential decision problem where each action variable ak has its own control frequency. The notion of control frequency can be formulated in terms of action persistence with
+FA-MDP M by considering how frequently ak should be decided in M. Speciﬁcally, we let ck be the action persistence of k-th action variable ak, i.e. ak is decided every ck time step in M. The overall action persistence of the decision problem is then described as a vector c = (c1, . . . , cm) ∈ Nm.
+Finally, we deﬁne the c-persistent policy π as follows:
+Deﬁnition 1. (c-persistent policy) Let π = (πt)t≥0 ∈ Π be a policy. Given the action persistence vector c ∈ Nm, the c-persistent policy ¯πc = (¯πc,t)t≥0 induced by π is a non-stationary policy where
+∀t, ¯πc,t(a|ht) = m (cid:89) k=1 c,t(ak|ht) s.t. ¯πk
+¯πk c,t(ak|ht) = (cid:40)πk t (ak|ht)
+δak t−(t mod ck ) if t mod ck = 0 (ak) otherwise (1) where δx(y) = 1 if x = y and 0 otherwise. Additionally, we deﬁne the set of c-persistent policies
+Πc = {(¯πc,t)t≥0 : π ∈ Π}.
+Our goal is to ﬁnd the c-persistent policy π∗ c that maximizes expected cumulative rewards: (cid:35)
+γtR(st, at) (cid:34) ∞ (cid:88)
+E¯π (2)
+¯π∗ c = arg max
+¯π∈Πc t=0
+Remark. When c = (1, . . . , 1), we have Πc = Π. Thus, Eq. (2) is reduced to the standard objective function of FA-MDP, which is known to always have a deterministic and Markovian stationary policy as an optimal solution [17]. Also, the c-persistent policy of Deﬁnition 1 is different from the k-persistent policy [13] in that our deﬁnition considers multiple action persistences and is not limited by Markovian policy π while [13] considers single action persistence and a non-stationary policy induced only by a Markovian policy.
+The agent with c-persistent policy ¯πc induced by π interacts with the environment as follows: At time step t = 0, all action variables are selected according to ¯πc,0 = π0, i.e. (a1 0 ) ∼ (cid:81)m 0 (·|h0). Then, each action variable ak is kept persistent for the subsequent ck − 1 time steps.
+At time step t = ck, the action variable ak is set by ¯πk t (·|ht), and continue into the next c,t(·|ht) = πk 0, . . . , am k=1 πk 2
+(a) (b)
+Figure 1: An illustrative example of FA-MDP with two action persistence where the initial state is s0 and γ = 0.95. The arrows indicate transitions and rewards for each action. In this simple example, every c-persistent policy induced by any stationary policy is suboptimal. time step. In other words, the agent decides the value for ak only at the time steps t that are multiples of ck, i.e. t mod ck = 0. Figure 1b illustrates an example of c-persistent policy ¯πc. For the remainder of this paper, we will omit the subscript c in ¯πc for notational brevity if there is no confusion. All the proofs of theorems are available in the Appendix. 3 Action-Persistence in FA-MDPs
+Finding the optimal policy via Eq. (2) is non-trivial since any c-persistent policy naively constructed from a stationary policy can be suboptimal, unlike in standard FA-MDPs where there always exists a stationary optimal policy. To see this, consider the FA-MDP depicted in Figure 1, where there are two action variables with action persistences 2 and 3, respectively. In this example task, in order to obtain a positive reward, the agent should take an action a = (1, 1) at state s0 to go to the rightmost state. However, when we use this to form a stationary deterministic policy with π(s0) = (1, 1) and construct a c-persistent policy in a naive manner, we see that the policy can never reach s3 due to the inherent action persistence c = (2, 3): The action (1, 1) taken at s0 when t = 0 will persist at the next time step t = 1 in s1, making the agent go back to s0. Then, the agent will select an action (1, 1) again by π(s0), and this will be repeated forever. As a consequence, the agent visits only s0 and s1, and thus cannot reach the rightmost state. In contrast, the non-stationary deterministic policy
+¯π described in Figure 1b reaches s3. Careful readers may notice that a c-persistent policy "projected" from some stationary but stochastic policy can eventually reach s3, but its expected return is clearly less than the non-stationary deterministic policy in Figure 1b, thus suboptimal.
+Therefore, obtaining a c-persistent policy by ignoring the action persistence requirement and solving the corresponding standard FA-MDP would not work. However, one can observe that the action persistence scheme is repeated periodically at every L (cid:44) LCM(c1, . . . , cm) time steps. From this observation, a naive approach to solving Eq. (2) would be redeﬁning the action space to have L-step actions as elements. After redeﬁning the transition and reward function corresponding to these actions, standard solution methods for FA-MDP such as dynamic programming can be applied. Still, this approach not only has exponential time complexity with respect to L due to the increase in the size of action space, i.e. |A|L, but also can be suboptimal unless the underlying transition dynamics is nearly deterministic due to the open-loop decision-making nature of L-step actions [27]. A more principled approach is to consider an L-Markovian policy that memorizes which action was taken during the last L steps, but its straightforward conversion to the standard MDP via state augmentation still suffers from the exponential time complexity with respect to L. 3.1 Policy evaluation for c-persistent policy: c-persistent Bellman operators
+As discussed in the previous section, augmenting state or action space for storing L-step information results in exponential complexity with respect to L. Instead, we take a more direct approach that optimizes the c-persistent policy via composition of Bellman operators within the space of L-periodic, non-stationary and deterministic policies ΠL:
+ΠL = {π ∈ Π : ∀t, πt = πt+L and πt : A × S → A} (3)
+We will later prove that there always exists an optimal policy for Eq. (2), which is induced by π ∈ ΠL.
+The policy in ΠL will be denoted as π = (π0, . . . , πL−1) in the remainder of the paper. 3
+As the ﬁrst step of the derivation of our algorithm, we deﬁne function Γc t,a(a(cid:48)) = (¯a1, . . . ¯am) where ¯ak (cid:44)
+Γc (cid:26)ak a(cid:48)k t,a(a(cid:48)): if t mod ck (cid:54)= 0 if t mod ck = 0 (4) which projects action a(cid:48) into a feasible action at time step t if the action taken at t − 1 is assumed to be a. This is done by extracting dimensions of "effectable" action variables at time step t from a(cid:48) and extracting dimensions of "uneffectable" variables at time step t from a.
+For the L-periodic non-stationary deterministic policy π = (π0, . . . , πL−1) ∈ ΠL, we ﬁrst deﬁne the one-step c-persistent Bellman operator ¯T π t ( ¯T π induced by π. Speciﬁcally, for t ∈ {0, . . . , L − 1}, t Q)(s, a) (cid:44) R(s, a) + γE t+1,a(a(cid:48)))(cid:3) (cid:2)Q(s(cid:48), Γc (5) s(cid:48)∼P (s(cid:48)|s,a) a(cid:48)=πt+1(a,s(cid:48))
+Then, we deﬁne an L-step c-persistent Bellman operator ¯H π c-persistent Bellman operators: ( ¯H π ( ¯H π 0 Q)(s, a) (cid:44) ( ¯T π 1 Q)(s, a) (cid:44) ( ¯T π
+¯T π 1 · · · ¯T π 2 · · · ¯T π
+¯T π 0 1
+L−2
+L−1 t by making the composition of L one-step
+¯T π
+L−1Q)(s, a)
+¯T π 0 Q)(s, a) (6)
+... ( ¯H π
+L−1Q)(s, a) (cid:44) ( ¯T π
+L−1 0 · · · ¯T π
+¯T π
+L−3
+¯T π
+L−2Q)(s, a)
+The following theorem and corollary state that each L-step c-persistent Bellman operator ¯H π contraction mapping, and each of the ﬁxed points Q¯π another by one-step c-persistent Bellman operators ¯T π
+Theorem 1. For all t ∈ {0, . . . , L − 1}, the L-step c-persistent Bellman operators ¯H π t contraction with respect to inﬁnity norm, thus ¯H π t : S × A → R, deﬁne Qn+1 other words, for any Q0 t-th c-persistent value function of ¯π as n → ∞.
+Corollary 1. Q¯π (t+1) mod L holds for all t ∈ {0, . . . , L − 1}, thus c-persistent value functions can be obtained by repeatedly applying 1-step c-persistent backup in a L-cyclic manner. is γL-t has the unique ﬁxed point solution. In t converges to t is a
+L−1 has a recursive relationship with
+L−1. t . Then, the sequence Qn t = Q¯π t Q¯π t = ¯H π 0 , . . . , Q¯π 0 , . . . , ¯T π t = ¯T π t Q¯π t Qn
+Note that the c-persistent value function of the policy π obtained by ¯H π t , has the following form: (cid:34) ∞ (cid:88) (cid:35) (cid:12) (cid:12) (cid:12) st = s, ¯at = a (7)
+Q¯π t (s, a) =E
+∀τ, sτ +1∼P (·|sτ ,aτ )
+γτ −tR(sτ , ¯aτ )
+¯aτ +1=Γc
+τ =t
+τ +1,¯aτ (πτ +1(¯aτ ,sτ +1)) which is obtained by unfolding the L-step c-persistent Bellman recursion from ¯H π t . Here, one can easily show that every action taken at every time step t, which is projected by Γc t,¯a(·), abides by c-persistence, by mathematical induction. As a result, Q¯π t (s, a) has the intended interpretable meaning, i.e. the expected sum of rewards that can be obtained when following the c-persistent policy
+¯π which is induced by π, except for the initial action a, starting from the state s at time step t.
+Remark. The time complexity of applying the one-step c-persistent Bellman backup ¯T π t of Eq. (5) for a deterministic policy π is O(|S|2|A|) for each t, which is identical to the time complexity of the non-persistent standard Bellman backup.
+Now, we have a complete policy evaluation operator for c-persistent policy induced by L-periodic non-stationary deterministic policy π. 3.2 Policy improvement for c-persistent policy
+The remaining step for full policy iteration is policy improvement using Q¯π
+Theorem 2. Given a L-periodic, non-stationary, and deterministic policy π = (π0, . . . , πL−1) ∈ ΠL, t be the c-persistent value of ¯π denoted in Eq. (7). If we update the new policy πnew = let Q¯π
+, . . . , πnew (πnew 0
+L−1) ∈ ΠL by t (s, a).
+∀t, a, s(cid:48), πnew t (a, s(cid:48)) = arg max a(cid:48) then Q¯πnew t (s, a) ≥ Q¯π t (s, a) holds for all t, s, a. 4
+Q¯π t (s(cid:48), Γc t,a(a(cid:48))) (8)
+Remark. The time complexity of policy improvement step deﬁned by Eq. (8) is O(|S||A|2) for each t, which has |A| times worse time complexity compared to the standard non-persistent policy improvement whose complexity is O(|S||A|). Note also that the new policy πnew is not necessarily c-persistent, i.e. πnew /∈ Πc is possible, but the performance of its inducing c-persistent policy is always improved.
+Finally, Theorems 1 and 2 lead us to a full algorithm, action-persistent policy iteration (AP-PI). AP-PI iterates between c-persistent policy evaluation by Eq. (6) and the c-persistent policy improvement of
+Eq. (8), and it is guaranteed to converge to the optimal c-persistent policy ¯π∗ ∈ Πc. The pseudo-code of AP-PI can be found in Appendix D.
+Theorem 3. Starting from any ¯π0 ∈ Πc induced by L-periodic non-stationary deterministic policy
+π0 ∈ ΠL, the sequence of value functions Q¯πn and the improved policies ¯πn+1 induced by πn+1 converge to the optimal value function and the optimal c-persistent policy ¯π∗, i.e. Q¯π∗ t (s, a) = limn→∞ Q¯πn
+Corollary 2. There always exists a c-persistent optimal policy ¯π∗ non-stationary, and deterministic policy π ∈ ΠL. t (s, a) for any ¯π ∈ Πc, t ∈ N0, s ∈ S, and a ∈ A. c , which is induced by a L-periodic, t mod L(s, a) ≥ Q¯π 0, . . . , ¯π∗
+The policy ¯π∗ = (¯π∗
+L−1) obtained by AP-PI is executed as follows. First, ¯a is initialized randomly. Then, at every step t, at = Γc t mod L(¯a, st)) is executed, and ¯a is updated by ¯a ← at.
+To the best of our knowledge, AP-PI is the ﬁrst algorithm that addresses multiple action persistences, extending the single action persistence model that has been recently analyzed in [13]. AP-PI can be readily made scalable using the actor-critic architecture, to cope with large action spaces such as continuous actions, which we describe in the next section. This is a non-trivial extension of Persistent
+Fitted Q-iteration (PFQI) [13] which only applies to ﬁnite action spaces with single action persistence. t,¯a(¯π∗ 4 Action-Persistent Actor-Critic
+In this section, we present Action-Persistent Actor-Critic (AP-AC), an off-policy RL algorithm that can be applied to high-dimensional tasks via practical approximation to AP-PI. AP-AC extends Soft
+Actor-Critic (SAC) [4] to perform iterative optimization of the parametric models of an L-periodic non-stationary policy (i.e. actor), and its c-persistent action-value function (i.e. critic). We assume that the action persistence vector c = (c1, . . . , cm) is given as a part of the environment speciﬁcation.
+As discussed in Section 3, the optimal c-persistent policy ¯π can be induced by an L-periodic non-stationary policy π = (π0, . . . , πL−1), where πt : A × S → ∆(A) for all t. The corresponding opti-mal value function is also represented by the L-periodic action-value function Q¯π = (Q¯π
+L−1) t : S × A → R for all t. We exploit this structure of the optimal solution in the neural network with Q¯π architecture. Speciﬁcally, the parameterized actor network πφ(¯a, s) and the critic network Qθ(s, a) are designed to have L heads, whose t-th head represents πt and Q¯π t respectively, thus sharing the parameters of the lower layers among different t. The t-th head of the critic recursively references the ((t + 1) mod L)-th head for the target value, reﬂecting the result of Corollary 1. 0 , . . . , Q¯π
+The c-persistent value function is trained to minimize the squared temporal difference error:
+JQ(θ) = 1
+L
+L−1 (cid:88) t=0
+E (s,a,r,s(cid:48))∼D a(cid:48)∼πφ,(t+1) mod L(·|a,s(cid:48)) (cid:20)(cid:16)
+Qθ,t(s, a) − yt(a, r, s(cid:48), a(cid:48)) (cid:17)2(cid:21) (9) s.t. yt(a, r, s(cid:48), a(cid:48)) = r + γQ¯θ,(t+1) mod L (cid:0)s(cid:48), Γc t+1,a(a(cid:48))(cid:1) − α log πφ,(t+1) mod L(a(cid:48)|a, s(cid:48)), where D denotes the replay buffer, ¯θ is the parameters of the target network, and Γc t,a(a(cid:48)) is the action projection function deﬁned in Eq. (4). This objective function is obtained from Eq. (5) with an (optional) entropy regularization term α log πφ,t(a(cid:48)|a, s(cid:48)), following the SAC formulation. Note that every term in Eq. (9) is agnostic to the actual time step when (s, a, r, s(cid:48)) was collected, which is due to the way we calculate yt using Q(t+1) mod L and Γ. Thus every (s, a, r, s(cid:48)) sample in D can be used to train Qθ,t regardless of t.
+The policy parameters are then optimized by maximizing:
+Jπ(φ) = 1
+L
+L−1 (cid:88) t=0
+E (s,a,r,s(cid:48))∼D a(cid:48)∼πφ,t(·|a,s(cid:48)) (cid:2)Qθ,t(s(cid:48), Γc t,a(a(cid:48))) − α log πφ,t(a(cid:48)|a, s(cid:48))(cid:3) (10) 5
+Figure 2: Overview of the network architectures and computational graphs for AP-AC training, given the (s, a, r, s(cid:48)) sample. The left ﬁgure corresponds to actor training of, Eq. (10), and the right ﬁgure to critic training of Eq. (9). where the (optional) α log πφ,t(a(cid:48)|a, s(cid:48)) term comes from SAC formulation. In essence, maximizing
+Jπ(φ) with respect to φ corresponds to c-persistent policy improvement by implementing Eq. (8) approximately. As with the case with critic, every term in Eq. (10) is agnostic to the actual time step t of when (s, a, r, s(cid:48)) was collected, thus every sample in D can be used to train πφ,t for all t.
+The overall network architecture and the computational graph for training AP-AC are visualized in Figure 2. In order to obtain lower-variance gradient estimate ˆ∇φJπ(φ), we adopt the exact reparameterization [7] for continuous action tasks and the relaxed reparameterization with Gumbel-softmax [5, 12] for discrete action tasks. The rest of the design choices follows that of SAC such as the clipped double Q trick and soft target update. The pseudo-code for AP-AC can be found in
+Appendix E. 5

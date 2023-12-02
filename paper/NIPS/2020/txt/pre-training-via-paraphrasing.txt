@@ -1,0 +1,155 @@
+Abstract
+We introduce MARGE, a pre-trained sequence-to-sequence model learned with an unsupervised multi-lingual multi-document paraphrasing objective. MARGE provides an alternative to the dominant masked language modeling paradigm, where we self-supervise the reconstruction of target text by retrieving a set of related texts (in many languages) and conditioning on them to maximize the likelihood of generating the original. We show it is possible to jointly learn to do retrieval and reconstruction, given only a random initialization. The objective noisily captures aspects of paraphrase, translation, multi-document summarization, and information retrieval, allowing for strong zero-shot performance on several tasks. For example, with no additional task-speciﬁc training we achieve BLEU scores of up to 35.8 for document translation. We further show that ﬁne-tuning gives strong performance on a range of discriminative and generative tasks in many languages, making
+MARGE the most generally applicable pre-training method to date. 1
+
+Introduction
+Variations on masked language models (MLMs) [Devlin et al., 2019, Liu et al., 2019, Yang et al., 2019b, Conneau et al., 2019, Lewis et al., 2019a, Raffel et al., 2019, Clark et al., 2020] provide highly effective self supervision for pre-training by removing and then reconstructing parts of an input text.
+In this paper, we present the ﬁrst viable pretraining alternative to MLMs; self supervision is instead provided by learning to paraphrase collections of related documents in many languages. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+More speciﬁcally, we introduce MARGE, a Multilingual Autoencoder that Retrieves and Generates.
+We train MARGE by self-supervising the reconstruction of target text by ﬁrst retrieving a set of related texts (in many languages) and then conditioning on them to maximize the likelihood of generating the original. We pre-train a multi-source sequence to sequence model that separately encodes each retrieved document and decodes the target, piecing together and translating content from the appropriate inputs as needed to provide the best reconstruction possible. The retrieval model scores are used to bias the cross attention to the most relevant retrieved documents, allowing the retrieval model to be trained jointly from the reconstruction loss.
+Our approach can be viewed as a new type of denoising auto-encoder where the noise comes from the retrieval step and is much more diverse than masking; retrieved documents may have little lexical overlap with the target, and may not even be in the same language, but should communicate the same underlying information. The pre-training task emphasizes paraphrasing and reduces the amount of encyclopedic knowledge the model must memorize. The set of retrieved documents and relevance scores are an autoencoder bottleneck from which the input must be reconstructed. MARGE is related to recent work that learns to do retrieval as part of the end task model, for example to ﬁnd evidence documents in open domain question answering [Guu et al., 2020, Lewis et al., 2020]. This leads to a more challenging retrieval problem that, unlike ours, requires a separate pre-training phase.
+Overall, our pre-trained models capture elements of traditional paraphrasing, translation, multi-document summarization, and information retrieval tasks.1 This enables effective zero-shot learning; with no ﬁne-tuning we achieve BLEU scores of up to 35.8 for document translation, and outperform strong baselines for cross-lingual transfer in summarization — providing a step towards pre-trained models that can perform any task with little or no ﬁne-tuning. With ﬁne-tuning, we achieve competi-tive performance with masked language models on a range of discriminative and generative tasks in many languages, making MARGE the most generally applicable pre-training method to date. 2 Model 2.1 Overview
+During pre-training, the input to the model is a batch of evidence documents2 z1..M and target documents x1..N . The model is trained to maximize the likelihood of the targets, conditioned on the evidence documents, and the relevance of each evidence document to each target:
+• The model ﬁrst computes a relevance score f (xi, zj) between every pair of documents xi and zj, by embedding each document and computing their cosine similarities (§2.2).
+• The model then computes the likelihood of reconstructing each xi conditioned on z1..M and each f (xi, ·), using a modiﬁed seq2seq model. The similarity score encourages the model to attend more to relevant evidence documents. Backpropagating the reconstruction loss therefore improves both the sequence-to-sequence model and the relevance model (§2.3).
+• We construct batches so that evidence documents are relevant to the targets, using the relevance model for retrieval (§2.4).
+Training this model is a chicken-and-egg problem. The reconstruction and relevance models cannot be effectively updated if the batches do not contain relevant evidence documents, but batch construction relies on a relevance model. However, we found that, in practice, the model is able to learn from a random initialization, which effectively provides a type of hashing of random features for each word. 1Masked language models, in contrast, are less directly related to target ﬁne tuning tasks and signiﬁcant ongoing research focuses on understanding why they work so well, see Rogers et al. [2020] for a survey. 2We use document to refer to contiguous chunks of text up to maximum length (here, 512 tokens). 2
+2.2 Relevance Scores
+To learn the relevance scores f (xi, zj) for a pair of documents, we train a document encoder g that maps a list of tokens to a ﬁxed size representation. We apply the same encoder to both the target and evidence document, and take the cosine similarity between their representations: f (x, z) = (cid:40) g(x)·g(z) (cid:107)g(x)(cid:107)(cid:107)g(z)(cid:107)
+−∞ if x (cid:54)= z otherwise (1)
+This function is used in the reconstruction model (§2.3), and trained by the reconstruction loss. It is also used to construct batches of relevant documents (§2.4).
+Using the same encoder for both the target and evidence documents allows even random models to compute meaningful similarity functions, as documents with high lexical overlap are more likely to be projected to more similar representations [Wieting and Kiela, 2019]. This is crucial at initialization.
+We encode documents by taking the representation of the ﬁrst token from the top of a 4-layer
+Transformer [Vaswani et al., 2017]. We share parameters with the ﬁrst four layers of the reconstruction-model encoder, which saves computation and allows multitask learning. 2.3 Reconstruction Model
+Given a set of evidence documents z1..M and similarity scores f (xi, zj), the reconstruction model computes the likelihood of target document xi.
+Lθ = − (cid:88) i log pθ(xi|z1..M , f (xi, z1), . . . , f (xi, zM )) (2)
+This provides an auto-encoder loss where the reconstruction of document xi is indirectly conditioned on xi, but with an intermediate bottleneck provided by the retrieved documents and relevance scores.
+First, the input documents are encoded individually with a bidirectional Transformer, and then the resulting embeddings are concatenated. The similarity score is used to bias the cross-attention from the decoder to the encoder, so that the decoder will pay more attention to more relevant evidence documents. Using more relevant evidence documents will improve the likelihood of reconstructing xi, so gradient descent on (2) will improve the quality of the similarity scores.
+Standard Transformer sequence-to-sequence models [Vaswani et al., 2017] compute a matrix of cross-attention probabilities between all elements of target document xi and evidence document zj:
+α = softmax zj (Qlh(xi)K lh(zj)) ∈ R|xi|×|zj | where Qlh and K lh compute query and key representations for layer l and head h, and softmax zj denotes a softmax normalised over elements of zj. (3)
+We instead compute cross attention over a set of evidence documents z1..M , biasing the attention scores with the document relevant score from (1):
+α = softmax z1..M (Qlh(xi)K lh(z1..M ) + βf (xi, zj)) ∈ R|xi|×(cid:80) j |zj | (4) where β is a trainable scalar parameter that weights the importance of the document similarity score.
+Guu et al. [2020] propose a related approach in which the likelihood of a target x is calculated by marginalizing out latent documents z: p(x) = (cid:80) j p(x|zj)p(zj). Our attention-like mechanism is (1) more expressive, because it can pay complete attention to a token from one document at one timestep and a token from another document at another timestep, and (2) more efﬁcient because p(x|z) is not computed separately for each zj. However, our method does not allow attention from z to x. 2.4 Batch Construction
+Batches are constructed to create evidence document sets z1..M that give useful information for reconstructing target documents x1..N , as detailed in this section. Overall, we divide the data into 3
+shards of related documents. Periodically, we compute the similarities between pairs of documents within each shard, using the relevance model, and apply a threshold to keep the strongest connections.
+The ﬁnal batches are constructed to maximize connectivity between evidence and target documents.
+Document similarity We compute document similarity in the same way as §2.2. All documents x are encoded as a vector g(x) ∈ Rd, and then all pair-wise similarities between documents are computed with a single matrix multiplication.
+Data Sharding We use simple heuristic constraints to divide documents into related shards, to improve both the accuracy and efﬁciency of retrieval. Speciﬁcally, for news text, documents are in the same shard iff they were published on the same date. For Wikipedia, we split articles into chunks of length 512. We create 1000 shards, where all chunks from the same article, or the equivalent article in another language, are in the same shard (otherwise dividing chunks randomly). Shards typically contain 50-250k entries.
+Indexing While we backpropagate through the relevance model in (4), the construction of the batch itself is inherently non-differentiable. For convenience we perform the nearest neighbour search ofﬂine. Every 10k model updates, we sample a set of shards of documents. For each shard, we compute f (x, z) for every pair of target and evidence documents, using the current relevance model.
+Thresholding We select which documents are sufﬁciently related by taking the top k most similar document pairs across all pairs in the shard. Some targets may have no sufﬁciently relevant evidence documents, and are unused until the shard is re-indexed with an updated relevance model.
+Batching We aim to construct batches containing clusters of related target and evidence documents, to maximize available information for reconstructing each target. The output from the thresholding step is a bipartite graph of evidence and target documents with edges between them. A batch is a subgraph, and we perform a small local search to ﬁnd subgraphs maximizing the sum of the weights of all edges in the subgraph. To encourage the model to build multilingual batches, edges where the evidence and target are in different languages are given weight 100, and other edges have weight 1.
+To create batches, we iterate over seed evidence documents xi with an edge to at least one evidence document. We then greedily add evidence and target documents to the batch to maximize the sum of the weights of edges, until the maximum number of tokens that can ﬁt in GPU memory is reached. 3 Training
+Architecture We use a Transformer model [Vaswani et al., 2017]. The encoder consists of 12
+Transformer layers of dimension 1024, with feedforward layers of size 4096. Recent work showed that large models train more efﬁciently [Li et al., 2020, Kaplan et al., 2020]. The decoder is similar to the encoder, but we increase the size of the feed-forward layers in the Transformer decoder to 16536.
+We also add 4 additional Transformer layers to the base of the decoder with only self-attention and feedforward layers of size 4096, which allows words in the target to contextualize locally before the more expensive cross-attention and feed-forward layers. We focus on scaling up the decoder, because it has access to more information than the encoder (which sees only evidence documents). In total, the model contains roughly 960M parameters. For the relevance model, we use the ﬁrst 4 layers of the encoder, and take the documents representation from the beginning-of-sentence token.
+Pre-training During pre-training, workers process sub-batches containing an average of 2 evidence documents and 2 target documents, and accumulate gradients across workers. Using a multilingual version of the CC-NEWS corpus [Liu et al., 2019], we train initially using the with 64 workers for 450k steps (linearly annealing the learning rate from 1e-04 to 0 with 10k warmup steps), and then continue training with 2048 workers with 550k steps (annealing the learning rate from 2e-04 to 0).3
+We refer to this model as MARGE-NEWS. To explore domain effects, we further pre-train for 100k steps on Wikipedia data, annealing the learning rate from 1e-04 to 0, and refer to the resulting model as MARGE. We rebuild the index every 10k updates. We set retrieval thresholds such that we take on average 4 monolingual and 4 crosslingual links per target document. 3Initially training with a smaller learning rate reduced instability with an untrained retrieval model. 4
+#Parameters
+#Languages
+Pretraining task
+Pretraining GPU
+Days (estimated)
+Pretraining Data (GB; estimated) mBERT
+XLM
+XLM-R
+MMTE mBART
+MARGE 172M 570M 550M 192M 680M 963M 104 100 100 100 25
+MLM
+MLM
+MLM
+Translation seq2seq MLM 26 Retrieval+Reconstruction
+Unknown 640 27000
+Unknown 4500 4700 60 60 2394
+Unknown 1370 206
+Table 1: Comparison models: MARGE is pre-trained on a scale between XLM and XLM-R.
+IWSLT2017 fr de ja 28.5 14.4 34.3 25.5 12.6 10.7 zh 19.9 12.9
+WMT19 de 35.8 13.4 ar 26.8 12.9
+Into English
+From English de
+-18.8 14.0 14.3 14.3 en 30.6
+-31.7 27.5 32.8 de en it nl ro
+Target it 14.0 14.3
+-12.6 14.4 nl 14.8 15.0 11.3
+-9.8 ro 11.6 14.0 12.7 9.3
+-Source
+Table 2: Zero-shot unsupervised document level machine translation BLEU scores using the pre-trained model, with no ﬁne-tuning or special constraints on generation. Performance varies considerably across languages, but is non-trivial with even distantly related languages.
+Data Pre-processing We de-duplicate the data, and identify languages using FastText [Joulin et al., 2016]. We select documents published in 26 different languages (based on their prevalence in downstream tasks), summarized in the Appendix. We divide documents into chunks of length 512.
+We allow all chunks to be evidence documents. For the news domain, we only allow the ﬁrst chunk in each document to be used as a target, which we found improved performance during development.
+We prepend a language identiﬁer token as the ﬁrst decoder input, to control the output language.
+Fine-tuning For ﬁne-tuning, we use a similar procedure to Lewis et al. [2019a]. For generation problems, such as translation and summarization, the task input is fed into the encoder, and the output is generated by the decoder. For classiﬁcation problems the task input is fed into both the encoder and decoder, and a representation is used from the decoder’s ﬁnal layer hidden state. For zero-shot transfer experiments, we freeze word embeddings and the ﬁrst 4 decoder layers. 4 Experiments
+As a multi-lingual sequence-to-sequence model, MARGE is applicable to a very broad range of tasks. We focus on multi-lingual tasks with elements of retrieval, document comprehension, and document generation, because they are the most directly related to our pre-training.
+Table 1 lists the strongest available multilingual pre-trained models, along with relevant model statistics. We compare performance to published numbers for these models. 4.1 Cross-lingual Sentence Retrieval
+Our pre-training task requires the model to retrieve similar texts, which may be in different languages.
+As an extrinsic evaluation of this functionality, we study cross-lingual sentence retrieval, in which a model must identify the correct translation of a sentence from a set of distractors. We report performance on BUCC2018 [Zweigenbaum et al., 2018] and Tatoeba [Artetxe and Schwenk, 2019].
+We follow the setup of Hu et al. [2020], using no ﬁne-tuning. As a document representation, we use the average embedding of the ﬁfth encoder layer (tuned on BUCC development data).
+On BUCC (Table 3), MARGE outperforms other unsupervised models by almost 10 points. On
+Tatoeba (see Appendix), there is signiﬁcant variation across languages, but overall MARGE performs comparably to XLM-R and signiﬁcantly better than other pre-trained models. Better results have been achieved on both tasks using labeled bitext for training [Artetxe and Schwenk, 2019], but our results suggest that our pre-training objective learns an effective cross-lingual retrieval function. 5
+de 62.5 67.9 56.3 67.5 fr 62.6 63.9 63.9 66.5 ru 51.8 54.3 60.6 73.5 zh 50.0 53.3 46.6 56.7 avg 56.7 59.8 56.8 66.0 mBERT
+MMTE
+XLM
+XLM-R en-de zh-en
+Random Initialization
+HAN [Miculicich et al., 2018] mBART (sentence) mBART (document) 7.7
+-38.0 38.5 3.2 24.0 28.4 29.6
+MARGE 78.8 75.9 75.9
+Table 3: Unsupervised Sentence Retrieval re-sults on BUCC. MARGE outperforms other unsupervised models. 77.3 71.6
+MARGE
+Table 4:
+Supervised document-level machine translation. Comparison results are from Liu et al.
+[2020]. MARGE performs similarly to mBART. 28.4 39.2 4.2 Document-Level Machine Translation
+During pre-training, the model can retrieve evidence documents in different languages than the target—in contrast to mBERT, XLM and mBART where instances are monolingual. We explore how well this pre-training approach learns to translate. We focus on document level translation tasks, and report document-level BLEU scores.4 Following Liu et al. [2020], we segment documents into chunks of 512 tokens for training and generation, and then concatenate chunks of the same document.
+Zero-Shot Unsupervised Document Translation Translation offers a direct measure of how well the pre-trained model encoder and decoder work for different languages, and the extent to which the interface between them is language independent. Therefore, in contrast to prior work on unsupervised translation, we do not further ﬁne-tune the model with iterative back-translation [Lample et al., 2017,
+Artetxe et al., 2017], or bitext in other language pairs [Johnson et al., 2017, Liu et al., 2020].
+We measure both translation into English, which compares encoder performance for other languages, and translation out of English, which measures the decoder performance. Generation hyperparameters were minimally tuned on German/English development, and are shared across all translation pairs.
+We use a beam of size 6 and block repeated n-grams of length 8 [Fan et al., 2017].
+Results are shown in Table 2. Performance varies considerably by language, but reaches 35.8 for
+German to English, which is the highest score we are aware of for system trained with no bitext.
+Performance is also strong for some languages using different scripts, such as Arabic to English.
+However, some languages work less well, notably Japanese. Generating non-English languages proves harder in all cases, particularly those with non-Latin alphabets, but English to French works well. Future work should explore up-sampling rarer languages during pre-training.
+Qualitatively, we note that the translations are often good but less literal translations than the reference.
+This may cause BLEU scores to underestimate performance. It is likely that unsupervised performance could be further improved using iterative back-translation using MARGE as an initialization, but we focus here on examining the pre-trained model directly.
+Supervised Document Translation We also evaluate how well our models can be ﬁne-tuned for translation using labeled bitext. To compare with mBART, we use the same English-German and
+Chinese-English document translation tasks from WMT19 and IWSLT2015. Table 4 show that
+MARGE and mBART perform similarly, with MARGE performing better on English-German and mBART on Chinese-English. Both outperform baselines by a wide margin. 4.3 Summarization
+We evaluate monolingual sequence-to-sequence generation performance on text summarization tasks.
+We use the MLSum dataset [Scialom et al., 2020] to compare performance in several languages.
+Results are shown in Table 5. MARGE outperforms an extractive mBERT model—the extractive oracle performance suggests that extractive models are very competitive on this dataset—and a seq2seq model without pre-training. In some cases, training one model on all languages (train all) improves results. Finally, we explore zero-shot summarization, where the model is trained on all 4All sentences in a document are concatenated prior to calculating BLEU, using SacreBLEU [Post, 2018]. 6
+Model
+Setting
+MLSum es de fr ru tr avg
+Extractive Oracle
+Lead 3
+Pointer-Generator
+M-BERT
+Oracle
+Deterministic
+Train One
+Train One 52.30 33.09 35.08 42.01 35.78 13.70 17.67 20.44 37.69 19.69 23.58 25.09 29.80 5.94 5.71 9.48 45.78 28.90 32.59 32.94 29.81 13.65 15.91 17.59
+MARGE-NEWS
+MARGE-NEWS
+MARGE
+MARGE-NEWS
+Zero-shot Transfer
+Train One
+Train All
+Train All 30.01 42.60 42.70 42.77
+Table 5: ROUGE-L scores on MLSum. MARGE generates abstractive summaries that outperform an extractive mBERT model. We also demonstrate zero-shot transfer learning, where the model is trained only on languages it is not trained on, and results from training on all languages. 19.39 25.91 25.78 25.79 29.39 36.09 35.47 35.90 17.81 22.31 22.27 22.72 8.67 10.85 10.85 11.03 15.05 19.03 18.87 19.09 en mBERT 80.2
+MMTE 78.5
+XLM 68.6
+XLM-R 83.5
+MARGE 83.7 ar 52.3 56.1 42.5 66.6 64.5 de 59.0 58.4 50.8 70.1 68.7 es 67.4 64.9 54.7 74.1 73.4 hi 50.2 46.2 34.4 70.6 67.2 vi 61.2 59.4 48.3 74.0 71.5 zh 59.6 58.3 40.5 62.1 67.8 avg 61.4 60.3 48.5 71.6 71.0 en 94.0 93.1 94.0 94.7 94.7 de 85.7 85.1 85.9 89.7 89.4 es 87.4 87.2 88.3 90.1 91.6 fr 87.0 86.9 87.4 90.4 90.9 ja 73.0 72.0 69.3 78.7 78.9 ko 69.6 69.2 64.8 79.0 77.7 zh 77.0 75.9 76.5 82.3 82.5 avg 81.9 81.3 80.9 86.4 86.5 (a) F1 scores on the MLQA question answering task. (b) Paraphrasing accuracy on PAWS-X.
+Table 6: Cross-lingual transfer: models are trained on English (en) and tested on other languages.
+MARGE performs competitively with XLM-R, with 20% of the pre-training compute. languages except the test language—this model outperforms a strong lead-3 baseline, and even a supervised pointer-generator model on Spanish and Russian. On this domain, we achieve better results with MARGE-NEWS, a version of the model trained only on news. 4.4 Paraphrasing
+We measure how well our pre-training learns paraphrasing on the PAWS-X paraphrase detection dataset [Yang et al., 2019a]. The task is to determine whether two sentences are paraphrases; examples were constructed adversarially to have high lexical overlap. Models are trained on English, and we test zero-shot transfer to other languages. MARGE edges out a new state of the art (Table 6b). 4.5 Question Answering
+Question answering offers another document level reasoning task that is easily posed in many languages. We use the MLQA dataset [Lewis et al., 2019b], in which models are trained on the
+English SQuAD dataset [Rajpurkar et al., 2016] and then tested in other languages. Results in Table 6a show that MARGE achieves competitive performance with XLM-R, setting the state of the art for
+Chinese, and outperforms other models by a wide margin. 5 Analysis
+What does the reconstruction model learn? To build intuitions about what the reconstruction model learns, we examine model outputs for inputs in different languages on the same topic (Table 9). Even for a ﬁxed topic, the model output varies signiﬁcantly with the input, showing that it is not simply memorizing text. Almost all facts in the outputs are supported by the input, with few hallucinations—suggesting pre-training has taught the model to translate and paraphrase information from its source, rather than memorize facts in its parameters. However, the outputs are not literal translations—in particular, some important facts from the source are not expressed in the output. The model was not trained on literal translations, so it is perhaps surprising that the output is so closely aligned to the input. Translations may represent a mode of a diverse distribution over paraphrases. 7
+Figure 2: Percentage of retrieved links to documents in target languages (y-axis) from evidence documents in different source languages (x-axis) on Wikipedia.
+What does the retrieval model learn? Figure 2 shows statistics of the retrieval model. Differences across languages are due to many factors, including the frequency of languages in the corpus, and how related languages are to each other. Our pre-training also introduces feedback loops, because if the reconstruction model is unable to translate between two languages, it may train the retrieval model that documents in these languages are less relevant to each other.
+All languages retrieve the highest proportion of documents within their own language (represented by the diagonal), but otherwise the retrieved documents tend to be distributed over a number of other languages. There tend to be closer afﬁnities between geographically or linguistically related languages, such as Bulgarian and Russian, or Chinese and Japanese. For some languages, the model fails to retrieve many documents in other languages—particularly Indo-Iranian languages, and those which are the only example of their language family we include (such as Telugu and Thai). For these cases, the pre-training reduces to independent updates for each language, as in mBART and mBERT.
+Discussion Overall, MARGE shows strong performance on a wider range of tasks than any previous pre-trained models, and is effective at discriminative and generative tasks in many languages.
+Results are competitive with less general models, even XLM-R, which was trained with signiﬁcantly 8
+higher pre-training resources. The pre-training task is more closely related to downstream tasks than masked language modeling, allowing pre-trained models to achieve BLEU scores as high as 35.8 for translation. MARGE also broadens the range of known effective pre-training tasks beyond MLMs, which we hope will lead to further exploration and understanding of pre-training objectives.
+However, there are several limitations that future work should address. We pre-trained on news and
+Wikipedia, where simple metadata can be used to constrain the similarity search, improving efﬁciency and accuracy. Broadening the domains may require approximate nearest neighbor search [Johnson et al., 2019]. Learning the retrieval model requires batch sizes greater than one, so model-parallel training would be required to train signiﬁcantly larger models. 6

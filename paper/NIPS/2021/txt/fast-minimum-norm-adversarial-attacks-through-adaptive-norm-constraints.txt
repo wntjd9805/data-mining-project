@@ -1,0 +1,388 @@
+Abstract
+Evaluating adversarial robustness amounts to ﬁnding the minimum perturbation needed to have an input sample misclassiﬁed. The inherent complexity of the underlying optimization requires current gradient-based attacks to be carefully tuned, initialized, and possibly executed for many computationally-demanding iterations, even if specialized to a given perturbation model. In this work, we overcome these limitations by proposing a fast minimum-norm (FMN) attack that works with different (cid:96)p-norm perturbation models (p = 0, 1, 2,
+), is ro-bust to hyperparameter choices, does not require adversarial starting points, and converges within few lightweight steps. It works by iteratively ﬁnding the sam-ple misclassiﬁed with maximum conﬁdence within an (cid:96)p-norm constraint of size (cid:15), while adapting (cid:15) to minimize the distance of the current sample to the decision boundary. Extensive experiments show that FMN signiﬁcantly out-performs existing (cid:96)0, (cid:96)1, and (cid:96)∞-norm attacks in terms of perturbation size, convergence speed and computation time, while reporting comparable perfor-mances with state-of-the-art (cid:96)2-norm attacks. Our open-source code is available at: https://github.com/pralab/Fast-Minimum-Norm-FMN-Attack.
+∞ 1
+
+Introduction
+Learning algorithms are vulnerable to adversarial examples, i.e., intentionally-perturbed inputs aimed to mislead classiﬁcation at test time [24, 3]. While adversarial examples have received much attention, evaluating the robustness of deep networks against them remains a challenge. Adversarial attacks solve a non-convex optimization problem and are thus prone to ﬁnding suboptimal solutions; in particular, all attacks make certain assumptions about the underlying geometry and properties of the optimization problem which, if violated, can derail the attack and may lead to premature conclusions regarding model robustness. That is why the vast majority of defenses published in recent years have later shown to be ineffective against more powerful white-box attacks [5, 1]. Having an arsenal of diverse attacks that can be adapted to speciﬁc defenses is one of the most promising avenues for increasing conﬁdence in white-box robustness evaluations [6, 25]. While it may seem that the number of attacks is already large, most of them are just small variations of the same technique, make similar underlying assumptions and thus tend to fail jointly (see, e.g., [25], in which projected-gradient attacks all fail similarly against the “Ensemble Diversity” defense). 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: (a) Conceptual representation of the FMN attack algorithm (leftmost plot). The (cid:15)-step updates the constraint size (cid:15) to minimize its distance to the boundary. The δ-step updates the perturbation δ with a projected-gradient step to maximize misclassiﬁcation conﬁdence within the current (cid:15)-sized constraint. (b) Example of execution of our attack on a bi-dimensional problem (middle plot), along with the corresponding values of the loss function L and the constraint size (cid:15) across iterations (rightmost plot). Our algorithm works by ﬁrst pushing the initial point (red dot) towards the adversarial region (in red), and then perturbing it around the decision boundary to improve the current solution towards a local optimum. The vertical lines in the rightmost plot highlight the steps in which a better solution (smaller and L < 0) is found.
+δ(cid:63) (cid:107) (cid:107)
+In this work, we focus on minimum-norm attacks for evaluating adversarial robustness, i.e., attacks that aim to mislead classiﬁcation by ﬁnding the smallest input perturbation according to a given norm. In contrast to maximum-conﬁdence attacks, which maximize conﬁdence in a wrong class within a given perturbation budget, the former are better suited to evaluate adversarial robustness as one can compute the accuracy of a classiﬁer under attack for any perturbation budget without re-running the attack. Within the class of gradient-based minimum-norm attacks, there are three main sub-categories: (i) soft-constraint attacks, (ii) boundary attacks and (iii) projected-gradient attacks.
+Soft-constraint attacks like CW [5] optimize a trade-off between conﬁdence of the misclassiﬁed samples and perturbation size. This class of attacks needs a sample-wise tuning of the trade-off hyperparameter to ﬁnd the smallest possible perturbation, thus requiring many steps to converge.
+Boundary attacks like BB [4] and FAB [10] move along the decision boundary towards the closest point to the input sample. These attacks converge within relatively few steps, but BB requires an adversarial starting point, and both attacks need to solve a relatively expensive optimization problem in each step. Finally, recent minimum-norm projected-gradient attacks like DDN [23] perform a maximum-conﬁdence attack in each step under a given perturbation budget (cid:15), while iteratively adjusting (cid:15) to reduce the perturbation size. DDN combines the effectiveness of boundary attacks with the simplicity and per-step speed of soft-constraint attacks; however, it is speciﬁc to the (cid:96)2 norm and cannot be readily extended to other norms.
+To overcome the aforementioned limitations, in this work we propose a novel, fast minimum-norm (FMN) attack (Sect. 2), which retains the main advantages of DDN while generalizing it to different (cid:96)p norms (p = 0, 1, 2,
+). We perform large-scale experiments on different datasets and models (Sect. 3), showing that FMN is able to signiﬁcantly outperform current minimum-norm attacks in terms of convergence speed and computation time (except for (cid:96)2-norm attacks, for which FMN achieves comparable results), while ﬁnding equal or better optima, on average, across almost all tested scenarios and (cid:96)p norms. FMN thus combines all desirable traits a good adversarial attack should have, providing an important step towards improving adversarial robustness evaluations. We conclude the paper by discussing related work (Sect. 4) and future research directions (Sect. 5).
+∞ 2 Minimum-Norm Adversarial Examples with Adaptive Projections
+Problem formulation. Given an input sample x
+, the
+}
+∈ { goal of an untargeted attack is to ﬁnd the minimum-norm perturbation δ(cid:63) such that the corresponding adversarial example x(cid:63) = x + δ(cid:63) is misclassiﬁed. This problem can be formulated as:
+[0, 1]d, belonging to class y 1, . . . , c
+∈
+δ(cid:63) arg min
+δ
+∈ s.t. (cid:107) p ,
+δ (cid:107)
+L(x + δ, y, θ) < 0 , x + δ
+[0, 1]d ,
+∈ 2 (1) (2) (3)
+Algorithm 1 Fast Minimum-norm (FMN) Attack
+Input: x, the input sample; t, a variable denoting whether the attack is targeted (t = +1) or untargeted (t = 1); y, the target (true) class label if the attack is targeted (untargeted); γ0 and
+γK, the initial and ﬁnal (cid:15)-step sizes; α0 and αK, the initial and ﬁnal δ-step sizes; K, the total number of iterations.
+− q if adversarial not found yet else (cid:15)k = (cid:15)k−1(1 + γk) (cid:107)
+∞ g (cid:107) 0, δ(cid:63) 0 then else if
+←
+← (cid:15)k =
+≥ p + L(xk−1, y, θ)/
+Output: The minimum-norm adversarial example x(cid:63). 1: x0 ← x, (cid:15)0 = 0, δ0 ←
+← 2: for k = 1, . . . , K do
+δL(xk−1 + δ, y, θ) // loss gradient g t 3:
+· ∇ h(γ0, γK, k, K) // (cid:15)-step size decay (Eq. 6)
+γk 4: if L(xk−1, y, θ) 5:
+δk−1(cid:107) 6: (cid:107) 7:
+δk−1(cid:107) 8: (cid:107)
+δ(cid:63) 9:
+← end if 10: (cid:15)k = min((cid:15)k−1(1 11: 12: 13:
+← 14:
+← 15:
+← 16:
+← 17:
+← 18: end for 19: return x(cid:63)
+δ(cid:63) (cid:107) h(α0, αK, k, K) // δ-step size decay (Eq. 6)
+// gradient-scaling step
+δk−1 + αk
+·
+Π(cid:15)(x0 + δk) clip(x0 + δk) x0 + δk
+δ(cid:63)
+// update best min-norm solution end if
+αk
+δk
+δk
+δk xk g (cid:107)2 (cid:107) x0
+− x0
+− p
+δk−1 p then p) (cid:107)
+γk), x0 + δ(cid:63)
+≤ (cid:107) g/
+− (cid:107)
+← where
+|| · || p indicates the (cid:96)p-norm operator. The loss L in the constraint in Eq. (2) is deﬁned as:
+L(x, y, θ) = fy(x, θ) max j(cid:54)=y
+− fj(x, θ) , (4) where fj(x, θ) is the conﬁdence given by the model f for classifying x as class j, and θ is the set of its learned parameters. Assuming that the classiﬁer assigns x to the class exhibiting the highest conﬁdence, i.e., y(cid:63) = arg maxj∈1,...,c fj(x, θ), the loss function L(x, y, θ) takes on negative values only when x is misclassiﬁed. Finally, the box constraint in Eq. (3) ensures that the perturbed sample x + δ lies in the feasible input space. The aforementioned problem typically involves a non-convex loss function L (w.r.t. its ﬁrst argument), due to the non-convexity of the underlying decision function f . For this reason, it may admit different locally-optimal solutions. Note also that the solution is trivial (i.e., δ(cid:63) = 0) when the input sample x is already adversarial (i.e., L(x, y, θ) < 0).
+Extension to the targeted case. The goal of a targeted attack is to have the input sample misclassiﬁed in a given target class y(cid:48). This can be accounted for by modifying the loss function in Eq. (4) as
+L(x, y(cid:48), θ), i.e., changing its sign and using the
+Lt(x, y(cid:48), θ) = maxj(cid:54)=y(cid:48) fj(x, θ)
+− target class label y(cid:48) instead of the true class label y. fy(cid:48)(x, θ) =
+−
+Solution algorithm. To solve Problem (1)-(3), we reformulate it using an upper bound (cid:15) on min (cid:15),δ (cid:15) , s.t.
+δ (cid:107) (cid:107) p
+≤ (cid:15),
+δ (cid:107) p: (cid:107) (5) and to the constraints in Eqs. (2)-(3). This allows us to derive an algorithm that works in two main steps, similarly to DDN [23], by updating the maximum perturbation size (cid:15) separately from the actual perturbation δ, as represented in Fig. 1(a). In particular, the constraint size (cid:15) is adapted to reduce the distance of the constraint to the boundary ((cid:15)-step), while the perturbation δ is updated using a projected-gradient step to minimize the loss function L within the given (cid:15)-sized constraint (δ-step). This essentially amounts to a projected gradient descent algorithm that iteratively adapts the constraint size (cid:15) to ﬁnd the minimum-norm adversarial example. The complete algorithm is given as
+Algorithm 1, while a more detailed explanation of the two aforementioned steps is given below. (cid:15)-step. This step updates the upper bound (cid:15) on the perturbation norm (lines 4-12 in Algorithm 1).
+The underlying idea is to increase (cid:15) if the current sample is not adversarial (i.e., L(xk−1, y, θ) 0), and to decrease it otherwise, while reducing the step size to dampen oscillations around the boundary
+≥ 3
+δk−1(cid:107) (cid:107) p + L(xk−1, y, θ)/ and reach convergence. In the former case ((cid:15)-increase), the increment of (cid:15) depends on whether an adversarial example has been previously found or not. If not, we estimate the distance to the boundary with a ﬁrst-order linear approximation, and set (cid:15)k = q, where q is the dual norm of p. This approximation allows the attack point to make faster progress towards the decision boundary. Conversely, if an adversarial sample has been previously found, but the current sample is not adversarial, it is likely that the current estimate of (cid:15) is only slightly smaller than the minimum-norm solution. We thus increase (cid:15) by a small fraction as (cid:15)k = (cid:15)k−1 (1 + γk), being γk a decaying step size. In the latter case ((cid:15)-decrease), if the current sample is adversarial, i.e.,
+L(xk−1, y, θ) < 0, we decrease (cid:15) as (cid:15)k = (cid:15)k−1 (1
+γk), to check whether the current solution can p found so far, we retain be improved. If the corresponding (cid:15)k value is larger than the optimal (cid:107) the best value and set (cid:15)k = p. These multiplicative updates of (cid:15) exhibit an oscillating behavior (cid:107) around the decision boundary, due to the conﬂicting requirements of minimizing the perturbation size and ﬁnding an adversarial point. To ensure convergence, as anticipated before, the step size γk is decayed with cosine annealing:
+L(xk−1, y, θ)
+δ(cid:63) (cid:107)
+||∇
+δ(cid:63)
+−
+|| (cid:107)
+γk = h(γ0, γK, k, K) = γK + 1 2 (γ0 −
+γK) (cid:0)1 + cos (cid:0) kπ
+K (cid:1)(cid:1) , (6) being k the current step, K the total number of steps, and γ0 and γK the initial and ﬁnal step sizes.
+δ-step. This step updates δ (lines 13-17 in Algorithm 1). The goal is to ﬁnd the adversarial example that is misclassiﬁed with maximum conﬁdence (i.e., for which L is minimized) within the current (cid:15)-sized constraint (Eq. 5) and bounds (Eq. 3). This amounts to performing a projected-gradient step along the negative gradient of L. We consider a normalized steepest descent with decaying step size
+α to overcome potential issues related to noisy gradients while ensuring convergence (line 14). Note that this step only rescales the gradient by its (cid:96)2 norm, while preserving its direction. The step size α is decayed using cosine annealing (Eq. 6). Once δ is updated, we project it onto the given (cid:15)-sized (cid:96)p-norm constraint via a projection operator Π(cid:15) (line 15), to fulﬁll the constraint in Eq. (5). The projection is trivial for p = and p = 2. For p = 1, we use the efﬁcient algorithm by Duchi et al.
+[14]. For p = 0, we retain only the ﬁrst (cid:15) components of δ exhibiting the largest absolute value. We
+ﬁnally clip the components of δ that violate the bounds in Eq. (3) (line 16).
+∞
+Execution example. In Fig. 1(b), we report an example of execution of our algorithm on a bi-dimensional problem. The initial sample is updated to follow the negative gradient of L towards the decision boundary. When an adversarial point is found, the algorithm reduces (cid:15) to ﬁnd a better solution. The point is thus projected back onto the non-adversarial region, and (cid:15) increased (by a smaller, decaying amount). These oscillations allow the point to walk on the boundary towards a local optimum, i.e., an adversarial point lying on the boundary, where the gradient of the loss function and that of the norm constraint have opposite direction. FMN tends to quickly converge to a good local optimum, provided that the step size is reduced to a sufﬁciently-small value and that a sufﬁciently-large number of iterations are performed. This is also conﬁrmed empirically in Sect. 3.
+Adversarial initialization. Our attack can be initialized from the input sample x, or from a point xinit belonging either to a different class (if the attack is untargeted) or to the target class (if the attack is targeted). When initializing the attack from xinit, we perform a 10-step binary search between x and xinit, to ﬁnd an adversarial point which is closer to the decision boundary. In particular, we aim x), y, θ) < 0 (or Lt < 0 for targeted attacks). to ﬁnd the minimum (cid:15) such that L(x + Π(cid:15)(xinit −
+Then we run our attack starting from the corresponding values of xk, (cid:15)k, δk and δ(cid:63).
+Differences with DDN. FMN applies substantial changes to both the algorithm and the formulation of DDN. The main difference is that (i) DDN always rescales the perturbation to have size (cid:15). This operation is problematic when using other norms, especially sparse ones, as it hinders the ability of the attack to explore the neighboring space and ﬁnd a suitable descent direction. Another difference is that (ii) FMN does not use the cross-entropy loss, but it uses the logit difference as the loss function L, since the latter is less affected by saturation effects. Moreover, (iii) FMN does not need an initial value for (cid:15), as (cid:15) is dynamically estimated; and (iv) γ is decayed to improve convergence around better minimum-norm solutions, by more effectively dampening oscillations around the boundary. Finally, we include the possibility of (v) initializing the attack from an adversarial point, which can greatly increase the convergence speed of the algorithm, as it uses a fast line-search algorithm to ﬁnd the boundary and the remaining queries to reﬁne the result. 4
+3 Experiments
+We report here an extensive experimental analysis involving several state-of-the-art defenses and minimum-norm attacks, covering (cid:96)0, (cid:96)1, (cid:96)2 and (cid:96)∞ norms. The goal is to empirically benchmark our attack and assess its effectiveness and efﬁciency as a tool for adversarial robustness evaluation. 3.1 Experimental Setup
+Datasets. We consider two commonly-used datasets for benchmarking adversarial robustness of deep neural networks, i.e., the MNIST handwritten digits and CIFAR10. Following the experimental setup in [4], we use a subset of 1000 test samples to evaluate the considered attacks and defenses.
+Models. We use a diverse selection of models to thoroughly evaluate attacks under different con-ditions. For MNIST, we consider the following four models: M1, the 9-layer network used as the undefended baseline model by Papernot et al. [20], Carlini and Wagner [5]; M2, the robust model by Madry et al. [17], trained on (cid:96)∞ attacks (robustness claim: 89.6% accuracy with 0.3, current best evaluation: 88.0%); M3, the robust model by Rony et al. [23], trained on (cid:96)2 attacks 1.5); and M4, the IBP Large Model by Zhang et al.
+δ (robustness claim: 87.6% accuracy with (cid:107)2 ≤ (cid:107)
+δ 0.3). For CIFAR10, we consider three state-of-[27] (robustness claim: 94.3% accuracy with
+∞ (cid:107) (cid:107) the-art robust models from RobustBench [11]: C1, the robust model by Madry et al. [17], trained on (cid:96)∞ attacks (robustness claim: 44.7% accuracy with 8/255, current best evaluation: 44.0%);
+C2, the defended model by Carmon et al. [7] (top-5 in RobustBench), trained on (cid:96)∞ attacks and 8/255, current best additional unsupervised data (robustness claim: 62.5% accuracy with evaluation: 59.5%); and C3, the robust model by Rony et al. [23], trained on (cid:96)2 attacks (robustness claim: 67.9% accuracy with (cid:107) 0.5, current best evaluation: 66.4%).
+≤
+δ (cid:107)
+δ (cid:107)
+δ (cid:107)
+≤
+≤
+≤
+∞
+∞
+∞ (cid:107) (cid:107)
+δ (cid:107) (cid:107)2 ≤
+Attacks. We compare our algorithm against different state-of-the-art attacks for ﬁnding minimum-norm adversarial perturbations across different norms: the Carlini & Wagner (CW) attack [5], the
+Decoupling Direction and Norm (DDN) attack [23], the Brendel & Bethge (BB) attack [4], and the
+Fast Adaptive Boundary (FAB) attack [10]. We use the implementation of FAB from Ding et al. [12], while for all the remaining attacks we use the implementation available in Foolbox [21, 22]. All these attacks are deﬁned on the (cid:96)2 norm. BB and FAB are also deﬁned on the (cid:96)1 and (cid:96)∞ norms, and only
+BB is deﬁned on the (cid:96)0 norm. We consider both untargeted and targeted attack scenarios, as deﬁned in Sect. 2, except for FAB, which is only evaluated in the untargeted case.1
+Hyperparameters. To ensure a fair comparison, we perform an extensive hyperparameter search for each of the considered attacks. We consider two main scenarios: tuning the hyperparameters at the sample-level and at the dataset-level. In the sample-level scenario, we select the optimal hyperparameters separately for each input sample by running each attack 10 to 16 times per sample, with a different hyperparameter conﬁguration or random initialization point each time. In the dataset-level scenario, we choose the same hyperparameters for all samples, selecting the conﬁguration that yields the best attack performance. While sample-level tuning provides a fairer comparison across attacks, it is more computationally demanding and less practical than dataset-level tuning. In addition, the latter allows us to understand how robust attacks are to suboptimal hyperparameter choices. We select the hyperparameters to be optimized for each attack as recommended by the corresponding authors [4, 5, 10, 23]. The hyperparameter conﬁgurations considered for each attack are detailed below. For attacks that are claimed to be robust to hyperparameter changes, like BB and FAB, we follow the recommendation of using a larger number of random restarts rather than increasing the number of hyperparameter conﬁgurations to be tested. In addition, as BB requires being initialized from an adversarial starting point, we initialize it by randomly selecting a sample either from a different class (in the untargeted case) or from the target class (in the targeted case). Finally, as each attack performs operations with different levels of complexity within each iteration, possibly querying the model multiple times, we set the number of steps for each attack such that at least 1, 000 forward passes (i.e., queries) are performed. This ensures a fairer comparison also in terms of the computational time and resources required to execute each attack. 1The reason is that FAB does not support generating adversarial examples with a particular target label. The targeted version of FAB aims to ﬁnd a closer untargeted misclassiﬁcation by running the attack a number of times, each time targeting a different candidate class, and then selecting the best solution [10, 9]. 5
+Figure 2: Query-distortion curves for MNIST (M2, top) and CIFAR10 (C1, bottom) models (untar-geted scenario).
+−
+CW. This attack minimizes the soft-constraint version of our problem, i.e., minδ min(L(x +
+δ, y, θ),
+κ). The hyperparameters κ and c are used to tune the trade-off between perturbation size and misclassiﬁcation conﬁdence. To ﬁnd minimum-norm perturbations, CW requires setting κ = 0, while the constant c is tuned via binary search (re-running the attack at each iteration). We set the number of binary-search steps to 9, and the maximum number of iterations to 250, to ensure that at least 1, 000 queries are performed. We also set different values for c, η p + c
+δ (cid:107) (cid:107)
+· 10−3, 10−2, 10−1, 1
+.
+}
+∈ {
+DDN. This attack, similarly to ours, maximizes the misclassiﬁcation conﬁdence within an (cid:15)-sized constraint, while adjusting (cid:15) to minimize the perturbation size. We consider initial values of (cid:15)0 ∈
+, as
+, and run the attack with a different number of iterations K 0.03, 0.1, 0.3, 1, 3
+{
+} this affects the size of each update on δ. 200, 1000
+}
+∈ {
+BB. This attack starts from a randomly-drawn adversarial point, performs a 10-step binary search to
+ﬁnd a point which is closer to the decision boundary, and then updates the point to minimize its per-turbation size by following the decision boundary. In each iteration, BB computes the optimal update 10−3, 10−2, 10−1, 1 within a given trust region of radius ρ. We consider different values for ρ
+,
+} while we ﬁx the number of steps to 1000. We run the attack 3 times by considering different initialization points, and eventually retain the best solution.
+∈ { and η
+FAB. This attack iteratively optimizes the attack point by linearly approximating its distance to the decision boundary. It uses an adaptive step size bounded by αmax and an extrapolation step
+η to facilitate ﬁnding adversarial points. As suggested by Croce and Hein [10], we tune αmax ∈
+. We consider 3 different random initialization points, and run the 0.1, 0.05 1.05, 1, 3
+{
+} attack for 500 steps each time, eventually selecting the best solution.
+, γK = 10−4, and αK = 10−5. For
+FMN. We run FMN for K = 1000 steps, using γ0 ∈ { 0.05, 0.3
+} 101, 102, 103
+, as the normalized (cid:96)2
+. For (cid:96)∞, we set α0 ∈ { (cid:96)0, (cid:96)1, and (cid:96)2, we set α0 ∈ {
+}
+} step yields much smaller updates in the (cid:96)∞ norm. For each hyperparameter setting we run the attack twice, starting from (i) the input sample and (ii) an adversarial point. 1, 5, 10
+∈ {
+}
+Evaluation criteria. We evaluate the attacks along four different criteria: (i) perturbation size and (ii) robustness to hyperparameter selection, measured as the median p on the test set (cid:107) (for a ﬁxed budget of Q queries and for sample- and dataset-level hyperparameter tuning, where by “robustness” we mean that a ﬁxed hyperparameter conﬁguration works well across different samples); (iii) execution time, measured as the average time spent per query (in milliseconds); and (iv) convergence speed, measured as the average number of queries required to converge to a good-enough solution (within 10% of the best value found at Q = 1000). When computing the median, we follow the evaluation in [4]: the perturbation size is set to 0 if a clean sample is misclassiﬁed, while it is set
+δ(cid:63) (cid:107) 6
+when the attack fails (no adversarial is found). The median perturbation size thus represents the to value for which 50% of the samples evade a particular model.
+∞ 3.2 Experimental Results
+Query-distortion (QD) curves. To evaluate each attack in terms of perturbation size under the same query budget Q, we use the so-called QD curves introduced by Brendel et al. [4]. These curves report, for each attack, the median value of δ(cid:63) as a function of the number of queries Q. For each given Q value, the optimal δ(cid:63) for each point is selected among the different attack executions (i.e., using different hyperparameters and/or initialization points, as described in Sect. 3.1). In Fig. 2, we report the QD curves for the MNIST and CIFAR10 challenge models (i.e., M2 and C1) in the untargeted scenario. The remaining QD curves exhibit a similar behavior and can be found in the supplementary material. It is worth noting that our attack attains comparable results in terms of perturbation size across all norms, while signiﬁcantly outperforming FAB and BB in the (cid:96)1 case. It typically requires also less iterations than the other attacks to converge. While the QD curves show the complete behavior of each attack as Q increases, a more compact and thorough summary of our evaluation is reported below, according to the four evaluation criteria described in Sect. 3.1.
+Perturbation size. Table 1 reports the median value of at Q = 1000 queries (i.e., the last value from the query-distortion curve), for all models, attacks and norms. The values obtained with sample-level hyperparamter tuning conﬁrm that our attack can ﬁnd smaller or comparable perturbations with those found by the competing attacks, in most of the untargeted and targeted cases, and that the biggest margin is achieved in the (cid:96)1 case. FMN is only slightly worse than DDN and BB in a few cases, including (cid:96)2-DDN on M4 and (cid:96)∞-BB on M2 and M4. The reason may be that these robust models exhibit noisy gradients and ﬂat regions around the clean input samples, hindering the initial optimization steps of the FMN attack. (cid:107)
+δ(cid:63) (cid:107)
+Robustness to hyperparameter selection. The values reported in the lower part of Table 1 show that, when using dataset-level hyperparameter tuning, FMN outperforms the other attacks in a much larger number of cases. This shows that FMN is more robust to hyperparameter changes, while other attacks like (cid:96)0- and (cid:96)1-BB suffer when using the same hyperparameters for all samples.
+Execution time. The average runtime per query for each attack-model pair, measured on a worksta-tion with an NVIDIA GeForce RTX 2080 Ti GPU with 11GB of RAM, can be found in Table 2. The results show that our attack is up to 2-3 times faster, with the exception of DDN in the (cid:96)2 case. This is however compensated by the fact that FMN ﬁnds better solutions. The advantage is that our attack avoids costly inner projections as in BB and FAB. FMN is slightly less time-efﬁcient than DDN and CW, as it simultaneously updates the adversarial point and the norm constraint. In particular, the update on the constraint may initially require computing the norm of the gradient g (line 6 in
+Algorithm 1), which increases the runtime of our attack. FAB computes a similar step, but for all the output classes, which hinders its scalability to problems with many classes.
+Convergence speed. To get an estimate of the convergence speed, we measure the number of queries required by each attack to reach a perturbation size that is within 10% of the value found at Q = 1000 queries (the lower the better). Results are shown in Table 3. Our attack converges on par with or faster than all other attacks for almost all models, often requiring only half or a ﬁfth as many queries as the state of the art. Exceptions are MNIST and CIFAR10 challenge models (M2 and C1) for (cid:96)2 and (cid:96)∞, where BB and DDN occasionally converge faster. FMN rarely needs more than 100 steps, reaching the minimal perturbation after only 10-30 queries on many datasets, models and norms.
+Robust accuracy. Despite our attack being not tailored to target speciﬁc defenses, and our evaluation restricted to a subset of the testing samples, it is worth remarking that the robust accuracies of the models against our attack are aligned with that reported in current evaluations, with the notable exception of C3, where our attack can decrease robust accuracy from 67.9% to 65.5%.
+Experiments on ImageNet. We conclude our experiments by running an additional comparison between FMN and a widely-used maximum-conﬁdence attack, i.e., the Projected Gradient Descent (PGD) attack [17], on two pretrained ImageNet models (i.e., ResNet18 and VGG16), considering (cid:96)1, (cid:96)2 and (cid:96)∞ norms. The hyperparameters are tuned at the dataset-level using 20 validation samples.
+, without
+For FMN, we ﬁx the hyperparameters as discussed before, and only tune α0 ∈ { 0.1, 1, 2, 8
+} using adversarial initialization. For PGD, we tune the step size α
+. We run both attacks for Q = 1, 000 queries on a separate set of 1, 000 samples. The success rates of both 0.001, 0.01, 0.1, 1, 2, 8
+}
+∈ { 7
+Table 1: Median level and dataset-level hyperparameter tuning. p value at Q = 1000 queries for targeted and untargeted attacks, with sample-(cid:107) (cid:107)
+δ(cid:63)
+Model M1
+Untargeted
+M3
+M2
+M4
+M1
+M2
+M3
+M4
+C1
+Targeted
+Untargeted
+C2
+C3
+Targeted
+C2
+C1
+MNIST
+CIFAR10 (cid:96)0 (cid:96)1 (cid:96)2
+BB
+Ours
+FAB
+BB
+Ours 7 7 6.60 6.26 5.57
+FAB 1.45
+CW 1.49 1.43
+BB 1.46
+DDN 1.41
+Ours (cid:96)∞ FAB
+BB
+Ours
+.138
+.138
+.134 (cid:96)0 (cid:96)1 (cid:96)2
+BB
+Ours 12 9
+FAB 8.66
+BB 10.60 7.13
+Ours 1.54
+FAB
+CW 1.63 1.75
+BB 1.47
+DDN 1.61
+Ours (cid:96)∞ FAB
+BB
+Ours
+.148
+.159
+.140 8 9 3.08 5.81 2.95 1.36 4.22 1.34 1.71 1.23
+.337
+.330
+.339 152 33 225.7 49.83 4.18 1.59 5.15 1.82 2.01 1.42
+.365
+.336
+.357 15 15 14.23 13.16 12.04 2.62 2.78 2.61 2.56 2.50
+.233
+.227
+.226 52 18 163.9 17.57 13.66 2.81 3.71 3.02 2.62 2.61
+.248
+.243
+.233 94 5 109.4 5.44 1.96 2.97
+-1.61 0.79 0.94
+.421
+.402
+.404 145 15 312.3 46.99 4.99 16.30
+-4.57 1.15 1.56
+.900
+.409
+.408
+Sample-level Hyperparameter Tuning 14 14
+-12.42 12.20
+-2.33 2.27 2.29 2.28
+-.202
+.201 27 20
+-10.38 6.75
+-6.97 2.04 2.20 1.89
+-.355
+.389 24 24
+-20.41 18.79
+-3.54 3.23 3.27 3.19
+-.271
+.272 93 23
+-6.25 7.31
+--1.79 1.33 1.85
+-.403
+.406 8 8 4.79 3.75 3.04 0.66 0.67 0.63 0.64 0.61
+.033
+.032
+.032 12 11 5.17 4.29 3.43 0.72 0.74 0.70 0.73 0.69
+.043
+.041
+.040
+Dataset-level Hyperparameter Tuning 20 16
+-16.60 13.18
+-2.50 2.64 2.31 2.30
+-.223
+.206 179 48
+-53.11 8.33
+--2.59 2.72 2.13
+-.361
+.426 39 28
+-29.89 21.37
+-4.72 3.52 3.36 3.24
+-.280
+.277 183 55
+-54.31 12.16
+--5.31 1.96 2.41
+-.477
+.434 28 11
+-7.02 4.28 0.77 0.86 0.86 0.66 0.67
+.038
+.044
+.034 44 17
+-10.20 4.82 1.11 1.00 0.95 0.77 0.74
+.052
+.054
+.042 13 14 8.79 8.62 8.26 0.94 0.91 0.91 0.91 0.91
+.025
+.024
+.024 32 16 20.48 17.13 9.52 1.06 0.99 1.10 0.91 0.91
+.029
+.029
+.024 19 19
+-8.04 7.07
+-1.08 1.07 1.09 1.03
+-.055
+.055 29 25
+-11.41 8.51
+-1.36 1.25 1.11 1.09
+-.059
+.057 32 32
+-10.93 9.40
+-1.27 1.26 1.29 1.21
+-.064
+.063 65 38
+-15.26 10.40
+-2.90 1.45 1.31 1.28
+-.074
+.066
+C3 25 27
+-15.71 15.24
+-1.38 1.38 1.39 1.38
+-.037
+.037 33 32
+-23.37 17.32
+-1.55 1.73 1.40 1.38
+-.042
+.037
+Table 2: Average execution time (milliseconds / query) for each attack-model pair.
+Model M1
+Untargeted
+M3
+M2
+M4
+M1
+M2
+M3
+M4
+C1
+Targeted
+Untargeted
+C2
+C3
+C1
+Targeted
+C2
+C3
+MNIST
+CIFAR10
+BB 10.76 5.15
+Ours 11.85 4.87 (cid:96)0 (cid:96)1 (cid:96)2
+FAB
+BB
+Ours 9.38 6.73 5.43
+FAB 10.22
+CW 4.22 4.44
+BB 3.42
+DDN 4.46
+Ours (cid:96)∞ FAB 10.85
+BB 14.26 4.25
+Ours 10.19 5.87 12.61 7.31 6.10 13.45 5.17 5.03 4.30 5.48 14.05 13.51 5.30 12.02 9.70 36.00 12.50 9.35 36.72 10.07 12.38 8.59 9.15 36.23 15.44 9.17 60.88 5.14
+-43.25 5.44
+-4.23 26.20 3.42 4.50
+-38.61 4.33 62.17 4.75
+-43.54 5.10
+-4.14 26.76 3.35 4.44
+-38.87 4.23 62.31 5.85
+-43.69 6.09
+-5.15 27.24 4.32 5.47
+-36.39 5.31 57.74 9.71
+-43.86 9.35
+-10.06 31.00 8.60 9.09
+-34.85 9.10 46.51 26.26 84.04 32.56 27.34 84.27 25.90 26.64 24.14 24.88 84.62 61.34 24.84 50.31 30.54 108.91 37.40 31.17 109.43 31.32 31.82 29.62 30.22 109.83 62.36 30.15 50.43 30.89 108.64 37.59 31.18 108.87 31.31 31.90 29.48 30.08 109.57 62.63 30.01 99.71 26.13
+-68.99 26.00
+-25.78 48.74 23.61 25.39
+-83.70 24.78 105.28 30.26 103.53 30.81
+-73.33 30.98
+-31.32 54.35 29.61 30.21
+-87.64 30.19
+-74.03 31.03
+-31.30 54.07 29.52 30.04
+-88.90 30.03 8.88 7.03 5.14 10.13 4.09 4.15 3.33 4.42 10.61 16.36 4.33 attacks at ﬁxed (cid:15) values are reported in Table 4. The results show that FMN outperforms or equals
+PGD in all norms. 4

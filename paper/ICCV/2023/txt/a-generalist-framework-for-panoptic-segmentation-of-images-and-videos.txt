@@ -1,0 +1,157 @@
+Abstract
+Panoptic segmentation assigns semantic and instance ID labels to every pixel of an image. As permutations of in-stance IDs are also valid solutions, the task requires learn-ing of high-dimensional one-to-many mapping. As a re-sult, state-of-the-art approaches use customized architec-tures and task-speciﬁc loss functions. We formulate panop-tic segmentation as a discrete data generation problem, without relying on inductive bias of the task. A diffusion model is proposed to model panoptic masks, with a simple architecture and generic loss function. By simply adding past predictions as a conditioning signal, our method is ca-pable of modeling video (in a streaming setting) and thereby learns to track object instances automatically. With ex-tensive experiments, we demonstrate that our simple ap-proach can perform competitively to state-of-the-art spe-cialist methods in similar settings. 1 1.
+
+Introduction
+Panoptic segmentation [30] is a fundamental vision task that assigns semantic and instance labels for every pixel of an image. The semantic labels describe the class of each pixel (e.g., sky, vertical), and the instance labels provides a unique ID for each instance in the image (to distinguish different instances of the same class). The task is a combi-nation of semantic segmentation and instance segmentation, providing rich semantic information about the scene.
+While the class categories of semantic labels are ﬁxed a priori, the instance IDs assigned to objects in an image can be permuted without affecting the instances identiﬁed. For example, swapping instance IDs of two cars would not af-fect the outcome. Thus, a neural network trained to predict instance IDs should be able to learn a one-to-many map-ping, from a single image to multiple instance ID assign-ments. The learning of one-to-many mappings is challeng-ing and traditional approaches usually leverage a pipeline of multiple stages involving object detection, segmentation,
+† Equal advising. 1Code at https://github.com/google-research/pix2seq
+Figure 1: We formulate panoptic segmentation as a con-ditional discrete mask (m) generation problem for images (left) and videos (right), using a Bit Diffusion generative model [12]. merging multiple predictions [30, 34, 66, 40, 14]. Recently, end-to-end methods [58, 17, 70, 16, 35, 68, 69, 33] have been proposed, based on a differentiable bipartite graph matching [7]; this effectively converts a one-to-many map-ping into a one-to-one mapping based on the identiﬁed matching. However, such methods still require customized architectures and sophisticated loss functions with built-in inductive bias for the panoptic segmentation task.
+Eshewing task-speciﬁc architectures and loss functions, recent generalist vision models, such as Pix2Seq [10, 11],
+OFA [60], UViM [31], and Uniﬁed I/O [43], advocate a generic, task-agnostic framework, generalizing across mul-tiple tasks while being much simpler than previous models.
+For instance, Pix2Seq [10, 11] formulates a set of core vi-sion tasks in terms of the generation of semantically mean-ingful sequences conditioned on an image, and they train a single autoregressive model based on Transformers [55].
+Following the same philosophy, we formulate the panop-tic segmentation task as a conditional discrete data genera-tion problem, depicted in Figure 1. We learn a generative model for panoptic masks, treated as an array of discrete tokens, conditioned on an input image. One can also apply the model to video data (in an online/streaming setting), by simply including predictions from past frames as an addi-tional conditioning signal. In doing so, the model can then learn to track and segment objects automatically.
+Generative modeling for panoptic segmentation is very challenging as the panoptic masks are discrete/categorical
+and can be very large. To generate a 512×1024 panoptic mask, for example, the model has to produce more than 1M discrete tokens (of semantic and instance labels). This is expensive for auto-regressive models as they are inherently sequential, scaling poorly with the size of data input. Dif-fusion models [50, 23, 51, 52] are better at handling high dimension data but they are most commonly applied to con-tinuous rather than discrete domains. By representing dis-crete data with analog bits [12] we show that one can train a diffusion model on large panoptic masks directly, without the need to also learn an intermediate latent space.
+In what follows, we introduce our diffusion-based model for panoptic segmentation, and then describe extensive ex-periments on both image and video datasets. In doing so we demonstrate that the proposed method performs competi-tively to state-of-the-art methods in similar settings, proving a simple and generic approach to panoptic segmentation. 2. Preliminaries
+Problem Formulation.
+Introduced in [30], panoptic seg-mentation masks can be expressed with two channels, m ∈
+ZH×W ×2. The ﬁrst represents the category/class label. The second is the instance ID. Since instance IDs can be per-muted without changing the underlying instances, we ran-domly assign integers in [0, K] to instances every time an image is sampled during training. K is maximum number of instances allowed in any image (0 denotes the null label).
+To solve the panoptic segmentation problem, we simply learn an image-conditional panoptic mask generation model i log P (mi|xi), where mi is a random by maximizing categorical variable corresponding to the panoptic mask for image xi in the training data. As mentioned above, panoptic masks may comprise hundreds of thousands or even mil-lions of discrete tokens, making generative modeling very challenging, particularly for autoregressive models. (cid:2)
+Diffusion Models with Analog Bits. Unlike autoregres-sive generative models, diffusion models are more effective with high dimension data [50, 23, 51, 52] . Training en-tails learning a denoising network. During inference, the network generates target data in parallel, using far fewer it-erations than the number of pixels.
+In a nutshell, diffusion models learn a series of state tran-sitions to transform noise (cid:2) from a known noise distribution into a data sample x0 from the data distribution p(x). To learn this mapping, we ﬁrst deﬁne a forward transition from data x0 to a noisy sample xt as follows, (cid:3) (cid:3) xt =
+γ(t) x0 + 1 − γ(t) (cid:2), (1) where (cid:2) is drawn from standard normal density, t is from uniform density on [0,1], and γ(t) is a monotonically de-creasing function from 1 to 0. During training, one learns a neural network f (xt, t) to predict x0 (or (cid:2)) from xt, usually formulated as a denoising task with an (cid:3)2 loss:
+Lx0 = Et∼U (0,T ),(cid:2)∼N (0,1),xt (cid:3)f (xt, t) − x0(cid:3)2. (2)
+To generate samples from a learned model, it starts with a sample of noise, xT , and then follows a series of (reverse) state transitions xT → xT −Δ → · · · → x0 by iteratively applying the denoising function f with appropriate transi-tion rules (such as those from DDPM [23] or DDIM [51]).
+Conventional diffusion models assume continuous data and Gaussian noise, and are not directly applicable to dis-crete data. To model discrete data, Bit Diffusion [12]
+ﬁrst converts integers representing discrete tokens into bit strings, the bits of which are then cast as real numbers (a.k.a., analog bits) to which continuous diffusion models can be applied. To draw samples, Bit Diffusion uses a con-ventional sampler from continuous diffusion, after which a
+ﬁnal quantization step (simple thresholding) is used to ob-tain the categorical variables from the generated analog bits. 3. Method
+We formulate panoptic segmentation as a discrete data generation problem conditioned on pixels, to
+Pix2Seq [10, 11] but for dense prediction; hence we coin our approach Pix2Seq-D. In what follows we ﬁrst specify the architecture design, and then the training and inference algorithms based on Bit Diffusion. similar 3.1. Architecture
+Diffusion model sampling is iterative, and hence one must run the forward pass of the network many times dur-ing inference. Therefore, as shown in Fig. 2, we intention-ally separate the network into two components: 1) an im-age encoder; and 2) a mask decoder. The former maps raw pixel data into high-level representation vectors, and then the mask decoder iteratively reads out the panoptic mask.
+Pixel/image Encoder. The encoder is a network that maps a raw image x ∈ RH×W ×3 into a feature map in
+RH (cid:2)×W (cid:2)×d where H (cid:3) and W (cid:3) are the height and width of the panoptic mask. The panoptic masks can be the same size or smaller than the original image. In this work, we follow [7, 10] in using ResNet [22] followed by trans-former encoder layers [55] as the feature extractor. To make sure the output feature map has sufﬁcient resolution, and includes features at different scales, inspired by U-Net [23, 45, 47] and feature pyramid network [38], we use convolutions with bilateral connections and upsampling op-erations to merge features from different resolutions. More sophisticated encoders are possible, to leverage recent ad-vances in architecture designs [20, 41, 25, 71, 26], but this is not our main focus so we opt for simplicity.
+Figure 2: The architecture for our panoptic mask generation framework. We separate the model into image encoder and mask decoder so that the iterative inference at test time only involves multiple passes over the decoder.
+Algorithm 1 Pix2Seq-D training algorithm.
+Algorithm 2 Pix2Seq-D inference algorithm. def train_loss(images, masks): def infer(images, steps=10, td=1.0):
+"""images: [b, h, w, 3], masks: [b, h’, w’, 2]."""
+"""images: [b, h, w, 3]."""
+# Encode image features. h = pixel_encoder(images)
+# Discrete masks to analog bits. m_bits = int2bit(masks).astype(float) m_bits = (m_bits * 2 - 1) * scale
+# Corrupt analog bits. t = uniform(0, 1) eps = normal(mean=0, std=1) # same shape as m_bits. m_crpt = sqrt( gamma(t)) * m_bits +
+# scalar. sqrt(1 - gamma(t)) * eps
+# Predict and compute loss. m_logits, _ = mask_decoder(m_crpt, h, t) loss = cross_entropy(m_logits, masks) return loss.mean()
+# Encode image features. h = pixel_encoder(images) m_t = normal(mean=0, std=1) # same shape as m_bits. for step in range(steps):
+# Get time for current and next states. t_now = 1 - step / steps t_next = max(1 - (step + 1 + td) / steps, 0)
+# Predict analog bits m_0 from m_t.
+_, m_pred = mask_decoder(m_t, h, t_now)
+# Estimate m at t_next. m_t = ddim_step(m_t, m_pred, t_now, t_next)
+# Analog bits to masks. masks = bit2int(m_pred > 0) return masks
+Mask Decoder. The decoder iteratively reﬁnes the panop-tic mask during inference, conditioned on the image fea-tures. Speciﬁcally, the mask decoder is a TransUNet [8]. It takes as input the concatenation of image feature map from encoder and a noisy mask (randomly initialized or from pre-vious step), and outputs a reﬁned prediction of the mask.
+One difference between our decoder and the standard U-Net architecture used for image generation and image-to-image translation [23, 45, 48] is that we use transformer decoder layers on the top of U-Net, with cross-attention layers to in-corporate the encoded image features (before upsampling). 3.2. Training Algorithm
+Our main training objective is the conditional denoising of analog bits [12] that represent noisy panoptic masks. Al-gorithm 1 gives the training algorithm (with extra details in A), the key elements of which are introduced below.
+Analog Bits with Input Scaling. The analog bits are real numbers converted from the integers of panoptic masks.
+When constructing the analog bits, we can shift and scale them into {−b, b}. Typically, b is set to be 1 [12] but we
+ﬁnd that adjusting this scaling factor has an signiﬁcant ef-fect on the performance of the model. This scaling factor effectively allows one to adjust the signal-to-noise ratio of the diffusion process (or the noise schedule), as visualized in Fig. 3. With b = 1, we see that even with a large time step t = 0.7 (with t ∈ [0, 1]), the signal-to-noise ratio is still relatively high, so the masks are visible to naked eye and the model can easily recover the mask without using the encoded image features. With b = 0.1, however, the denoising task becomes signiﬁcantly harder as the signal-In our study, we ﬁnd b = 0.1 to-noise ratio is reduced. works substantially better than the default of 1.0.
+Softmax Cross Entropy Loss. Conventional diffusion models (with or without analog bits) are trained with an (cid:3)2 denoising loss. This works reasonably well for panop-tic segmentation, but we also discovered that a loss based on softmax cross entropy yields better performance. Al-b = 1.0 b = 0.1 (a) t = 0.1. (b) t = 0.3. (c) t = 0.5. (d) t = 0.7. (e) t = 0.9. (f) t = 0.1. (g) t = 0.3. (h) t = 0.5. (i) t = 0.7. (j) t = 0.9.
+Figure 3: Noisy masks at different time steps under two input scaling factors, b = 1.0 (top row) and b = 0.1 (bottom row).
+Decreasing the input scaling factor leads to smaller signal-to-noise ratio (at the same time step), which gives higher weights to harder cases. (a) p = 0.1. (b) p = 0.2. (c) p = 0.3. (d) p = 0.4.
+Figure 4: The effect of p on loss weighting for panoptic masks. With p = 0, every mask token is weighted equally (equivalent to no weighting). As p increases, larger weight is given to mask tokens of smaller instances (indicated by warmer colors). though the analog bits are real numbers, they can be seen as a one-hot weighted average of base categories. For ex-ample, ‘01’ = α0‘00’ + α1‘01’ + α2‘10’ + α3‘11’ where
+α1 = 1, and α0 = α2 = α3 = 0. Instead of modeling the analog bits in ‘01’ as real numbers, with a cross entropy loss, the network can directly model the underlying distri-bution over the four base categories, and use the weighted average to obtain the analog bits. As such, the mask de-coder output not only analog bits (m_pred), but also the corresponding logits (m_logits), ˜y ∈ RH×W ×K, with a cross entropy loss for training; i.e., segmentation of small instances by giving higher weights to mask tokens associated with small objects. The speciﬁc per-token loss weighting is as follows: wij = 1/cp ij , and w(cid:3) ij = H ∗ W ∗ wij/ (cid:4) ij wij , where cij is the pixel count for the instance at pixel location (i, j), and p is a tunable parameter; uniform weighting oc-curs when p = 0, and for p > 0, a higher weight is assigned to mask tokens of small instances. Fig. 4 demonstrate the effects of p in weighting different mask tokens.
+L = (cid:4) i,j,k yijk log softmax( ˜yijk) 3.3. Inference Algorithm
+Here, y is the one-hot vector corresponding to class or in-stance label. During inference, we still use analog bits from the mask decoder instead of underlying logits for the reverse diffusion process.
+Loss Weighting. Standard generative models for discrete data assign equal weight to all tokens. For panoptic segmen-tation, with a loss deﬁned over pixels, this means that large objects will have more inﬂuence than small objects. And this makes learning to segment small instances inefﬁcient.
+To mitigate this, we use an adaptive loss to improve the
+Algorithm 2 summarizes the inference procedure. Given an input image, the model starts with random noise as the initial analog bits, and gradually reﬁnes its estimates to be closer to that of good panoptic masks. Like Bit Diffu-sion [12], we use asymmetric time intervals (controlled by a single parameter td) that is adjustable during inference time. It is worth noting that the encoder is only run once, so the cost of multiple iterations depends on the decoder alone. 3.4. Extension to Videos
+Our image-conditional panoptic mask modeling with p(m|x) is directly applicable for video panoptic segmen-Training. MS-COCO is larger and more diverse than
+Cityscapes and DAVIS. Thus we mainly train on MS-COCO, and then transfer trained models to Cityscapes and DAVIS with ﬁne-tuning (at a single resolution). We
+ﬁrst separately pre-train the image encoder and mask de-coder before training the image-conditional mask genera-tion on MS-COCO. The image encoder is taken from the
+Pix2Seq [10] object detection checkpoint, pre-trained on objects365 [49]. It comprises a ResNet-50 [22] backbone, and 6-layer 512-dim Transformer [55] encoder layers. We also augment image encoder with a few convolutional up-sampling layers to increase its resolution and incorporate features at different layers. The mask decoder is a Tran-sUNet [8] with base dimension 128, and channel multipli-ers of 1×,1×,2×,2×, followed by 6-layer 512-dim Trans-former [55] decoder layers. It is pre-trained on MS-COCO as an unconditional mask generation model without images.
+Directly training our model on high resolution images and panoptic masks can be expensive as the existing ar-chitecture scales quadratically with resolution. So on MS-COCO, we train the model with increasing resolutions, sim-ilar to [53, 54, 24]. We ﬁrst train at a lower resolution (256×256 for images; 128×128 for masks) for 800 epochs with a batch size of 512 and scale jittering [21, 65] of strength [1.0, 3.0]. We then continue train the model at full resolution (1024×1024 for images; 512×512 for masks) for only 15 epochs with a batch size of 16 without augmenta-tion. This works well, as both convolution networks and transformers with sin-cos positional encoding generalize well across resolutions. More details on hyper-parameter settings for training can be found in Appendix B.
+Inference. We use DDIM updating rules [51] for sam-pling. By default we use 20 sampling steps for MS-COCO.
+We ﬁnd that setting td= 2.0 yields near optimal results.
+We discard instance predictions with fewer than 80 pixels.
+For inference on DAVIS, we use 32 sampling steps for the
+ﬁrst frame and 8 steps for subsequent frames. We set td= 1 and discard instance predictions with fewer than 10 pixels. 4.2. Main Results
+We compare with two families of state-of-the-art meth-ods, i.e., specialist approaches and generalist approaches.
+Table 1 summarizes results for MS-COCO. Pix2Seq-D achieves competitive Panoptic Quality (PQ) to state-of-the-art methods with the ResNet-50 backbone. When compared with other recent generalist models such as UViM [31], our model performs signiﬁcantly better while being much more efﬁcient. Similar results are obtained for Cityscape, the de-tails of which are given in Appendix C.
+Table 2 compares Pix2Seq-D to state-of-the-art methods on unsupervised video object segmentation on DAVIS, us-ing the standard J &F metrics [46]. Baselines do not in-Figure 5: Mask decoder extended for video settings. The image conditional signal to the mask decoder is concate-nated with mask predictions from previous frames of the video. tation by considering 3D masks (with an extra time dimen-sion) given a video. To adapt for online/streaming video settings, we can instead model p(mt|xt, mt−1, mt−k), thereby generating panoptic masks conditioned on the im-age and past mask predictions. This change can be eas-ily implemented by concatenating the past panoptic masks (mt−1, mt−k) with existing noisy masks, as demonstrated in Fig. 5. Other than this minor change, the model remains the same as that above, which is simple and allows one to
+ﬁne-tune an image panoptic model for video.
+With the past-conditional generation (using the denois-ing objective), the model automatically learns to track and segment instances across frames, without requiring explicit instance matching through time. Having an iterative reﬁne-ment procedure also makes our framework convenient to adapt in a streaming video setting where there are strong de-pendencies across adjacent frames. We expect fewer infer-ence steps to arrive at good segmentation results when there are relative small change in video frames, it may be possible to set reﬁnement steps adaptively across video frames. 4. Experiments 4.1. Setup and Implementation Details
+Datasets. For image panoptic segmentation, we conduct experiments on the two commonly used benchmarks: MS-COCO [39] and Cityscapes [19]. MS-COCO contains ap-proximately 118K training images and 5K validation im-ages used for evaluation. Cityscapes contains 2975 images for training, 500 for validation and 1525 for testing. We report results on Cityscapes val set, following most exist-ing papers. For expedience we conduct most model abla-tions on MS-COCO. Finally, for video segmentation we use
+DAVIS [46] in the challenging unsupervised setting, with no segmentation provided at test time. DAVIS comprises 60 training videos and 30 validation videos for evaluation.
+Method
+Backbone
+# of Params
+PQ
+PQthing
+PQstuff
+Specialist approaches:
+MaskFormer [17]
+K-Net [70]
+CMT-DeepLab [68]
+Panoptic SegFormer [35]
+Mask2Former [16] kMaX-DeepLab [69]
+DETR [7]
+Mask2Former [13]
+ResNet-50
+ResNet-50
+ResNet-50
+ResNet-50
+ResNet-50
+ResNet-50
+ResNet-101
+Swin-L kMaX-DeepLab [69] ConvNeXt-L
+MasK DINO [33]
+Swin-L
+Generalist approaches:
+UViM [31]
+Pix2Seq-D (steps=5)
+Pix2Seq-D (steps=10)
+Pix2Seq-D (steps=20)
+Pix2Seq-D (steps=50)
+ViT
+ResNet-50
+ResNet-50
+ResNet-50
+ResNet-50 45M
+--51M 44M 57M 61.8M 216M 232M 223M 939M 94.5M 94.5M 94.5M 94.5M 46.5 47.1 48.5 49.6 51.9 53.0 45.1 57.8 58.1 59.4 45.8 47.5 49.4 50.3 50.2 51.0 51.7
+-54.4 57.7 58.3 50.5
+-64.3
+--52.2 54.4 55.3 55.1 39.8 40.3
+-42.4 43.0 44.9 37.0
+-48.8
+--40.3 41.9 42.9 42.8
+Table 1: Results on MS-COCO. Pix2Seq-D achieves competitive results to state-of-the-art specialist models with ResNet-50 backbone.
+Method
+Backbone
+J &F J -Mean J -Recall F-mean F-Recall
+Specialist approaches:
+RVOS [56]
+STEm-Seg [3]
+MAST [32]
+UnOVOST [44]
+ResNet-101
+ResNet-101
+ResNet-18
+ResNet-101
+Propose-Reduce [37] ResNeXt-101 41.2 64.7 65.5 67.9 70.4 36.8 61.5 63.3 66.4 67.0 40.2 70.4 73.2 76.4
+-45.7 67.8 67.6 69.3 73.8 46.4 75.5 77.7 76.9
+-Generalist approaches:
+Pix2Seq-D (ours)
+ResNet-50 68.4 65.1 70.6 71.7 77.1
+Table 2: Results of unsupervised video object segmentation on DAVIS 2017 validation set. clude other generalist models as they are not directly appli-cable to the task. Our method achieves results on par with state-of-the-art methods without specialized designs. 4.3. Ablations on Training
+Ablations on model training are performed with MS-COCO dataset. To reduce the computation cost while still be able to demonstrate the performance differences in de-sign choices, we train the model for 100 epochs with a batch size of 128 in a single-resolution stage (512×512 image size, and 256×256 mask size).
+Input Scaling of Analog Bits. Table 3 shows the de-pendence of PQ results on input scaling of analog bits. The scale factor of 0.1 used here yield results that outperform the standard scaling of 1.0 in previous work [12].
+Loss Functions. Table 4 compares our proposed cross entropy loss to the (cid:3)2 loss normally used by diffusion mod-els. Interestingly, the cross entropy loss yields substantial gains over (cid:3)2.
+Loss weighting. Table 5 shows the effects of p for loss
+Input scaling 0.03 0.1 0.3 1.0
+PQ 40.8 43.9 38.7 21.3
+Table 3: Ablation on input scaling
+Loss function (cid:2)2 Regression Cross Entropy
+PQ 41.9 43.9
+Table 4: Ablation on loss function.
+Loss weight p 0 0.2 0.4 0.6
+PQ 40.4 43.9 43.7 41.3
+Table 5: Ablation on loss weighting. weighting. Weighting with p = 0.2 appears near optimal and clearly outperforms uniform weighting (p = 0). 4.4. Ablations on Inference
+Figure 6 explores the dependence of model performance on hyper-parameter choices during inference (sampling),
+5.

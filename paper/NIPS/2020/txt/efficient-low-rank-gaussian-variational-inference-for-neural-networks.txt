@@ -1,0 +1,507 @@
+Abstract
+Bayesian neural networks are enjoying a renaissance driven in part by recent advances in variational inference (VI). The most common form of VI employs a fully factorized or mean-ﬁeld distribution, but this is known to suffer from several pathologies, especially as we expect posterior distributions with highly correlated parameters. Current algorithms that capture these correlations with a Gaussian approximating family are difﬁcult to scale to large models due to computational costs and high variance of gradient updates. By using a new form of the reparametrization trick, we derive a computationally efﬁcient algorithm for performing VI with a Gaussian family with a low-rank plus diagonal covariance structure. We scale to deep feed-forward and convolutional architectures. We ﬁnd that adding low-rank terms to parametrized diagonal covariance does not improve predictive performance except on small networks, but low-rank terms added to a constant diagonal covariance improves performance on small and large-scale network architectures. 1
+
+Introduction
+The application of Bayesian methods to neural networks (NNs) has the potential to address many of their issues, such as enabling decision making in the low data regime [4], or capturing epistemic uncertainty [19]. However, Bayesian methods tend to be computationally expensive, making their direct application to large models like deep NNs impractical. Variational inference (VI), one of the most commonly used approximate Bayesian schemes, has seen a series of advances, enabling it to be applied to NNs [3, 12, 21]. The most common form of VI employs a mean-ﬁeld (MF) Gaussian distribution as the variational posterior [21, 35]. This fully factorized posterior can take advantage of local reparametrization [21], enabling practical applications of Bayesian NNs (BNNs).
+In this paper, we focus on deriving a computationally efﬁcient algorithm for learning Gaussian variational posteriors with correlations among hidden units. Adding correlations among hidden units theoretically increases the closeness of the variational posterior to the true posterior, so we might expect better performance, although there has also been evidence favoring simpler posteriors [40, 45].
+Previous attempts to add correlations either rely on additional approximations [31], or apply the naive global reparametrization trick resulting in high variance gradient updates [34, 41, 43]. This results in slow learning and poor scalability, and this has not been shown to scale beyond very small NNs. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+We develop an efﬁcient optimization scheme for learning a Gaussian posterior with a low-rank plus diagonal covariance structure within each layer of a neural network. We do this by extending the
+Local Reparametrization Trick [21], which was originally designed to work only with mean-ﬁeld posterior distributions. We derive an algorithm that can be applied to networks with fully connected and/or convolutional layers, and scale to large NNs such as ResNets [14]. We open-source the implementation of the algorithm derived in this paper at https://github.com/marctom/elrgvi. 2 Variational inference for neural networks
+{ fθθθ(x)) and a prior p(θθθ), we aim to approximate the posterior distribution p(θθθ
+|
+N
+We assume a standard VI problem setup for supervised learning. Given a data set i=1
+} consisting of inputs xi and corresponding targets yi, a neural network fθθθ, a likelihood function p(y
+). We do
+|D
+) this by minimizing the Kullback-Leibler divergence DKL to learn a parametrized
+|D
+λλλ) from variational family distribution q(θθθ
+. This minimization is equivalent to maximizing the
+|
+Evidence Lower Bound (ELBO) [1, 2, 16] w.r.t. variational parameters λλλ: (xi, yi)
+λλλ)
+| p(θθθ q(θθθ
+Q
+=
+D
+||
+�
+�
+N (λλλ) =
+L
+Eθθθ q(
+λλλ) log p
+·|
+∼ yi| fθθθ(xi)
+−
+DKL q(θθθ
+λλλ)
+|
+|| p(θθθ)
+. (1) i=1
+�
+|
+|
+)
+�
+�
+�
+D
+Q x∗,
+� (λλλ) to approximate the posterior distribution p(θθθ
+λλλ∗).
+We can then use λλλ∗ = argmaxλλλL
+|D
+|
+We do this at prediction time, to approximate the predictive distribution over the target y∗ given a
+λλλ∗)dθθθ. When the variational family p(y∗ test input x∗: p(y∗ contains the
+|
+≈
+), approximate inference yields q(θθθ true posterior distribution p(θθθ
+), but this setting is usually computationally intractable. The mean-ﬁeld approach factorizes the variational posterior over its dimensions, q(θθθ
+λd) [2]. This leads to a computationally tractable setup, and has been extensively used in practice [3, 12, 15, 21].
+�
+|D
+�
+D d=1 q(θd|
+λλλ∗) = p(θθθ
+| fθθθ(x∗))q(θθθ
+) with q(θθθ
+λλλ) =
+|
+λλλ) factorizes over layers q(θθθ
+|
+λλλl), where
+We assume that the variational posterior q(θθθ
+θθθl denote the parameters associated with layer l. When weights θθθ are random we denote this by
+θθθ
+λλλ). In the case of a linear layer, we overload notation to index elements in matrix θθθ as θij,
+·| though we also use θθθ to denote a vector. We denote a single convolutional or fully connected layer in
+Fθθθl (xl), where xl is the input to layer l. A neural network can be represented as a neural network as a1 ◦ Fθθθ1 , where aL a composition of consecutive layers and activations, fθθθ = 1 ◦ FθθθL
+FθθθL ◦
+◦ al denote nonlinearities. Therefore the weights θθθl for each layer
+Fθθθl can be sampled sequentially
+Fθθθl (xl). While naive reparametrization θθθl = g(λλλl, ���l), e.g. and used to calculate the forward pass (λλλ) [3], it leads to high computational cost or high
+θθθl = µµµl + σσσl � variance gradients, as we discuss next.
+��� can be used to estimate l=1 ql(θθθl|
+λλλ) =
+|
+∇λλλl L 1 , . . .
+|D
+� q(
+∼
+−
+L
+−
+∼ q(
+D
+D
+�
+∇λλλL
+∇λλλL
+∇λλλL fθθθ(xi)
+N i=1 Eθθθ
+λλλ) log p
+·| is large, the gradients
+Estimating approximating the gradient reconstruction term set the data set (λλλ) with naive reparametrization. Estimating the gradient
+∇λλλ (λλλ) requires
+. When the data (λλλ) are estimated with two sources of stochasticity: (i) subsampling yi|
+, and (ii) Monte Carlo sampling of the variational posterior q(θθθ
+�
+λλλ) [43, 17].
+|
+λλλ) among inputs xi in
+Estimating the reconstruction term by sharing one variational sample θθθ
+·| fθθθ(xi)). Although this does not a data batch introduces correlation between the terms affect the bias of the estimator, it can lead to a dramatic increase in the estimation variance [36, 21, 46].
+In comparison, this correlation is zero when we have different variational samples θθθ(i)
+λλλ) for
+·| each input xi in the data batch. When using the naive reparametrization θθθl = g(λλλl, ���l), obtaining different variational samples θθθ(i) copies of the network (one for each input in the data batch). This results in a memory cost of an update of parameters λλλl of order
+), where Nl,in, Nl,out denote the layers’ input/output dimensions, respectively. This cost is prohibitively large for even moderately sized networks.
+λλλ) for different inputs xi requires storing
+·|
+∼ (Nl,inNl,out|B|
+∇λλλ log p(yi|
+|B| q( q( q(
+O
+∼
+∼
+B
+�
+The Local Reparametrization Trick (LRT). To reduce the excessive cost of having separate varia-Fθθθl (xl) instead tional samples per input, we can resort to local reparametrization (reparametrizing of θθθl) and sample the layer’s outputs
+λλλl). q(
+·|
+λλλl), the LRT [21] provides the following
+For instance, for a mean-ﬁeld Gaussian posterior q(θθθl| reparametrization of the forward pass
+Fθθθl (xl) directly, instead of sampling weights θθθl ∼
+Fθθθl (xl) through a fully connected layer:
+Fθθθl (xl) =
+Fµµµl (xl) + ���l � (x2 l ),
+Fσσσ2 l
+� 2 (2)
+(µµµl, diag[σσσ2 l ]), ���l ∼ N
+� (Nl,outNl,in|B| (0, Il) and we overloaded notation by using x2 and √x to denote where θθθl ∼ N elementwise operations, and to denote elementwise multiplication. The reparametrization given
+) (Nl,out|B| by Equation (2) requires two forward passes
+) for naive reparametrization. LRT provides two beneﬁts [21]. memory, compared to
+First, sampling ���l as opposed to the large matrix θθθl lowers the variance of estimated gradients (λλλ).
+∇λλλL
+Second, it is now computationally feasible to sample separate variational samples θθθ(i)
+λλλl) for q(
+·| each data input xi in the batch by simply sampling the perturbation noise ���l. As argued earlier, this also reduces gradient variance during training. l ), but allocates only
+Fµµµl (xl) and l ∼
+Fσσσ2 (x2
+O
+O l (such as correlations
+Larger variational families. Theoretically, larger variational families
+λλλ∗), as the beyond simple mean-ﬁeld) improve the quality of the variational approximation q(θθθ
+| global maximizer λλλ∗ is closer to the true posterior, with smaller DKL
+)
+. However, this poses two challenges. First, the derivation of local reparametrization in Equation (2) relies on the fact that the sum of independent Gaussian distributions follows a Gaussian distribution.
+λλλl) with non-diagonal covariance matrix,
+Unfortunately, when considering a Gaussian posterior q(θθθl| application of the same derivation does not lead to a reduction in computational complexity. To the best of the authors’ knowledge, no local reparametrization other than LRT has been proposed. p(θθθl)
+Second, analytically calculating DKL is computationally demanding for correlated approximate posteriors. For these reasons, existing algorithms [31, 34, 41, 43] are prone to high variance updates and/or high computational cost, preventing scalability to large models. q(θθθl|
+λλλ∗)
+| p(θθθ q(θθθ
+|D
+λλλ)
+Q
+||
+||
+�
+�
+�
+�
+To complicate matters further, for BNNs, the improved quality of q(θθθ (λλλ) does not necessarily improve predictive performance of p(y∗
+λλλ) as measured by the ELBO
+|
+). In fact, some authors x∗,
+L present evidence that employing simpler variational posteriors q(θθθ
+λλλ) yields better predictive perfor-| mance [40, 45], while others claim the mean-ﬁeld approach apparently works well enough for deep models [8, 35, 44]. Designing prior distributions over weights for neural networks ensuring that the
+ELBO is a reliable indicator of the quality of predictive performance is an open research problem.
+The evidence we gather suggests that adding complexity to the Gaussian variational posterior via correlations does not decrease the predictive performance for small networks, and as we show in the paper, can provide visible improvements. For larger networks, the message is more complicated.
+Next we describe how to efﬁciently learn correlations among units within the same layer of a neural network.
+D
+| 3 Methods
+As discussed previously, it is challenging to introduce correlations among units within the same
+λλλl). To overcome these difﬁculties, we (i) extend the layer l into Gaussian variational posteriors q(θθθl|
+λλλl), and local reparametrization of (ii) demonstrate an efﬁcient way of computing complexity penalty DKL
+. Detailed derivations can be found in Supplementary Material A.2.
+Fθθθl (xl) beyond the class of mean-ﬁeld Gaussian posteriors q(θθθl| q(θθθl| p(θθθl)
+λλλ)
+||
+�
+�
+Efﬁcient forward pass with low-rank covariance. We consider a layer-wise variational posterior
+K k=1 vl,kv�l,k + diag[σσσ2 of the form q(θθθl| l ]). As the lemma below shows, we can exploit the low-rank plus diagonal structure of the approximate posterior’s covariance matrix to derive
+Fθθθl (xl). a local reparametrization of a forward pass
+λλλl) = (θθθl|
+µµµl, α
+�
+N
+K k=1 vkv�k + diag[σσσ2]). The forward pass through fully connected
+Lemma 1. Let θθθ layer (θθθ
+∼ N
+Fθθθ(x) can be reparametrized as
+µµµ, α
+|
+�
+Fθθθ(x) =
+Fµµµ(x) + √α
+K
+�k=1
+Note that Lemma 1 does not make the assumption that vectors vk are pairwise orthogonal. Additionally, the noise �l,k can be shifted to ei-ther the layer’s inputs xl, or the
+Fθθθl (xl), due to lin-layer’s outputs
+Fθθθl . Based on the RHS earity of
+�kFvk (x) + εεε
+�
+Fσσσ2 (x2), where �k ∼ N (0, 1), εεε
+∼ N (0, I). (3)
+�
+Algorithm
+MAP naive mean-ﬁeld mean-ﬁeld (LRT) naive low-rank efﬁcient low-rank full rank
+Time (NinNout|B|
+)
+O
+) (NinNout|B|
+O
+) (2NinNout|B|
+O inN 3 (N 3 out + NinNout|B|
+)
+O (K3 + (K + 2)NinNout|B| inN 2 out + N 2 (N 3
+) out|B|
+O inN 3
+O
+)
+O
+)
+O
+Memory (Nout|B|
+)
+O (NinNout|B|
+) (2Nout|B|
+O (NinNout|B|
+)
+O ((K + 2)Nout|B|
+) (NoutNin|B|
+O
+)
+Table 1: Computational cost to update λλλl per layer. 3
+�
+Fθθθl (xl) requires performing a standard forward pass
+Fvl,k (xl) multiplied by scalar noise �l,k, and a forward pass
+Fµµµl (xl), K of Equation (3), sampling from l ) which we take forward passes the square root of and then perturb by noise εεεl. For convolutional layers, the diagonal part of the covariance diag[σσσ2 l ] cannot be reparametrized as the LRT cannot be applied directly [46]. However,
+K k=1 vkv�k can be still reparametrized, yielding the middle term in the low-rank component α
+Equation (3). We discuss convolutional layers in detail in Supplementary Material A.4.
+Fσσσ2 (x2 l
+Computational cost. We now describe the computational cost per layer of different algorithms. We (λλλ) (not the cost to store λλλ).
+ﬁrst consider the additional memory allocation required to estimate
+As allocating memory is time-consuming, the ‘memory’ column can eventually be mapped into an increased running time of the algorithm. We compare the computational cost required to estimate (λλλ) in Table 1. Naive approaches (naive mean-ﬁeld and naive low-rank) require sampling
+∇λλλl L
+λλλ) and thus incur a large memory cost, proportional to the number of reparametrized weights θθθ
+·| parameters in that layer NinNout. The Local Reparametrization Trick (LRT) shifts sampling noise to activations for mean-ﬁeld VI, reducing the memory cost by the factor of Nin, enabling practical use. Reparametrization in the RHS of Equation (3) achieves a similar reduction for a posterior with low-rank plus diagonal covariance matrix, reducing the naive memory cost proportional to NinNout (red) to (K + 2)Nout (blue). Our method also reduces computational time in a similar way, as seen in Table 1, and described next. See Supplementary Material A.3 for more detail.
+∇λλλl L q(
+∼ q(θθθ p(θθθ)
+λλλ)
+|
+K k=1 vl,kv�l,k + diag[σσσ2 l ]
+Efﬁciently calculating the complexity penalty. We now focus on efﬁciently calculating the diver-gence between the approximate posterior and prior in Equation (1), DKL
+. Since both
+λλλ) factorize over layers, we can also factorize the KL the prior p(θθθ) and variational posterior q(θθθ
+| p(θθθl) divergence over layers, and focus on deriving an analytical expression for DKL
+.
+The naive approach for calculating this term is dominated by the cost of calculating the determinant
+� l,out), for every layer l. This complexity is
+α
+| too large to be feasible for deep models with large numbers of parameters. We desire the complexity to be linear in the product Nl,inNl,out. Any dependency on the product Nl,inNl,out above linear will cause the resulting algorithm to be too slow, preventing scaling to large models. To that end, we derive the following lemma, enabling computationally tractable analytic calculation of the KL
+K k=1 vkv�k + diag[σσσ2]) divergence DKL and an isotropic Gaussian p(θθθ) =
+� between the posterior q(θθθ
+, with complexity
+� q(θθθl|
+λλλ) =
+| l,inN 3
+µµµ, α
+|
+λλλ)
+| (N 3 p(θθθ)
+λλλl) q(θθθ
+� (θθθ (θθθ
+N
+O
+||
+||
+||
+�
+�
+|
+� (θθθ 0, γI).
+�
+K k=1 vkv�k + diag[σσσ2]) and p(θθθ) =
+|
+N
+µµµ, α
+| can be calculated as
+� 0, γI). Then the (θθθ
+|
+N
+σ2 d
+γ − log σ2 d
++
+�
+α
+γ
+K
+�k=1 vk� 2 2 −
+�
+Δ + 1
+γ �
+µµµ
+� 2 2 + D(log γ
+− 1)
+, (4)
+�
+K matrix and Δ = log
+IK + αV�diag[σσσ2]− 1V
+.
+×
+λλλl) using Equation (4) becomes dominated by
+Estimating the divergence term DKL
+IK + αV�diag[σσσ2
+K as opposed l ]− calculating the log determinant log
+� (K 3 + 4Nl,inNl,out),
+Nl,inNl,out, leading to a total computational cost of order to Nl,inNl,out × and enabling scalability to deep models. The same reduction in computational complexity follows for
+. This discussion is summarized in the ‘time’ column in Table 1, the gradient
+∇λλλl DKL inN 3 demonstrating the reduction from N 3
+� out (red) to K 3 (blue).
+. This is of shape K q(θθθl| p(θθθl)
+λλλ)
+| p(θθθ) 1V q(θθθ
+O
+×
+||
+||
+�
+�
+|
+|
+|
+|
+Theoretical properties. Although low-rank plus diagonal approximations have previously been considered in the context of variational inference [31, 34], the theory behind the quality of the obtained variational posterior remains unclear to the best of the authors’ knowledge. We now provide theoretical properties of approximate inference employing a low-rank Gaussian approximate posterior, demonstrating the difﬁculty in selecting the rank K. We derive a result providing the analytical
+K k=1 vkv�k + σ2I) and the true posterior follows solution for
+{
+µµµp, ΣΣΣp). Related problems have been studied in [25, 39, 42].
+Gaussian distribution p(θθθ
+|
+µµµ, VVV , σ2) =
+µµµp, ΣΣΣp) and q(θθθ (θθθ
+) =
+|
+| (µµµ, V, σ2), rank(V) = K
+= argminµµµ,V,σ2
+λD are decreasing eigenvalues of the posterior covariance ΣΣΣp with
+µµµ, ΣΣΣV I := VV�+σ2I). Assume that µµµ (θθθ
+N
+| and λ1 ≥
+Lemma 3. Denote the true and approximate posterior p(θθθ and σ2 when q(θθθ
+λλλ) =
+| (θθθ
+λ2 ≥ vk}
+, σ2
+∗
+µµµ,
+|
+) =
+, V
+. . .
+�
+|D
+|D (θθθ
+N
+N
+N
+≥
+L
+∗
+∗ 4
+λλλ) =
+Lemma 2. Let q(θθθ
+|
+λλλ) q(θθθ divergence DKL
+|
+||
+N p(θθθ)
+DKL q(θθθ
+λλλ)
+|
+||
+�
+D
+� p(θθθ)
+= 1 2
+�d=1 � where V = [v1, v2, . . . vk] is a D
+�
+�
+�
+D λ− i
+)− 1.
+D σ2
+∗ uiu�i where σ2
+∗
+= ( corresponding orthonormal eigenvectors u1, u2, . . . , uD. Then ΣΣΣV I ∗ = 1 1
+K λkuku�k + k 1
+≤
+≤
+| i 1 1 1
+S
+)
+≤
+≤
+−
+≤
+D
+D
+D
+�
+�
+K
+||
+−| k+1
+|D
+|D
+�
+�
+K+1 q(θθθ p(θθθ
+λλλ)
+|
+λλλ)
+| k /
+∈ 1 k −
+S λ− k /
+∈ is given by XXT + σ2
+−
+, as we can adjust the spectrum of XXT . Even when p(θθθ i
+≤
+�
+λλλ) depends on the spectral properties of the true
+Lemma 3 shows that the quality of the posterior q(θθθ
+| posterior covariance matrix ΣΣΣp, which are unknown in practical settings. Even in the case of a linear model y = θθθ�x, where the precision of posterior distribution Σ− priorI, it is p 1 will result in large possible to construct examples in which any number of components K < D
+) is Gaussian, it is
+DKL difﬁcult to choose a speciﬁc rank K, suggesting we should resort to empirical evaluation. p(θθθ
+See Supplementary Material A.2 for a derivation of the exact expression for DKL(q(θθθ
+)),
+||
+|D 1 which is proportional to the gap in Jensen’s inequality log
+S log λ− k , where S is a set of indices of K largest eigenvalues. When the dimensionality D is high, in general setting K to a value K << D cannot be expected to reduce DKL(q(θθθ
+)) by a large margin.
+When the posterior diagonal component σ2I is not parametrized and σ2 0, then the form of
+ΣΣΣV I ∗ remains the same as in Lemma 3. The decrease in DKL(q(θθθ
+)) by increasing K by one can be well-approximated with value proportional to log λi, where λi denotes the largest yet non-selected eigenvalue of posterior covariance ΣΣΣp. Therefore we can expect larger beneﬁts to introducing low-rank components compared to the previous case, where we fully parametrized the diagonal component. However, this constant diagonal would also likely lead to an overall higher
+DKL(q(θθθ (µµµl, σ2 l Il), and
+Practical algorithm. Gaussian variational posteriors with diagonal, isotropic
+K k=1 vl,kv�l,k non-isotropic covariances to the covariance matrix. Lemmas 1 and 2 provide an efﬁcient way to learn these posteriors by
+Fθθθl (xl). We call the resulting algorithm Efﬁcient Low Rank Gaussian VI: ELRG-(D)-reparametrizing
+VI, where the optional D indicates a non-isotropic diagonal component diag[σσσ2 l ]. As we demonstrate in Section 5, ELRG-D-VI improves over MF-VI (within reasonable optimization time) only on very small networks. Therefore we focus on evaluating ELRG-VI, where we set σ2 to a small constant value, which performs strongly across a wide range of network sizes and architectures. While this variational posterior has lower expressibility, it also allows scaling to deep models such as ResNets.
+N (µµµl, diag[σσσ2]) can be boosted by adding the term α
+≈ p(θθθ
+|D
+λλλ)
+|
+λλλ)
+|
+λλλ)
+| p(θθθ p(θθθ
+)).
+�
+�
+�
+|D
+|D
+N
+−|
+||
+||
+||
+S
+|
+�
+�
+K
+�
+λλλl) p(θθθl) q(θθθl|
+∇vl,k DKL
+�
+From an algorithmic perspective, introducing low-rank terms α covariance has a regularizing effect. The forward pass term √α penalty
+|| a balance between the gradient emerging from the entropy
+L2 regularization from from the trace term in αγ−
+K k=1 vl,kv�l,k to the posterior
+Fθθθl (xl) now has an additional stochastic k=1 �kFvl,k (xl), making reconstruction more difﬁcult. The gradients of the complexity will prevent vl,k from being squeezed to 0 as they need to strike
+IK + αV�diag[σσσ2 log
+, and the
+|
+− 2
+K 2. We set hyperparameter α to 1 vl,k�
+K . k=1 �
+Convolutional neural networks (CNNs). As brieﬂy discussed before, LRT cannot be applied to convolutional layers as applying the same kernel over different patches incurs correlations between elements of output. A crude approximation is to simply ignore these dependencies and sample outputs from marginal distributions. The quality of this approximation is difﬁcult to quantify. As shown
+Fvk (x), middle term in Equation in the Supplementary Material A.4 that the low rank component (3), can be still reparametrized for convolutional layers. Thus, ﬁxing the diagonal component σ2I of covariance posterior matrix with a small constant σ2 results in negligible contribution from the
+Fσ2 (x), making the reparametrization in Equation (3) good approximation for CNNs. diagonal term l ]− 1V
+� 1
+| 4

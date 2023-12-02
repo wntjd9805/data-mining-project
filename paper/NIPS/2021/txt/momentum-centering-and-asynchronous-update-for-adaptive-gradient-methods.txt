@@ -1,0 +1,215 @@
+Abstract
+We propose ACProp (Asynchronous-centering-Prop), an adaptive optimizer which combines centering of second momentum and asynchronous update (e.g. for t-th update, denominator uses information up to step t − 1, while numerator uses gradient at t-th step). ACProp has both strong theoretical properties and empirical performance. With the example by Reddi et al. (2018), we show that asynchronous optimizers (e.g. AdaShift, ACProp) have weaker convergence condition than syn-chronous optimizers (e.g. Adam, RMSProp, AdaBelief); within asynchronous optimizers, we show that centering of second momentum further weakens the con-vergence condition. We demonstrate that ACProp has a convergence rate of O( 1√
+)
+T for the stochastic non-convex case, which matches the oracle rate and outperforms the O( logT√
+) rate of RMSProp and Adam. We validate ACProp in extensive empiri-T cal studies: ACProp outperforms both SGD and other adaptive optimizers in image classiﬁcation with CNN, and outperforms well-tuned adaptive optimizers in the training of various GAN models, reinforcement learning and transformers. To sum up, ACProp has good theoretical properties including weak convergence condition and optimal convergence rate, and strong empirical performance including good generalization like SGD and training stability like Adam. We provide the imple-mentation at https://github.com/juntang-zhuang/ACProp-Optimizer. 1
+
+Introduction
+Deep neural networks are typically trained with ﬁrst-order gradient optimizers due to their com-putational efﬁciency and good empirical performance [1]. Current ﬁrst-order gradient optimizers can be broadly categorized into the stochastic gradient descent (SGD) [2] family and the adaptive family. The SGD family uses a global learning rate for all parameters, and includes variants such as
+Nesterov-accelerated SGD [3], SGD with momentum [4] and the heavy-ball method [5]. Compared with the adaptive family, SGD optimizers typically generalize better but converge slower, and are the default for vision tasks such as image classiﬁcation [6], object detection [7] and segmentation [8].
+The adaptive family uses element-wise learning rate, and the representatives include AdaGrad [9],
+AdaDelta [10], RMSProp [11], Adam [12] and its variants such as AdamW [13], AMSGrad [14]
+AdaBound [15], AdaShift [16], RAdam [17] and AdaBelief [18]. Compared with the SGD family, the adaptive optimizers typically converge faster and are more stable, hence are the default for generative adversarial networks (GANs) [19], transformers [20], and deep reinforcement learning [21].
+We broadly categorize adaptive optimizers according to different criteria, as in Table. 1. (a) Centered v.s. uncentered Most optimizers such as Adam and AdaDelta uses uncentered second momentum in the denominator; RMSProp-center [11], SDProp [22] and AdaBelief [18] use square root of centered 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Table 1: Categories of adaptive optimizers
+Synchronous
+Asynchronous
+Uncentered second momentum
+Centered second momentum
+Adam , RAdam, AdaDelta, RMSProp RMSProp-center, SDProp, AdaBelief
+AdaShift
+ACProp (ours) second momentum in the denominator. AdaBelief [18] is shown to achieve good generalization like the SGD family, fast convergence like the adaptive family, and training stability in complex settings such as GANs. (b) Sync vs async The synchronous optimizers typically use gradient gt in both numerator and denominator, which leads to correlation between numerator and denominator; most existing optimizers belong to this category. The asynchronous optimizers decorrelate numerator and denominator (e.g. by using gt as numerator and use {g0, ...gt−1} in denominator for the t-th update), and is shown to have weaker convergence conditions than synchronous optimizers[16].
+We propose Asynchronous Centering Prop (ACProp), which combines centering of second momentum with the asynchronous update. We show that ACProp has both good theoretical properties and strong empirical performance. Our contributions are summarized as below:
+• Convergence condition (a) Async vs Sync We show that for the example by Reddi et al. (2018), asynchronous optimizers (AdaShift, ACProp) converge for any valid hyper-parameters, while synchronous optimizers (Adam, RMSProp et al.) could diverge if the hyper-paramaters are not carefully chosen. (b) Async-Center vs Async-Uncenter Within the asynchronous optimizers family, by example of an online convex problem with sparse gradients, we show that Async-Center (ACProp) has weaker conditions for convergence than Async-Uncenter (AdaShift).
+• Convergence rate We demonstrate that ACProp achieves a convergence rate of O( 1√
+T
+) for stochastic non-convex problems, matching the oracle of ﬁrst-order optimizers [23], and outper-forms the O( logT√
+T
+) rate of Adam and RMSProp.
+• Empirical performance We validate performance of ACProp in experiments: on image classi-ﬁcation tasks, ACProp outperforms SGD and AdaBelief, and demonstrates good generalization performance; in experiments with transformer, reinforcement learning and various GAN models,
+ACProp outperforms well-tuned Adam, demonstrating high stability. ACProp often outperforms
+AdaBelief, and achieves good generalization like SGD and training stability like Adam. 2 Overview of algorithms 2.1 Notations x, xt ∈ Rd: x is a d−dimensional parameter to be optimized, and xt is the value at step t. f (x), f ∗ ∈ R: f (x) is the scalar-valued function to be minimized, with optimal (minimal) f ∗.
+αt, (cid:15) ∈ R: αt is the learning rate at step t. (cid:15) is a small number to avoid division by 0. gt ∈ Rd: The noisy observation of gradient ∇f (xt) at step t.
+β1, β2 ∈ R: Constants for exponential moving average, 0 ≤ β1, β2 < 1. mt ∈ Rd: mt = β1mt−1 + (1 − β1)gt. The Exponential Moving Average (EMA) of observed gradient at step t.
+∆gt ∈ Rd: ∆gt = gt − mt. The difference between observed gradient gt and EMA of gt. vt ∈ Rd: vt = β2vt−1 + (1 − β2)g2 st ∈ Rd: st = β2st−1 + (1 − β2)(∆gt)2. The EMA of (∆gt)2. t . The EMA of g2 t . 2.2 Algorithms
+In this section, we summarize the AdaBelief [18] method in Algo. 1 and ACProp in Algo. 2. For the ease of notations, all operations in Algo. 1 and Algo. 2 are element-wise, and we omit the bias-correction step of mt and st for simplicity. ΠF represents the projection onto feasible set F.
+We ﬁrst introduce the notion of “sync (async)” and “center (uncenter)”. (a) Sync vs Async The update on parameter xt can be generally split into a numerator (e.g. mt, gt) and a denominator (e.g. 2
+Algorithm 1: AdaBelief
+Initialize x0, m0 ← 0 , s0 ← 0, t ← 0
+While xt not converged t ← t + 1 gt ← ∇xft(xt−1) mt ← β1mt−1 + (1 − β1)gt st ← β2st−1+(1−β2)(gt−mt)2 (cid:16) xt ← (cid:81) st+(cid:15) mt xt−1 − α√
+F , st
+√ (cid:17)
+Algorithm 2: ACProp
+Initialize x0, m0 ← 0 , s0 ← 0, t ← 0
+While xt not converged t ← t + 1 gt ← ∇xft(xt−1) mt ← β1mt−1 + (1 − β1)gt xt ← (cid:81) st ← β2st−1+(1−β2)(gt−mt)2 xt−1 − st−1
+F , (cid:16)
+√
+α√ st−1+(cid:15) gt (cid:17)
+√
+√ st, vt). We call it “sync” if the denominator depends on gt, such as in Adam and RMSProp; and call it “async” if the denominator is independent of gt, for example, denominator uses information up to step t − 1 for the t-th step. (b) Center vs Uncenter The “uncentered” update uses vt, the exponential moving average (EMA) of g2 t ; while the “centered” update uses st, the EMA of (gt − mt)2.
+Adam (Sync-Uncenter) The Adam optimizer [12] stores the EMA of the gradient in mt, and stores the EMA of g2 t in vt. For each step of the update, Adam performs element-wise division between
+√ mt and can be viewed as the element-wise learning rate. Note that
+β1 and β2 are two scalars controlling the smoothness of the EMA for the ﬁrst and second moment, respectively. When β1 = 0, Adam reduces to RMSProp [24]. vt. Therefore, the term αt 1√ vt
+AdaBelief (Sync-Center) AdaBelief optimizer [18] is summarized in Algo. 1. Compared with
+Adam, the key difference is that it replaces the uncentered second moment vt (EMA of g2 t ) by an estimate of the centered second moment st (EMA of (gt − mt)2). The intuition is to view mt as an estimate of the expected gradient: if the observation gt deviates much from the prediction mt, then it takes a small step; if the observation gt is close to the prediction mt, then it takes a large step.
+AdaShift (Async-Uncenter) AdaShift [16] performs temporal decorrelation between numerator and denominator. It uses information of {gt−n, ...gt} for the numerator, and uses {g0, ...gt−n−1} for the denominator, where n is the “delay step” controlling where to split sequence {gi}t i=0. The numerator is independent of denominator because each gi is only used in either numerator or denominator.
+ACProp (Async-Center) Our proposed ACProp is the asynchronous version of AdaBelief and is summarized in Algo. 2. Compared to AdaBelief, the key difference is that ACProp uses st−1 in the denominator for step t, while AdaBelief uses st. Note that st depends on gt, while st−1 uses history up to step t − 1. This modiﬁcation is important to ensure that E(gt/ st−1|g0, ...gt−1) = (Egt)/ st−1. It’s also possible to use a delay step larger than 1 similar to AdaShift, for example, use
+EM A({gi}t i=t−n) as numerator, and EM A({(gi − mi)2}t−n−1
+) for denominator.
+√
+√ i=0 3 Analyze the conditions for convergence
+We analyze the convergence conditions for different methods in this section. We ﬁrst analyze the counter example by Reddi et al. (2018) and show that async-optimizers (AdaShift, ACProp) always converge ∀β1, β2 ∈ (0, 1), while sync-optimizers (Adam, AdaBelief, RMSProp et al.) would diverge if (β1, β2) are not carefully chosen; hence, async-optimizers have weaker convergence conditions than sync-optimizers. Next, we compare async-uncenter (AdaShift) with async-center (ACProp) and show that momentum centering further weakens the convergence condition for sparse-gradient problems.
+Therefore, ACProp has weaker convergence conditions than AdaShift and other sync-optimizers. 3.1 Sync vs Async
+We show that for the example in [14], async-optimizers (ACProp, AdaShift) have weaker convergence conditions than sync-optimizers (Adam, RMSProp, AdaBelief).
+Lemma 3.1 (Thm.1 in [14]). There exists an online convex optimization problem where sync-optimizers (e.g. Adam, RMSProp) have non-zero average regret, and one example is ft(x) = (cid:26)P x, if
+−x, Otherwise t%P = 1 x ∈ [−1, 1], P ∈ N, P ≥ 3 (1) 3
+√
+Figure 1: Numerical results for the example deﬁned by Eq. (1). We set the initial value as x0 = 0, and run each optimizer for 104 steps trying different initial learning rates in {10−5, 10−4, 10−3, 10−2, 10−1, 1.0}, and set t. If there’s a proper initial learning rate, such that the average distance between the learning rate decays with 1/ the parameter and its optimal value x∗ = −1 for the last 1000 steps is below 0.01, then it’s marked as “converge" (orange plus symbol), otherwise as “diverge” (blue circle). For each optimizer, we sweep through different
+β2 values in a log grid (x-axis), and sweep through different values of P in the deﬁnition of problem (y-axis).
+We plot the result for β1 = 0.9 here; for results with different β1 values, please refer to appendix. Our results indicate that in the (P, β2) plane, there’s a threshold curve beyond which sync-optimizers (Adam, RMSProp,
+AdaBelief) will diverge; however, async-optimizers (ACProp, AdaShift) always converge for any point in the (P, β2) plane. Note that for AdaShift, a larger delay step n is possible to cause divergence (see example in Fig. 2 with n = 10). To validate that the “divergence” is not due to numerical issues and sync-optimizers are drifting away from optimal, we plot trajectories in Fig. 2
+Lemma 3.2 ([25]). For problem (1) with any ﬁxed P , there’s a threshold of β2 above which RMSProp converges.
+In order to better explain the two lemmas above, we conduct numerical experiments on the prob-lem by Eq. (1), and show results in Fig. 1. Note that (cid:80)k+P t=k ft(x) = x, hence the optimal point is x∗ = −1 since x ∈ [−1, 1]. Starting from ini-tial value x0 = 0, we sweep through the plane of (P, β2) and plot results of convergence in Fig. 1, and plot example trajectories in Fig. 2.
+Lemma. 3.1 tells half of the story: looking at each vertical line in the subﬁgure of Fig. 1, that is, for each ﬁxed hyper-parameter β2, there ex-ists sufﬁciently large P such that Adam (and
+RMSProp) would diverge. Lemma. 3.2 tells the other half of the story: looking at each horizontal line in the subﬁgure of Fig. 1, for each problem with a ﬁxed period P , there exists sufﬁciently large β2s beyond which Adam can converge.
+Figure 2: Trajectories of x for different optimizers in
+Problem by Eq. 1. Initial point is x0 = 0, the optimal is x∗ = −1, the trajectories show that sync-optimizers (Adam, AdaBelief, RMSProp) diverge from the optimal, validating the divergent area in Fig. 1 is correct rather than artifacts of numerical issues. Async-optimizers (ACProp, AdaShift) converge to optimal value, but large delay step n in AdaShift could cause non-convergence.
+The complete story is to look at the (P, β2) plane in Fig. 1. There is a boundary between conver-gence and divergence area for sync-optimizers (Adam, RMSProp, AdaBelief), while async-optimizers (ACProp, AdaShift) always converge.
+Lemma 3.3. For the problem deﬁned by Eq. (1), using learning rate schedule of αt = α0√ t optimizers (ACProp and AdaShift with n = 1) always converge ∀β1, β2 ∈ (0, 1), ∀P ∈ N, P ≥ 3.
+, async-The proof is in the appendix. Note that for AdaShift, proof for the always-convergence property only holds when n = 1; larger n could cause divergence (e.g. n = 10 causes divergence as in Fig. 2).
+The always-convergence property of ACProp and AdaShift comes from the un-biased stepsize, while the stepsize for sync-optimizers are biased due to correlation between numerator and denominator.
+Taking RMSProp as example of sync-optimizer, the update is −αt
+. t−1+g2 t
+Note that gt is used both in the numerator and denominator, hence a large gt does not necessarily gt 0 +...+β2g2
+= −αt gt√ vt 2g2
+βt
+√ 4
+Figure 3: Area of convergence for the problem in Eq. (2). The numerical experiment is performed under the same setting as in Fig. 1.Our results experimentally validated the claim that compared with async-uncenter (AdaShift), async-center (ACProp) has a larger convergence area in the hyper-parameter space. generate a large stepsize. For the example in Eq. (1), the optimizer observes a gradient of −1 for
+P − 1 times and a gradient of P once; due to the biased stepsize in sync-optimizers, the gradient of
+P does not generate a sufﬁciently large stepsize to compensate for the effect of wrong gradients −1, hence cause non-convergence. For async-optimizers, gt is not used in the denominator, therefore, the stepsize is not biased and async-optimizers has the always-convergence property.
+Remark Reddi et al. (2018) proposed AMSGrad to track the element-wise maximum of vt in order to achieve the always-convergence property. However, tracking the maximum in the denominator will in general generate a small stepsize, which often harms empirical performance. We demonstrate this through experiments in later sections in Fig. 6. 3.2 Async-Uncenter vs Async-Center
+In the last section, we demonstrated that async-optimizers have weaker convergence conditions than sync-optimizers. In this section, within the async-optimizer family, we analyze the effect of centering second momentum. We show that compared with async-uncenter (AdaShift), async-center (ACProp) has weaker convergence conditions. We consider the following online convex problem: ft(x) =
+
+
+
+P/2 × x,
+−x, 0, t%P == 1 t%P == P − 2 otherwise
+P > 3, P ∈ N, x ∈ [0, 1]. (2)
+Initial point is x0 = 0.5. Optimal point is x∗ = 0. We have the following results:
+Lemma 3.4. For the problem deﬁned by Eq. (2), consider the hyper-parameter tuple (β1, β2, P ), there exists cases where ACProp converges but AdaShift with n = 1 diverges, but not vice versa.
+We provide the proof in the appendix. Lemma. 3.4 implies that ACProp has a larger area of conver-gence than AdaShift, hence the centering of second momentum further weakens the convergence conditions. We ﬁrst validate this claim with numerical experiments in Fig. 3; for sanity check, we plot the trajectories of different optimizers in Fig. 4. We observe that the convergence of AdaShift is inﬂuenced by delay step n, and there’s no good criterion to select a good value of n, since Fig. 2 requires a small n for convergence in problem (1), while Fig. 4 requires a large n for convergence in problem (2). ACProp has a larger area of convergence, indicating that both async update and second momentum centering helps weaken the convergence conditions.
+We provide an intuitive explanation on why momentum centering helps convergence. Due to the periodicity of the problem, the optimizer behaves almost periodically as t → ∞. Within each period, the optimizer observes one positive gradient P/2 and one negative gradient -1. As in Fig. 5, between observing non-zero gradients, the gradient is always 0. Within each period, ACprop will s−, where s+ (s−) is the value s+) and a negative update −1/ perform a positive update P/(2 of denominator before observing positive (negative) gradient. Similar notations for v+ and v− in
+AdaShift. A net update in the correct direction requires
+√
+√
+P
+√ s+ > 1√ s− , (or s+/s− < P 2/4). 2
+When observing 0 gradient, for AdaShift, vt = β2vt−1 + (1 − β2)02; for ACProp, st = β2st−1 + (1 − β2)(0 − mt)2 where mt (cid:54)= 0. Therefore, v− decays exponentially to 0, but s− decays to a non-zero constant, hence s+ v− , hence ACProp is easier to satisfy s+/s− < P 2/4 and converge. s− < v+ 5
+Figure 4: Trajectories for problem deﬁned by Eq. (2).
+Note that the optimal point is x∗ = 0.
+Figure 5: Value of uncentered second momentum vt and centered momentum st for problem (2). 4 Analysis on convergence rate
+T ) in the stochastic nonconvex
+In this section, we show that ACProp converges at a rate of O(1/ case, which matches the oracle [23] for ﬁrst-order optimizers and outperforms the O(logT /
+T ) rate for sync-optimizers (Adam, RMSProp and AdaBelief) [26, 25, 18]. We further show that the upper bound on regret of async-center (ACProp) outperforms async-uncenter (AdaShift) by a constant.
+√
+√
+For the ease of analysis, we denote the update as: xt = xt−1 − αtAtgt, where At is the diagonal preconditioner. For SGD, At = I; for sync-optimizers (RMSProp), At = 1√ vt+(cid:15) ; for AdaShift with st−1+(cid:15) . For async optimizers, E[Atgt|g0, ...gt−1] = 1√ n = 1, At =
+AtEgt; for sync-optimizers, this does not hold because gt is used in At
+Theorem 4.1 (convergence for stochastic non-convex case). Under the following assumptions: 1√ vt−1+(cid:15) ; for ACProp, At =
+• f is continuously differentiable, f is lower-bounded by f ∗ and upper bounded by Mf . ∇f (x) is globally Lipschitz continuous with constant L:
+||∇f (x) − ∇f (y)|| ≤ L||x − y|| (3)
+• For any iteration t, gt is an unbiased estimator of ∇f (xt) with variance bounded by σ2. Assume norm of gt is bounded by Mg.
+E(cid:2)gt (cid:3) = ∇f (xt) E(cid:2)||gt − ∇f (xt)||2(cid:3) ≤ σ2 then for β1, β2 ∈ [0, 1), with learning rate schedule as: αt = α0t−η, α0 ≤ Cl
+LC2 u for the sequence {xt} generated by ACProp, we have
+, η ∈ [0.5, 1) 1
+T
+T (cid:88) t=1 (cid:12) (cid:12) (cid:12) (cid:12) (cid:12) (cid:12) (cid:12) (cid:12)∇f (xt) (cid:12) (cid:12) (cid:12) (cid:12) 2
+≤ (cid:104) 2
+Cl (Mf − f ∗)α0T η−1 +
+LC 2 uσ2α0 2(1 − η)
+T −η(cid:105) (4) (5) where Cl and Cu are scalars representing the lower and upper bound for At, e.g. ClI (cid:22) At (cid:22) CuI, where A (cid:22) B represents B − A is semi-positive-deﬁnite.
+Note that there’s a natural bound for Cl and Cu: Cu ≤ 1 because (cid:15) is added to denominator to avoid division by 0, and gt is bounded by Mg. Thm. 4.1 implies that ACProp has
+T ) when η = 0.5; equivalently, in order to have ||∇f (x)||2 ≤ δ2, a convergence rate of O(1/
+ACProp requires at most O(δ−4) steps.
+Theorem 4.2 (Oracle complexity [23]). For a stochastic non-convex problem satisfying assumptions in Theorem. 4.1, using only up to ﬁrst-order gradient information, in the worst case any algorithm requires at least O(δ−4) queries to ﬁnd a δ-stationary point x such that ||∇f (x)||2 ≤ δ2. (cid:15) and Cl ≥ 1 2Mg
+√
+√
+Optimal rate in big O Thm. 4.1 and Thm. 4.2 imply that async-optimizers achieves a convergence
+T ) for the stochastic non-convex problem, which matches the oracle complexity and rate of O(1/
+T ) rate of sync-optimizers (Adam [14], RMSProp[25], AdaBelief [18]). outperforms the O(logT /
+Adam and RMSProp are shown to achieve O(1/
+T ) rate under the stricter condition that β2,t → 1
+[27]. A similar rate has been achieved in AVAGrad [28], and AdaGrad is shown to achieve a similar rate [29]. Despite the same convergence rate, we show that ACProp has better empirical performance.
+√
+√ 6
+Figure 6: From left to right: (a) Mean value of denominator for a 2-layer MLP on MNIST dataset. (b) Training loss of different optimizers for the 2-layer MLP model. (c) Performance of AdaShift for VGG-11 on CIFAR10 varying with learning rate ranging from 1e-1 to 1e-5, we plot the performance of ACProp with learning rate 1e-3 as reference. Missing lines are because their accuracy are below display threshold. All methods decay learning rate by a factor of 10 at 150th epoch. (d) Performance of AMSGrad for VGG-11 on CIFAR10 varying with learning rate under the same setting in (c).
+Constants in the upper bound of regret Though both async-center and async-uncenter optimizers have the same convergence rate with matching upper and lower bound in big O notion, the constants of the upper bound on regret is different. Thm. 4.1 implies that the upper bound on regret is an increasing function of 1/Cl and Cu, and
+√
+√ 1/Cl =
+Ku + (cid:15), Cu = 1/(
+Kl + (cid:15)) where Kl and Ku are the lower and upper bound of second momentum, respectively.
+We analyze the constants in regret by analyzing Kl and Ku. If we assume the observed gradient gt follows some independent stationary distribution, with mean µ and variance σ2, then approximately
+Uncentered second momentum: 1/C v
+Centered second momentum: 1/C s l = (cid:112)K v u + (cid:15) ≈
+√ l = (cid:112)K s u + (cid:15) ≈ (cid:112)
+µ2 + σ2 + (cid:15)
+σ2 + (cid:15) (6) (7)
+During early phase of training, in general |µ| (cid:29) σ, hence 1/C s l , and the centered version (ACProp) can converge faster than uncentered type (AdaShift) by a constant factor of around
+√ l (cid:28) 1/C v
+µ2+σ2+(cid:15)
+√
+σ2+(cid:15) version) and K s
+. During the late phase, gt is centered around 0, and |µ| (cid:28) σ, hence K v l (for uncentered l (for centered version) are both close to 0, hence Cu term is close for both types.
+Remark We emphasize that ACProp rarely encounters numerical issues caused by a small st as denominator, even though Eq. (7) implies a lower bound for st around σ2 which could be small in extreme cases. Note that st is an estimate of mixture of two aspects: the change in true gradient
+||∇ft(x) − ∇ft−1(x)||2, and the noise in gt as an observation of ∇f (x). Therefore, two conditions are essential to achieve st = 0: the true gradient ∇ft(x) remains constant, and gt is a noise-free observation of ∇ft(x). Eq. (7) is based on assumption that ||∇ft(x) − ∇ft−1(x)||2 = 0, if we further assume σ = 0, then the problem reduces to a trivial ideal case: a linear loss surface with clean observations of gradient, which is rarely satisﬁed in practice. More discussions are in appendix.
+Empirical validations We conducted experiments on the MNIST dataset using a 2-layer MLP. We plot the average value of vt for uncentered-type and st for centered-type optimizers; as Fig. 6(a,b) shows, we observe st ≤ vt and the centered-type (ACProp, AdaBelief) converges faster, validating our analysis for early phases. For epochs > 10, we observe that min st ≈ min vt, validating our analysis for late phases.
+As in Fig. 6(a,b), the ratio vt/st decays with training, and in fact it depends on model structure and dataset noise. Therefore, empirically it’s hard to compensate for the constants in regret by applying a larger learning rate for async-uncenter optimizers. As shown in Fig. 6(c,d), for VGG network on
+CIFAR10 classiﬁcation task, we tried different initial learning rates for AdaShift (async-uncenter) and AMSGrad ranging from 1e-1 to 1e-5, and their performances are all inferior to ACProp with a learning rate 1e-3. Please see Fig.8 for a complete table varying with hyper-parameters. 5 Experiments
+We validate the performance of ACProp in various experiments, including image classiﬁcation with convolutional neural networks (CNN), reinforcement learning with deep Q-network (DQN), machine translation with transformer and generative adversarial networks (GANs). We aim to test 7
+Figure 7: Test accuracy (mean ± std) on CIFAR10 datset. Left to right: VGG-11, ResNet-34, DenseNet-121.
+Figure 8: Test accuracy (%) of VGG network on
+CIFAR10 under different hyper-parameters. We tested learning rate in {10−1, 10−2, 10−3, 10−4} and (cid:15) ∈ {10−5, ..., 10−9}.
+Figure 9: The reward (higher is better) curve of a DQN-network on the four-rooms problem. We report the mean and standard deviation across 10 independent runs.
+Table 2: Top-1 accuracy of ResNet18 on ImageNet. (cid:5) is reported in PyTorch Documentation, † is reported in [30], ∗ is reported in [17], ‡ is reported in [18]
+SGD 69.76(cid:5) (70.23†)
+Adam AdamW RAdam AdaShift AdaBelief ACProp 66.54∗ 70.46 67.62∗ 67.93† 70.08‡ 65.28 both the generalization performance and training stability: SGD family optimizers typically are the default for CNN models such as in image recognition [6] and object detection [7] due to their better generalization performance than Adam; and Adam is typically the default for GANs [19], reinforcement learning [21] and transformers [20], mainly due to its better numerical stability and faster convergence than SGD. We aim to validate that ACProp can perform well for both cases.
+Image classiﬁcation with CNN We ﬁrst conducted experiments on CIFAR10 image classiﬁcation task with a VGG-11 [31], ResNet34 [6] and DenseNet-121 [32]. We performed extensive hyper-parameter tuning in order to better compare the performance of different optimizers: for SGD we set the momentum as 0.9 which is the default for many cases [6, 32], and search the learning rate between 0.1 and 10−5 in the log-grid; for other adaptive optimizers, including AdaBelief, Adam,
+RAdam, AdamW and AdaShift, we search the learning rate between 0.01 and 10−5 in the log-grid, and search (cid:15) between 10−5 and 10−10 in the log-grid. We use a weight decay of 5e-2 for AdamW, and use 5e-4 for other optimizers. We report the mean ± std for the best of each optimizer in Fig. 7: for VGG and ResNet, ACProp achieves comparable results with AdaBelief and outperforms other optimizers; for DenseNet, ACProp achieves the highest accuracy and even outperforms AdaBelief by 0.5%. As in Table 2, for ResNet18 on ImageNet, ACProp outperforms other methods and achieves comparable accuracy to the best of SGD in the literature, validating its generalization performance.
+To evaluate the robustness to hyper-parameters, we test the performance of various optimizers under different hyper-parameters with VGG network. We plot the results for ACProp and AdaShift as an example in Fig. 8 and ﬁnd that ACProp is more robust to hyper-parameters and typically achieves higher accuracy than AdaShift.
+Reinforcement learning with DQN We evaluated different optimizers on reinforcement learning with a deep Q-network (DQN) [21] on the four-rooms task [33]. We tune the hyper-parameters in the same setting as previous section. We report the mean and standard deviation of reward (higher is better) across 10 runs in Fig. 9. ACProp achieves the highest mean reward, validating its numerical stability and good generalization.
+Neural machine translation with Transformer We evaluated the performance of ACProp on neural machine translation tasks with a transformer model [20]. For all optimizers, we set 8
+Table 3: BLEU score (higher is better) on machine translation with Transformer
+Adam
+DE-EN 34.66±0.014 21.83±0.015
+EN-VI 33.33±0.008
+JA-EN
+RO-EN 29.78± 0.003
+RAdam 34.76±0.003 22.54±0.005 32.23±0.015 30.26 ± 0.011
+AdaShift 30.18±0.020 20.18±0.231 25.24±0.151 27.86±0.024
+AdaBelief 35.17±0.015 22.45±0.003 34.38±0.009 30.03±0.012
+ACProp 35.35±0.012 22.62±0.008 33.70±0.021 30.27±0.007
+Table 4: FID (lower is better) for GANs
+Adam
+DCGAN 49.29±0.25
+RLGAN 38.18±0.01
+SNGAN 13.14±0.10
+SAGAN 13.98±0.02
+RAdam 48.24±1.38 40.61±0.01 13.00±0.04 14.25±0.01
+AdaShift 99.32±3.82 56.18 ±0.23 26.62±0.21 22.11±0.25
+AdaBelief 47.25±0.79 36.58±0.12 12.70±0.17 14.17±0.14
+ACProp 43.43±4.38 37.15±0.13 12.44±0.02 13.54±0.15
+Table 5: Performance comparison between AVAGrad and ACProp. ↑ (↓) represents metrics that upper (lower) is better. (cid:63) are reported in the AVAGrad paper [28]
+WideResNet Test Error (↓)
+CIFAR100
+CIFAR10 18.76(cid:63)±0.20 3.80(cid:63)±0.02 18.72±0.01 3.67±0.04
+Transformer BLEU (↑)
+RO-EN
+DE-EN 27.73±0.134 30.23±0.024 30.27±0.007 35.35±0.012
+SNGAN 21.02±0.14 12.44±0.02
+DCGAN 59.32±3.28 43.34±4.38
+AVAGrad
+ACProp
+GAN FID (↓) learning rate as 0.0002, and search for β1 ∈ {0.9, 0.99, 0.999}, β2 ∈ {0.98, 0.99, 0.999} and (cid:15) ∈ {10−5, 10−6, ...10−16}. As shown in Table. 3, ACProp achieves the highest BLEU score in 3 out 4 tasks, and consistently outperforms a well-tuned Adam.
+Generative Adversarial Networks (GAN) The training of GANs easily suffers from mode collapse and numerical instability [34], hence is a good test for the stability of optimizers. We conducted experiments with Deep Convolutional GAN (DCGAN) [35], Spectral-Norm GAN (SNGAN) [36],
+Self-Attention GAN (SAGAN) [37] and Relativistic-GAN (RLGAN) [38]. We set β1 = 0.5, and search for β2 and (cid:15) with the same schedule as previous section. We report the FID [39] on CIFAR10 dataset in Table. 4, where a lower FID represents better quality of generated images. ACProp achieves the best overall FID score and outperforms well-tuned Adam.
+Remark Besides AdaShift, we found another async-optimizer named AVAGrad in [28]. Unlike other adaptive optimizers, AVAGrad is not scale-invariant hence the default hyper-parameters are very different from Adam-type (lr = 0.1, (cid:15) = 0.1). We searched for hyper-parameters for AVAGrad for a much larger range, with (cid:15) between 1e-8 and 100 in the log-grid, and lr between 1e-6 and 100 in the log-grid. For experiments with a WideResNet, we replace the optimizer in the ofﬁcial implementation for AVAGrad by ACProp, and cite results in the AVAGrad paper. As in Table 5, ACProp consistently outperforms AVAGrad in CNN, Transformer, and GAN training. 6

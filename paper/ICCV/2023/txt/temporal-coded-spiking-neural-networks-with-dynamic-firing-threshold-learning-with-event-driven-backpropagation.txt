@@ -1,0 +1,189 @@
+Abstract 1.
+
+Introduction
+Spiking Neural Networks (SNNs) offer a highly promis-ing computing paradigm due to their biological plausibil-ity, exceptional spatiotemporal information processing ca-pability and low power consumption. As a temporal en-coding scheme for SNNs, Time-To-First-Spike (TTFS) en-codes information using the timing of a single spike, which allows spiking neurons to transmit information through sparse spike trains and results in lower power consump-tion and higher computational efficiency compared to tradi-tional rate-based encoding counterparts. However, despite the advantages of the TTFS encoding scheme, the effective and efficient training of TTFS-based deep SNNs remains a significant and open research problem.
+In this work, we first examine the factors underlying the limitations of apply-ing existing TTFS-based learning algorithms to deep SNNs.
+Specifically, we investigate issues related to over-sparsity of spikes and the complexity of finding the ‘causal set’. We then propose a simple yet efficient dynamic firing threshold (DFT) mechanism for spiking neurons to address these is-sues. Building upon the proposed DFT mechanism, we fur-ther introduce a novel direct training algorithm for TTFS-based deep SNNs, called DTA-TTFS. This method utilizes event-driven processing and spike timing to enable efficient learning of deep SNNs. The proposed training method was validated on the image classification task and experimen-tal results clearly demonstrate that our proposed method achieves state-of-the-art accuracy in comparison to existing
+TTFS-based learning algorithms, while maintaining high levels of sparsity and energy efficiency on neuromorphic in-ference accelerator.
+*Corresponding author
+Deep learning approaches have demonstrated remark-able performance in various intelligent applications [18, 27, 24, 23] and innovative simulations [62, 61]. How-ever, these achievements come at a significant cost of en-ergy consumption, severely limiting the deployment of ar-tificial neural networks (ANNs) on resource-limited plat-forms [43, 9, 3, 50]. Brain-inspired spiking neural networks (SNNs) have emerged as a promising and energy-efficient alternative to ANNs [22, 31, 57]. SNNs have garnered at-tention for their distinctive features of sparse-asynchronous spikes and event-driven computing, which have played a pivotal role in driving the development of neuromorphic computing platforms such as ANP-I [54], TrueNorth [1],
+Loihi [8], and Tianjic [39].
+Despite the inherent energy efficiency of SNNs, their extensive application to real-world practical scenarios has been limited by the absence of efficient and scalable train-ing algorithms [52, 35, 30, 14, 20]. Traditional training techniques for ANNs, such as error backpropagation (BP) and standard GPU-accelerated training packages, cannot be leveraged directly by SNNs due to the complex temporal dynamics and the non-differentiability of spiking neurons’ activity [33, 6, 56]. To address these challenges, various so-lutions have been proposed, broadly categorized into three distinct groups.
+The first category of solutions proposed to address the lack of scalable training algorithms for SNNs is ANN-to-SNN conversion method [40, 41, 49, 45]. These methods involve training an ANN first and then converting it to its
+SNN counterpart. The resulting SNN may achieve com-parable performance to pre-trained ANNs through manual and careful setting of the SNN parameters such as the firing threshold [28] and the chosen spiking neuron model [44].
+However, such conversion often results in precision loss due to approximation and requires longer time steps for lossless
+conversion [19]. Moreover, ANN-to-SNN conversion meth-ods often encode the activation values of artificial neurons using the firing rate of spiking neurons [11, 4, 5], which fails to fully leverage the timing information of spikes. Further-more, the runtime computation on neuromorphic hardware can often be highly energy-intensive.
+The second category of the proposed SNN training so-lutions is RNN-like method, commonly known as surrogate gradient learning [47, 48]. In these surrogate gradient-based
+SNNs, information is conveyed through spikes during feed-forward computation, while during backpropagation, gradi-ent information is calculated by treating the neurons’ mem-brane potential as a differentiable signal at the current time step [42, 34]. To address the non-differentiability of spikes in the direct training of SNNs, surrogate functions are em-ployed to approximate the derivative of the spike generation function during the backward process [53, 29]. However, while these methods have successfully tackled the chal-lenges associated with the non-differentiability of spiking neurons, they necessitate updating synaptic weights at each time step, regardless of whether there is a spike emission or not [47, 15]. Consequently, this results in substantial energy and memory demands as large intermediate activation val-ues necessitate storage to facilitate gradient computation.
+Unlike the above-mentioned methods, the third cate-gory of learning algorithms in SNNs is spike-driven method
+[2, 33, 58, 60, 38, 6], which operate in a strictly event-driven manner during both forward and backward computations.
+SpikeProp [2] and its various extensions [33, 6, 25] are typ-ical examples of this category. However, these algorithms remain limited to shallow network structures and relatively simple classification tasks. To overcome this limitation,
+Zhang et al. [58] and Zhou et al. [60] extended the spike-driven algorithm to more complex network structures. De-spite achieving competitive accuracy on large datasets [60], the identification of the ‘causal set’1 in this approach re-quires substantial computational resources. To improve the training efficiency, Park et al. [38] proposed a surrogate deep neural network (DNN) model that is subsequently con-verted into a TTFS-based SNN. However, this conversion method is prone to conversion errors, potentially impairing the temporal learning capability of SNNs. Recently, sev-eral multi-spike-based spike-driven algorithms have been developed [59, 65]. While Zhang et al. [59] and Zhu et al. [65] achieve competitive performance on CIFAR uti-lizing the rate coding scheme, we focus on developing an energy-efficient TTFS-based spike-driven algorithm.
+In this paper, we introduce an effective and efficient spike-driven learning algorithm that facilitates the training 1Assume a postsynaptic neuron fire a first spike at tout, only a subset of input spikes had arrived before tout and contributed to the output spike.
+This set of spikes, C = {i : ti < tout}, is called the causal set in this work. of high-performance TTFS-based deep SNNs. The main contributions of this work are outlined as follows:
+• We provide a comprehensive analysis of the main shortcomings of existing methods in achieving high performance in TTFS-based deep SNNs. Specifically, we examine issues such as the over-sparsity of spikes and the complexity of determining the ‘causal set’.
+• We propose a simple yet efficient dynamic firing threshold (DFT) mechanism for spiking neurons that can effectively address the aforementioned issues.
+• Building upon the proposed DFT, we further introduce a novel direct training algorithm for TTFS-based deep
+SNNs, which we refer to as DTA-TTFS. In this train-ing method, the timing of a single spike is considered the basic information carrier and the learning process is performed strictly in an event-driven manner.
+• The proposed method is validated through extensive experiments on benchmark image classification tasks and achieves state-of-the-art accuracy compared to ex-isting TTFS-based learning algorithms. Furthermore, we demonstrate the ultra-low power capability of the
+SNN with DTA-TTFS on a recently developed neuro-morphic accelerator. 2. Preliminaries and Problem Analysis
+In this section, we first briefly review the TTFS coding and the employed spiking neuron model. Subsequently, we provide a comprehensive analysis of the primary shortcom-ings in existing TTFS-based deep SNN methods. 2.1. Preliminaries
+TTFS coding scheme: There are two primary coding schemes utilized to represent information in SNNs: rate coding and temporal coding. The rate coding method repre-sents information based on the average firing rate of a spik-ing neuron. However, this encoding scheme neglects the temporal information carried by spikes, leading to higher spike frequency and increased energy consumption. Con-versely, temporal coding leverages the precise timing of spikes to encode information, resulting in lower power con-sumption and higher computational efficiency compared to the rate-based coding method.
+As a temporal coding method, TTFS encodes informa-tion by the timing of the first spike. As depicted in Fig. 1, the higher the activation value, the earlier the first spike is emitted. The relationship between the input activation value ai and the encoded spike time ti can be expressed as (cid:18) ti = 1 − (cid:19) ai amax
+× Tw, (1)
+In the subsequent section, we will conduct a comprehensive analysis to identify the underlying reasons for this limita-tion. 2.2. Problem Analysis
+Over-sparsity of spikes: Sparse neural networks offer several advantages such as efficient variable-size represen-tation, information decomposition, and energy efficiency.
+However, over-sparsity may diminish the model’s effective capacity and adversely affect its performance [17]. This is-sue becomes more serious in TTFS-based deep SNNs, ow-ing to their firing mechanism, asynchronous transmission, and TTFS-based decision strategy. (a) (b)
+Figure 2. The over-sparsity problem caused by asynchronous transmission and TTFS-based decision strategy. (a) The presynap-tic (gray) neuron fires later than the postsynaptic (blue) neuron j, making it ineffective in contributing to the firing of the postsynap-tic neuron. As a result, this presynaptic neuron becomes invalid. (b) After learning, the postsynaptic (blue) neuron fires at an earlier time, leading to the appearance of additional invalid neurons.
+According to the firing mechanism of spiking neurons, a neuron emits one spike only when its membrane poten-tial reaches the firing threshold. This leads to fewer acti-vated spiking neurons compared to ANNs. In addition, the asynchronous transmission of SNNs further diminishes the number of valid activated neurons. As shown in Fig. 2(a), when the presynaptic neuron i fires after the postsynaptic neuron j, the spike of neuron i becomes invalid for neuron j. Furthermore, TTFS-based SNNs make decisions based on the earliest spike, and the synaptic weights are trained to make the target neuron fire as early as possible. As shown in
+Fig. 2(b), after learning, the firing time of the postsynaptic neuron j may become earlier, thereby further exacerbating the sparsity induced by asynchronous transmission.
+In event-driven learning algorithms of SNNs, error back-propagation depends on the timing of spikes. Therefore, if a spiking neuron does not fire or does not contribute to the postsynaptic neuron, it will not participate in learning.
+The issue of over-sparsity not only limits the information representation capability of SNNs but also leads to learn-ing failure. Consequently, the achievement of a harmonious balance between sparsity and performance in the training of
+TTFS-based deep SNNs remains an open question.
+Figure 1. (a) TTFS coding scheme. The larger intensity value cor-responds to the earlier spike. (b) ReL-PSP spiking neuron model.
+Neuron j accumulates the linear PSP and fires a spike when the membrane potential crosses the firing threshold ϑ. where amax is the maximum input activation value, Tw is the length of the permissible spike time window. As the
+TTFS coding scheme requires only a single spike to convey information, it effectively diminishes the number of spikes and significantly decreases the energy requirements. Con-sequently, it achieves higher sparsity and energy efficiency, making it a powerful coding scheme that maximizes the en-ergy efficiency of SNNs.
+Spiking neuron model: The Rectified Linear Postsy-naptic Potential (ReL-PSP) spiking neuron [58] is chosen for our method due to its simplicity and energy efficiency.
+As shown in Fig. 1(b), the ReL-PSP neuron model utilizes a rectified linear kernel function to shape the neuron’s PSP, and its dynamics is defined as
+V l j (t) =
+N (cid:88) i=1 ijK (cid:0)t − tl−1 wl i (cid:1) , (2) where V l j (t) is the membrane potential of neuron j in layer l, and wl ij is the synaptic weight between neuron j and its presynaptic neuron i. N is the number of neurons in the previous layer l − 1, tl−1 is the spike time of input neuron i, and K (cid:0)t − tl−1 (cid:1) is the PSP function that is defined as i i
+K (cid:0)t − tl−1 i (cid:1) = (cid:40) t − tl−1 i 0,
+, t > tl−1 if i otherwise.
+, (3)
+The neuron j emits a spike when V l j (t) reaches the firing threshold ϑ. Mathematically, the spike generation function
+F is defined as j = F {t|V l tl j (t) ≥ ϑ, t ≥ 0}. (4)
+The ReL-PSP neuron has proven its efficacy in tackling the main challenges encountered during the training of deep
+SNNs, such as the non-differentiability of the spike func-tion, gradient explosion, and the dead neuron issue. De-spite the successful performance on the MNIST dataset, its performance is not ideal on deeper network structures and more complex datasets, such as CIFAR-10 and CIFAR-100.
+The complexity of finding the ‘causal set’: Due to the sparsity and asynchronicity of SNNs, not all presynaptic neurons {i|i = 1, . . . , N } contribute to their postsynap-tic neuron j, where the contributory neurons are defined as the ‘causal set’ of the postsynaptic neuron j, denoted as Cj = {i|ti < tj} [33, 60]. To leverage standard GPU-accelerated ANN training packages, it is crucial to iden-tify the ‘causal set’ of each neuron during the feed-forward computation process [33, 60]. However, this process is highly complex and time-consuming. For example, in or-der to find the ‘causal set’, Zhou et al. [60] proposed an approach where they first sort all of this neuron input spikes
+{ti|i = 1, · · · N } in ascending order and subsequently con-sider each individual spike ti for inclusion in the causal set.
+This approach, however, is computationally expensive and results in inefficient training even with the implementation of a space-for-time strategy [60].
+Despite the success of algorithms with this approach in utilizing standard GPU-accelerated ANN training packages, the training process involves a significant amount of sort-ing and iteration. This results in higher demand for train-ing resources and increased latency, especially as the net-work depth increases. Consequently, the process of find-ing the ‘causal set’ may become a bottleneck for training deep SNNs. In the next section, we propose a dynamic fir-ing threshold mechanism for spiking neurons to avoid this resource-intensive process. 3. Method
+In this section, we first introduce the dynamic firing threshold (DFT) for spiking neurons and discuss how it ef-fectively addresses the above issues. Then, based on the
+DFT, we further propose a direct training algorithm for
+TTFS-based SNN, referred to as DTA-TTFS. 3.1. DFT-based Spiking Neuron Model
+As demonstrated in Fig. 3(a), the proposed DFT is a layer-dependent and time-varying function, which is de-fined as
+ϑl (t) = (cid:40)
+Tw(l + 1) − t,
++∞,
+Twl ≤ t ≤ Tw(l + 1), if otherwise, (5) where ϑl (t) represents the firing threshold of the neurons in the l-th layer and Tw denotes the length of the permissible
+In this work, Tw is set to 1 (unless spike time window. otherwise stated) and the input layer is regarded as the 0-th layer. Eq. 5 reveals that the firing threshold is infinite outside the interval t ∈ [Twl, Tw(l + 1)], and neurons in the l-th layer can only generate a spike within this time interval.
+Therefore, as shown in Fig. 4, the generated spikes are non-overlapping across different layers, which we refer to as the layer-dependent firing feature.
+Based on the membrane potential dynamics in Eq. 2 and the proposed DFT in Eq. 5, the output of neuron j can be divided into three categories:
+• Spikes at tl j = Twl: Since the firing threshold is infin-ity when t < Twl, the neuron cannot fire a spike before t = Twl even though the membrane potential is strong (i.e., V l j (t) ≥ ϑl(Twl) and t < Twl). As shown in
+Fig. 3(b), the earliest spike time for DFT-based spik-ing neurons in the l-th layer is tl j = Twl.
+• Spikes within (Twl, Tw(l+1)]: The neuron generates a spike when its membrane potential exceeds the thresh-j (t) ≥ ϑl(t). The firing threshold ϑl in this old, i.e.V l time interval is a linear function, which decays linearly from 1 to 0. As depicted in Fig. 3(c), by combining the membrane potential in Eq. 2 and the firing threshold in
+Eq. 5, the precise spiking time tl j can be calculated as tl j = wl ijtl−1 i
+Tw(l + 1) + (cid:80) i∈Cj wl ij 1 + (cid:80) i∈Cj
+. (6)
+• Nonspike: The neuron will not fire a spike if its mem-brane potential is below the dynamic firing threshold j (t) < ϑl(t)). Fig. 3(d) shows three typical sce-(i.e., V l narios of nonspike.
+Overall, the spike time of a DFT-based neuron j in the l-th layer can be represented as tl j =
+
+
+
+Twl,
+Tw(l+1)+ (cid:80) i∈Cj wl ij tl−1 i wl ij 1+ (cid:80) i∈Cj nonspike, if if
+, j (Twl) ≥ ϑl(Twl),
+V l
+Twl < tl j ≤ Tw(l + 1), otherwise. (7)
+In the following, we will analyze how the proposed DFT effectively addresses issues of over-sparsity of spikes and the complexity of finding the ‘causal set’. 1) Over-sparsity of spikes: As described in Eq. 5, the
+DFT is a piecewise function, whose linearly decreased part and layer-dependent firing feature effectively address the over-sparsity of spikes.
+The linearly decreased part of the DFT is purposefully designed to tackle the over-sparsity arising from the spik-ing neuron firing mechanism. By gradually decreasing the firing threshold from 1 to 0, the neuron j remains active as long as its membrane potential is non-negative at Tw(l + 1).
+As a result, the proposed DFT effectively reduces the num-ber of inactive neurons. Moreover, the linear decay design enhances the discriminative nature of information from ac-tive neurons.
+(a) (b) (c) (d)
+Figure 3. Proposed dynamic firing threshold and output of the DFT-based spiking neurons. (a) Dynamic firing threshold function(DFT). (b) Spikes at tl j = Twl. (c) Spikes within (Twl, Tw(l + 1)] . (d) Nonspike. This case is further divided into three sub-cases, which are shown by the curves of different colors. of standard GPU-accelerated training packages of ANNs, which further leads to an efficient training process. 3.2. DTA-TTFS Learning Algorithm
+Consider a task with n categories, where each output neuron corresponds to a specific category.
+In this task, the target category is represented by the output neuron that fires the earliest. To assess the effectiveness of the model, we adopt the widely utilized cross-entropy loss function L, which aims to maximize the output value of the target neu-ron. In order to ensure the desired neuron fires earliest and others fire as late as possible, we utilize the negative spike times of the output layer [58, 6], i.e., −t, for evaluation.
+Therefore, the loss function is given by
+L (t, d) = − log exp(−t[d]) i=1 exp(−t[i]) (cid:80)n
+, (8) where t is the vector of spike times in the output layer, and d is the desired category index.
+In order to minimize the L(t, d), the DTA-TTFS algo-rithm adjusts spike times by modifying the synaptic weights during gradient backpropagation. For driving the gradient backpropagation, it is necessary to calculate derivatives of the output spike time tl j with respect to the synaptic weight ij and the input spike time tl−1 wl
+. According to Eq. 7, we can easily get these two derivatives, i
+∂tl j
+∂wl ij
+=
+
+
+ 0, tl−1 i −tl j 1+ (cid:80) wl ij i∈Cj
+, if
+Twl < tl j < Tw(l + 1), (9) otherwise,
+∂tl j
+∂tl−1 i
+=
+
+
+ wl ij 1+ (cid:80) i∈Cj 0,
+, if wl ij
+Twl < tl j < Tw(l + 1), otherwise. (10)
+Following Eq. 9 and Eq. 10, gradient backpropagation can be directly applied.
+Figure 4. The propagation pipeline of the SNN with DFT.
+The layer-dependent firing feature enables SNN with non-overlapping spike time windows. This effectively re-solves the over-sparsity arising from asynchronous trans-mission and TTFS-based decision strategy. Fig. 4 illustrates that the spike time window of postsynaptic neurons occurs later than that of presynaptic neurons. Consequently, when the presynaptic neuron fires a spike, its postsynaptic neuron absolutely receives it. Furthermore, the non-overlapping spike window provides output layer neurons with a prede-termined earliest spike time, preventing them from being forced forward indefinitely during the training process. 2) The complexity of finding the ‘causal set’: The layer-dependent firing feature of DFT circumvents the need for
+SNNs to identify the ‘causal set’, resulting in efficient train-ing. This efficiency is further improved by the output ana-lytic equation of the DFT-based neuron.
+As depicted in Fig. 4, the layer-dependent firing feature ensures that in the l-th layer of the SNN utilizing DFT, the spike time is controlled within the interval [Twl, Tw(l + 1)].
+Therefore, we can easily learn that neurons in the (l-1)-th layer must fire earlier than neurons in the l-th layer. In other words, all active presynaptic neurons must remain in the
+‘causal set’ of their postsynaptic neurons. Therefore, the
+DFT mechanism prevents the need for resource-intensive sorting and iteration process, enhancing training efficiency and facilitating its extension to deeper network architecture.
+In addition, the employed ReL-PSP spiking neuron and the DFT provide an analytical relation between input spikes and output spikes, as described in Eq.7. Therefore, the dy-namics of SNNs within the training loop need not be sim-ulated using long time steps. This allows the utilization
+Datasets
+Models
+MNIST
+CIFAR-10
+CIFAR-100
+Mostafa 2017 [33]
+Zhang et al. 2020 [58]
+Zhou et al. 2021 [60]
+DTA-TTFS
+Wu et al. 2022 [46]
+Park et al. 2020 [37]
+Zhou et al. 2021 [60]
+Park et al. 2021 [38]
+DTA-TTFS
+DTA-TTFS
+Park et al. 2020 [37]
+Park et al. 2021 [38]
+DTA-TTFS
+Network
+Architecture
+MLP1
+CNN1
+CNN2
+CNN1
+VGG11
+VGG16
+VGG16
+VGG16
+VGG11
+VGG16
+VGG16
+VGG16
+VGG16
+Neural
+Coding
+TTFS
+TTFS
+TTFS
+TTFS
+Rate
+TTFS
+TTFS
+TTFS
+TTFS
+TTFS
+TTFS
+TTFS
+TTFS
+Method Accuracy
+Sparsity
+DT
+DT
+DT
+DT conv conv
+DT
+DT
+DT
+DT conv
+DT
+DT 0.51 0.6614 0.94 97.55% 99.4% 99.33% 99.4% 0.3913 no 91.24% 0.2459 91.43% 0.62 92.68% 91.90% 0.1746 91.17% 0.4387 93.05% 0.2561 0.2994 68.79% 65.98% 0.2780 69.66% 0.2845
+Table 1. Comparison of accuracy and sparsity between the DTA-TTFS method and other related works. DT: direct training. conv: ANN-to-SNN conversion. MLP1: 784-800-10. CNN1: 784-16C5-P2-32C5-P2-800-128-10. CNN2: 784-32C5-16C5-10. 4. Experiments
+In this section, we first evaluate the performance of the
+DTA-TTFS algorithm. Then, we carry out validation stud-ies to illustrate the impact of the DFT. Finally, we employ theoretical analysis along with the neuromorphic hardware simulator to evaluate the energy consumption during the in-ference process. 4.1. Details
+We conduct experiments on three image classification benchmark datasets: MNIST2, CIFAR-10, and CIFAR-1003. All experiments are conducted using the PyTorch li-brary, which allows for efficient training on multi-GPU ma-chines with accelerated computations and optimized mem-ory usage. For the MNIST dataset, we employ a network structure with 784-16C5-P2-32C5-P2-800-128-10 and train it for 150 epochs. As for CIFAR datasets, we adopt augmen-tation techniques [7, 10] and train the VGG11 and VGG16 network structures without Batch Normalization (BN) for 300 epochs. Moreover, in order to maintain the initial pa-rameter domain at a good level, the SNN is initialized with the parameters from the pre-trained identical ANN when training CIFAR datasets. During the training process, we adopt the Adam optimizer and implement milestones learn-ing rate decay, with an initial learning rate 1e−3 for MNIST and 1e−4 for CIFAR datasets. 4.2. Comparison with

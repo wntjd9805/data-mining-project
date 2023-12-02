@@ -1,0 +1,44 @@
+Abstract
+Since convolutional neural networks (CNNs) perform well at learning generalizable image priors from large-scale data, these models have been extensively applied to image restoration and related tasks. Recently, another class of neural architectures, Transformers, have shown signifi-cant performance gains on natural language and high-level vision tasks. While the Transformer model mitigates the shortcomings of CNNs (i.e., limited receptive field and in-adaptability to input content), its computational complex-ity grows quadratically with the spatial resolution, there-fore making it infeasible to apply to most image restora-tion tasks involving high-resolution images. In this work, we propose an efficient Transformer model by making sev-eral key designs in the building blocks (multi-head atten-tion and feed-forward network) such that it can capture long-range pixel interactions, while still remaining appli-cable to large images. Our model, named Restoration
+Transformer (Restormer), achieves state-of-the-art results on several image restoration tasks, including image derain-ing, single-image motion deblurring, defocus deblurring (single-image and dual-pixel data), and image denoising (Gaussian grayscale/color denoising, and real image de-noising). The source code and pre-trained models are avail-able at https://github.com/swz30/Restormer. 1.
+
+Introduction
+Image restoration is the task of reconstructing a high-quality image by removing degradations (e.g., noise, blur, rain drops) from a degraded input. Due to the ill-posed na-ture, it is a highly challenging problem that usually requires strong image priors for effective restoration. Since con-volutional neural networks (CNNs) perform well at learn-ing generalizable priors from large-scale data, they have emerged as a preferable choice compared to conventional restoration approaches.
+The basic operation in CNNs is the ‘convolution’ that provides local connectivity and translation equivariance.
+While these properties bring efficiency and generalization to CNNs, they also cause two main issues. (a) The convo-[13]
+[14]
+[58]
+[94]
+[93]
+[100]
+[93]
+[64]
+[43]
+[32] (a) Deblurring (Tab. 2) (b) Deraining (Tab. 1)
+[55]
+[44]
+[99]
+[93]
+[80]
+[63]
+[92]
+[63]
+[106]
+[55] (c) Gaussian Denoising (Tab. 4) (d) Real Denoising (Tab. 6)
+Figure 1. Our Restormer achieves the state-of-the-art performance on image restoration tasks while being computationally efficient. lution operator has a limited receptive field, thus prevent-(b) ing it from modeling long-range pixel dependencies.
+The convolution filters have static weights at inference, and thereby cannot flexibly adapt to the input content. To deal with the above-mentioned shortcomings, a more powerful and dynamic alternative is the self-attention (SA) mecha-nism [17,77,79,95] that calculates response at a given pixel by a weighted sum of all other positions.
+Self-attention is a core component in Transformer mod-els [34, 77] but with a unique implementation, i.e., multi-head SA that is optimized for parallelization and effective representation learning. Transformers have shown state-of-the-art performance on natural language tasks [10,19,49,62] and on high-level vision problems [11,17,76,78]. Although
+SA is highly effective in capturing long-range pixel inter-actions, its complexity grows quadratically with the spatial resolution, therefore making it infeasible to apply to high-resolution images (a frequent case in image restoration).
+Recently, few efforts have been made to tailor Transformers for image restoration tasks [13, 44, 80]. To reduce the com-putational loads, these methods either apply SA on small spatial windows of size 8×8 around each pixel [44, 80], or
+divide the input image into non-overlapping patches of size 48×48 and compute SA on each patch independently [13].
+However, restricting the spatial extent of SA is contradic-tory to the goal of capturing the true long-range pixel rela-tionships, especially on high-resolution images.
+In this paper, we propose an efficient Transformer for image restoration that is capable of modeling global con-nectivity and is still applicable to large images. Specifi-cally, we introduce a multi-Dconv head ‘transposed’ atten-tion (MDTA) block (Sec. 3.1) in place of vanilla multi-head
+SA [77], that has linear complexity. It applies SA across feature dimension rather than the spatial dimension, i.e., instead of explicitly modeling pairwise pixel interactions,
+MDTA computes cross-covariance across feature channels to obtain attention map from the (key and query projected) input features. An important feature of our MDTA block is the local context mixing before feature covariance compu-tation. This is achieved via pixel-wise aggregation of cross-channel context using 1×1 convolution and channel-wise aggregation of local context using efficient depth-wise con-volutions. This strategy provides two key advantages. First, it emphasizes on the spatially local context and brings in the complimentary strength of convolution operation within our pipeline. Second, it ensures that the contextualized global relationships between pixels are implicitly modeled while computing covariance-based attention maps.
+A feed-forward network (FN) is the other building block of the Transformer model [77], which consists of two fully connected layers with a non-linearity in between. In this work, we reformulate the first linear transformation layer of the regular FN [77] with a gating mechanism [16] to im-prove the information flow through the network. This gating layer is designed as the element-wise product of two linear projection layers, one of which is activated with the GELU non-linearity [27]. Our gated-Dconv FN (GDFN) (Sec. 3.2) is also based on local content mixing similar to the MDTA module to equally emphasize on the spatial context. The gating mechanism in GDFN controls which complementary features should flow forward and allows subsequent layers in the network hierarchy to specifically focus on more re-fined image attributes, thus leading to high-quality outputs.
+Apart from the above architectural novelties, we show the effectiveness of our progressive learning strategy for
+Restormer (Sec. 3.3). In this process, the network is trained on small patches and large batches in early epochs, and on gradually large image patches and small batches in later epochs. This training strategy helps Restormer to learn con-text from large images, and subsequently provides qual-ity performance improvements at test time. We conduct comprehensive experiments and demonstrate state-of-the-art performance of our Restormer on 16 benchmark datasets for several image restoration tasks, including image derain-ing, single-image motion deblurring, defocus deblurring (on single-image and dual pixel data), and image denois-ing (on synthetic and real data); See Fig. 1. Furthermore, we provide extensive ablations to show the effectiveness of architectural designs and experimental choices.
+The main contributions of this work are summarized below:
+• We propose Restormer, an encoder-decoder Transformer for multi-scale local-global representation learning on high-resolution images without disintegrating them into local windows, thereby exploiting distant image context.
+• We propose a multi-Dconv head transposed attention (MDTA) module that is capable of aggregating local and non-local pixel interactions, and is efficient enough to process high-resolution images.
+• A new gated-Dconv feed-forward network (GDFN) that performs controlled feature transformation, i.e., suppress-ing less informative features, and allowing only the useful information to pass further through the network hierarchy. 2.

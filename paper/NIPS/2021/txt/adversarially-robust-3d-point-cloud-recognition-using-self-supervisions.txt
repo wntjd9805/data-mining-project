@@ -1,0 +1,262 @@
+Abstract 3D point cloud data is increasingly used in safety-critical applications such as autonomous driving. Thus, the robustness of 3D deep learning models against adversarial attacks becomes a major consideration. In this paper, we systemati-cally study the impact of various self-supervised learning proxy tasks on different architectures and threat models for 3D point clouds with adversarial training.
+Speciﬁcally, we study MLP-based (PointNet), convolution-based (DGCNN), and transformer-based (PCT) 3D architectures. Through extensive experimentation, we demonstrate that appropriate applications of self-supervision can signiﬁcantly enhance the robustness in 3D point cloud recognition, achieving considerable improvements compared to the standard adversarial training baseline. Our analysis reveals that local feature learning is desirable for adversarial robustness in point clouds since it limits the adversarial propagation between the point-level input perturbations and the model’s ﬁnal output. This insight also explains the success of
+DGCNN and the jigsaw proxy task in achieving stronger 3D adversarial robustness.
+
+Introduction 1
+Point cloud data is one of the most broadly used representations in 3D computer vision. It is a versatile data format available from various sensors and computer-aided design (CAD) models. Given such advantages, many deep learning-based 3D perception systems have been proposed [1–6] and achieved great success in safety-critical applications (e.g., autonomous driving) [7–9]. Although deep learning [5, 10] on point clouds has exhibited high performance, they are particularly vulnerable to adversarial attacks [11–13]. Because of the wide applications in safety-critical ﬁelds, it is imperative to study the adversarial robustness of point cloud recognition models.
+However, there are at present two obstacles on the path reaching robust point cloud recognition:
+Architectural Diversity. Deep 3D point cloud recognition is an emerging ﬁeld. Many 3D architec-tures with various feature aggregation methods have been proposed. We broadly categorize them into three families based on how networks aggregate the geometric information: multi-layer-perceptron (MLP)-based networks [5, 10], convolutional networks [3, 4, 6, 14–16], and transformer-based net-works [17, 18]. These networks have been studied mostly using clean accuracy as their main metric, but an in-depth study of their robustness is lacking.
+Vulnerability to Adaptive Attacks. A few defenses against 3D attacks have been recently pro-posed [19–21]. Some of the methods, however, merely obfuscate attackers by limiting the malicious agents from accessing the defense systems and true gradients [22]. They have been shown vulnerable to adaptive attackers who have the full knowledge of the defenses and can approximate the gradi-ents [21]. Similar to the 2D domain [23], adversarial training (AT) [21] provides more longstanding robustness in 3D even against adaptive attacks [22]. Nevertheless, further robustness improvements on adversarial training are highly desired for practical usage and deployments.
+∗Correspondence to jiachens@umich.edu 35th Conference on Neural Information Processing Systems (NeurIPS 2021)
+(a) Illustration of Different Threats and Self-Supervised Learning Tasks. (b) Illustration of Adversarial Pre-training for Fine-tuning (APF) and Adversarial Joint Training (AJT).
+Figure 1: Overview of Our Analysis in 3D Point Cloud Classiﬁcation.
+Self-supervised learning (SSL) has been incorporated into adversarial training in 2D image perception models lately. It has shown great potential to enhance adversarial robustness without requiring any additional data or labels [24, 25]. Given such achievements, a natural question emerges: can we mimic the application of SSL to improve adversarial robustness in 3D point cloud recognition? Such a label-free strategy is preferred due to the cost and difﬁculty of 3D point cloud data annotation [26].
+Summary of Our Contributions:
+In this paper, we present a systematic analysis of the adversarial robustness in 3D point cloud recognition using self-supervisions on three representative architectures: a multi-layer-perceptron (MLP) network (PointNet) [5], a convolutional network (DGCNN) [15], and a transformer-based network (PCT) [17]. Speciﬁcally, we use two strategies to integrate self-supervised learning and adversarial training, including (1) adversarial pre-training for ﬁne-tuning (APF), which uses the SSL tasks only for pre-training, and (2) adversarial joint training (AJT), which jointly trains the SSL task with the recognition task, as shown in Figure 1. To further study the importance of self-supervised tasks for adversarial robustness, we select three representative SSL proxy tasks, including 3D rotation prediction [27], 3D jigsaw [28], and autoencoding [29]. Our key observations are as follows:
+• We show that pre-training on SSL tasks improves adversarial robustness of the ﬁne-tuned models.
+Unlike the 2D domain, where both APF and AJT have enhanced the robustness, our study ﬁnds that only APF consistently achieves robustness improvements in 3D. AJT does not always help since the distributional gap between data for SSL and recognition tasks will distract each other in
+AJT. Evaluation results of various unforeseen attacks further conﬁrm such improvements by APF.
+• We ﬁnd that the convolutional network, i.e., DGCNN, is more robust than the other architectures in point cloud recognition tasks. Moreover, 3D jigsaw SSL task, which predicts the permutation of 3D point cloud patches, helps achieve stronger robustness than the others. Both convolutional architecture and jigsaw SSL task enforce the model to learn better local semantics. Intuitively, robust local features help limit the propagation of adversarial effect from point-level input perturbations to the model’s ﬁnal output.
+• We demonstrate that ﬁne-tuned models from different pre-training tasks have different vulnerabili-ties, and adversarial examples generated by attacking them do not transfer well among each other.
+Thus, we further leverage two simple yet powerful ensemble methods to boost the adversarial robustness by a substantial margin. Our best ensemble models, for instance, achieve robust accuracy of 53.5% (+15.6%), 69.4% (+7.4%) and 57.9% (+8.8%) with PointNet, DGCNN, and PCT on the representative dataset, ModelNet40 [30]. 2 Analysis Methodology
+In this section, we detail our adversarial robustness analysis methodology. We ﬁrst introduce the principal 3D point cloud recognition architectures and the threat models used in our study. We then introduce two ways to generalize and improve AT using 3D point cloud SSL proxies. 3D Point Cloud Recognition Models and Threats 2.1
+We introduce the adopted model designs and the formulations of threats to 3D point clouds below.
+Model Variants. We use a shared multi-layer-perceptron-based network PointNet [5], a convolutional network Dynamic Graph CNN (DGCNN) [15], and a transformer-based network Point Cloud
+Transformer (PCT) [17] as our primary backbone architectures, denoted as Mθm . Speciﬁcally,
+PointNet directly aggregates learned features from each point to form a global embedding for ﬁnal 2
+recognition. By doing so, the point-level features are independent of each other before global pooling.
+PointNet embraces high efﬁciency that has been widely utilized as a base operation in complex tasks [8, 31]. DGCNN instead builds a graph based on k-nearest neighbors (kNN) and uses a variant of continuous convolution (EdgeConv) on edges to enable local feature learning. The combination of local and global representation learning helps DGCNN achieve a higher clean accuracy. PCT extends the Transformer [32], the dominant framework in natural language processing, for point cloud recognition. The core of PCT is the full attention mechanism, which establishes a much more
+ﬂexible scheme, where each point has the potential to affect every other point in the point cloud.
+The classiﬁcation head Hθh parameterized with θh for these backbones is an MLP and the part segmentation head Hθh is a set of 1 × 1 convolutions. We use Fθf parameterized with θf (θf :=
+[θm; θh]) to represent the overall model architecture, consisting of the stacked backbone M and recognition head H, where F = H ◦ M. Given the input point cloud x, the model F aims to predict the corresponding label y, where y = F(x). More details of the architectures are in the supplements.
+Threats. There are mainly three types of threats against point cloud perception models, which could be abstracted as point shifting (PS), point dropping (PD), and point adding (PA) attacks (Figure 1(a)).
+We formally deﬁne these threats within (cid:96)p projected gradient descent (PGD) style attacks. First, we assume a PS adversary is able to shift all existing points within a (cid:96)p norm ball: xs+1 = Πx+S (xs + α · sign(∇xs L(xs, y; F))); x0 = x + U(−(cid:15), (cid:15)) (1) where xs is the adversarial example in the s-th iteration, Π is the projection function to project the adversarial example to the pre-deﬁned perturbation space S, α is the attack step size, and U(−(cid:15), (cid:15)) represents a uniform distribution from −(cid:15) to (cid:15). Second, we allow a PD adversary to discard the top k salient points [33] in each iteration until a total drop of N points: xs+1 = xs / arg topkx∈xs saliency(xs, y; F); if k × s < N (2) where we follow [33] to implement saliency() to calculate the importance scores of the input points w.r.t. to the prediction accuracy and / denotes the dropping operation. We detail saliency() in the supplements due to space limits. Third, a PA adversary is capable of adding new points bounded by an (cid:96)p norm ball to the original point cloud. PA randomly initializes N new points from the original point coordinates and only perturbs the added points. We follow the same setting as PS to formulate the perturbation: xs+1 = Πx+S (xs + α · sign(∇xs L([xori; xs], y; F))); x0 = sample(xori, N ) + U(−(cid:15), (cid:15)) (3) where xori is the original point cloud and sample() initializes N new points denoted as x0. We believe the chosen threats mostly cover the existing attack surfaces on point cloud data. It is also beneﬁcial to study how different threats would affect the adversarial robustness in point cloud recognition under our adversarial training strategies which will be introduced next. 2.2 Adversarial Training with Self-Supervisions
+We ﬁrst introduce the chosen 3D self-supervised learning methods, followed by two strategies to incorporate these pretext tasks in adversarial training. 3D Self-Supervised Learning. The primary goal of self-supervised learning (SSL) is to learn effective feature representations with unlabeled data. Given a pretext task Pt , the pre-training process is still conducted in a supervised manner with self-generated data xt and label yt from pristine data x, where (xt, yt) = Pt(x). Therefore, a target loss function Lt(xt, yt; F t
+) will be minimized during
+θt the optimization, where θt consists of the shared backbone parameters θm and customized branch parameters θc (i.e., θt := [θm; θc]). We utilize the following 3D SSL tasks in our study (Figure 1(a)).
+• 3D Rotation [27]: Similar to the rotation task in 2D vision [34], the data and label are generated by rotating the original point clouds to pre-deﬁned angles η in the 3D space. Therefore, the problem is to correctly predict 3D rotation angles w.r.t. the input point cloud. The objective function can be formulated as a cross-entropy (CE) loss: Lrotation = CE(xrotation, yrotation; F rotation).
+• 3D Jigsaw [28]: Different from the jigsaw task in 2D vision [35] which is deﬁned as a classiﬁcation problem, 3D jigsaw solicits a segmentation model. A point cloud is evenly divided to k3 small cubes and shufﬂed to different positions. Points inside each small cube are assigned to a label signaling its original position. The problem, thus, is to correctly predict the original cube position of each point.
+Similarly, its objective is to minimize a CE loss: Ljigsaw = CE(xjigsaw, yjigsaw; F jigsaw). 3
+• Autoencoder [29, 36]: An autoencoder utilizes an encoder z = E(x) to learn a compact representa-tion and a decoder D(E(x)) to reconstruct the point cloud. We utilize different backbones as the encoder E(·) and FoldingNet [29] as the decoder D(·) due to its satisfactory performance. We use three different positional encodings: plane, 3D sphere, and 3D gaussian in our experiments. we use the Chamfer distance [37] as the reconstruction loss: Lae = Chamfer(D(E(xae)), xae; F ae).
+The detailed description of the pretext tasks can be found in the supplements.
+Adversarial Pre-training for Fine-tuning (APF). As introduced in §1, adversarial training (AT) [23, 38, 39] has been demonstrated to be one of the most longstanding and practical defenses. We thus enable AT in both pre-training and ﬁne-tuning stages: arg min
+θ
+E(x,y)∼D (cid:20) max
+σ∈S (cid:21)
+L(x + σ, y, θ) (4) where L ∈ {Lt, Lf } for loss functions in pre-training (t) and ﬁne-tuning (f ) stages, σ is the adversarial perturbations, and S represents its manipulation space (i.e., (cid:96)∞ in our study). AT essentially solves a min-max problem. In the inner loop, the optimizer tries to ﬁnd adversarial examples that maximize the target loss, and the outer loop updates the network parameters to correctly recognize the generated adversarial examples. In contrast, standard training (ST) is simply to optimize arg minθ
+In the pre-training stage of APF, we leverage both standard and adversarial training to get the pre-trained backbones Mθm and Madv
+. Given a pre-trained backbone parameterized by θm, in the
+θm second stage, we adversarially ﬁne-tune all θf := [θm; θh] for the recognition task, as illustrated in
+Figure 1(b). The network branches at the penultimate vector for the rotation task and the ﬁrst global feature [21] for the jigsaw and autoencoder tasks since they use the segmentation head.
+E(x,y)∼D [L(x, y, θ)].
+Adversarial Joint Training (AJT). Besides pre-training for ﬁne-tuning, joint training is another way to apply SSL. The objective function is formulated as: arg min
+θm;θh;θc
+E(x,y)∼D (cid:20) max
+σ∈S (cid:21)
+Lf (x + σ, y, θf )
++ λ · Lt(xt, yt, θt) (5) where λ is a hyperparameter to balance the SSL and recognition tasks. Two tasks share the same backbone θm with two different branches, parameterized by θh and θc, respectively. We also enable dual batch normalization [40] in AJT for x and xt since they should belong to different underlying distributions. We use two model-agnostic tasks, i.e., 3D rotation and jigsaw in AJT.
+Similarly, in our AJT analysis, all Lt and Lf can be formulated as CE loss. We empirically set
+λ = 1 and leverage the same branching point with APF. The whole network is trained to predict the supervised task with the original head and the SSL task with the auxiliary head (Figure 1(b)). 3 Experiments and Results
+In this section, we present our experimental setups and results. We ﬁrst introduce the adopted datasets and adversarial settings. We leverage PS as the primary threat in our study since we ﬁnd it is the most powerful adversary and the other two adversaries easier to detect. Next, we detail our extensive evaluation of two fundamental point cloud recognition tasks: classiﬁcation and part segmentation. 3.1 Evaluation Setups
+Datasets. We leverage four datasets (D): ModelNet40 [30] (40 classes), ModelNet10 [30] (10 classes), ScanObjectNN [41] (15 classes), and ShapeNetPart [42] throughout our experiments.
+Speciﬁcally, the ﬁrst three datasets are utilized for the classiﬁcation task and the last one is for the part segmentation task. ModelNet and ShapeNetPart are captured from CAD models, and ScanObjectNN is scanned and extracted from real-world indoor scenes. For each point cloud, we randomly sample 1024 points and normalize them to an edge-length-2 cube ([−1, 1]) for experimentation. We follow the default split of training and test sets in [5] and [43]. For SSL, we randomly sample yt from the pre-deﬁned label sets and further generate xt based on yt in each iteration. Speciﬁcally, we choose
+η = 6, 18 and k = 3, 4 for rotation and jigsaw tasks, followed by the suggestion of [27] and [28].
+Adversary. As introduced in §2.1, for PS, we exploit 7-step and 200-step (cid:96)∞ PGD attacks [23] targeting the cross-entropy loss for adversarial training and testing, respectively. We follow Sun et al. [21] to empirically set the perturbation boundary (cid:15) = 0.05 (||σ||∞ ≤ 0.05) since perturbed 4
+point clouds with (cid:15) = 0.05 are at the edge of correct human predictions of objects. Numerically, (cid:15) = 0.05 out of the range [-1,1] is also similar to the commonly used (cid:15) = 8 255 in 2D adversarial training [23]. Note that, different from discrete RGB values in 2D images, point cloud’s features (coordinates) are continuous. We thus utilize PGD step size α = 0.01 and α = 0.005 in the training and testing phases, respectively. We allow a stealthy perturbation of N = 100 points for PD and
+PA since we believe a larger number of modiﬁcation would be easy to detect [13, 33]. We drop the most k = 14 and 5 salient points every iteration in training and testing phases for PD, respectively.
+The behind rationale is that a severer attacker is preferred in the testing phase to evaluate the true robust accuracy. The attack setups in PA are the same as those in PS since they utilize similar (cid:96)∞ PGD perturbation methods. We exploit PS as the primary threat for the classiﬁcation and part segmentation tasks, and leverage the other two threats to further demonstrate our robustness improvements in the classiﬁcation task.
+Figure 2: Adversarial Examples of Different Threats. 3.2 Point Cloud Classiﬁcation
+In this section, we ﬁrst introduce the setups of our point cloud classiﬁcation analysis. Next, we introduce the detailed study of APF and AJT. We further evaluate our robust models with unforeseen attacks to demonstrate that our robustness improvements are non-trivial. We ﬁnd that pre-trained models from different SSL tasks preserve different vulnerabilities; hence we use simple yet powerful ensemble methods to boost the robustness. Lastly, we evaluate our methods in different threats to demonstrate their generality.
+Training Details. We generally follow data augmentation methods (e.g., jitter and translation) in
+DGCNN [15] in our study. All pre-trained and ﬁne-tuned models in APF are trained using Adam [44].
+We use batch sizes of 32 for PointNet and DGCNN, and 128 for PCT. The initial learning rate is set to 0.001 for PointNet and DGCNN, and 5 × 10−4 for PCT. Both pre-training and ﬁne-tuning take 250 epochs, where a 10× decay happens at the 100-th, 150-th, and 200-th epoch. We leverage the same training setups in AJT. All experiments are done on 1 to 4 NVIDIA V100 GPUs [45].
+Model Adaptation to AT. First, PointNet [5] leverages exponential learning rate decay, and
+DGCNN and PCT utilize cosine annealing learning rate decay. Through preliminary experiments, we ﬁnd that a piecewise decay of the learning rate im-proves the default baseline by a noticeable margin. Second, two T-Nets in PointNet [5] will also make AT unstable since they holistically modify the point cloud and features.
+We thus remove them in our experiments. Third, PCT by default leverage farthest point sampling (FPS) to sample and group local points, which will cause AT unstable since the perturbed point cloud samples different anchor points in each iteration. We replace FPS with EdgeConv on each point. It is worth noting that such a change will not modify the application of self-attention in PCT. As presented in Table 12, the modiﬁcations will both improve the standard and adversarial training baseline, and we introduce the details in the supplements.
+Table 1: Summarized Results (%) on Mod-elNet40 by Model Adaptation.
+Default AT
+Selected AT
+Default ST
+Selected ST 87.1 87.7 88.0 88.7 90.6 90.6 91.9 92.1 91.3 91.5 88.4 89.7 33.6 37.9 58.7 62.0 44.2 49.1
+PointNet
+DGCNN 0.0 0.3 2.9 3.2 0.0 2.3
+PCT
+CA
+RA
+CA
+RA
+RA
+CA 3.2.1 Self-Supervised Pre-training Helps Adversarial Fine-tuning
+We systematically evaluate all conﬁgurations in APF under PS attack. As introduced earlier, we use standard and adversarial training to get the pre-trained models. From Table 2, we can make several interesting observations. First, we ﬁnd that our APF strategy generally enhances the adversarial robustness. The best-ﬁne-tuned models achieve 14.2%, 5.4%, and 2.2% robustness improvements in PointNet, DGCNN, and PCT on ModelNet40, respectively. The enhancements on the real-world dataset, ScanObjectNN, i.e., 1.8%, 10.4%, and 6.9% in PointNet, DGCNN, and PCT, are also signiﬁcant, which demonstrate the generality of APF. Second, we ﬁnd that DGCNN outstands to be the most robust architecture, consistently achieving ∼15% stronger robustness than the other two models on both ModelNet40 and ScanObjectNN. Lastly, jigsaw-based APF offers more robustness improvements than the other two methods while maintaining slightly higher clean accuracy (CA). 2The 1-st and 2-nd highest accuracy among ﬁne-tuned models in each column are noted, and we use the same mark throughout this paper. CA and RA denote clean and robust accuracy, respectively. 5
+Table 2: Evaluation Results (%) of Adversarial Pre-training for Fine-tuning and Task Ensembles.
+ModelNet40
+ScanObjectNN
+ModelNet10
+PointNet
+DGCNN
+PCT
+PointNet
+DGCNN
+PCT
+PointNet
+DGCNN
+PCT
+Pretext Task
+Parameters
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+AT Baseline
+N/A 87.7 37.9 90.6 62.0 89.7 49.1 69.9 23.7 74.4 30.9 72.4 20.5 96.6 79.7 98.1 86.3 97.4 80.0 3D Rotation
+Adversarial 3D Rotation 3D Jigsaw
+Adversarial 3D Jigsaw
+Autoencoder
+Adversarial
+Autoencoder
+η = 6
+η = 18
+η = 6
+η = 18 k = 3 k = 4 k = 3 k = 4 sphere plane gaussian sphere plane gaussian
+Max Ensemble
+Mean Ensemble 87.2 87.2 87.6 87.4 87.6 87.6 88.2 87.8 87.4 87.1 87.4 87.1 86.9 87.1 88.5 88.4 48.0 48.3 42.1 45.7 50.1 50.9 52.1 50.5 50.0 48.8 48.9 49.7 46.6 48.5 53.5 52.5 91.4 91.1 90.8 90.9 90.0 90.1 89.6 89.9 89.9 90.1 90.8 90.0 89.7 90.7 91.4 91.4 63.6 64.1 61.8 62.9 67.4 65.3 65.8 65.3 62.8 62.2 63.3 62.2 61.8 62.7 69.4 68.7 90.2 90.2 90.4 90.4 90.4 90.3 89.8 89.6 90.2 90.2 89.7 90.3 89.7 90.2 90.5 90.4 50.7 49.5 50.8 50.1 51.1 50.2 51.3 51.0 50.7 50.2 50.3 50.0 50.0 50.5 55.4 57.9 69.1 69.5 69.6 69.3 70.8 70.2 69.0 69.9 69.9 69.4 69.7 70.4 69.2 68.8 70.8 70.8 24.5 25.0 25.3 24.5 25.5 25.4 24.8 25.5 25.1 25.5 23.8 25.2 24.0 25.0 27.3 26.9 75.7 73.8 75.0 75.0 79.0 76.2 77.5 76.1 76.1 76.2 75.6 75.2 75.6 74.7 79.1 79.0 32.9 32.2 36.8 36.3 33.8 35.3 41.3 40.6 36.0 35.6 35.8 36.2 38.0 36.3 42.6 41.9 72.6 72.5 71.6 73.1 73.4 73.8 72.5 73.1 71.3 71.1 71.3 72.6 73.3 72.6 74.0 74.2 20.6 20.1 28.7 26.9 23.2 24.6 26.3 27.4 24.1 22.6 24.8 22.2 21.6 23.4 28.9 28.4 96.8 97.1 97.0 97.0 96.8 96.7 97.0 97.0 97.0 96.8 96.8 96.7 97.0 97.0 97.2 97.0 79.0 79.3 79.9 79.7 80.0 80.2 80.6 80.5 80.5 80.8 80.5 80.4 80.6 80.2 82.5 82.4 97.7 98.5 97.7 98.0 98.0 98.0 98.5 98.0 98.2 97.8 97.8 97.5 98.0 97.8 98.5 98.6 84.9 85.3 87.5 88.2 89.6 89.0 90.5 89.1 86.8 87.6 86.4 87.3 86.1 88.4 91.0 90.9 97.2 97.8 98.0 97.4 97.8 97.7 97.4 97.3 97.1 97.0 97.1 97.5 97.7 97.4 98.1 98.0 80.4 80.3 82.2 83.7 81.5 81.9 83.5 83.9 80.1 80.1 80.1 82.1 82.5 83.2 85.2 84.9
+Speciﬁcally, jigsaw-based APF, on average, further boosts DGCNN’s robust accuracy (RA) by 2.8%, 2.2%, and 2.7% on three datasets, respectively.
+Insights. Different from 2D images that possess both texture and shape information, 3D point clouds naturally bias towards shape. In 2D image space, it is widely recognized that local and global features correspond to the texture and shape information, respectively [46]. Recent studies have demonstrated that appreciation of global/shape features can help improve model robustness on image classiﬁcation [47]. However, we ﬁnd some distinctions in point cloud recognition. As mentioned above, PointNet with only global feature learning will be easily affected by the perturbed points (Table 2). Due to the sparsity of point clouds, the local feature actually represents the smoothness of the object’s surface. Thus, learning robust local features is critical for correctly recognizing a perturbed point cloud, as it limits the adversarial effect propagation to the model output. We also include a preliminary study on contrastive pre-training [48] and ﬁnd that it can be viewed as a global feature learning scheme as well. Detailed results can be found in the supplements.
+As summarized above, DGCNN achieves the strongest robustness under AT, attributed to the hier-archical usage of EdgeConv [15]. EdgeConv dynamically aggregates local features by exploiting kNN. Such an aggregation method has the ability to calibrate the adversarial effect in the local feature learning stage. Although transformer-based architectures have gained tremendous visibility recently [49], we ﬁnd that PCT does not have a major robustness improvement compared to PointNet.
+Self-attention increases the capacity of the model architecture, but it also enlarges the receptive ﬁeld of the model [50]. In PCT, each point can inﬂuence every other point’s feature, which will potentially increase the model’s fragility [51].
+Moreover, we also ﬁnd that jigsaw-based APF is the most effective method to improve adversarial robustness, aligning well with our above insights. Jigsaw SSL makes the model learn to reassemble the randomly displaced local point clusters, where the model is enforced to learn the displaced local features. Meanwhile, to correctly reconstruct the point cloud, jigsaw SSL also requires the model to capture the global and holistic semantics. Nevertheless, rotation and autoencoder-based pre-training methods focus more on global feature learning. Therefore, we believe jigsaw-based APF is a perfect candidate to strengthen the association between local and global features in point cloud learning, hence improving the adversarial robustness under APF. 3.2.2 Adversarial Joint Training Does not Always Improve Robustness
+We further analyze the implication of SSL tasks in AJT. As presented in Table 3, AJT can still enhance the robustness in PointNet and DGCNN. For instance, AJT improves their RA by 1.8% and 8.0% on ScanObjectNN, respectively. However, AJT overall cannot outperform APF in point cloud recognition. Especially, we ﬁnd AJT even degrades the RA of PCT compared to the standard AT.
+Insights. We ﬁnd this also to be related to the natural characteristic of point cloud data. Although
+SSL can help models learn strong priors and context information, it is still a separate learning task.
+Rotated and disassembled images still preserve similar local features to the original images since the 6
+Table 3: Evaluation Results (%) of Adversarial Joint Training.
+ModelNet40
+ScanObjectNN
+ModelNet10
+PointNet
+DGCNN
+PCT
+PointNet
+DGCNN
+PCT
+PointNet
+DGCNN
+PCT
+Pretext Task
+Parameters
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+CA
+RA
+AT Baseline
+N/A 87.7 37.9 90.6 62.0 89.7 49.1 69.9 23.7 74.4 30.9 72.4 20.5 96.6 79.7 98.1 86.3 97.4 80.0 3D Rotation 3D Jigsaw
+Autoencoder
+η = 6
+η = 18 k = 3 k = 4 sphere plane gaussian 86.8 86.5 87.6 87.2 87.5 87.4 86.9 45.0 46.4 42.5 46.7 44.4 42.1 43.9 91.2 91.3 91.0 91.1 90.9 90.7 90.9 60.7 62.0 62.3 61.7 62.1 61.9 61.9 89.5 88.9 90.2 89.8 89.6 89.3 88.9 44.3 42.9 43.1 40.9 49.2 48.7 49.2 67.8 68.7 69.4 70.0 68.9 68.5 68.7 24.3 25.1 25.5 24.6 24.2 23.9 24.4 74.2 76.2 77.1 75.9 75.5 75.6 76.3 37.8 37.2 38.9 38.4 36.5 34.7 35.1 72.3 72.1 72.1 73.7 72.5 72.8 72.1 20.3 19.8 20.7 20.8 20.5 20.6 20.5 96.6 97.0 96.8 96.8 96.7 96.7 96.6 79.0 79.9 79.8 77.9 79.8 79.7 79.7 98.1 97.9 98.4 98.0 98.2 98.1 98.3 86.3 85.7 87.9 88.6 86.3 86.2 86.9 97.8 98.1 97.7 97.1 97.5 97.4 97.5 73.8 75.6 76.8 78.0 80.3 79.9 80.0
+RGB values do not change, so that the auxiliary optimization in AJT will not distract AT but help models learn robust global features [24]. However, point cloud models take point coordinates xyz as input. Rotated and disassembled point clouds have signiﬁcant variations in their coordinates’ numeric values. Although we apply dual batch normalization [52] to migrate the feature heterogeneous problems, such discrimination will consequently distract model learning in AJT, and thus hurt the RA performance. The usage of self-attention in PCT will further expand this impact since it introduces a global receptive ﬁeld [51]. We ﬁnd that the results of AJT using autoencoders are more stable than the other two tasks. We believe it is because the input for the autoencoder is the same as the recognition task so that the distributional gap is small. However, it is still worse than the pre-training scheme. 3.2.3 Robustness against Unforeseen Attacks and Noises
+We have so far shown that APF generally improves the robustness of point cloud classiﬁcation. In this section, we leverage unforeseen attacks to further demonstrate that the enhancements are non-trivial.
+We select the ﬁne-tuned models with the highest RA in Table 2, and all results here are averaged from
+ﬁve runs using different random seeds.
+We leverage unforeseen attacks: Auto Attack (AA) [53], Momentum Iterative Method (MIM) [54], and PGD with both cross-entropy and margin loss (i.e., Lmargin = Z(x)y − maxi(cid:54)=y Z(x)i, where
+Z(x) is the logit output of the target classiﬁer). We elaborate the details of AA (i.e., A-PGD) and
+MIM in the supplements. All attacks use 200 steps to ﬁnd the potential adversarial examples. As shown in Figure 3(a) and 3(b), the best ﬁne-tuned models consistently achieve higher RA than models from standard AT with 2.6% - 15.3% and 1.0% - 10.1% improvements on ModelNet40 and
+ScanObjectNN, respectively. We ﬁnd that DGCNN still outperforms the other two models achieving the highest RA even against the strongest Auto Attacks [53].
+Moreover, we exploit the transfer attack to conﬁrm the effectiveness of APF. We ﬁne-tune ﬁve models using the same (best) setting but different random seeds for transfer-based attacks and test the transferability of generated adversarial examples among different models. As Figure 3(d) and 3(e) show, adversarial examples cannot transfer well and there is a ∼10% gap in RA compared to attacks on target models, which further validates the real robustness improvements.
+We also ﬁnd that Gaussian and uniform noises are ineffective in breaking model robustness, and the RA is therefore close to the CA. As shown in Figure 3(d) and 3(e), the ﬁne-tuned models still outperform standard AT baseline by 0.1% - 2.2% and 1.0% - 5.7% on ModelNet40 and ScanObjectNN, respectively, in RA. More evaluation results of our adversarial training strategy are elaborated in the supplements. 3.2.4 Attack Transferability and Task Ensemble
+Since we leverage three pre-text tasks for self-supervised pre-training, we also test the trans-ferability of adversarial exam-ples generated by models pre-trained on different SSL tasks.
+As shown in Figure 4, different
+ﬁne-tuned models preserve dif-ferent vulnerabilities, and there is at least ∼10% gain of RA when transferring attacks on mod-(a) PointNet. (b) DGCNN.
+Figure 4: Robust Accuracy on Transfer Attacks among Fine-tuned
+Models from Different SSL Tasks on ModelNet40. (c) PCT. 7
+(a) ModelNet40. (b) ScanObjectNN. (c) ModelNet10. (d) ModelNet40. (e) ScanObjectNN. (f) ModelNet10.
+Figure 3: Evaluation Results of Unforeseen Attacks. Plots in the ﬁrst row present the evaluation results of unforeseen adversarial attacks, where “-M” denotes the attacks on margin loss. Plots in the second row present the evaluation results of noise and transfer attacks. jigsaw, Li rotation, Li els ﬁne-tuned from different tasks on ModelNet40. We thus combine the models and fur-ther test the ensemble model’s robustness. We use two ensemble methods, which are tak-ing the max and mean value of the stacked logits from individual models i.e., Li ensemble = max/mean([Li autoencoder]) where Li denotes the i-th value in the logit L. By doing so, we form a “wider” model where the gradients can still propagate smoothly back to the input. Therefore, we also exploit the 200-step PGD attack to test their robustness. As presented in the last two rows of Table 2, both ensemble models can further boost the RA by a signiﬁcant margin while maintaining similar clean accuracy. For example, our best ensemble models achieve robust accuracy of 53.5% (+15.6%), 69.4% (+7.4%) and 57.9% (+8.8%) with PointNet, DGCNN, and PCT on ModelNet40 respectively. It is worth noting that our ﬁne-tuning strategy does not enforce a diversity regulation, unlike [25], which further demonstrates that pre-training on different pretext tasks indeed brings distinct context information into pre-trained models. 3.2.5 Robustness against Other Point Cloud Threats
+As mentioned before, we also consider two other threats that speciﬁcally target point cloud recognition.
+As we have demonstrated that jigsaw-based APF reaches the best robustness enhancement under point shifting (PS), we replace PS attack in AT with salient point dropping (PD) and point adding (PA) to test the effectiveness of jigsaw-based APF strategy.
+Table 4: Evaluation (%) of PD on ScanObjectNN.
+Table 5: Evaluation (%) of PA on ScanObjectNN.
+PointNet
+DGCNN
+PCT
+PointNet
+DGCNN
+PCT
+Pretext Task
+Parameters
+CA
+RA
+CA
+RA
+CA
+RA
+Pretext Task
+Parameters
+CA
+RA
+CA
+RA
+CA
+RA
+ST Baseline
+AT Baseline 3D Jigsaw
+Adversarial 3D Jigsaw
+N/A
+N/A k = 3 k = 4 k = 3 k = 4 69.8 48.5 79.3 60.9 74.2 56.1
+ST Baseline 70.9 64.2 76.2 77.1 73.3 73.7
+AT Baseline 71.3 72.5 71.1 70.9 65.2 66.3 64.7 65.7 81.4 81.2 78.7 79.3 80.0 80.7 79.5 80.4 76.8 77.8 75.4 75.9 76.9 80.1 76.2 78.3 3D Jigsaw
+Adversarial 3D Jigsaw
+N/A
+N/A k = 3 k = 4 k = 3 k = 4 69.8 57.6 79.3 38.0 74.2 39.6 69.0 59.4 77.4 63.5 72.1 56.8 70.2 70.4 70.4 70.7 59.9 60.6 62.5 59.4 82.3 83.1 77.5 79.5 66.3 66.6 67.8 68.2 75.7 76.4 75.2 74.4 60.4 58.7 64.4 65.5
+We ﬁnd that jigsaw-based APF can still strengthen the robustness under these two threats on three datasets. Especially, as shown in Table 4 and 5, DGCNN still achieves the highest RA, which on average outperforms PointNet and PCT by 14.8% and 2.3% in PD-AT, and 6.6% and 4.9% in PA-AT, respectively, which is consistent with our previous ﬁndings. Moreover, as PD and PA tend to be much weaker adversaries than the PS attack, the enhancements mainly appear in the challenging real-world dataset, ScanObjectNN, where jigsaw-based APF boosts the RA of DGCNN by 3.6% and 4.7% under
+PD and PA. The key insights still hold in ModelNet datasets under these two threats, and we present the detailed results in the supplements due to space constraints. 8
+3.3 Point Cloud Part Segmentation
+In addition to object classiﬁcation, we conduct the ﬁrst study on analyzing the robustness of the point cloud part segmentation on ShapeNetPart [42] with 17 classes of 3D objects. Apart from semantic segmentation that all samples from a dataset share the same set of labels, part segmentation task assigns a unique label set for each class of objects. For instance, the class of chair has the label set: {seat, back, arm, leg} and the airplane has {wing, body, tail, engine}, as illustrated in Figure 5.
+We use the same backbone with a segmentation head for this task and mean intersection-over-union (mIoU) [43] as the evaluation metric. Especially since each class possesses its own label set, the models also take the category (one-hot vector) as input. As we ﬁnd APF is an effective and efﬁcient strategy, we use the PS attack with the same AT and APF setups as the classiﬁcation task to train the models (§ 3.1).
+Table 6: Evaluation Results (%) of the Part Segmentation Task.
+PointNet
+DGCNN
+PCT
+Pretext Task
+Parameters C-mIoU R-mIoU C-mIoU R-mIoU C-mIoU R-mIoU
+ST Baseline
+AT Baseline 3D Rotation
+Adversarial 3D Rotation 3D Jigsaw
+Adversarial 3D Jigsaw
+N/A
+N/A
+η = 6
+η = 18
+η = 6
+η = 18 k = 3 k = 4 k = 3 k = 4 83.2 79.2 79.1 79.3 79.3 79.1 79.4 79.4 79.7 79.9 32.5 62.7 63.0 63.0 62.9 62.6 63.0 63.1 62.5 62.7 84.2 82.9 82.8 82.9 82.9 82.9 82.7 82.9 82.8 82.7 42.0 69.5 69.3 69.5 69.2 69.0 70.1 70.3 69.7 70.3 84.2 82.6 82.8 82.9 82.2 81.0 82.8 82.4 81.1 82.0 34.6 67.8 67.7 67.5 67.2 65.7 68.1 68.4 65.8 66.7
+Figure 5: Illustration of the Point Cloud
+Part Segmentation Using “Chair”.
+Table 63 summarizes the quantitative results. To our surprise, we ﬁnd that part segmentation is a more robust task than classiﬁcation. The robust mIoU is relatively high even in the ST baseline. Moreover,
+DGCNN still achieves the highest clean and robust mIoU in part segmentation, further conﬁrming its supremacy in point cloud learning. Furthermore, jigsaw-based APF can also promote the robustness of part segmentation by 0.4%, 0.8%, and 0.6% in PointNet, DGCNN, and PCT, respectively.
+Insights. We attribute the natural robustness of part segmentation to the intrinsic feature of point clouds. Since all point clouds in ShapeNetPart are sampled from CAD models, they are posed to face the same direction. Thus, models may memorize the 3D space corresponding to the speciﬁc label during learning. Taking the class of chair as an example, the points whose z ∈ [−1, 0] most likely belong to the “leg” label. However, (cid:96)∞-based adversary with (cid:15) = 0.05 might not be able to perturb this strong pattern (Figure 5). We also envision that the robustness of part segmentation may help and transfer to other complex learning tasks if appropriately used. Moreover, DGCNN with jigsaw-based APF still delivers the best performance, which further generalizes our previous ﬁndings on the importance of balancing local and global features in point cloud learning. 4

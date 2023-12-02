@@ -1,0 +1,4962 @@
+Abstract Spatial-Temporal Reasoning via Probabilistic Abduction and Execution
+Chi Zhang‹
+Baoxiong Jia‹
+Song-Chun Zhu
+Yixin Zhu
+UCLA Center for Vision, Cognition, Learning, and Autonomy
+{chi.zhang,baoxiongjia}@ucla.edu, sczhu@stat.ucla.edu, yixin.zhu@ucla.edu
+Abstract
+Spatial-temporal reasoning is a challenging task in
+Artiﬁcial Intelligence (AI) due to its demanding but unique nature: a theoretic requirement on representing and rea-soning based on spatial-temporal knowledge in mind, and an applied requirement on a high-level cognitive system ca-pable of navigating and acting in space and time. Recent works have focused on an abstract reasoning task of this kind—Raven’s Progressive Matrices (RPM). Despite the encouraging progress on RPM that achieves human-level performance in terms of accuracy, modern approaches have neither a treatment of human-like reasoning on generaliza-tion, nor a potential to generate answers. To ﬁll in this gap, we propose a neuro-symbolic Probabilistic Abduction and
+Execution (PrAE) learner; central to the PrAE learner is the process of probabilistic abduction and execution on a probabilistic scene representation, akin to the mental ma-nipulation of objects. Speciﬁcally, we disentangle percep-tion and reasoning from a monolithic model. The neural visual perception frontend predicts objects’ attributes, later aggregated by a scene inference engine to produce a prob-abilistic scene representation. In the symbolic logical rea-soning backend, the PrAE learner uses the representation to abduce the hidden rules. An answer is predicted by exe-cuting the rules on the probabilistic representation. The en-tire system is trained end-to-end in an analysis-by-synthesis manner without any visual attribute annotations. Extensive experiments demonstrate that the PrAE learner improves cross-conﬁguration generalization and is capable of ren-dering an answer, in contrast to prior works that merely make a categorical choice from candidates. 1.
+
+Introduction
+While “thinking in pictures” [13], i.e., spatial-temporal reasoning, is effortless and instantaneous for humans, this signiﬁcant ability has proven to be particularly challeng-‹ indicates equal contribution. ing for current machine vision systems [27]. With the promising results [13] that show the very ability is strongly correlated with one’s logical induction performance and a crucial factor for the intellectual history of technology development, recent computational studies on the prob-lem focus on an abstract reasoning task relying heavily on “thinking in pictures”—Raven’s Progressive Matrices (RPM) [3, 24, 51, 52]. In this task, a subject is asked to pick a correct answer that best ﬁts an incomplete ﬁgure ma-trix to satisfy the hidden governing rules. The ability to solve RPM-like problems is believed to be critical for gener-ating and conceptualizing solutions to multi-step problems, which requires mental manipulation of given images over a time-ordered sequence of spatial transformations. Such a task is also believed to be characteristic of relational and analogical reasoning and an indicator of one’s ﬂuid intelli-gence [6, 18, 26, 55].
+State-of-the-art algorithms incorporating a contrasting mechanism and perceptual inference [17, 72] have achieved decent performance in terms of accuracy. Nevertheless, along with the improved accuracy from deep models come critiques on its transparency, interpretability, generalization, and difﬁculty to incorporate knowledge. Without explic-itly distinguishing perception and reasoning, existing meth-ods use a monolithic model to learn correlation, sacriﬁcing transparency and interpretability in exchange for improved performance [17, 20, 53, 59, 70, 72, 75]. Furthermore, as shown in experiments, deep models nearly always overﬁt to the training regime and cannot properly generalize. Such a
+ﬁnding is consistent with Fodor [11] and Marcus’s [43, 44] hypothesis that human-level systematic generalizability is hardly compatible with classic neural networks; Marcus postulates that a neuro-symbolic architecture should be re-cruited for human-level generalization [7, 8, 9, 41, 42, 66].
+Another defect of prior methods is the lack of top-down and bottom-up reasoning [72]: Human reasoning applies a generative process to abduce rules and execute them to synthesize a possible solution in mind, and discriminatively selects the most similar answer from choices [19]. This bi-directional reasoning is in stark contrast to discriminative-only models, solely capable of making a categorical choice. 9736
+Psychologists also call for weak attribute supervision in
+RPM. As isolated Amazonians, absent of schooling on primitive attributes, could still correctly solve RPM [5, 25], an ideal computational counterpart should be able to learn it absent of visual attribute annotations. This weakly-supervised setting introduces unique challenges: How to jointly learn these visual attributes given only ground-truth images? With uncertainties in perception, how to abduce hidden logic relations from it? How about executing the symbolic logic on inaccurate perception to derive answers?
+To support cross-conﬁguration generalization and an-swer generation, we move a step further towards a neuro-symbolic model with explicit logical reasoning and human-like generative problem-solving while addressing the chal-lenges. Speciﬁcally, we propose the Probabilistic Abduc-tion and Execution (PrAE) learner; central to it is the pro-cess of abduction and execution on the probabilistic scene
+Inspired by Fodor, Marcus, and neuro-representation. symbolic reasoning [15, 40, 67, 68], the PrAE learner dis-entangles the previous monolithic process into two separate modules: a neural visual perception frontend and a sym-bolic logical reasoning backend. The neural visual frontend operates on object-based representation [15, 29, 40, 67, 68] and predicts conditional probability distributions on its at-tributes. A scene inference engine then aggregates all object attribute distributions to produce a probabilistic scene rep-resentation for the backend. The symbolic logical backend abduces, from the representation, hidden rules that govern the time-ordered sequence via inverse dynamics. An exe-cution engine executes the rules to generate an answer rep-resentation in a probabilistic planning manner [12, 21, 31], instead of directly making a categorical choice among the candidates. The ﬁnal choice is selected based on the diver-gence between the generated prediction and the given candi-dates. The entire system is trained end-to-end with a cross-entropy loss and a curricular auxiliary loss [53, 70, 72] with-out any visual attribute annotations. Fig. 1 compares the proposed PrAE learner with prior methods.
+The unique design in PrAE connects perception and rea-soning and offers several advantages: (i) With an inter-mediate probabilistic scene representation, the neural vi-sual perception frontend and the symbolic logical reason-ing backend can be swapped for different task domains, enabling a greater extent of module reuse and combina-torial generalization. (ii) Instead of blending perception and reasoning into one monolithic model without any ex-plicit reasoning, probabilistic abduction offers a more inter-pretable account for reasoning on a logical representation.
+It also affords a more detailed analysis into both percep-tion and reasoning. (iii) Probabilistic execution permits a generative process to be integrated into the system. Sym-bolic logical constraints can be transformed by the execu-tion engine into a forward model [28] and applied in a prob-(a)
+Existing methods: feature manipulation
+Answer: 5
+Holistic encoder + MLP
+.
+.
+.
+Answer: 5
+...<
+Shared encoder + Potential
+Answer: 5
+Relational module + MLP (b)
+Our approach: probabilistic abduction and execution
+Probabilistic abduction via inverse dynamics
+. . .
+Number: Plus
+Probabilisitic execution via forward model
+X
+. . .
+. . .
+Context panels
+Candidate panels
+Figure 1. Differences between (a) prior methods and (b) the pro-posed approach. Prior methods do not explicitly distinguish per-ception and reasoning; instead, they use a monolithic model and only differ in how features are manipulated, lacking semantics and probabilistic interpretability. In contrast, the proposed approach disentangles this monolithic process: It perceives each panel of
+RPM as a set of probability distributions of attributes, performs logical reasoning to abduce the hidden rules that govern the time-ordered sequence, and executes the abduced rules to generate an-swer representations. A ﬁnal choice is made based on the diver-gence between predicted answer distributions and each candidate’s distributions; see Section 2 for a detailed comparison. abilistic manner to predict the ﬁnal scene representation, such that the entire system can be trained by analysis-by-synthesis [4, 14, 16, 22, 23, 36, 62, 63, 64, 65, 69, 77]. (iv)
+Instead of making a deterministic decision or drawing lim-ited samples, maintaining probabilistic distributions brings in extra robustness and fault tolerance and allows gradients to be easily propagated.
+This paper makes three major contributions: (i) We pro-pose the Probabilistic Abduction and Execution (PrAE) learner. Unlike previous methods, the PrAE learner disen-tangles perception and reasoning from a monolithic model with the reasoning process realized by abduction and execu-tion on a probabilistic scene representation. The abduction process performs interpretable reasoning on perception re-sults. The execution process adds to the learner a generative
+ﬂavor, such that the system can be trained in an analysis-by-synthesis manner without any visual attribute annotations. (ii) Our experiments demonstrate the PrAE learner achieves better generalization results compared to existing methods in the cross-conﬁguration generalization task of RPM. We also show that the PrAE learner is capable of generating an-swers for RPM questions via a renderer. (iii) We present analyses into the inner functioning of both perception and reasoning, providing an interpretable account of PrAE. 9737 l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+S
+Y m n c 6 o
+L
+A
+L
+Q
+R t 8 a x e j
+Z
+I 1
++ e e u 1 s
+=
+"
+>
+A
+A
+A
+B 6 n i c b
+V
+B
+N
+S 8
+N
+A
+E
+J 3 4
+W e t
+X 1 a
+O
+X x
+S
+J 4
+C k k 9 6
+L
+H o x
+W
+N
+F
++ w
+F t
+K
+J v t p l 2 6 2
+Y
+T d i
+V
+B
+C f 4
+I
+X
+D 4 p 4 9
+R d 5 8 9
++ 4 b
+X
+P
+Q 1 g c
+D j
+/ d m m
+J k
+X p l
+I
+Y 9
+L x v
+Z 2 1 9
+Y 3
+N r u 7
+R
+T 3 t 3 b
+P z i s
+H
+B 2 3
+T
+J
+J p x p s s k
+Y n u h
+N
+R w
+K
+R
+R v o k
+D
+J
+O 6 n m
+N
+A 4 l b 4 f j 2 5 n f f u
+L a i
+E
+Q 9 4 i
+T l
+Q
+U y
+H
+S k
+S
+C
+U b
+T
+S g
++ u 6
+/
+U r
+V c 7 0 5 y
+C r x
+C 1
+K
+F
+A o 1
++ 5 a s 3
+S
+F g
+W c 4
+V
+M
+U m
+O 6 v p d i k
+F
+O
+N g k k
++
+L f c y w 1
+P
+K x n
+T
+I u 5
+Y q
+G n
+M
+T 5
+P
+N
+T p
++
+T c
+K g
+M
+S
+J d q
+W
+Q j
+J
+X f 0
+/ k
+N
+D
+Z m
+E o e 2
+M 6
+Y 4
+M s v e
+T
+P z
+P 6 2
+Y
+Y
+X
+Q e 5
+U
+G m
+G
+X
+L
+H
+F o i i
+T
+B
+B
+M y
++ 5 s
+M h
+O
+Y
+M 5 c
+Q
+S y r
+S w t x
+I 2 o p o y t
+O m
+U b
+Q j
++ 8 s u r p
+F
+V z
+/
+U u 3 d l
++ r 1 m
++
+K
+O
+E p w
+C m d w
+A
+T 5 c
+Q
+R 3 u o
+A
+F
+N
+Y
+D
+C
+E
+Z 3 i
+F
+N 0 c 6
+L 8 6 7 8 7
+F o
+X
+X
+O
+K m
+R
+P 4
+A
++ f z
+B 0 y
+S j
+S
+Q
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" i
+M x h
+E
+P j n
+J
+V 1 9
+R
++ l
+S h
+D
+N
+V z
+Z
+T 7 a 2 4
+=
+"
+>
+A
+A
+A
+B
+/ 3 i c b
+V
+D
+L
+S s
+N
+A
+F
+L 3 x
+W e u r
+K r h x
+M 1 g
+E
+Q
+S h
+J
+X e i y 6
+K
+Y
+L h
+Q r 2
+A
+W 0 o k 8 m k
+H
+T r
+J h
+J m
+J
+U
+G
+I
+X
+/ o o b
+F 4 q 4 9
+T f c
++
+T d
+O 2 i y 0 9 c
+L
+A 4
+Z x z 7 5 1 7 v
+J g z p
+W 3 7 2 1 p a
+X l l d
+W y 9 s
+F
+D e 3 t n d 2
+S 3 v 7
+L
+S
+U
+S
+S
+W i
+T
+C
+C 5 k x 8
+O
+K c h b
+R p m a a 0 0 4 s
+K
+Q 4 9
+T t v e 6
+D r
+T 2 w 9
+U
+K i a i e z 2
+O q
+R v i
+Q c
+Q
+C
+R r
+A 2
+V
+L 9 0
+W
+B f
+Z
+F k
+Y
+Q j
+Y j w q
+U
+R n 6
+P a m 0
+S
++
+V 7
+Y o 9
+L b
+Q
+I n
+B y
+U
+I
+S
+/ j
+/
++ r 5 g i
+Q h j
+T
+T h
+W
+K m u
+Y 8 f a
+T b
+E 0 o z m d
+F
+H u
+J o j
+E m
+I z y g
+X
+Q
+M j
+H
+F
+L l p t
+P
+/
+T 9
+C
+J
+Y
+X w
+U
+C
+G l e p
+N
+G
+U
+/ d 2
+R 4 l
+C p c e g
+Z
+Z 4 j 1
+U
+M 1 r
+G f m f 1 k 1 0 c
+O m m
+L
+I o
+T b c 6 b
+L
+Q o
+S j r
+R
+A
+W
+R j
+I
+Z 5
+I
+S z c c
+G
+Y
+C
+J
+Z
+F g
+M
+Z
+Y o m
+J
+N p
+E
+V
+T
+Q j
+O
+/
+M m
+L o
+F
+W t
+O
+O e
+V 6 l 2 1
+X
+L v
+K 4 y j
+A
+E
+R z
+D
+K
+T h w
+A
+T
+W o
+Q w
+O a
+Q
+O
+A
+R n u
+E
+V 3 q w n 6 8
+V 6 t z 5 m 1 i
+U r 7 z m
+A
+P 2
+V 9
+/ g
+C
+E
+B
+J
+U c
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" 6
+X
+Q
+G
+V
++
+C
+/
+G j o k
+M g
+O y g n
+O
+P y
++ c m
+S i
+U
+=
+"
+>
+A
+A
+A
+C
+A
+H i c b
+V
+D
+L
+S s
+N
+A
+F
+J 3
+U
+V 6 2 v q g s
+X b g a
+L
+I
+A g l q
+Q t d
+F t 2 4
+U
+K h i
+H 9
+C
+G
+M p n c t
+E
+M n m
+T
+A z
+E
+U r o x l 9 x 4 0
+I
+R t 3 6
+G
+O
+/
+/
+G a
+Z q
+F t h 4
+Y
+O
+J x z
+L n f u 8
+W
+L
+O l
+L b t b 6 u w t
+L y y u l
+Z c
+L 2 1 s b m 3 v l
+H f 3
+W k o k k k
+K
+T
+C i 5 k x y
+M
+K
+O
+I u g q
+Z n m 0
+I k l k
+N
+D j 0
+P
+Z
+G
+V 1
+O
+/
+/
+Q h
+S
+M
+R
+E 9 6
+H
+E
+M b k g
+G
+E
+Q s
+Y
+J d p
+I
+/ f
+L
+B
+P f
+C
+M
+E o 5
+D 4
+S c c 8
+C m
++ v
+W n 0 y x
+W 7 a m f
+A i 8
+T
+J
+S
+Q
+X l
+M
+P m v n i 9 o
+E k
+K k
+K
+S d
+K d
+R 0 7 1 m 5
+K p
+G a
+U w 6
+T
+U
+S x
+T
+E h
+I 7
+I
+A
+L q
+G
+R i
+Q
+E 5 a b
+Z
+A
+R
+N 8 b
+B
+Q f
+B 0
+K a
+F 2 m c q b 8 n
+U h
+I q
+N
+Q 4 9 k w y
+J
+H q p 5 b y r
++ 5 3
+U
+T
+H
+V y 4
+K
+Y v i
+R
+E
+N
+E
+Z 4 u
+C h
+G
+M t 8
+L
+Q
+N 7
+D
+M
+J
+V
+P
+O x
+I
+Y
+R
+K
+Z v 6
+K 6
+Z
+B
+I
+Q r
+X p r
+G
+R
+K c
+O
+Z
+P
+X i
+S t
+W t
+U 5 q 9 b u a p
+X 6
+Z
+V 5
+H
+E
+R 2 i
+I 3
+S
+C
+H
+H
+S
+O 6 u g a
+N
+V
+A
+T
+U
+T
+R
+B z
++ g
+V v
+V l
+P 1 o v 1 b n 3
+M o g
+U r n 9 l
+H f 2
+B 9
+/ g
+B f e
+J
+W
+Y
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+S
+Y m n c 6 o
+L
+A
+L
+Q
+R t 8 a x e j
+Z
+I 1
++ e e u 1 s
+=
+"
+>
+A
+A
+A
+B 6 n i c b
+V
+B
+N
+S 8
+N
+A
+E
+J 3 4
+W e t
+X 1 a
+O
+X x
+S
+J 4
+C k k 9 6
+L
+H o x
+W
+N
+F
++ w
+F t
+K
+J v t p l 2 6 2
+Y
+T d i
+V
+B
+C f 4
+I
+X
+D 4 p 4 9
+R d 5 8 9
++ 4 b
+X
+P
+Q 1 g c
+D j
+/ d m m
+J k
+X p l
+I
+Y 9
+L x v
+Z 2 1 9
+Y 3
+N r u 7
+R
+T 3 t 3 b
+P z i s
+H
+B 2 3
+T
+J
+J p x p s s k
+Y n u h
+N
+R w
+K
+R
+R v o k
+D
+J
+O 6 n m
+N
+A 4 l b 4 f j 2 5 n f f u
+L a i
+E
+Q 9 4 i
+T l
+Q
+U y
+H
+S k
+S
+C
+U b
+T
+S g
++ u 6
+/
+U r
+V c 7 0 5 y
+C r x
+C 1
+K
+F
+A o 1
++ 5 a s 3
+S
+F g
+W c 4
+V
+M
+U m
+O 6 v p d i k
+F
+O
+N g k k
++
+L f c y w 1
+P
+K x n
+T
+I u 5
+Y q
+G n
+M
+T 5
+P
+N
+T p
++
+T c
+K g
+M
+S
+J d q
+W
+Q j
+J
+X f 0
+/ k
+N
+D
+Z m
+E o e 2
+M 6
+Y 4
+M s v e
+T
+P z
+P 6 2
+Y
+Y
+X
+Q e 5
+U
+G m
+G
+X
+L
+H
+F o i i
+T
+B
+B
+M y
++ 5 s
+M h
+O
+Y
+M 5 c
+Q
+S y r
+S w t x
+I 2 o p o y t
+O m
+U b
+Q j
++ 8 s u r p
+F
+V z
+/
+U u 3 d l
++ r 1 m
++
+K
+O
+E p w
+C m d w
+A
+T 5 c
+Q
+R 3 u o
+A
+F
+N
+Y
+D
+C
+E
+Z 3 i
+F
+N 0 c 6
+L 8 6 7 8 7
+F o
+X
+X
+O
+K m
+R
+P 4
+A
++ f z
+B 0 y
+S j
+S
+Q
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" 0
+G
+V n
+F d 3
+D p e
+N
+U r n s f 8
+Y
+/ a r 0 o
+U
++
+E w
+=
+"
+>
+A
+A
+A
+C
+A 3 i c b
+V
+D
+L
+S g
+M x
+F
+M 3 4 r
+P
+U 1 6 k 4 3 w
+S
+I
+I
+Q p m p
+C 1 0
+W 3 b i s a
+B
+/
+Q
+D i
+W
+T u d
+O
+G
+Z p
+I h y
+Q i l
+F
+N z 4
+K 2 5 c
+K
+O
+L
+W n 3
+D n 3 5 i 2 s 9
+D
+W
+A 4
+H
+D
+O f d w c 0
++
+Y c q a
+N 5 3 0 7
+S 8 s r q 2 v r h
+Y 3 i 5 t b 2 z q 6 7 t 9
+/
+Q
+M l
+M
+U 6 l
+R y q
+V o h 0 c
+C
+Z g
+L p h h k
+M r
+V
+U
+C
+S k
+E
+M z
+H
+F x
+P
+/
+O
+Y
+D
+K
+M 2 k u
+D f
+D
+F
+I
+K
+E 9
+A
+S
+L
+G
+S
+X
+G
+S l 3 3 8
+K 5
+P
+F
+E
+Q
+Y
+B
+J
+U
+R
+K
+H y
+G a 9
+K
+A
+M
+I z w r l v y y t 4
+U e
+J
+H 4
+O
+S m h
+H
+L
+W u
++ 9
+W
+J
+J
+M 0
+S
+G 6 e c a
+N 3 2 v d
+Q
+E
+I 6
+I
+M o x z
+G x
+U 6 m
+I
+S
+V 0
+Q
+H r
+Q t l
+S
+Q
+B
+H
+Q w m t 4 w x i d
+W i
+X
+A s l
+X 3
+C 4
+K n 6
+O z
+E i i d b
+D
+J
+L
+S
+T
+C
+T
+F 9
+P e 9
+N x
+P
++ 8 d m b i y 2
+D
+E
+R
+J r
+Z u
++ h s
+U
+Z x x b
+C
+S e
+F
+I
+I j p o
+A a
+P r
+S
+E
+U
+M
+X s
+X z
+G 1 n
+R
+B q b
+G 1
+F
+W 4
+I
+/ f
+/
+I i a
+V
+T
+K
+/ n m 5 c l s p
+V a
+/ y
+O g r o
+C
+B 2 j
+U
++
+S j
+C 1
+R
+F
+N 6 i
+G 6 o i i
+R
+/
+S
+M
+X t
+G b 8
++
+S 8
+O
+O
+/
+O x 2 x 0 y c k z
+B
++ g
+P n
+M 8 f
+D
+S
+K
+X
+I w
+=
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+V i a
+X q
+H b l
+A y
+I o
+E 4 7 i
+K s
+G z m
+G r 7
+P
+P w
+=
+"
+>
+A
+A
+A
+C
+G
+H i c b
+V
+D
+L
+S g
+M x
+F
+M 3 4 t r 6 q
+L h
+U
+J i u
+C q
+T h
+V 8 r
+Y o i u
+F
+S w
+K r
+S l
+Z
+N
+I 7 b
+T
+D
+J
+D
+M k d s
+Q x d
++ g l u
+/
+J
+K
+C
+G x e
+K u
+H
+X n
+N
+/ g
+T p l
+M
+R
+X w c
+C h 3
+P u 4 e a e
+I
+J b
+C o u
++
+/ e
+Q
+O
+D
+Q 8
+M j o 2
+P j u
+Y n
+J q e m
+Z
+/
+O z c m
+Y 0
+S w 6
+H
+M
+I x m
+Z i 4
+B
+Z k
+E
+J
+D
+G
+Q
+V
+K u
+I g
+N
+M
+B
+V
+I
+O
+A 8 u
+D 3 r
++
++
+R
+U
+Y
+K y
+J 9 i u 0
+Y a o o 1 t
+Q g
+F
+Z
++ i k e n 6 9 i n
+C
+N
+Q
+Z g e
+X r t l
+Q j e p
+A m x
+F
+D b t
+H
+Q 2
+C
+Y
+G
+K
+C
+K a
+R
+E n
+M g t 0 6 v k
+V v
++
+B n o
+H 9
+J 8
+Z
+O s l
+B a 7
+J
++ 8 3
+S 9 3 j e v 6 1 2 o h 4 o k
+A j l 8 z a
+S t
+G
+P s
+Z
+Y y g 4
+J
+L 6
+O
+S q i
+Y
+W
+Y 8
+U v
+W h
+I q j m i m w t
+T
+Q 7 r
+E
+N
+X n d
+K g
+Y
+W
+T c 0 0 g z 9
+X s i
+Z c r a t g r c p
+G
+L
+Y s r
++ 9 n v i f
+V 0 k w 3
+K m l
+Q s c
+J g u b 9
+R
+W
+E i
+K
+U a 0 1 x
+J t
+C
+A
+M c
+Z d s
+R x o 1 w f 6
+W 8 x
+Q z j 6
+L r
+M
+Z
+S
+X s 9 r
+D 1 d f
+J f c r
+Z
+R
+K
+G 4
+W
+N k 9 c
+G
+/ u k j z
+G y
+Q
+J b
+J
+G i m
+S b
+V
+I i
+R
++
+S
+Y l
+A k n t
++
+S e
+P
+J
+I n 7 8 5 7 8
+J 6 9 l
+/ 7 o g
+P e
+Z m
+S c
+/ 4
+L 1
++
+A
+G d
+T p
+R
+Y
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" x
+T
+I v
+U
+X
+E 5 z 3 v 6 x
+L 2
+U e u d
+G
+P b a 3 i l o
+=
+"
+>
+A
+A
+A
+B 8
+H i c b
+V
+D
+L
+S s
+N
+A
+F
+L 2 p r 1 p f
+V
+Z d u
+B o v g q i
+Q t
+P l d
+V
+N y 4 r 2
+I e 0 o
+U y m k 3 b o z
+C
+T
+M
+T
+J
+Q
+S
++ h
+V u
+X
+C j i 1 s 9 x 5 9
++
+Y p
+E
+X
+U e u
+D
+C 4
+Z x 7 u f c e
+L
++
+R
+M
+G 9 v
++ t
+H
+I
+L i 0 v
+L
+K
+/ n
+V w t r 6 x u
+Z
+W c
+X u n q
+Y
+N
+I
+E d o g
+A
+Q 9
+U 2 8
+O a c i
+Z p w z
+D
+D a
+T t
+U
+F
+A u
+P 0 5
+Y 3 u k r 9 1 j 1
+V m g
+X y 1 o x
+D 6 g o 8 k
+M x n
+B
+J t
+E u r u
+Q
++ o
+G q c 3
+T
+U
+K 5 b s s p 0
+B z
+R
+N n
+R k o w
+Q 7 1
+X
+/
+O j 2
+A x
+I
+J
+K g 3 h
+W
+O u
+O
+Y 4 f
+G j b
+E y j
+H
+A 6
+K
+X
+Q j
+T
+U
+N
+M
+R n h
+A
+O w m
+V
+W
+F
+D t x t n
+B
+E 3
+S
+Q
+K
+H 3 k
+B y o p a
+V
+C m
+/ p y
+I s d
+B 6
+L
+L y k
+U 2
+A z 1
+H
++ 9
+V
+P z
+P 6 0
+T
+G
+P 3
+V j
+J s
+P
+I
+U
+E m m i
+/ y
+I
+I x
+O g 9
+H v
+U
+Z 4 o
+S w 8 c
+J w
+U
+S x 5
+F
+Z
+E h l h h
+Y p
+K
+M
+C l k
+I
+Z y m
+O v 1
++ e
+J 8 1
+K 2 a m
+W q z e
+V
+U u 1 y
+F k c e 9 m
+A f
+D s
+G
+B
+E 6 j
+B
+N d
+S h
+A
+Q
+Q
+E
+P
+M
+I z v
+F j
+K e r
+J e r b d p a 8 6 a z e z
+C
+L 1 j v
+X w g 8 k
+A g
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" x
+T
+I v
+U
+X
+E 5 z 3 v 6 x
+L 2
+U e u d
+G
+P b a 3 i l o
+=
+"
+>
+A
+A
+A
+B 8
+H i c b
+V
+D
+L
+S s
+N
+A
+F
+L 2 p r 1 p f
+V
+Z d u
+B o v g q i
+Q t
+P l d
+V
+N y 4 r 2
+I e 0 o
+U y m k 3 b o z
+C
+T
+M
+T
+J
+Q
+S
++ h
+V u
+X
+C j i 1 s 9 x 5 9
++
+Y p
+E
+X
+U e u
+D
+C 4
+Z x 7 u f c e
+L
++
+R
+M
+G 9 v
++ t
+H
+I
+L i 0 v
+L
+K
+/ n
+V w t r 6 x u
+Z
+W c
+X u n q
+Y
+N
+I
+E d o g
+A
+Q 9
+U 2 8
+O a c i
+Z p w z
+D
+D a
+T t
+U
+F
+A u
+P 0 5
+Y 3 u k r 9 1 j 1
+V m g
+X y 1 o x
+D 6 g o 8 k
+M x n
+B
+J t
+E u r u
+Q
++ o
+G q c 3
+T
+U
+K 5 b s s p 0
+B z
+R
+N n
+R k o w
+Q 7 1
+X
+/
+O j 2
+A x
+I
+J
+K g 3 h
+W
+O u
+O
+Y 4 f
+G j b
+E y j
+H
+A 6
+K
+X
+Q j
+T
+U
+N
+M
+R n h
+A
+O w m
+V
+W
+F
+D t x t n
+B
+E 3
+S
+Q
+K
+H 3 k
+B y o p a
+V
+C m
+/ p y
+I s d
+B 6
+L
+L y k
+U 2
+A z 1
+H
++ 9
+V
+P z
+P 6 0
+T
+G
+P 3
+V j
+J s
+P
+I
+U
+E m m i
+/ y
+I
+I x
+O g 9
+H v
+U
+Z 4 o
+S w 8 c
+J w
+U
+S x 5
+F
+Z
+E h l h h
+Y p
+K
+M
+C l k
+I
+Z y m
+O v 1
++ e
+J 8 1
+K 2 a m
+W q z e
+V
+U u 1 y
+F k c e 9 m
+A f
+D s
+G
+B
+E 6 j
+B
+N d
+S h
+A
+Q
+Q
+E
+P
+M
+I z v
+F j
+K e r
+J e r b d p a 8 6 a z e z
+C
+L 1 j v
+X w g 8 k
+A g
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" x
+T
+I v
+U
+X
+E 5 z 3 v 6 x
+L 2
+U e u d
+G
+P b a 3 i l o
+=
+"
+>
+A
+A
+A
+B 8
+H i c b
+V
+D
+L
+S s
+N
+A
+F
+L 2 p r 1 p f
+V
+Z d u
+B o v g q i
+Q t
+P l d
+V
+N y 4 r 2
+I e 0 o
+U y m k 3 b o z
+C
+T
+M
+T
+J
+Q
+S
++ h
+V u
+X
+C j i 1 s 9 x 5 9
++
+Y p
+E
+X
+U e u
+D
+C 4
+Z x 7 u f c e
+L
++
+R
+M
+G 9 v
++ t
+H
+I
+L i 0 v
+L
+K
+/ n
+V w t r 6 x u
+Z
+W c
+X u n q
+Y
+N
+I
+E d o g
+A
+Q 9
+U 2 8
+O a c i
+Z p w z
+D
+D a
+T t
+U
+F
+A u
+P 0 5
+Y 3 u k r 9 1 j 1
+V m g
+X y 1 o x
+D 6 g o 8 k
+M x n
+B
+J t
+E u r u
+Q
++ o
+G q c 3
+T
+U
+K 5 b s s p 0
+B z
+R
+N n
+R k o w
+Q 7 1
+X
+/
+O j 2
+A x
+I
+J
+K g 3 h
+W
+O u
+O
+Y 4 f
+G j b
+E y j
+H
+A 6
+K
+X
+Q j
+T
+U
+N
+M
+R n h
+A
+O w m
+V
+W
+F
+D t x t n
+B
+E 3
+S
+Q
+K
+H 3 k
+B y o p a
+V
+C m
+/ p y
+I s d
+B 6
+L
+L y k
+U 2
+A z 1
+H
++ 9
+V
+P z
+P 6 0
+T
+G
+P 3
+V j
+J s
+P
+I
+U
+E m m i
+/ y
+I
+I x
+O g 9
+H v
+U
+Z 4 o
+S w 8 c
+J w
+U
+S x 5
+F
+Z
+E h l h h
+Y p
+K
+M
+C l k
+I
+Z y m
+O v 1
++ e
+J 8 1
+K 2 a m
+W q z e
+V
+U u 1 y
+F k c e 9 m
+A f
+D s
+G
+B
+E 6 j
+B
+N d
+S h
+A
+Q
+Q
+E
+P
+M
+I z v
+F j
+K e r
+J e r b d p a 8 6 a z e z
+C
+L 1 j v
+X w g 8 k
+A g
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+F
++ l
+M b z i
++ u y m
+L 9
+X z x a y
+G
+N c o i m 6
+I 8
+=
+"
+>
+A
+A
+A
+B 8 3 i c b
+V
+D
+L
+S s
+N
+A
+F
+J 3
+U
+V 6 2 v q k s 3 g 0
+W o m 5
+J
+Y 8 b
+E r u n
+F
+Z w
+T 6 g
+C
+W
+U y n b
+R
+D
+J 5
+M w c y
+O
+W 0
+N 9 w 4 0
+I
+R t
+/ 6
+M
+O
+/
+/
+G
+S
+V p
+E r
+Q c u
+H
+M 6 5 l 3 v v 8
+W
+P
+B
+N d j 2 p 1
+V
+Y
+W l 5
+Z
+X
+S u u l z
+Y 2 t 7
+Z 3 y r t 7 b
+R 0 l i r
+I
+W j
+U
+S k u j 7
+R
+T
+H
+D
+J
+W s
+B
+B s
+G 6 s
+G
+A l 9 w
+T r
++
++
+D r z
+O
+/ d
+M a
+R 7
+J
+O 5 j
+E z
+A v
+J
+U
+P
+K
+A
+U w
+J
+G c l 1 g
+D
++
+A
+H a
+Z
+U c
+T
+/ v l i l 2 z c
++
+B
+F 4 s x
+J
+B c 3
+R 7
+J c
+/ 3
+E
+F
+E k 5
+B
+J o
+I
+J o 3
+X
+P s
+G
+L y
+U
+K
+O
+B
+U s
+G n
+J
+T
+T
+S
+L
+C
+R 2
+T
+I e s
+Z
+K k n
+I t
+J f m
+N 0
+/ x k
+V
+E
+G
+O
+I i
+U
+K
+Q k 4
+V 3 9
+O p
+C
+T
+U e h
+L 6 p j
+M k
+M
+N
+J
+/ v
+U z 8 z
++ s l
+E
+F x 4
+K
+Z d x
+A k z
+S 2 a
+I g
+E
+R g i n
+A
+W
+A
+B 1 w x
+C m
+J i
+C
+K
+G
+K m 1 s x
+H
+R
+F
+F
+K
+J i
+Y
+S n k
+I l x n
+O v l 9 e
+J
+O 2
+T m l
+O v 1
+W 9
+P
+K 4 2 r e
+R x
+F d
+I
+A
+O
+U
+R
+U 5 6
+B w 1 0
+A 1 q o h a i
+K
+E a
+P 6
+B m 9
+W
+I n 1
+Z
+L 1 a b 7
+P
+W g j
+W f 2
+U e
+/
+Y
+L 1
+/
+A e k t k b w
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+H 9
+A a
+O
+Z
+F
+B
+U x
++ a 3 z p r n 1
+J
+X 0
+B y
++ a
+Q 8
+=
+"
+>
+A
+A
+A
+B 8 3 i c b
+V
+D
+L
+S s
+N
+A
+F
+J 3
+U
+V 6 2 v q k s 3 g 0
+W o m 5
+J
+Y 8 b
+E r u n
+F
+Z w
+T 6 g
+C
+W
+U y n b
+R
+D
+J 5
+M w c y
+O
+W 0
+N 9 w 4 0
+I
+R t
+/ 6
+M
+O
+/
+/
+G
+S
+V p
+E r
+Q c u
+H
+M 6 5 l 3 v v 8
+W
+P
+B
+N d j 2 p 1
+V
+Y
+W l 5
+Z
+X
+S u u l z
+Y 2 t 7
+Z 3 y r t 7 b
+R 0 l i r
+I
+W j
+U
+S k u j 7
+R
+T
+H
+D
+J
+W s
+B
+B s
+G 6 s
+G
+A l 9 w
+T r
++
++
+D r z
+O
+/ d
+M a
+R 7
+J
+O 5 j
+E z
+A v
+J
+U
+P
+K
+A
+U w
+J
+G c l 1 g
+D
++
+A
+H a d
+U
+/ n v b
+L
+F b t m 5 8
+C
+L x
+J m
+T
+C p q j 2
+S 9
+/ u
+I
+O
+I
+J i
+G
+T
+Q
+A
+X
+R u u f
+Y
+M
+X g p
+U c
+C p
+Y
+N
+O
+S m 2 g
+W
+E z o m
+Q 9
+Y z
+V
+J
+K
+Q a
+S
+/
+N b 5 7 i
+I 6
+M
+M c
+B
+A p
+U x
+J w r v 6 c
+S
+E m o 9
+S
+T 0
+T
+W d
+I
+Y
+K
+T
+/ e p n 4 n 9 d
+L
+I
+L j w
+U i 7 j
+B
+J i k s 0
+V
+B
+I j
+B
+E
+O
+A s
+A
+D 7 h i
+F
+M
+T
+E
+E
+E
+I
+V
+N 7 d i
+O i
+K
+K
+U
+D
+A x l f
+I
+Q
+L j
+O c f b
++ 8
+S
+N o n
+N a d e q 9
++ e
+V h p
+X 8 z i
+K 6
+A
+A d o i p y 0
+D l q o
+B v
+U
+R
+C 1
+E
+U
+Y w e 0
+T
+N 6 s
+R
+L r y
+X q 1 3 m a t
+B
+W s
++ s 4 9
++ w
+X r
+/
+A u q z k b 0
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" t v 6
+O
+M 9
+U y
+Y
+M 3
+/ y d
+J q w
+L
+X t
+H
+P y
+W t s c
+=
+"
+>
+A
+A
+A
+B
++
+X i c b
+V
+B
+N
+S 8
+N
+A
+E
+N 3
+U r 1 q
+/ o h 6 9
+L
+B b
+B
+U 0 l b 8
+O
+N
+W 7
+M
+V j
+B
+V s
+L b
+S i
+T z b
+R d u t m
+E 3
+U 2 h h
+P 4
+T
+L x 4
+U 8 e o
+/ 8 e a
+/
+M
+U 2
+D q
+P
+X
+B w
+O
+O 9
+G
+W b m e
+Z
+H g 2 j j
+O p 1
+V
+Y
+W 9
+/
+Y 3
+C p u l 3
+Z 2 9
+/
+Y
+P 7
+M
+O j j g 5 j x b
+D
+N
+Q h
+G q r g c a
+B
+Z f
+Y
+N t w
+I 7
+E
+Y
+K
+I f
+A
+E
+P n i
+T 5 s
+J
+/ m
+K
+L
+S
+P
+J
+T 3
+Z h a h
+G 8
+B
+I 8 i
+F n
+Y
+F
+J p
+Y
+N t
+N k
+D 7 3 w
+S
+C
+N
+Q
+K
+L
+Q
+A 7 v s
+V
+J w
+M d
+J
+V
+U c 1
+I m
+O
+V o
+D
++ 6
+P v h y w
+O
+U
+B o m
+Q
+O t e 1
+Y m
+M m 4
+A y n
+A m c l
+/ q x x g j
+Y
+B
+E b
+Y
+S 6 m
+E
+A
+L
+W b
+Z
+J f
+P 6
+V m q
++
+H
+Q
+Y q r
+S k o
+Z n 6 c y
+K
+B
+Q
+O t
+Z 4
+K
+W d
+A
+Z i x
+/ u s t x
+P
++ 8
+X m y
+G
+V 2 7
+C
+Z
+R
+Q b l
+G y 5 a
+B g
+L a k
+K 6 i
+I
+H 6
+X
+C
+E z
+Y p
+Y
+S
+Y
+I q n t 1
+I 2
+B g
+X
+M p
+G
+G
+V s h
+C u
+F 7 j 4 f n m
+V d
+G q
+V a r 1
+S v 6 u
+V
+G z d 5
+H
+E
+V y
+Q k 7
+J
+O a m
+S
+S 9
+I g t 6
+R
+F 2 o
+S
+R
+K
+X k k z
++
+T
+F
+S q w n 6 9
+V 6
+W 7
+Y
+W r
+H z m m
+P y
+C 9 f 4
+F
+Y
+G
+O
+T o
+A
+=
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" 8 n
+/
+C
+T
+J
+O
+Y h
++ 8 t
+Y e w
+X
+D 6 l
+L f
+I c
+/ n n
+Y
+=
+"
+>
+A
+A
+A
+B 9
+X i c b
+V
+B
+N
+S 8
+N
+A
+E
+N 3
+U r 1 q
+/ q h 6 9
+L
+B b
+B
+U 0 l b 8
+O
+N
+W 7
+M
+V j
+B d s
+K b
+S y b 7 a
+R d u t m
+E 3
+Y l a
+S v
++
+H
+F w
++
+K e
+P
+W
+/ e
+P
+P f m
+K
+R
+B 1
+P p g 4
+P
+H e
+D
+D
+P z 3
+F
+A
+K g 7 b 9 a e
+W
+W l l d
+W 1
+/
+L r h
+Y 3
+N r e 2 d 4 u 5 e 2 w
+S
+R 5 t
+D i g
+Q z 0 j c s
+M
+S
+K
+G g h
+Q
+I l 3
+I
+Q a m
+O 9
+K 6
+L j j
+R u
+J 3 7 k
+A b
+E a h r n
+I
+T g
++
+G y o h
+C c 4 w 1 i 6 b
+Q
+Q
+K 4
+Q
+F p y
+B
+R
+I 0 y
++
+W 7
+L
+K d g i 6
+S
+S k
+Z
+K
+J
+E
+O z
+X
+/ z o
+D
+Q
+I e
++ a
+C
+Q
+S 2
+Z
+M t 2
+K
+H 6
+E y
+Z
+R s
+E l z
+A q 9 y
+E
+D
+I
++
+J g
+N o
+R t
+T x
+X w w z j
+S 9 e k a
+P
+Y m
+V
+A v
+U
+D
+H p
+Z
+C m 6 s
++
+J
+K f
+O
+N m f h u 3
+O k z
+H
+J m
+/
+X i
+L
++ 5 3
+U j 9
+M 6 c q
+V
+B h h
+K
+D 4 f
+J
+E
+X
+S
+Y o
+B
+T
+S
+K g
+A 6
+G
+B o 5 z
+E h
+H
+E t 4 l s p
+H z
+H
+N
+O
+M
+Z
+B
+F d
+I
+Q z h
+O c f
+L
++ 8
+S
+N r
+V c q
+V
+W r l 1
+V
+S
+/
+W
+L
+L
+I 4 8
+O
+S
+C
+H 5
+J h
+U y
+C m p k 0 v
+S
+J
+C 3
+C i
+S a
+P 5
+J m 8
+W
+P f
+W k
+/
+V q v c 1 b c 1
+Y 2 s 0 9
++ w
+X r
+/
+A q 6 x k s
+M
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+D m
+M f l
+N z 0 j
+J d n j r 3
+I t h y t
+X
+B
+V 3 a
+Y 8
+=
+"
+>
+A
+A
+A
+B 7 n i c b
+V
+B
+N
+S 8
+N
+A
+E
+J 3
+U r 1 q
+/ q h 6 9
+L
+B b
+B
+U 0 m 0
++
+H
+E r e v
+F
+Y w d p
+C
+G 8 p m s 2 m
+X b n b
+D 7 k
+Y o o
+T
+/
+C i w d
+F v
+P p 7 v
+P l v 3
+L
+R
+B 1
+P p g 4
+P
+H e
+D
+D
+P z g o
+Q z b
+V z 3 0 y k t
+L a
++ s r p
+X
+X
+K x u b
+W 9 s 7 1 d 2 9 e y 1
+T
+R
+W i b
+S
+C 5
+V
+N 8
+C a c i
+Z o 2 z
+D
+D a
+T d
+R
+F
+M c
+B p 5 1 g f
+J 3 7 n
+Q e q
+N
+J
+P i z k w
+S 6 s d 4
+K
+F j
+E
+C
+D
+Z
+W 6 v
+R
+H o
+T
+S 6
+M q j
+W 3
+L o 7
+A 1 o k
+X k
+F q
+U
+K
+A 1 q
+H 7 0
+Q 0 n
+S m
+A p
+D
+O
+N a 6 5 7 m
+J 8
+T
+O s
+D
+C
+O c
+T i v 9
+V
+N
+M
+E k z
+E e 0 p 6 l
+A s d
+U
++ 9 n s 3
+C k 6 s k q
+I
+I q l s
+C
+Y
+N m 6 s
++
+J
+D
+M d a
+T
++
+L
+A d s b
+Y j
+P
+R f
+L x f
+/ 8 3 q p i
+S 7 8 j
+I k k
+N
+V
+S
+Q
++ a
+I o 5 c h
+I l
+P
++
+O
+Q q
+Y o
+M
+X x i
+C
+S a
+K 2
+V s
+R
+G
+W
+G
+F i b
+E
+J z
+U
+O 4 z
+H
+H 2
+/ f
+I i u
+T
++ p e 6 f 1 x m 2 j 1 r w q 4 i j
+D
+A
+R z
+C
+M
+X h w
+D k 2 4 g
+R a 0 g c
+A
+Y
+H u
+E
+Z
+X p z
+E e
+X
+J e n b d 5 a 8 k p
+Z v b h
+F 5 z 3
+L w
+W 8 j 4
+A
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+D m
+M f l
+N z 0 j
+J d n j r 3
+I t h y t
+X
+B
+V 3 a
+Y 8
+=
+"
+>
+A
+A
+A
+B 7 n i c b
+V
+B
+N
+S 8
+N
+A
+E
+J 3
+U r 1 q
+/ q h 6 9
+L
+B b
+B
+U 0 m 0
++
+H
+E r e v
+F
+Y w d p
+C
+G 8 p m s 2 m
+X b n b
+D 7 k
+Y o o
+T
+/
+C i w d
+F v
+P p 7 v
+P l v 3
+L
+R
+B 1
+P p g 4
+P
+H e
+D
+D
+P z g o
+Q z b
+V z 3 0 y k t
+L a
++ s r p
+X
+X
+K x u b
+W 9 s 7 1 d 2 9 e y 1
+T
+R
+W i b
+S
+C 5
+V
+N 8
+C a c i
+Z o 2 z
+D
+D a
+T d
+R
+F
+M c
+B p 5 1 g f
+J 3 7 n
+Q e q
+N
+J
+P i z k w
+S 6 s d 4
+K
+F j
+E
+C
+D
+Z
+W 6 v
+R
+H o
+T
+S 6
+M q j
+W 3
+L o 7
+A 1 o k
+X k
+F q
+U
+K
+A 1 q
+H 7 0
+Q 0 n
+S m
+A p
+D
+O
+N a 6 5 7 m
+J 8
+T
+O s
+D
+C
+O c
+T i v 9
+V
+N
+M
+E k z
+E e 0 p 6 l
+A s d
+U
++ 9 n s 3
+C k 6 s k q
+I
+I q l s
+C
+Y
+N m 6 s
++
+J
+D
+M d a
+T
++
+L
+A d s b
+Y j
+P
+R f
+L x f
+/ 8 3 q p i
+S 7 8 j
+I k k
+N
+V
+S
+Q
++ a
+I o 5 c h
+I l
+P
++
+O
+Q q
+Y o
+M
+X x i
+C
+S a
+K 2
+V s
+R
+G
+W
+G
+F i b
+E
+J z
+U
+O 4 z
+H
+H 2
+/ f
+I i u
+T
++ p e 6 f 1 x m 2 j 1 r w q 4 i j
+D
+A
+R z
+C
+M
+X h w
+D k 2 4 g
+R a 0 g c
+A
+Y
+H u
+E
+Z
+X p z
+E e
+X
+J e n b d 5 a 8 k p
+Z v b h
+F 5 z 3
+L w
+W 8 j 4
+A
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+D m
+M f l
+N z 0 j
+J d n j r 3
+I t h y t
+X
+B
+V 3 a
+Y 8
+=
+"
+>
+A
+A
+A
+B 7 n i c b
+V
+B
+N
+S 8
+N
+A
+E
+J 3
+U r 1 q
+/ q h 6 9
+L
+B b
+B
+U 0 m 0
++
+H
+E r e v
+F
+Y w d p
+C
+G 8 p m s 2 m
+X b n b
+D 7 k
+Y o o
+T
+/
+C i w d
+F v
+P p 7 v
+P l v 3
+L
+R
+B 1
+P p g 4
+P
+H e
+D
+D
+P z g o
+Q z b
+V z 3 0 y k t
+L a
++ s r p
+X
+X
+K x u b
+W 9 s 7 1 d 2 9 e y 1
+T
+R
+W i b
+S
+C 5
+V
+N 8
+C a c i
+Z o 2 z
+D
+D a
+T d
+R
+F
+M c
+B p 5 1 g f
+J 3 7 n
+Q e q
+N
+J
+P i z k w
+S 6 s d 4
+K
+F j
+E
+C
+D
+Z
+W 6 v
+R
+H o
+T
+S 6
+M q j
+W 3
+L o 7
+A 1 o k
+X k
+F q
+U
+K
+A 1 q
+H 7 0
+Q 0 n
+S m
+A p
+D
+O
+N a 6 5 7 m
+J 8
+T
+O s
+D
+C
+O c
+T i v 9
+V
+N
+M
+E k z
+E e 0 p 6 l
+A s d
+U
++ 9 n s 3
+C k 6 s k q
+I
+I q l s
+C
+Y
+N m 6 s
++
+J
+D
+M d a
+T
++
+L
+A d s b
+Y j
+P
+R f
+L x f
+/ 8 3 q p i
+S 7 8 j
+I k k
+N
+V
+S
+Q
++ a
+I o 5 c h
+I l
+P
++
+O
+Q q
+Y o
+M
+X x i
+C
+S a
+K 2
+V s
+R
+G
+W
+G
+F i b
+E
+J z
+U
+O 4 z
+H
+H 2
+/ f
+I i u
+T
++ p e 6 f 1 x m 2 j 1 r w q 4 i j
+D
+A
+R z
+C
+M
+X h w
+D k 2 4 g
+R a 0 g c
+A
+Y
+H u
+E
+Z
+X p z
+E e
+X
+J e n b d 5 a 8 k p
+Z v b h
+F 5 z 3
+L w
+W 8 j 4
+A
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+F x g
+Q b 8
+R v
+M
+H x
+T 6 n
+M
+R
+B
+Q a
+D s v g n w
+X o
+=
+"
+>
+A
+A
+A
+C
+L
+H i c b
+Z
+D
+L
+S g
+M x
+G
+I
+U z
+X u t 4 q 7 p 0
+E y y
+C
+C y k z b a 2 6 k 7 r
+Q p
+Y q t
+Q q e
+U
+T
+P p
+P
+G 5 r
+J
+D
+E l
+G
+K
+M
+M s f
+B p 3 o u
+/ i
+R s
+S t
+D
++
+H
+K 9
+I
+J
+Y 9
+U
+D g c
+P 5 b
++
+P y
+Y
+M 6
+U d 5 9
+W a m
+Z 2 b
+X 1 j
+M
+L d n
+L
+K 6 t r 6
+/ m
+N z
+Y a
+K
+E k m h
+T i
+M e y
+V u f
+K
+O
+B
+M
+Q
+F 0 z z e
+E 2 l k
+B
+C n 8
+O
+N 3 z 8 d 1 m
+/ u
+Q
+C o
+W i
+W s 9 i
+K
+E
+V k q 5 g
+A a
+N
+E m 6 i d 3 7 a 9 0
+Z
+K 0 2 5
+U
+A
+I v
+N o
+D 2 g
+/
+J
+L
+J v 2
++ 1 8 w
+S k 6
+I
++
+G
+/ x p 2
+Y
+A p r o o p 3
+/ 9
+D o
+R
+T
+U
+I
+Q m n
+K i
+V
+N
+N 1
+Y t 1
+K i d
+S
+M c s h s
+L 1
+E
+Q
+E 9 o n
+X
+W g a
+K 0 g
+I q p
+W
+O 7 m d 4 1 y
+Q d
+H
+E
+T
+S
+P
+K
+H x
+K
+P 0 5 k
+Z
+J
+Q q
+U
+H o m 8 6
+Q 6
+J 7 6
+X
+R u
+G
+/ 9
+W a i
+Q 6
+O
+W i k
+T c a
+J
+B 0
+P
+G h
+I
+O
+F
+Y
+R 3 h
+I
+B
+H e
+Y
+B
+K r 5 w
+B h
+C
+J
+T
+N
+/ x b
+R
+H
+J
+K
+H a c
+L
+N t r w
+O
+B g
+T t
+F
+K b 0 6 q 2
+V p q b y
+P 3
+Y
+P q
+P j 4 q
+Z
+W
+N
+Y x 0
+N
+V v 9
+H 8
+N
+Y 1
+S 0
+S 0
+X
+K 5 e
+V w k l t g i 2
+H t t
+E
+O 2 k
+M u
+O k
+Q n 6
+B x d o
+D q i 6
+B 4 9 o
+C f 0 b
+D 1 a
+L 9 a b 9
+T 5 u n b
+E m
+M 1 t o
+S t b
+H
+F z
+U s p i c
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+U v
+/
+F b f
+F 3 k
+I 3
+M w g x 1 i n 6
+S
+P o
+E 9 0
+G 8
+=
+"
+>
+A
+A
+A
+C
+I
+H i c b
+V
+A 9
+S w
+N
+B
+E
+N 2
+L 3
+/
+E r a m m z
+G
+A
+S r c
+B e
+L
+W
+A
+Z t
+L
+C
+M
+Y
+D e
+R
+C m
+N u b 6
+J
+K 9 3
+W
+N 3
+L x q
+C
+P 8
+X
+G v 2
+J j o
+Y h 2
++ m v c u 6
+T w 6 8
+H
+A 4 8 0
+M b
++
+Z
+F q e
+D
+G
++ v 6
+H
+V 5 q b
+X 1 h c
+W l 4 p r 6 6 t b 2 x
+W t r
+Y v j
+M o 0 w z
+Z
+T
+Q u l
+O
+B
+A
+Y
+F l 9 i 2 3
+A r s p
+B o h i
+Q
+R e
+R s
+O
+T v
+H 8 5
+Q m 2 4 k u d 2 n
+G
+I v g
+S v
+J
+B 5 y
+B d
+V
+K
+/ 0 g i l 4 j
+J
+G a
+W l
+L q w g i 7 k y 5 5
+Y z i
+L b
+I s
+H 6
+J h
+W
+B 5 x o
+A
+O l b 0
+D
+H
+N
+F
+E x i n 6 l 6 t f 8
+A v
+Q v
+C
+W a k
+S m
+Z o 9
+S v v
+Y a x
+Y l j g n
+J s
+C
+Y b u
+C n t j c
+B 7 b w
+E 3 p
+X
+D z
+G
+A
+K b
+A h
+X 2
+H
+V
+U
+Q o
+K m
+N y k e v
+K
+P 7
+T o n z
+A 1 y 5
+S w v 1
++ 8
+Y
+E
+E m
+P
+G
+S e
+Q m
+E 7
+D
+X 5 n c v
+F
+/
+/ r d
+T
+M 7
+O
+O p
+N u
+E w z i 5
+J
+N j
+Q a
+Z o
+F b
+R
+P
+C 0 a c 4 3
+M i r
+E j w
+H
+S
+R
+C 7 s
+G
+D c y 6
+T
+M s u h
+O
+D 3 y 3
+/
+J
+R b 0
+W
+H
+N b q
+Z
+/
+V q 8 3 g
+W x z
+L
+Z
+J
+X v k g
+A
+S k
+Q
+Z r k l
+L
+R
+I m z
+B y
+T x 7
+J
+M 3 n x
+H r w n 7 9
+V 7 m 4 6
+W v
+N n
+O
+D v k
+B 7
+/
+M
+L b
+Z q j u g
+=
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" 4 c
+T 8
+E 4
+I
+U k e w
+U l 9 g a 2 8 d
+R
+P
+E
+O 8
+Z
+I o
+=
+"
+>
+A
+A
+A
+B 8 3 i c b
+V
+D
+J
+S g
+N
+B
+E
+K 1 x j
+X
+G
+L e v
+T
+S
+G
+A
+R
+P
+Y
+Z
+K
+A 2 y n o x
+Z
+N
+E
+M
+A s k
+Q
++ j p 9
+C
+R
+N e n q
+G
+X o
+Q w 5
+D e 8 e
+F
+D
+E q z
+/ j z b
++ x
+Z z
+K
+I
+G h 8
+U
+P
+N 6 r o q q e
+H 3
+O m t
+O t
++
+O k v
+L
+K 6 t r 6 4
+W
+N 4 u b
+W 9 s 5 u a
+W
++
+/ r
+S
+I j
+C
+W 2
+R i
+E e y 6 2
+N
+F
+O
+R
+O 0 p
+Z n m t
+B t
+L i k
+O f 0 4 4
+/ u
+U 7 9 z g
+O
+V i k
+X i
+X k 9 j 6 o
+V 4
+J
+F j
+A
+C
+N
+Z
+W 6 t
++ a 0
+K f y
+E j
+W 5
+U
+Y
+N
+S 2 a 2 4
+G d
+A i q e a k
+D
+D m a g 9
+J
+H f x g
+R
+E 1
+K h
+C c d
+K 9 a p u r
+L 0
+E
+S 8 0
+I p 7
+N i 3 y g a
+Y z
+L
+B
+I 9 q z
+V
+O
+C
+Q
+K i
+/
+J b p 6 h
+Y 6 s
+M
+U
+R
+B
+J
+W 0
+K j
+T
+P 0 5 k e
+B
+Q q
+W n o 2 8 4
+Q 6 7
+H 6 6 6
+X i f 1 7
+P 6
+O
+D c
+S 5 i
+I j a a
+C z
+B c
+F h i
+M d o
+T
+Q
+A
+N
+G
+S
+S
+E s 2 n l m
+A i m b 0
+V k
+T
+G
+W m
+G g b
+U z
+E
+L 4
+S
+L
+F 6 f f
+L i 6
+R d q 1
+T r l f p d r d y 4 y u
+M o w
+C
+E c w
+Q l
+U 4
+Q w a c
+A
+N
+N a
+A
+G
+B
+G
+B 7 h
+G
+V 4 c 4 z w 5 r 8 7 b v
+H
+X
+J y
+W c
+O 4
+B e c 9 y
++ j b p
+G
+O
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+B 3
+I
+G s
+E h
+U
+G
+R e u p
+Q 2
+Y c 4
+S c
+G
+J
+/ z f m
+Y
+=
+"
+>
+A
+A
+A
+C
+I n i c b
+V
+D
+L
+S g
+M x
+F
+M 3 4 r
+P
+V
+V d e k m
+W
+A
+R
+X
+Z d q
+C 2 l 3
+R j c s
+K 9 g
+G d
+U u 5 k 0 j
+Y 0 k w x
+J p j
+C
+U f o s b f 8
+W
+N
+C 0
+V d
+C
+X 6
+M m
+X
+Y
+Q t
+R 4
+I
+H
+M 5 9 n
+N z j
+R 5 x p 4 7 o f z s r q 2 v r
+G
+Z m 4 r v 7 2 z u 7 d f
+O
+D h s a
+R k r
+Q p t
+E c q k 6
+P m j
+K m a
+B
+N w w y n n
+U h
+R
+C
+H 1
+O 2
+/ 7 4
+O q 2 3
+J 1
+R p
+J s
+W d
+S
+S
+L a
+C 2
+E o 2
+I
+A
+R
+M
+F b q
+F 2 q e k
+E w
+E
+V
+B j c
+U
+N
+I
+H n 6
+W m j
+G
+D w g 5 i k
+P d j z 8 h
+M
+G m
+I l 0
+D 8
+V
+B
+I i
+B k
+R
+P c
+L
+R b f k z o
+G
+X
+S
+T k j
+R
+Z
+S h 0
+S
++ 8 e
+Y
+E k c
+W i 9
+C
+A e t u 2
+U 3
+M r 0 p
+K
+G v
+H 6
+S z v x
+Z p
+G
+Q
+M
+Y w p
+F 1
+L r
+Q v
+V v e n 8 x
+B k
++ t
+U q
+A
+B 1
+L
+Z
+Z
+/ 8 6
+V 3 9
+O
+T
+C
+H
+U
+O g l 9 2 x m
+C
+G e m
+/ t
+V
+T 8 r 9 a
+N z e
+C y
+N 2
+U i i g 0
+V
+Z
+G
+E 0 i
+D k 2
+E q d 5 4
+Y
+A p
+S g x
+P
+L
+A
+G i
+W
+B o
+N
+G
+Y
+E
+C
+Y m w a
++
+X k
+I t
+R
+T n 3 y c v k 1 a l
+V
+K 6
+W q r e
+V
+Y v 0 q i y
+O
+H j t
+E
+J
+O k
+N l d
+I
+H q 6
+A
+Y 1
+U
+B
+M
+R d
+I 8 e 0
+T
+N 6 c
+R 6 c
+J
++ f
+V e
+V
++ 0 r j j
+Z z
+B
+H 6
+B e f z
+C y h
+K p
+M s
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" p n
+B o
+F v b
+T 4
+J
+R 5
+Y
++
+F l e o 5
+C g s c e
+Z
+P
+A
+=
+"
+>
+A
+A
+A
+C
+J
+X i c b
+V
+D
+L
+S g
+M x
+F
+M 3 4 t r 6 q
+L t 0
+E i
++
+C q
+T
+B
+V 8 4
+U
+J 0 4 0 4
+F q 0
+J b y k 3 m j g 1 m
+M k
+M e 0 j
+L 0
+Z 9 z 4
+K 2 5 c
+K
+C
+K 4 8 l f
+M 1
+C
+K
++
+D o
+S c n
+H s u
+N
+/ e w
+T
+A p j w
+/
+A t
+G
+B k d
+G 5
++
+Y n
+J o u z c z
+O z
+S
++
+U
+F 5 c u
+T
+O o 0 x z p
+P
+Z a q v
+G
+B i
+U
+Q m
+H d
+C i v x
+K t
+M
+I
+C
+Z
+N 4 y
+W 6
+O i v r l
+L
+W o j
+U n
+V u e x m 2
+E r h
+W
+I h
+Y c r
+J f a 5 f 2 m x a 5 l c
+X 7 i
+N
+I
+U s 0 y n w z h 7 1
+N w
+M m i g 8
+I
+T o
+F
+F j h d
++
+C i q i 2
+E
+X u i l e
+/
+X a 6
+E 1
+X
+A
+A
++ p f
+U h q
+R
+C h j h t l 5
++ b
+U c p d g s p y
+C c
+Y 0 a m
+F m
+W z l o
+P 0
+V i v 9
+R 0
+B j
+P g
+N 3
+C
+N
+D
+U 8
+V
+J
+G h a
++
+W
+D
+L
+P l 3 z
+S k
+T j
+V
+P u j
+L
+B 2 o 3 z t y
+S
+I z p
+J c w 7
+E 7
+A d 8 7 t
+W i
+P
+/
+V
+G s 7
+G
+O 6 1 c q
+M x
+Z
+V
+P x z
+U
+O w k t
+S k t
+I q
+O
+R 0
+M i t 7
+H k
+C
+X
+I s i
+E d 4
+B
+D d z 6
+Y
+E u
+D
+E
+H
+Y
+L b
+H 2 t
+/
+J d c b
+F
+R r m 9
+X
+N s 4 3
+K w e
+E w j i m y
+Q l b
+J
+O q m
+R b
+X
+J
+A j s k p q
+R
+N
+O 7 s g
+D e
+S
+L
+P w
+X 3 w
+G
+L w
+E r 5
+/
+W k
+W
+D
+Y s 0 x
++
+I
+H j
+/
+A
+H 4
+E p p 4
+=
+<
+/ l a t e x i t
+>
+2.

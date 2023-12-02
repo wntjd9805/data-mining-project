@@ -1,0 +1,144 @@
+Abstract 1.
+
+Introduction
+With their robustness to adverse weather conditions and ability to measure speeds, radar sensors have been part of the automotive landscape for more than two decades. Re-cent progress toward High Definition (HD) Imaging radar has driven the angular resolution below the degree, thus approaching laser scanning performance. However, the amount of data a HD radar delivers and the computational cost to estimate the angular positions remain a challenge.
+In this paper, we propose a novel HD radar sensing model,
+FFT-RadNet, that eliminates the overhead of computing the range-azimuth-Doppler 3D tensor, learning instead to recover angles from a range-Doppler spectrum. FFT-RadNet is trained both to detect vehicles and to segment free driving space. On both tasks, it competes with the most re-cent radar-based models while requiring less compute and memory. Also, we collected and annotated 2-hour worth of raw data from synchronized automotive-grade sensors (camera, laser, HD radar) in various environments (city street, highway, countryside road). This unique dataset, nick-named RADIal for “Radar, LiDAR et al.”, is available at https://github.com/valeoai/RADIal.
+Automotive radars have been in production since the late 90s. They are the preferred, most affordable sensors for adaptive cruise control, blind spot detection and auto-matic emergency braking functions. However, they have a poor angular resolution, which hinders their use in auto-mated driving systems. Indeed, such systems need a high level of safety and robustness, usually reached through re-dundancy mechanisms. While sensing is improved by fus-ing several modalities, the overall combination works only if each sensor achieves sufficient and comparable perfor-mances. High-definition (HD) imaging radar has emerged to meet these requirements. By using dense virtual antenna arrays, these new sensors achieve high angular resolution both in azimuth and elevation (horizontal and vertical angu-lar positions, resp.) and produce denser point clouds.
+With the rapid progress of deep learning and the avail-ability of public driving datasets, e.g., [4, 6, 12], the per-ception ability of vision-based driving systems (detection of objects, structures, markings and signs, estimation of depth, forecasting of other road users’ movements) has consider-ably improved. These advances quickly extended to depth sensors such as laser scanners (LiDAR), with the help of specific architectures to deal with 3D point clouds [19, 42].
+Dataset
+Year
+Scale nuScenes [4]
+Astyx [24]
+RadarRobotCar [1]
+CARRADA [31]
+RADIATE [38]
+MulRan [17]
+Zendar [27]
+CRUW [41]
+RadarScenes [36]
+RADDet [43]
+RADIal (ours) 2019 2019 2020 2020 2020 2020 2020 2021 2021 2021 2022 large small large small medium medium small medium large small medium
+Radar data
+D
+R r o
+A
+R
+✗
+✗
+✓
+✓
+✓
+✓
+✓
+✓
+✗
+✓
+✓ r e l p p o
+D
+✓
+✓
+✗
+✓
+✗
+✗
+✓
+✗
+✓
+✓
+✓
+C
+P
+✓
+✓
+✗
+✓
+✗
+✓
+✓
+✗
+✓
+✗
+✓
+C
+D
+A
+✗
+✗
+✗
+✗
+✗
+✗
+✗
+✗
+✗
+✗
+✓
+D
+A
+R
+✗
+✗
+✗
+✓
+✗
+✗
+✗
+✗
+✗
+✓
+✓ e p y t r a d a
+R
+LD
+HD
+S
+LD
+S
+S
+HD
+LD
+HD
+LD
+HD s e i t i l a d o
+M
+CLO
+CL
+CLO
+C
+CLO
+CLO
+CL
+C
+CO
+C
+CLO e c n e u q e
+S
+✓
+✗
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+Annot. type 3D boxes 3D boxes
+✗ 2D boxes, seg. 2D boxes
+✗ 2D boxes point location point-wise 2D boxes 2D boxes, seg.
+Table 1. Publicly-available driving datasets with radar. The dataset is ‘small’ (<15k frames), ‘large’ (>130k frames) or ‘medium’ (in between). The radar is low-definition (‘LD’), high-definition (‘HD’) or scanning (‘S’) and its data is released in different representations, amounting to different signal processing pipelines: analog-to-digital converter (‘ADC’) signal, range-azimuth-Doppler (‘RAD’) tensor, range-azimuth (‘RA’) view, range-Doppler (‘RD’) view, point cloud (‘PC’). The presence of Doppler information depends on the radar sensor. Other sensor modalities are camera (‘C’), LiDAR (‘L’) and odometry (‘O’). RADIal is the only dataset providing each representation of a HD radar, combined with camera, LiDAR and odometry, while proposing detection and free-space segmentation tasks.
+Quite surprisingly, the adoption of deep learning for radar processing in this context is much slower, compared to the other sensors. This might be explained by the com-plex nature of the data and the lack of public datasets. In-deed, recent key contributions in the field of radar-based ve-hicle’s perception have appeared together with the release of datasets. Interestingly, most of the recent works exploit the range-azimuth (RA) representation of the radar data (either in polar or Cartesian coordinates). Similar to a bird’s eye view (see Figure 1d), this representation is easy to interpret and allows simple data augmentation with translations and rotations. However, one barely-mentioned drawback is that the generation of the RA radar maps incurs significant pro-cessing costs (tens of GOPS, see Section 6.5), which com-promises its viability on embedded hardware. While novel
+HD radars offer better resolution, they make this computa-tional complexity issue even more acute.
+Owing to the promising capabilities of HD radars, our work attacks this issue to improve their practicality. In par-ticular, we propose: (1) FFT-RadNet, an optimized deep architecture that processes HD radar data at reduced cost, toward two different perception tasks, namely vehicle de-tection and free-space segmentation; (2) An empirical anal-ysis comparing various radar signal representations in terms of performance, complexity and memory footprint; (3) RA-DIal, the first raw HD radar dataset, including several other automotive-grade sensors, as described in Table 1.
+The paper is organized as follows: Sections 2 and 3 dis-cuss radar background and related work; FFT-RadNet and
+RADIal are introduced in Sections 4 and 5 resp.; Experi-ments are reported in Section 6, and Section 7 concludes. 2. Radar background
+Radars are usually composed of a set of transmitting and receiving antennas. The transmitters emit electromag-netic waves which are reflected back to the receivers by the objects in the environment. Standard in the automotive industry [3, 13], a frequency-modulated continuous-wave (FMCW) radar emits a sequence of frequency-modulated signals called chirps. The frequency difference between the emission and reception is mostly due to the radial distance of the obstacle. This distance is thus extracted via a Fast
+Fourier Transform (FFT) along the chirp sequence (range-FFT). A second FFT (Doppler-FFT) along the time axis ex-tracts the phase difference, which captures the radial ve-locity of the reflector. The combination of these 2 FFTs provides a range-Doppler (RD) spectrum for each receiving antenna (Rx), stored for all Rx in an RD tensor. The angle-of-arrival (AoA) can be estimated by using more than one
+Rx. A phase difference in the received signal is observed due to the small distance between Rx antennas. A common practice is to apply a third FFT (angle-FFT) along the chan-nel axis to estimate this AoA.
+Radar’s capability to discriminate between two targets with same range and velocity but different angles is called its angular resolution. It is directly proportional to the an-tenna aperture, that is, the distance between the first and last antennas. The multiple inputs multiple outputs (MIMO) approach [9] is commonly used to improve the angular res-olution without increasing the physical aperture: Angular resolution increases by a factor of 2 for each added emit-ting antenna (Tx). Denoting NTx and NRx the number of its
+Tx and Rx channels respectively, a MIMO system builds a
+virtual array of NTx·NRx antennas. In order to prevent emit-ted signals from interfering, the transmitters emit the same signal at the same time, but with a slight phase shift ∆ϕ between two consecutive antennas. The downside of this approach is that the signature of each reflector appears NTx times in the RD spectrum, making the data interleaved.
+To translate the AoA into an effective angle, one needs to calibrate the sensor. An alternative to the third FFT is to correlate in the complex domain the RD spectrum with a calibration matrix, to estimate the angles (azimuth and ele-vation). The complexity of this operation for a single point of the RD tensor is O(NTxNRxBABE), where BA and BE are the numbers of discretization bins for azimuth and ele-vation angles respectively in the calibration matrix. For a 4D representation in range-azimuth-elevation-Doppler, this operation would need to be performed for each point of the
+RD tensor.1
+As a conclusion, for an embedded HD radar, tradi-tional signal processing can not be applied as it is too re-source greedy in terms of both computation requirements and memory footprint. For driving assistance systems, there is therefore the challenge of increasing radar’s angular res-olution while keeping the processing costs under control. 3.

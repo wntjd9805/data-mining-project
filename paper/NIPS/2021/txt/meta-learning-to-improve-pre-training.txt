@@ -1,0 +1,341 @@
+Abstract
+Pre-training (PT) followed by ﬁne-tuning (FT) is an effective method for training neural networks, and has led to signiﬁcant performance improvements in many do-mains. PT can incorporate various design choices such as task and data reweighting strategies, augmentation policies, and noise models, all of which can signiﬁcantly impact the quality of representations learned. The hyperparameters introduced by these strategies therefore must be tuned appropriately. However, setting the values of these hyperparameters is challenging. Most existing methods either struggle to scale to high dimensions, are too slow and memory-intensive, or cannot be directly applied to the two-stage PT and FT learning process. In this work, we propose an efﬁcient, gradient-based algorithm to meta-learn PT hyperparameters. We for-malize the PT hyperparameter optimization problem and propose a novel method to obtain PT hyperparameter gradients by combining implicit differentiation and backpropagation through unrolled optimization. We demonstrate that our method improves predictive performance on two real-world domains. First, we optimize high-dimensional task weighting hyperparameters for multitask pre-training on protein-protein interaction graphs and improve AUROC by up to 3.9%. Second, we optimize a data augmentation neural network for self-supervised PT with SimCLR on electrocardiography data and improve AUROC by up to 1.9%. 1
+
+Introduction
+A popular and important learning paradigm for neural networks is pre-training (PT) followed by ﬁne-tuning (FT), an approach commonly used in transfer learning [13, 59, 19, 27, 52, 11, 37, 74, 35, 28], and semi-supervised learning [9, 8, 24]. This paradigm has led to performance improvements in many domains, including computer vision [13, 59, 19, 37, 74, 35], natural language processing
+[27, 52, 11, 40, 34], graph structured prediction [28], and clinical machine learning [45, 46, 2, 48], and is especially helpful in settings where downstream tasks have limited training data.
+The PT & FT paradigm introduces high-dimensional, complex PT hyperparameters, such as pa-rameterized data augmentation policies used in contrastive representation learning [8, 22] or the use of task, class, or instance weighting variables in multi-task PT to avoid negative transfer [70].
+These hyperparameters can signiﬁcantly affect the quality of pre-trained models [8], and thus ﬁnding techniques to set their values optimally is an important area of research.
+Choosing optimal PT hyperparameter values is challenging, and existing methods do not work well.
+Simple approaches such as random or grid search are inefﬁcient since evaluating a hyperparameter setting requires performing the full, two-stage PT & FT optimization, which may be prohibitively computationally expensive. Gradient-free approaches, such as Bayesian optimization or evolutionary algorithms [33, 61, 47], are also limited in how well they scale to this setting. Gradient-based 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+approaches [44, 41, 43, 42] can be used online to jointly learn hyperparameters and model parameters and can scale to millions of hyperparameters [42], but typically deal with a standard single-stage learning problem (e.g., normal supervised learning) and are therefore not directly applicable to the two-stage PT & FT learning problem.
+In this work, we address this gap and propose a method for high-dimensional PT hyperparameter op-timization. We ﬁrst formalize a variant of the PT & FT paradigm, which we call meta-parameterized pre-training (Figure 1), where meta-parameters refer to arbitrary PT hyperparameters or parameteriz-able architectural choices that can be optimized to improve the learned representations.1 We outline a meta-learning problem characterizing the optimal meta-parameters propose a gradient-based method to learn meta-parameters. Our contributions are:
+• We formalize meta-parameterized pre-training, a variant of the pre-training and ﬁne-tuning (PT &
+FT) paradigm where PT is augmented to incorporate meta-parameters: arbitrary structures that can be optimized to improve learned representations.
+• We propose a scalable gradient-based algorithm to learn meta-parameters using a novel method to obtain meta-parameter gradients through the two-stage PT & FT process. Our gradient estimator composes a constant-memory implicit differentiation approximation for the longer PT stage and exact backpropagation through training for the shorter FT stage.
+• We show that our algorithm recovers optimal meta-parameters in toy experiments on synthetic data.
+• In two real-world experimental domains, we demonstrate our algorithm improves performance.
+Firstly, on a multitask PT benchmark over biological graph-structured data [28], using our method to optimize meta-parameters representing task weights improves performance by up to 3.9%
+AUROC. Secondly, for semi-supervised learning using SimCLR [8] over electrocardiography data, using our algorithm to optimize meta-parameters representing the weights of a data augmentation neural network improves performance by up to 1.9% AUROC. 2 Problem Setup and Preliminaries
+In this section, we deﬁne the meta-parameterized pre-training meta-learning problem, and compare it to traditional ﬁne-tuning and pre-training. A full glossary of notation is in Appendix B, Table 3.
+Notation. Let the subscript • be a placeholder for either PT (pre-training) or FT (ﬁne-tuning),
+X ⊆ Rd be our input domain, Y• and ˆY• be the true and predicted output spaces for some model respectively, and Θ, Ψ•, Φ be spaces of parameters for models. We will use f• : X ; (Θ, Ψ•) → ˆY• to refer to a parametric model, with the semicolon separating the input space from the parameter spaces. We then deﬁne f• = f (head)
+◦ f (feat), such that f (feat)(·; θ ∈ Θ) is a feature extractor that is transferable across learning stages (e.g., pre-training to ﬁne-tuning), and f (head) (·; ψ ∈ Ψ•) is a stage-speciﬁc head that is not transferable. Given a data distribution x•, y• ∼ D•, parametric model f•, and loss function L• : ˆY• × Y• → R, we will also deﬁne for convenience a corresponding expected loss L• : Θ, Ψ• → R via L•(θ, ψ•; D•) = ED• [L•(f•(x•; θ, ψ•), y•)]. We also adopt the convention that the output of the argmin operator is any arbitrary minimum, rather than the set of possible minima, to avoid complications in notation.
+•
+• 2.1 Problem Formulation
+FT = AlgFT(θ(0)
+Supervised Learning (Fig. 1A). In a fully-supervised setting (our ﬁne-tuning domain), we are given a data distribution DFT, model f , and loss LFT. Using a learning algorithm AlgFT (e.g., SGD) that takes as input initial parameters θ(0)
+FT , our goal is to approximate the LFT-optimal parameters:
+FT, ψ∗
+θ∗
+Pre-training (Fig. 1B). For tasks where data is scarce, we can additionally incorporate a pre-training step and approximate the optimal initial parameters for FT (i.e., the ﬁnal pre-trained weights are used as initialization weights of the FT stage), again via an optimization algorithm AlgPT:
+PT = AlgPT(θ(0)
+θ∗
+PT ; DPT) ≈ argminθ∈Θ LFT(AlgFT(θ, ψ(0)
+FT ; DFT) ≈ argminθ∈Θ,ψ∈ΨFT
+FT ; DFT); DFT). 2
+LFT(θ, ψ; DFT)
+FT , ψ(0)
+FT , ψ(0)
+PT , ψ(0) 1We use the term meta-parameter since these structures do not directly affect inference of the ﬁnal model after FT, but instead inform the process of learning this model (by modulating the PT process). 2Note that we discard the PT head ψ∗
+PT here as only the PT feature extractor θ∗
+PT is transferred. 2
+Figure (1) Meta-Parameterized Pre-Training. A paradigm where meta-parameters — rich, potentially high dimensional structures that generalize PT hyperparameters — are incorporated in PT to improve the learned representations. Meta-parameters are optimized in a meta-PT phase, using data from FT task(s) in a meta-FT dataset. The FT and meta-FT datasets are (potentially overlapping) samples from the FT data distribution.
+Meta-Parameterized PT (Fig. 1C). In Meta-Parameterized PT, we recognize that, in addition to taking as input the PT parameters θ, AlgPT is itself parameterized by a set of meta-parameters φ ∈ Φ: arbitrary, potentially high dimensional quantities that inform the structure of the algorithm directly.
+These could represent weighting strategies, data augmentation policies, or sampling processes. The optimal meta-parameters φ(opt) are the solution to the following meta-PT optimization problem: (cid:16) (cid:16) (cid:17) (cid:17) (cid:17) (cid:16)
+φ(opt) = argmin
+LFT
+AlgFT
+AlgPT
+PT , ψ(0)
+θ(0)
+PT ; DPT, φ
+, ψ(0)
+FT ; DFT
+; DFT
+.
+φ∈Φ 2.2 Example: Multitask Meta-Parameterized Pre-Training
+To make our notation concrete, here we instantiate our setup for a multitask pre-training problem. (cid:80)M
+Suppose we have a multitask classiﬁcation dataset, (X × Y)N such that
+Problem:
+Y = Y1 × · · · × YK consists of labels for K distinct tasks. Of this full set of tasks, we are in-terested only in a subset of M tasks, S = {t1, . . . , tM } ⊆ {1, . . . , K}.
+Supervised FT: Under supervised FT alone, we can directly average a cross-entropy loss LCE over only the tasks in S, LFT(ˆy, y) = 1 j=1 LCE(ˆy(tj ), y(tj )), and then solve this problem via SGD.
+M
+PT: If we assume that S is a random subset of the full set of tasks, we can introduce a PT stage over all tasks: LPT(ˆy, y) = 1 i=1 LCE(ˆy(i), y(i)), followed by FT on S alone. As S is a random subset,
+K leveraging all tasks for PT is well motivated and may improve performance.
+Meta-Parameterized PT: In the case where T is not a random subset, the PT strategy described above is no longer well-motivated. However, using meta-parameterized PT, we can still effectively pre-train by introducing the meta-parameters that weight the tasks φ = [φ1
+. . . φK] and modulate the loss function LPT: LPT(ˆy, y; φ) = (cid:80)K i=1 φiLCE(ˆy(i), yi). With optimal meta-parameters φ(opt), the PT stage will leverage only that subset of tasks that best informs the ﬁnal FT performance. This setting mirrors our real-world experiment in Section 5. (cid:80)K 3 Methods: Optimizing Meta-Parameters for Two-Stage Training
+We now introduce our gradient-based algorithm to optimize meta-parameters. We ﬁrst describe how to efﬁciently approximate meta-parameter gradients through the two-stage PT and FT optimization.
+We then present our algorithm, and outline practical considerations when using it. 3.1 Efﬁcient Computation of Meta-Parameter Gradients
+We begin by deﬁning: g(φ; θ(0)
+PT , ψ(0)
+PT , ψ(0)
+FT ) = LFT (cid:16) (cid:0)
+AlgFT (cid:124) (cid:122)
+AlgPT(θ(0)
+Parameter θPT (cid:125)(cid:124)
+PT ; DPT, φ), ψ(0)
+PT , ψ(0) (cid:123)(cid:122)
+Parameters θFT,ψFT (cid:123)
+FT ; DFT (cid:17)
+, (cid:1)
+; DFT (cid:125) (1) so that φ(opt) = argminφ∈Φ g(φ). 3
+We also deﬁne two best-response values:
+PT(φ) = AlgPT(θ(0)
+θ∗
+FT(φ) = AlgFT(θ∗
+θ∗
+FT(φ), ψ∗
+PT , ψ(0)
+PT(φ), ψ(0)
+PT ; DPT, φ),
+FT ; DFT).
+We do not explicitly include the dependence of the best responses on the initialization values for notational convenience.
+With these deﬁned, we now consider the desired gradient term, ∂g partial derivatives ∂LFT
+∂φ . Under our deﬁnitions, the direct
+∂φ reduces to a simple expression of the chain rule:
+∂φ are zero, so ∂g
+∂φ and ∂AlgFT
+∂g
+∂φ (cid:12) (cid:12) (cid:12) (cid:12)φ(cid:48)
+= (cid:12)
+∂LFT (cid:12) (cid:12)
+∂ [θFT, ψFT] (cid:12)θ∗ (cid:123)(cid:122) (cid:124)
+FT Loss Gradient
+FT(φ(cid:48)),ψ∗
+FT(φ(cid:48)) (cid:125)
+FT Best Response Jacobian (cid:125)(cid:124) (cid:122) (cid:12)
+∂AlgFT (cid:12) (cid:12)
+∂θPT (cid:12)θ∗
+PT(φ(cid:48)) (cid:123)
+×
+×
+∂AlgPT
+∂φ (cid:123)(cid:122)
+PT Best Response Jacobian (cid:12) (cid:12) (cid:12) (cid:12)φ(cid:48) (cid:125) (cid:124)
+. (2)
+The FT Loss Gradient term on the RHS of (2) is easily computed using backpropagation. Computing the other two terms is more involved, and we detail each below, beginning with the PT best response
+Jacobian. The full algorithm with both gradient estimation terms is provided in Algorithm 1.
+PT Best Response Jacobian ∂AlgPT
+∂φ . Using recent work in hyperparameter optimization with implicit differentiation [42], we re-express this term using the implicit function theorem (IFT). If we assume that θ∗ is a good approximation of argminθ∈Θ LPT (θ; DPT, φ) (i.e., the PT model converges to LPT-optimal parameters), then under certain smoothness and regularity assumptions on the PT parameters and meta-parameters, the IFT allows us to re-express ∂AlgPT
+∂φ as: (cid:17)
+θ(0)
+PT ; DPT, φ
+PT(φ) = AlgPT (cid:16)
+∂AlgPT
+∂φ (cid:12) (cid:12) (cid:12) (cid:12)φ(cid:48)
+= − (cid:104) ∂2LPT
+∂θPT ∂θ(cid:62)
+PT (cid:105)−1
+×
+∂2LPT
+∂θPT ∂φ(cid:62) (cid:12) (cid:12) (cid:12) (cid:12)θ∗
+PT(φ(cid:48)),φ(cid:48)
+, (3) which is the product of the inverse Hessian and a matrix of mixed partial derivatives. Following [42], the inverse can be efﬁciently approximated using a truncated Neumann series.
+FT Best Response Jacobian ∂AlgFT
+. First, note that without additional constraints on AlgFT, the
+∂θPT
+FT best response Jacobian may be zero. This is because LFT has no functional dependence on the variable θPT and, if we assume the convergence point θ∗
+FT is stable (as we did for the PT best response
+Jacobian), this implies that the gradient of θ∗
+FT with respect to θPT would be zero. To enable effective learning, we must therefore either (1) impose restrictions on AlgFT to ensure there is a dependence between the initialization point and the ﬁnal loss value (e.g., proximal regularization [55]) or (2) leverage methods that do not differentiate through AlgFT through convergence, as at non-converged points we will still observe nonzero LFT-gradients [29, 51]. Given that the FT phase often involves shorter optimization horizons than PT, we take approach 2 here, and iteratively update θFT for K steps. We ﬁrst initialize the FT head ψ(0)
+FT and then compute:
+PT)
+θ(0)
+FT = copy(θ∗ (cid:104)
+θ(k−1)
+FT
+FT =
+FT , ψ(k)
+θ(k)
+, ψ(k−1)
+FT (init with PT solution, implicitly performing stop gradient) (cid:105)
+− ηFT
+∂LFT
+∂ [θFT, ψFT] (cid:12) (cid:12) (cid:12) (cid:12)θ(k−1)
+FT
+,ψ(k−1)
+FT k = 1, . . . , K (4)
+θ∗
+FT, ψ∗
+FT ≈ θ(K) and compute the gradient ∂AlgFT
+∂θPT
+FT , ψ(K)
+FT , (cid:12) (cid:12) (cid:12)θ∗
+PT(φ(cid:48)) by differentiating through this optimization.3
+We can also choose to freeze the feature extractor parameters θFT and update only the head parameters
+ψFT during truncated FT, and use this to obtain meta-parameter gradients. This resembles linear evaluation, where a linear classiﬁer is trained on top of ﬁxed, pre-trained feature extractors [50, 3, 63].
+Together, these two approximations allow for efﬁcient computation of meta-parameter gradients. 3While Equation 4 uses standard gradient descent, we could use other differentiable optimizers (e.g., Adam). 4
+Algorithm 1 Gradient-based algorithm to learn meta-parameters. Notation deﬁned in Appendix B,
+Table 3. Vector-Jacobian products (VJPs) can be efﬁciently computed by standard autodifferentiation. 1: Initialize PT parameters θ(init) 2: for n = 1, . . . , N iterations do 3: 4:
+FT and meta-parameters φ(0)
+PT = ψ(init)
+PT .
+PT , ψ(init)
+PT , ψ(0) and ψ(0)
+PT
+PT = θ(init)
+Initialize θ(0) for p = 1, . . . , P PT iterations do
+, ψ(p−1)
+PT (cid:104)
+PT , ψ(p)
+θ(p) (cid:104)
+θ(p−1)
+PT
+=
+PT (cid:105) (cid:105)
+− ηPT
+∂LPT
+∂[θPT, ψPT] (cid:12) (cid:12) (cid:12) (cid:12)θ(p−1)
+PT
+,ψ(p−1)
+PT
+FT = copy(θ(P )
+PT ). 5: 6: 7: 8: 9: 10: 11: 12:
+Compute g1 = end for
+Initialize FT encoder with PT solution: θ(0)
+Approximate θ∗
+FT, ψ∗
+FT using Eq. 4.
+∂LFT
+∂[θFT, ψFT]
+∂AlgFT
+∂θPT (cid:12) (cid:12) (cid:12) (cid:12)θ∗ (cid:12) (cid:12) (cid:12)θ(P )
+= g2
+FT,ψ∗
+FT
+PT ,ψ(0)
+Compute VJP g2 = g1 (cid:12) (cid:12) (cid:12)φ(n−1) (cid:12)
+∂g (cid:12) (cid:12)φ(n−1)
+∂φ
+Approximate VJP ∂g
+∂φ
+φ(n) = φ(n−1) − ηV
+Update PT initialization by setting: θ(init)
+FT
+∂AlgPT
+∂φ 13: 14: end for
+PT = θ(P )
+PT and ψ(init)
+PT = ψ(P )
+PT . using the unrolled learning step from line 8. (cid:12) (cid:12) (cid:12)φ(n−1) using the IFT (Eq. 3). 3.2 Our Algorithm and Practical Considerations
+By leveraging the above approximations, we obtain Algorithm 1 to optimize meta-parameters φ online during PT & FT of the base model. Note that AlgPT is explicitly written out as a sequence of gradient updates (lines 4-6 in Algorithm 1). We now discuss practical considerations when using this algorithm, with further details given in Appendix C. (1) Access to DFT and generalizing to new FT tasks: Solving the meta-PT problem requires avail-ability of: the model f•, the PT data DPT, and the FT data DFT. In this work, we assume availability of the model and PT dataset, but since assuming access to the complete FT dataset at meta-PT time is more restrictive, we study two scenarios: Full FT Access, where all FT data that we expect to encounter is available at meta-PT time, and Partial FT Access, where the FT data available at meta-PT time is only a sample from a distribution of FT data that we may encounter later.
+Full FT Access occurs in settings like semi-supervised learning, where we are given a large unlabelled
+PT dataset and a small labelled FT dataset and our goal is to achieve the best possible performance by leveraging these two ﬁxed datasets [68, 73, 25, 24, 8, 9].
+Partial FT Access occurs when our goal is to learn transferable representations: at meta-PT time, we might have limited knowledge of FT tasks or data. In evaluating this scenario, we examine generalizability to new FT tasks, given only small amounts of FT data/task availability at meta-PT time, demonstrating that even very limited FT access can be sufﬁcient for effective meta-parameter optimization [11, 45, 56, 28]. (2) DFT splits: In practice, we have access to ﬁnite datasets and use minibatches, rather than true data-generating processes. Following standard convention, we split DFT into two subsets for meta-learning:
+D(tr)
+FT (independent of any held-out DFT testing split), and deﬁne the FT data available at meta-PT time as D(Meta) and
+FT for the computation of ∂AlgFT
+∂θPT
+FT . We use D(tr)
+FT = D(tr)
+FT and D(val)
+FT ∪ D(val) (cid:12) (cid:12) (cid:12)θ(P )
+PT ,ψ(0)
+FT
+∂AlgPT
+∂φ (cid:12) (cid:12) (cid:12)φ(n−1) and D(val)
+FT for the computation of
+∂LFT
+∂[θFT, ψFT] (cid:12) (cid:12) (cid:12) (cid:12)θ∗
+FT,ψ∗
+FT in Algorithm 1. (3) Online updates: Given that PT phases often involve long optimization horizons, for computa-tional efﬁciency, we update θPT and ψPT online rather than re-initializing them at every meta-iteration (see Algorithm 1). FT phases are often shorter so we could in theory re-initialize ψFT at each 5
+meta-iteration, as is presented in Algorithm 1. However, it is more computationally efﬁcient to also optimize this online, and we follow this approach in our experiments. A description of the algorithm with these details in Appendix C.
+Note that prior work [67] has suggested that online optimization of certain hyperparameters (e.g., learning rates) using short horizons may yield suboptimal solutions. We comment on this in Ap-pendix C, study this effect for our algorithm in synthetic experiments in Appendix E, and in real-world experiments on self-supervised learning in Appendix G, revealing it is not a signiﬁcant concern. (4) Computational tractability: Our method can scale to large encoder models and high-dimensional meta-parameters, despite the complexity of the two-stage PT & FT process. This is because: (i) meta-parameters are optimized jointly with the base model parameters; (ii) using the IFT to obtain gradients has similar time and memory complexity to one iteration of training
+[42]; (iii) the FT best response Jacobian can be approximated efﬁciently using a small number of unrolled optimization steps K, and by only unrolling the FT head of the network. In our real-world experiments (Sections 5 and 6), meta-parameterized PT has less than twice the time cost of standard
+PT. Further details on time and memory cost are provided in Appendices F and G. (5) Setting optimizer parameters: Learning rates and momentum values can impact the efﬁcacy of the algorithm. A discussion on how to set them in practice is provided in Appendix D. 4 Synthetic Experiments
+We validate that our algorithm recovers optimal low and high dimensional meta-parameters in two synthetic MNIST experiments with Full FT Access. Further details and results are provided in
+Appendix E, including a study of how our method performs comparably to differentiating exactly through the entire learning process of PT & FT, without approximations.
+First, we optimize low dimensional meta-parameters characterizing a data augmentation scheme.
+We tune a 1-D meta-parameter φ representing the mean of a Normal distribution N (φ, 12) from which we sample rotation augmentations to apply to PT images. FT images undergo rotations from a
+Normal distribution N (µFT, 12) with µFT = 90◦; we therefore expect that φ should converge to near
+µFT. Using Algorithm 1 to optimize φ we ﬁnd that the mean error in the optimized meta-parameter over 10 different initializations is small: 7.2 ± 1.5◦, indicating efﬁcacy of the algorithm.
+Next, we consider learning high dimensional meta-parameters that characterize a PT per-example weighting scheme. The PT dataset contains some examples that have noisy labels, and FT examples all have clean labels. The meta-parameters are the parameters of a neural network that assigns importance weights to each PT example, which is used to weight the loss on that example during PT.
+We use Algorithm 1 again to optimize φ, over 10 random initializations, ﬁnding the ratio of assigned importance weights between clean label PT examples and noisy label PT examples is greater than 102. This is expected since the noisy label classes may worsen the quality of the PT model and so should be down-weighted. 5 Meta-Parameterized Multitask Pre-Training for Graph Neural Networks
+We consider optimizing PT task weights for a multitask PT & FT problem of predicting the presence of protein functions (multitask binary classiﬁcation) given graph-structured biological data as input.
+We have two experimental goals: ﬁrst, in the Full FT Access setting, where methods are given access to all FT data at PT time, we evaluate whether optimizing task weighting meta-parameters can improve predictive performance on the FT tasks. Second, motivated by how in typical transfer learning problems, new tasks or labels not available at PT time may become available at FT time, we study the Partial FT Access setting, investigating how our method performs when it only sees limited
+FT tasks at PT time. In both settings, our method outperforms baselines. 5.1 Problem Setup
+Dataset and Task. We consider the transfer learning benchmark introduced in [28], where the pre-diction problem at both PT and FT is multitask binary classiﬁcation: predicting the presence/absence of speciﬁc protein functions (y) given a Protein-Protein Interaction (PPI) network as input (rep-6
+resented as a graph x). The PT dataset has pairs DPT = {(xi, yi)}|DPT| i=1 , where y ∈ {0, 1}5000 characterizes the presence/absence of 5000 particular protein functions. The FT dataset has pairs
+DFT = {(xi, yi)}|DFT| i=1 , where y ∈ {0, 1}40 now characterizes the presence/absence of 40 different protein functions. Further dataset details in Appendix F. (cid:80)5000
+Meta-Parameterized Multitask PT. To deﬁne a meta-parameterized PT scheme, we let meta-parameters φ ∈ R5000 be weights for the binary PT tasks. Then, we deﬁne a PT loss incorporating the weights: LPT = 1 i=1 2 σ(φi) LCE(fPT(x; θPT, ψPT)i, yi),with i indexing the tasks, σ(·) 5000 representing the sigmoid function (to ensure non-negativity and clamp the range of the weights), and
+LCE denoting the binary cross-entropy loss. With this loss deﬁned, we use Algorithm 1 (with P = 10
+PT steps and K = 1 truncated FT steps) to jointly learn φ and the feature extractor parameters θPT.
+For computational efﬁciency, we only update the FT head when computing the FT best response
+Jacobian and keep the feature extractor of the model ﬁxed. We use the training and validation splits of the FT dataset DFT proposed by the dataset creators [28] for computing the relevant gradient terms.
+Baselines. Motivated by our goals, we compare with the following PT baselines:
+• No PT: Do not perform PT (i.e., feature extractor parameters are randomly initialized).
+• Graph Supervised PT: As explored in prior work on this domain [28], perform multitask super-vised PT with DPT. This corresponds to setting all task weights to 1: φi = 1, i = 1, . . . , 5000.
+• CoTrain: A common baseline that makes use of the FT data available during PT [70] (like meta-parameterized PT). We PT a model with 5000 + 40 outputs (covering the space of PT and FT labels) jointly on both DPT and DFT. We do so by alternating gradient updates on batches sampled from each dataset in turn. Further details are in Appendix F.
+• CoTrain + PCGrad: An extension of CoTrain, where we leverage the method PCGrad [72] to perform gradient projection and prevent destructive gradient interference between updates from
+DPT and DFT. Further details and variants we tried are in Appendix F.
+Experimental Details. We use a standardized setup to facilitate comparisons. Following [28], all methods use the Graph Isomorphism Network architecture [69], undergo PT for 100 epochs, and
+FT for 50 epochs, over 5 random seeds, using early stopping based on validation set performance.
+During FT, we initialize a new FT network head and either FT the whole network or freeze the PT feature extractor and learn the FT head alone (Linear Evaluation [50]). We report results for the strategy that performed best (full results in the appendix). We consider two experimental scenarios: (1) Full FT Access: Provide methods full access to DPT and DFT at PT time (D(Meta)
+FT = DFT) and evaluate on the full set of 40 FT tasks; (2) Partial FT Access: Limit the number of FT tasks seen at
+PT time, by letting D(Meta) include only 30 of the 40 FT tasks. At FT time, models are ﬁne-tuned on the held-out 10 tasks not in D(Meta)
+. We use a 4-fold approach where we leave out 10 of the 40 FT tasks in turn, and examine performance across these 10 held-out tasks, over the folds.
+FT
+FT 5.2 Results
+Key Findings. By optimizing PT task weights, meta-parameterized multitask PT improves perfor-mance on the FT problem of predicting presence/absence of protein functions given a protein-protein interaction graph as input. Performance improvements are also seen when generalizing to new FT tasks (protein functions), unseen at meta-PT time.
+Table 1 presents quantitative results for the two experimental settings described. For the No PT and
+Graph Supervised PT baselines, we re-implement the methods from [28], obtaining improved results (full comparison in Appendix Table 5). In both full and partial FT access settings, meta-parameterized
+PT improves signiﬁcantly on other methods, indicating that optimizing meta-parameters can improve predictive performance generally, and be effective even when new, related tasks are considered at evaluation time. Interestingly, we observe that CoTrain and CoTrain + PCGrad obtain relatively poor performance compared to other baselines; this could be because the methods overﬁt to the FT data during PT. Further analysis of this is presented in Appendix F.
+, setting (cid:12) (cid:12)D(Meta) (cid:12)
+Further experiments. In Appendix F, we study another partial FT access scenario with smaller (cid:12)
+D(Meta) (cid:12) (cid:12) = 0.5 |DFT|, and ﬁnd that meta-parameterized PT again outperforms other
+FT methods. (Table 7). We also examine another meta-parameter learning baseline, namely a version of
+CoTrain where we optimize task weights using a traditional hyperparameter optimization algorithm
+[42] jointly with the main model. We ﬁnd that our method outperforms this baseline also (Table 5).
+FT 7
+AUC (D(Meta)
+FT = DFT) AUC (D(Meta) excludes tasks)
+Method
+No PT
+Graph Supervised PT
+CoTrain
+CoTrain + PCGrad
+Meta-Parameterized PT 66.6 ± 0.7 74.7 ± 0.1 70.2 ± 0.3 69.4 ± 0.2 78.6 ± 0.1
+FT 65.8 ± 2.5 74.8 ± 1.8 69.3 ± 1.8 68.1 ± 2.3 77.0 ± 1.3
+Table (1) Meta-Parameterized PT improves predictive performance over baselines. Table showing mean
+AUC and standard error for two evaluation settings. When provided all FT data at PT time (ﬁrst results column), meta-parameterized PT signiﬁcantly improves predictive performance. In a more challenging setting when
+D(Meta) excludes FT tasks (10 of the 40 available tasks are held-out), evaluating mean AUC/standard error
+FT across four folds with each set of 10 FT tasks held out in turn, meta-parameterized PT again obtains the best performance: it is effective even with partial information about the downstream FT tasks.
+Analysis of learned structures. In Appendix F, we conduct further analysis and study the effect of various PT strategies on the pre-trained representations (Figure 3), ﬁnding intuitive patterns of similarity between different methods. We also examine the learned task weights (Figure 4), and examine performance on a per-FT task basis with/without meta-parameterized PT (Figure 5), ﬁnding little evidence of negative transfer. 6 Meta-Parameterized SimCLR for Semi-Supervised Learning with ECGs
+We now explore a second real-world application of our method: optimizing a data augmentation policy for self-supervised PT with SimCLR [8, 9] on electrocardiograms (ECGs). SimCLR is a popular self-supervised PT method that leverages data augmentations to deﬁne a contrastive PT objective (details in Appendix G.1). The choice/strength of the augmentations used signiﬁcantly impacts the effectiveness of the algorithm [8]. In settings where relevant augmentations are known (e.g., natural images), SimCLR is readily applicable; however, for ECGs, effective augmentations are less clear, motivating the use of our algorithm to optimize the augmentation pipeline.
+We have two experimental goals. Firstly, we examine the typical semi-supervised learning setting of Full FT Access: we explore whether optimizing the augmentations in SimCLR PT can improve performance on the supervised FT task of detecting pathologies from ECGs, given access to all FT data at meta-PT time. Secondly, to study the data efﬁciency of our method, we consider the Partial
+FT Access setting and explore performance given access to limited FT data at meta-PT time. We ﬁnd that our method improves the performance of SimCLR, and that it is effective even with very limited amounts of FT data provided at meta-PT time. 6.1 Problem Setup
+Dataset and Task. We construct a semi-supervised learning (SSL) problem using PTB-XL [64, 20], an open-source dataset of electrocardiogram (ECG) data. Let the model input at both PT and FT time be denoted by x, which represents a 12-lead (or channel) ECG sampled at 100 Hz for 10 seconds resulting in a 1000 × 12 signal. Our goal is to pre-train a model fPT on an unlabeled PT dataset of ECGs DPT = {xi}|DPT| i=1 using SimCLR PT [8], and then ﬁne-tune it on the labeled FT dataset
+DFT = {(xi, yi)}|DFT| i=1 , where the FT labels y ∈ {0, 1}5 encode whether the signal contains certain features indicative of particular diseases/pathologies. Further dataset details in Appendix G.
+ECG Data Augmentations. To augment each ECG for SimCLR (example in Appendix G, Figure 6), we apply three transformations in turn (based on prior work in time series augmentation [30, 66]): 1. Random cropping: A randomly selected portion of the signal is zeroed out. 2. Random jittering: IID Gaussian noise is added to the signal. 3. Random temporal warping: The signal is warped with a random, diffeomorphic temporal transformation. This is formed by sampling from a zero mean, ﬁxed variance Gaussian at each temporal location in the signal to obtain a velocity ﬁeld, and then integrating and smoothing (following [4, 5]) to generate a temporal displacement ﬁeld, which is applied to the signal. 8
+FT dataset size |DFT| 100
+Test AUC at different FT dataset sizes |DFT| 500 1000 250 2500 71.5 ± 0.7
+No PT 74.6 ± 0.4
+SimCLR
+Meta-Parameterized SimCLR 76.1 ± 0.5 76.1 ± 0.3 76.5 ± 0.3 77.8 ± 0.4 78.7 ± 0.3 79.8 ± 0.3 81.7 ± 0.2 82.0 ± 0.2 82.2 ± 0.3 84.0 ± 0.3 84.5 ± 0.2 85.8 ± 0.1 86.7 ± 0.1
+Table (2) Meta-Parameterized SimCLR obtains improved semi-supervised learning performance. Ta-ble showing mean AUC/standard error over seeds across 5 FT binary classiﬁcation tasks for baselines and meta-parameterized SimCLR at different sizes of DFT, with D(Meta)
+FT = DFT. We observe improvements in performance with meta-parameterized SimCLR, which optimizes the augmentation pipeline.
+Meta-Parameterized SimCLR. To construct a meta-parameterized SimCLR PT scheme, we instan-tiate meta-parameters φ as the weights of a neural network w(x; φ) that takes in an input signal and outputs the warp strength: the variance of the Gaussian that is used to obtain the velocity ﬁeld for temporal warping. This parameterization permits signals to be warped more/less aggressively depending on their individual structure. With this deﬁnition, the SimCLR PT loss is directly a function of the meta-parameters, and we can use Algorithm 1 (with P = 10 PT steps and K = 1 truncated FT steps) to jointly learn φ and the feature extractor parameters θPT. For computational efﬁciency, we only update the FT head when computing the FT best response Jacobian and keep the feature extractor of the model ﬁxed. We use the training and validation splits of the FT dataset DFT proposed by the dataset creators [64] for computing the relevant gradient terms.
+Baselines. Our experimental goals suggest the following PT baselines:
+• No PT: Do not perform PT (i.e., feature extractor parameters are randomly initialized).
+• SimCLR: Pre-train a model using SimCLR with the above three augmentations without learning per-example temporal warping strengths.
+Experimental Details. We standardize the experimental setup to facilitate comparisons. All methods use a 1D CNN based on a ResNet-18 [23] architecture. The temporal warping network w(x; φ) is a four layer 1D CNN. SimCLR PT takes place for 50 epochs for all methods, over three PT seeds. At evaluation time, for all methods, we initialize a new FT network head over the PT network feature extractor and FT the whole network for 200 epochs, over ﬁve FT seeds. Validation set AUC is used for early stopping. We consider two experimental settings: (1) Full FT Access, standard SSL: consider different sizes of the labelled FT dataset DFT and make all the FT data available at meta-PT time,
+D(Meta)
+FT = DFT; and (2) Partial FT Access, examining data efﬁciency of our algorithm: SSL when only limited FT data is available at meta-PT time: D(Meta)
+FT ⊆ DFT. We evaluate performance across the 5 binary classiﬁcation tasks in both settings. Further details are provided in Appendix G. 6.2 Results
+Key Findings. By optimizing the data augmentation policy used in SimCLR PT, meta-parameterized
+SimCLR improves performance on the FT problem of detecting pathologies from ECG data. Even a small amount of FT data provided at meta-PT time can lead to improved FT performance.
+Table 2 shows results for the Full FT Access setting, D(Meta)
+= DFT: mean AUC/standard error over seeds across the 5 FT binary classiﬁcation tasks at different sizes of DFT. We observe that meta-parameterized SimCLR improves on other baselines in all settings. Note that while these gains are modest, they are obtained with simple augmentation policies; our method may yield further improvements if applied to policies with more scope to specialize the augmentations.
+Next, we consider the Partial FT Access scenario where D(Meta)
+FT ⊆ DFT, which is relevant when we only have a small amount of FT data at meta-PT time. Fixing |DFT| = 500, we ﬁnd that with |D(Meta)
+| as small as 50, we obtain test AUC of 81.3 ± 0.5, compared to 79.8 ± 0.3 with no optimization of augmentations: this shows that even small |D(Meta)
+| appear to be sufﬁcient for meta-parameter learning. Further results showing performance curves varying |D(Meta)
+| are in Appendix G.
+FT
+FT
+FT
+FT
+Further experiments.
+In Appendix G, we study other aspects of our method on this domain, including: (1) Exploring different values of K, the number of FT steps differentiated through when obtaining meta-parameter gradients; and (2) Examining a meta-parameter learning baseline where 9
+augmentations are optimized for supervised learning, using the method in [42], and then applied to semi-supervised learning (to compare how optimizing augmentations for supervised learning compares to optimizing them for semi-supervised learning). We ﬁnd that our method is not very sensitive to the value of K (provided K > 0), and that it outperforms this additional baseline. 7

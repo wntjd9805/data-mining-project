@@ -1,0 +1,204 @@
+Abstract
+Most existing point cloud detection models require large-scale, densely anno-tated datasets. They typically underperform in domain adaptation settings, due to geometry shifts caused by different physical environments or LiDAR sensor conﬁgurations. Therefore, it is challenging but valuable to learn transferable fea-tures between a labeled source domain and a novel target domain, without any access to target labels. To tackle this problem, we introduce the framework of 3D Contrastive Co-training (3D-CoCo) with two technical contributions. First, 3D-CoCo is inspired by our observation that the bird-eye-view (BEV) features are more transferable than low-level geometry features. We thus propose a new co-training architecture that includes separate 3D encoders with domain-speciﬁc parameters, as well as a BEV transformation module for learning domain-invariant features. Second, 3D-CoCo extends the approach of contrastive instance alignment to point cloud detection, whose performance was largely hindered by the mismatch between the ﬁctitious distribution of BEV features, induced by pseudo-labels, and the true distribution. The mismatch is greatly reduced by 3D-CoCo with trans-formed point clouds, which are carefully designed by considering speciﬁc geometry priors. We construct new domain adaptation benchmarks using three large-scale 3D datasets. Experimental results show that our proposed 3D-CoCo effectively closes the domain gap and outperforms the state-of-the-art methods by large margins. 1
+
+Introduction 3D point cloud detection shows remarkable signiﬁcance in real-world scenarios, such as autonomous driving [14, 43, 38, 44], in which the recent progress is largely driven by the emergence of high-precision LiDAR sensors and large-scale, densely annotated point cloud datasets [1, 6, 26]. Most existing 3D detection models assume that the training domain and testing domain are independently and identically distributed. In practice, however, domain shifts are often inevitable due to differences in physical environments or LiDAR sensor conﬁgurations, including different numbers of laser beams and installation positions, etc. To address this issue, we present an early study of the unsupervised domain adaptation problem for point cloud detection, which aims to effectively adapt 3D detectors from the labeled source domain to a novel unlabeled target domain by learning transferable features.
+Previous domain adaptation approaches for image data [27, 12, 24, 2] are not readily applicable to point clouds. As shown in Fig. 1, different from the domain shifts of 2D scenes that usually
+∗ The ﬁrst two authors have equal contributions.
+† C. Ma is the corresponding author. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: Comparisons of domain shifts between 2D and 3D scenes. Left: Domain shifts in 2D scenes are mainly reﬂected in appearance variations, e.g., weather or environment changes in autonomous driving. Right: 3D domain shifts are generally represented as geometry variations, which not only arise from external environments, but also come from the internal sensor conﬁgurations. exists in the image appearance, those of 3D scenes are mainly reﬂected in the geometry variations of point clouds. Since 2D images from different domains have the same grid topology of uniformly distributed pixels, most of the domain adaptation methods exploit image encoders with domain-sharing parameters, which is also adopted by existing 3D transfer learning models such as PointDAN
+[20]. However, due to the severe low-level geometry shifts between different point sets, we believe that some features are transferable while some features are not on 3D object detection, which requires a rethink of the transferability of different levels of the point cloud representations. To this end, we propose a novel framework named 3D Contrastive Co-training (3D-CoCo), whose architecture contains separate 3D encoders with domain-speciﬁc parameters, a domain-agnostic BEV transformation module, and the ﬁnal detection head. The key idea of the architecture design is that the BEV features with similar grid structures to images can be more transferable than low-level 3D features, so that they can be better integrated with advanced transfer learning techniques in 2D vision and thus greatly reduce the geometry shift. Another beneﬁt of the co-training architecture with domain-speciﬁc encoders is that in addition to improving domain adaptation results, it also maintains the in-domain performance.
+Furthermore, 3D-CoCo is also featured by a new end-to-end contrastive learning framework, which contains two main components, i.e., contrastive instance alignment based on bird-eye-view (BEV) features and hard sample mining with transformed point clouds. The insight of the contrastive instance alignment is to push the feature centroids of similar sample clusters, induced by pseudo-labels, closer to each other, no matter they are in the same domain or different domains. Besides, we consider the mismatch between the true distribution of BEV features and the ﬁctitious one used for contrastive learning, which is caused by biased pseudo-labels. Speciﬁcally, we take advantage of the editability of point clouds and perform hard sample mining by applying speciﬁc transformation functions to 3D data. The hard samples, as an effective supplement to contrastive co-training, can further reduce the geometry shift across domains and prevent the adaptation model from falling into the local minima.
+Notably, there exists another line of work discussing transfer learning for point cloud detection
+[28, 35, 3], which utilizes the self-training pipeline that retrains the model with pseudo-labels on target data. Compared to these approaches, we adopt a different problem setup, using labeled source domain data and unlabeled target domain data for co-training. Through ablation studies, we observe that the separate encoders and the contrastive co-training scheme can progressively ﬁlter domain-speciﬁc features and learn more transferable knowledge across domains.
+We evaluate the effectiveness and generalizability of 3D-CoCo across three widely-used autonomous driving datasets collected by heterogeneous LiDAR sensors, including Waymo [26], nuScenes [1], and KITTI [6]. 3D-CoCo is shown to signiﬁcantly outperform existing approaches for point cloud detection on different unsupervised domain adaptation benchmarks. 2 Preliminaries
+Problem setup. The traditional setup of point cloud detection is to learn a base 3D object detector
+D that classiﬁes and localizes m objects represented by Y from a point cloud P :
+D : P → Y, (1) where P = {p1, . . . , pn} consists of n points pi ∈ Rd scattered over the 3D coordinate space.
+The dimension d is set to 4, including the coordinate (x, y, z) and an additional intensity i. The annotations Y = {y1, . . . , ym} consists of a set of class labels and bounding box coordinates, 2
+Figure 2: An illustration of the proposed 3D-CoCo model, which contains domain-speciﬁc 3D encoders and performs contrastive adaptation on BEV features for instance-level feature alignment. which is represented by the size (l, w, h), center (cx, cy, cz), and heading angle r of each 3D object.
+Typically, D is trained in a supervised manner by minimizing the classiﬁcation and localization errors between the ground truth Y and the prediction (cid:98)Y over the training (source) dataset. In this paper, we speciﬁcally study the problem of unsupervised domain adaptation for point cloud detection, which aims to adapt the detector Dθ parametrized by θ from a labeled source domain {(P S i=1 to an unlabeled target domain {P T i=1, where NS and NT are the numbers of training samples: i )}NS i }NT i , Y S
+Dθ : P S ∪ P T → Y S ∪ Y T .
+Compared to the typical setup of point cloud detection, we focus more on the performance of the model on the test set of the target domain, which requires additional well-designed modules for learning transferable features. (2)
+Modern point cloud detectors. Modern 3D point cloud detectors [38, 43, 14] usually consist of three modules: a 3D encoder E, a bird-eye-view (BEV) transformation module U , and a detection head H. The 3D encoder quantizes the point cloud into regular grids for feature extraction. The
+BEV transformation module, usually in forms of 2D convolutional layers, produces ﬁxed-size BEV feature maps M ∈ RW ×L×F , where width W and length L are based on the resolution of bins, and
+F denotes the channel number. The detection head takes M as inputs and produces detection results (cid:98)Y . To demonstrate the generality of the proposed method, we adopt two mainstream architectures, i.e., VoxelNet [43] and PointPillars [14], with different point cloud processing pipelines as alternative options of the 3D encoder. VoxelNet quantizes the point cloud into small 3D voxel features and then uses a 3D CNN to compress them into 2D BEV space along the height of the voxel, while
+PointPillars quantizes the point cloud into vertical pillars on ﬁxed-size 2D grids and then performs linear transformation and max-pooling on each pillar to obtain the BEV representation. Neither of them explicitly considers the domain shift in transfer learning setups. 3 Method
+We present 3D-CoCo as a feasible solution to the unsupervised domain adaptation task in point cloud detection. It has two contributions to learning transferable features from heterogeneous geometries, which respectively reside in the new architecture design, as shown in Fig. 2, and the framework of contrastive instance alignment enhanced by hard sample mining, as shown in Alg. 1 and Fig. 3. 3.1 3D-CoCo Architecture
+Domain-speciﬁc 3D encoders. Transfer learning in 3D scenes may suffer from dramatic geometry shifts, such as density variations and different occlusion ratios of point clouds, due to different physical environments and sensor conﬁgurations. Although some work has explored model pretraining on 3D pretext tasks [41, 30], in contrast with 2D scenarios, 3D vision still lacks a transferable, well-pretrained backbone. One possible reason is that it is very difﬁcult to reduce the domain shift in geometric representations at the bottom of the 3D encoder. Intuitively, we expect the 3D detection network to progressively process domain-speciﬁc non-transferable features and learn domain-invariant semantic features. As shown in Fig. 2, we present a novel model architecture with domain-speciﬁc 3D encoders, which learn different mapping functions to parse and convert LiDAR points into the 3
+Algorithm 1: The learning procedure of 3D contrastive co-training (3D-CoCo)
+Input: The labeled point set from the source domain {(P S i , Y S i=1, the maximum number of update stages K i=1, the unlabeled point set i )}NS i }NT i }NT i=1) i=1) ← HSM({(P T from the target domain {P T
+Output: Learned network weights θ i )}NS i , Y S 1 D(cid:48) ← {(P S i=1
+T i }NT i=1 ← (D(cid:48), {P T 2 {Y
+T i )}NT 3 ({(P T i , Y 4 Dθ ← D(cid:48) 5 D0
+θ ← ({(P S 6 for k = 1, . . . , K do
+T i }NT i=1 ← (Dk−1
+T i )}NT i , Y
+θ ← ({(P S
+θ ← Dk
+θ
+, {P T i=1) ← HSM({(P T i , Y S i , Y
+{Y ({(P T
+Dk
+Dk−1 i=1, {(P T i=1, {(P T i }NT i=1) i )}NS i )}NS i , Y S i , Y i , Y
+θ 7 9 8 10 (cid:46) Pretrain the base detector according to Eq. (3) (cid:46) Generate pseudo-labels for target domain samples
+T i )}NT i=1) (cid:46) Mine hard samples to augment the target set (cid:46) Initialize the model with the base detector
+T i )}NT i=1) (cid:46) Warm-up according to Eq. (6) (cid:46) Update pseudo-labels i=1) (cid:46) Append new hard samples to the target set (cid:46) Model update according to Eq. (6)
+T i )}NT i , Y
+T i )}NT i=1) bird-eye-view (BEV) space for different domains. It is worth noting that the co-training architecture not only beneﬁts the adaptation performance on the target domain but also contributes to maintaining the performance on the source domain, in the sense that learning transferable features upon separate encoders can facilitate bi-directional knowledge sharing.
+Domain-agnostic BEV transformation module. The 2D transformation module is co-trained with data samples from both source and target domain. It further compresses the outputs of the domain-speciﬁc 3D encoders into BEV feature maps M . The BEV features are supposed to be more transferable, because they have similar structures to the grid-based feature maps in 2D vision and can therefore be easily integrated into off-the-shelf transfer learning techniques. Based on M , we perform the contrastive alignment training scheme to encourage the learning of domain-invariant features.
+Detection head. The detection head classiﬁes and localizes 3D objects from the BEV feature maps
+M . Given a labeled sample from the source domain, the detection head is trained to minimize
+Ldet = LS cls + LS loc, (3) cls and LS where LS sample from the target domain, we use a regularization of the localization error LT predictions and the pseudo-labels, which encourages a rapid adaptation to the target domain. loc respectively indicates the classiﬁcation and localization error. For an unlabeled reg between the 3.2 Hard Sample Augmented Contrastive Alignment
+Since the features of point clouds are sparsely distributed, it is difﬁcult to achieve effective matching between domains by using global distribution alignment. We thus propose to exploit ﬁne-grained alignment at the instance level, which is enhanced by hard sample mining to avoid bad local minima.
+T
+= {yT 1 , . . . , yT
+Foreground and background proposals. We ﬁrst construct foreground and background instance-level features for contrastive domain alignment, respectively. According to the predicted pseudo-labels
+Y m}, we obtain foreground detection proposals on the BEV features. We then apply a keypoint-based feature extraction approach to each proposal. Concretely, we assign R × R × 1 equally distributed keypoints to the proposal box, and then learn the feature of each keypoint by performing bilinear interpolation on the feature map and get the average-pooling value as the ﬁnal representation. For background samples, we randomly select grid features from areas outside the proposal boxes on the feature map. It is worth noting that the proportion of blank areas without any points in the background region is relatively large, while the proportion of non-blank areas with background points is relatively small. There is a gap between the learned features of these two kinds of background samples. To alleviate the sample imbalance, we equally select a certain number of features from these two groups of background samples. 4
+Figure 3: The idea of the hard sample augmented contrastive alignment. (a-b) A simple use of contrastive alignment introduces the mismatch in point density and occlusion ratio between sample distributions of pseudo-labels and ground truths in the target domain. (c) Hard sample mining transforms point clouds by considering the speciﬁc geometry mismatches. (d) The original contrastive alignment focuses more on the alignment of easy samples in 3D scenes rather than the easily neglected hard samples with severe occlusions or density variations. (e) The contrastive alignment scheme of 3D-CoCo is effectively augmented by the transformed hard samples to achieve further alignment.
+Contrastive instance alignment induced by pseudo-labels. The core idea of contrastive align-ment is to drive the feature centroids of similar samples closer between domains. Speciﬁcally, we choose the positive instance sample pair (I S j ) based on a similarity-priority criterion as follows: j )}, 1 ≤ i ≤ N S
+{Φ(I S (4) c , c = 1, 2, . . . , |C|, i , I T i , I T j(cid:63) = Pc(i) = arg max 1≤j≤N T c i , it ﬁnds a positive sample I T where N S c denotes the total number of source samples in category c and |C| denotes the total number of categories. For each I S j(cid:63) from the target domain under the same category c, where Φ(x, y) = x·y (cid:107)x(cid:107)(cid:107)y(cid:107) calculates the cosine similarity between features of a source sample and a target candidate within the same category. In addition to minimizing the intra-class distance of the same category between domains, we also constrain the inter-class distance between different categories within the same domain. The objective of contrastive alignment is formulated as
+Lintra-class(S, T ) = −
+|C| (cid:88) (cid:88) c=1 i∈N S c log exp(I S i exp(I S i j(cid:63) /τ ) + (cid:80)
+· I T
+· I T j(cid:63) /τ ) j∈N T
+|C|\c exp(I S i
+· I T j )
+,
+Linter-class(S) = −
+Linter-class(T ) = −
+|C| (cid:88) c=1
+|C| (cid:88) c=1 (cid:88) i∈N S c ,j(cid:48) ∈N S c ,i(cid:54)=j(cid:48) (cid:88) i∈N T c ,j(cid:48) ∈N T c ,i(cid:54)=j(cid:48) log exp(I S i log exp(I T i
+· I S exp(I S i j(cid:48) /τ ) + (cid:80) exp(I T i j(cid:48) /τ ) + (cid:80)
+· I T
+· I S j(cid:48) /τ ) j∈N S
+|C|\c
+· I T j(cid:48) /τ ) j∈N T
+|C|\c exp(I S i
+· I S j )
+, (5) exp(I T i
+· I T j )
+,
+Luda = Lintra-class(S, T ) + Linter-class(S) + Linter-class(T ), where τ denotes a temperature hyper-parameter, which is set to 0.07 in our experiments. In the total adaptation loss Luda, all pairwise relations of samples between domains and within domains are con-sidered, which enhances both the intra-class transferability as well as the inter-class discriminability.
+Finally, by combining the loss terms in Eq. (3), Eq. (5), and the regularization term for target domain
+LT reg, we optimize the model Dθ by arg min
+θ
+Ldet + λLuda + LT reg, (6) 5
+where λ is the hyper-parameter for the domain adaptation term, set as 0.5 in experiments.
+Transformed point clouds as hard samples. A straightforward use of the contrastive instance alignment tends to introduce the mismatch between the sample distributions obtained by pseudo-labels and ground truths on the target domain. First, as shown in Fig. 3(a), pseudo-labels are more concentrated in the patterns with dense point clouds than those with sparse point clouds. Second, as shown in Fig. 3(b), pseudo-labels cannot completely cover the patterns of severe occlusions.
+Therefore, most instances induced by positive pseudo-labels can be viewed as “easy samples” with sufﬁcient points or complete geometry. However, we believe that the neglected “hard samples”, which are more likely to be distributed in the marginal area shown in Fig. 3(d), are equally important to 3D transfer learning. As shown in Fig. 3(e), mining the hard samples can further promote distribution alignment and prevent the model from overﬁtting bad local minima. The key to creating ﬁctitious hard samples is to consider the priors of geometry variations indicated by Fig. 3(a-b). We here propose two mechanisms to create ﬁctitious hard samples. As shown in Fig. 3(c), the ﬁrst transformation method uniformly discards the points from existing dense point clouds, which simulates the change of the number of laser beams. The second method simulates object occlusions by breaking the complete geometry of easy samples. Concretely, we calculate the viewpoint of a certain sample, randomly select a part of the viewpoint, and discard the point cloud on these angles. Compared to common augmentation strategies such as rotation and ﬂipping that were previously applied to 3D detection [38, 32], the transformed point clouds focus on effective contrastive instance alignment by reducing the distribution mismatch of the target domain induced by pseudo-labels, rather than aiming at enriching sample diversity of the source domain.
+Overall training procedure. We propose a step-wise training procedure with a warm-up process as shown in Alg. 1. Speciﬁcally, we ﬁrst pretrain a source detector on the labeled source domain and use it to generate pseudo-labels on the target set. We then conduct hard sample mining (HSM) and augment the target set. Next, we warm up the 3D-CoCo detection model following Eq. (6), which allows a more stable convergence in the early stages of training. For the remaining epochs, we update the pseudo-labels using the ensembling and voting mechanism [35]. Throughout step-wise co-training, Dθ gradually adapts to the target domain while maintaining the in-domain performance. 4 Experiments 4.1 Experimental Setup
+Datasets. We evaluate 3D-CoCo on three widely used LiDAR-based datasets, including
+Waymo [26], nuScenes [1], and KITTI [6]. Each dataset has speciﬁc properties in external en-vironments (i.e., trafﬁc condition) and internal sensor conﬁgurations (i.e., number of beams), so there exist huge domain gaps between them. Speciﬁcally, Waymo is collected in the United States with multiple weather conditions throughout the day using 5 LiDAR sensors. The nuScenes dataset is collected in the United States and Singapore by a 32-beam LiDAR sensor. KITTI is collected in Ger-many in sunny daytime by a 64-beam LiDAR sensor. We construct 4 domains adaptation benchmarks between datasets including: (i) Waymo→nuScenes, (ii) nuScenes→Waymo, (iii) Waymo→KITTI, and (iv) nuScenes→KITTI. We use the common category of the three datasets, i.e., Car/Vehicle.
+Here, KITTI is only used as the target domain as it is much smaller than the other two datasets.
+Compared models. As shown in Table 1, 3D-CoCo is ﬁrstly compared with the “Source Only” model, which is trained with only source domain data. We include two existing approaches for cross-domain 3D detection: SN [28] normalizes the object size of the source domain by leveraging the object-level statistics of the target domain. ST3D [35] is a self-training pipeline that achieves the state-of-the-art domain adaptation results by using pseudo-labels of target data for retraining. We re-implement SN and ST3D on the same base detector as ours. Finally, 3D-CoCo is also compared with the “Oracle” model, which is trained with labeled target domain data, to roughly represent the optimal performance of an adaptation model on the target domain.
+Evaluation metrics. We use the average precision (AP) as the evaluation metric for both BEV
+IoUs and 3D IoUs under an IoU threshold of 0.7. We also adopt the domain adaptation metric named
+Closed Gap from Yang et al. [35], which is deﬁned as APmodel−APsource
+× 100%, the higher, the better.
+APoracle−APsource
+Implementation details. We follow Yin et al. [38] to build the base detector with two alternative 3D encoders including VoxelNet and PointPillars. We set the voxel size to (0.1, 0.1, 0.15)m for 6
+Task
+Method
+N → K
+W → K
+W → N
+N → W
+Source Only
+SN [28]
+ST3D [35] 3D-CoCo
+Oracle
+Source Only
+SN [28]
+ST3D [35] 3D-CoCo
+Oracle
+Source Only
+ST3D [35] 3D-CoCo
+Oracle
+Source Only
+ST3D [35] 3D-CoCo
+Oracle
+VoxelNet
+PointPillars
+APBEV Closed Gap AP3D Closed Gap APBEV Closed Gap AP3D Closed Gap 46.7 35.4 54.4 77.1 84.2 55.1 50.6 72.6 77.0 84.2 32.4 32.8 39.2 49.5 40.2 42.7 56.7 78.9 11.1
+-−30.13% 22.9
++20.53% 38.3
++81.07% 65.6 71.9
+-18.9
+-−15.46% 36.7
++60.14% 54.8
++75.26% 61.9 71.9
+-21.1
+-+2.34% 21.1
++39.77% 25.4 32.7
+-22.9
+-+6.46% 29.0
++42.64% 33.0 74.7 0.5
+-+26.61% 2.0
++60.65% 11.1
++87.42% 47.2 71.6
+-11.5
+-−55.14% 6.4
++27.84% 23.2
++76.49% 42.9 71.6
+-12.1
+-+13.21% 15.6
++25.00% 20.7 31.3
+-8.5
+-+15.63% 14.0
++49.55% 29.5 50.4
+-+19.41%
++44.74%
++89.64%
+--+33.58%
++67.74%
++81.13%
+--+0.00%
++37.07%
+--+11.78%
++19.50%
+--+2.11%
++14.91%
++65.68%
+--−8.49%
++19.47%
++52.25%
+--+18.23%
++44.79%
+--+13.13%
++50.12%
+-22.8 39.3 60.4 77.0 84.8 47.8 27.4 58.1 76.1 84.8 27.8 30.6 33.1 49.0 28.1 35.1 50.3 72.9
+--Table 1: Results in average precision and the corresponding closed gaps for unsupervised domain adaptation. Please see the text for the deﬁnition of the metric. N: nuScenes; K: KITTI; W: Waymo.
+VoxelNet and (0.1, 0.1)m for PointPillars. We use the Adam optimizer [13] with a learning rate of 1.5 × 10−3. We set the maximum number of training epochs to 30 for KITTI and 20 for Waymo and nuScenes, with a warm-up process taking half of the total epochs. For pseudo-labels generation, we apply a high-pass threshold of 0.7 to IoU to obtain foreground samples, and a low-pass threshold of 0.2 for background samples. To reduce the domain shift of object size between datasets [28], we use the random object scaling (ROS) strategy [35] with a scaling factor in the range of [0.75, 0.9] when adapting the model to KITTI. In this way, different from Statistical Normalization (SN) [28], our approach does not require accurate prior knowledge of the target domain statistics. 4.2 Main Results
+As shown in Table 1, 3D-CoCo outperforms all compared models by large margins on all adaptation benchmarks. Especially on nuScenes→KITTI and Waymo→KITTI based on the VoxelNet backbone, 3D-CoCo closes the domain gap in AP3D by around 81% ∼ 89%. Furthermore, for the adaptation tasks between the two large-scale datasets, i.e., Waymo and nuScenes, 3D-CoCo also achieves considerable improvement, closing the domain gap in AP3D by 37% on VoxelNet and 50% on
+PointPillars. Notably, despite taking 3D domain shift into account, SN and ST3D achieve relatively small improvements under the domain adaptation setups, or even have a negative effect on the base model (source only). In contrast, although starting with low-quality pseudo labels, 3D-CoCo still performs well due to the effective co-training that incorporates labeled source data and augmented hard samples. The overall results validate the transferability of 3D-CoCo on different unsupervised domain adaptation benchmarks, and its ability to generalize to different detection networks. 4.3 Ablation Studies
+Architecture designs. All ablation studies are conducted on nuScenes→KITTI, using VoxelNet as the network backbone. First, Table 2(I) compares the results of using different parameter-sharing strategies in the model architecture. By replacing the domain-speciﬁc 3D encoders of 3D-CoCo with (I)
+Method
+Source Only 1E + 1U 2E + 2U 2E + 1U (Ours)
+Target
+Source
+APBEV AP3D APBEV AP3D 19.4 45.2 14.3 74.0 18.1 77.5 19.6 77.1 32.6 59.1 60.3 65.6 32.2 24.5 31.6 30.6 (II)
+Method
+Source Only 1E + 1U 2E + 2U 2E + 1U (Ours)
+Target
+Source
+APBEV AP3D APBEV AP3D 28.0 51.4 25.5 73.5 23.5 64.0 30.0 77.1 32.2 53.7 26.0 55.6 44.0 39.1 43.5 44.6
+Table 2: Ablations on the architecture design. 1E and 2E respectively denotes using a domain-sharing 3D encoder and separate domain-speciﬁc encoders. 1U /2U denotes using shared/separate BEV transformation module(s). All models are trained in the proposed contrastive alignment framework with the random object scaling technique. In (I), the ROS scaling factor ranges in [0.75, 0.9]; In (II), it ranges in [0.75, 1.1]. We report both in-domain and cross-domain performance. 7
+(a) (b) (c) (d)
+Bkgd (cid:88) (cid:88) (cid:88)
+Sim Proto APBEV AP3D 62.1 63.3 65.6 59.2 76.5 76.8 77.1 72.7 (cid:88) (cid:88)
+Table 3: Ablations on contrastive alignment schemes. Bkgd: The balanced background sam-pling strategy; Sim: Similarity-priority criterion;
+Proto: Prototype-level alignment as opposed to the instance-level alignment.
+Rand Unif (cid:88) (cid:88) (cid:88)
+Pers APBEV AP3D 58.8 74.0 61.3 74.2 62.5 76.2 61.4 76.0 65.6 77.1 (cid:88) (cid:88) (e) (f) (g) (h) (i)
+Table 4: Ablations on hard sample mining. Rand:
+Dropping points randomly; Unif: Dropping points uniformly; Pers: Dropping points of certain per-spectives to simulate occlusions.
+Figure 4: Comparisons of self-training (ST) and the proposed co-training (CT) methods. (a1-a2)
+Training without updating pseudo-labels. (b1-b2) Training with progressively updated pseudo-labels. (c1-c2) Training with pseudo-labels ﬁltered by different conﬁdence scores. AP3D indicates the detection accuracy. The ratio of TPs/FPs indicates the detection noise. HSM: Hard sample mining. a domain-sharing encoder, we observe that the in-domain performance in AP3D drops by 6.5% and the cross-domain performance drops by 5.3%, which indicates the difﬁculty of learning transferable features on raw point clouds due to the low-level geometry shift. We further evaluate a baseline model that contains separate BEV transformation modules, and ﬁnd that the domain adaptation performance yields a 5.3% drop in AP3D. It demonstrates the transferability of the BEV features. Besides, our model can work well with ROS, which is designed to reduce the object size bias on the target domain but inevitably degrades the localization accuracy on the source domain. With different values of the
+ROS scaling factor, as shown in Table 2(II), our model consistently achieves the performance gain in both in-domain and cross-domain evaluation setups.
+Contrastive learning schemes. By comparing the baseline models (a) and (b) in Table 3, we observe that the balanced background sampling strategy effectively improves the adaptation results.
+By further including model (c) into comparison, which is the ﬁnal proposed model, we validate the effectiveness of using the similarity-priority criterion. We further compare 3D-CoCo with existing prototype-level alignment methods [18, 40] that calculate normalized features of all samples for each category as category-level prototypes for alignment. From Table 3, due to the ambiguity of the prototypes, the baseline model (d) performs much worse than the proposed model (c) with instance-level alignment. Furthermore, as shown in Table 4, hard sample mining (i) signiﬁcantly boosts the performance of the original algorithm of contrastive instance alignment (e) with a 6.8% mAP. By comparing the models (e-g-i), we can see that the two transformation methods of uniformly dropping and occlusion simulation progressively improve the model performance.
+Comparisons with the self-training pipeline. We compare our co-training procedure, denoted as
+CT in Fig. 4, with self-training, denoted as ST, based on the same initialized pretrained source model.
+In Fig. 4(a1), without updating pseudo-labels, both models ﬂuctuate in the early training stage but 3D-CoCo converges faster and more stably, with higher performance than the self-training model. 8
+Fig. 4(a2) shows the ratio of true positive and false positive predictions, denoted as TPs/FPs. It indicates that our co-training approach derives a lower detection noise than the self-training baseline.
+Besides, by updating pseudo-labels in the training process, as shown in Fig. 4(b1-b2), the proposed co-training framework consistently outperforms self-training in detection accuracy, and yields an extremely low detection noise with gradually improved pseudo-labels. At last, we conduct sensitivity analyses of pseudo-labels that are ﬁltered by different conﬁdence scores, where lower scores bring in more noisy labels while higher ones tend to miss the positive labels. As shown in Fig. 4(c1), since self-training is fully dependent on pseudo-labels, it is more sensitive to the ﬁltering scores, while our co-training framework is more robust to the quality of pseudo-labels. 5

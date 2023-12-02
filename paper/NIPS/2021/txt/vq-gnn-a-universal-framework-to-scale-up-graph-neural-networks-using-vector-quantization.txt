@@ -1,0 +1,156 @@
+Abstract
+Most state-of-the-art Graph Neural Networks (GNNs) can be deﬁned as a form of graph convolution which can be realized by message passing between direct neighbors or beyond. To scale such GNNs to large graphs, various neighbor-, layer-, or subgraph-sampling techniques are proposed to alleviate the “neighbor explosion” problem by considering only a small subset of messages passed to the nodes in a mini-batch. However, sampling-based methods are difﬁcult to apply to GNNs that utilize many-hops-away or global context each layer, show unstable performance for different tasks and datasets, and do not speed up model inference. We propose a principled and fundamentally different approach, VQ-GNN, a universal framework to scale up any convolution-based GNNs using Vector Quantization (VQ) without compromising the performance. In contrast to sampling-based techniques, our approach can effectively preserve all the messages passed to a mini-batch of nodes by learning and updating a small number of quantized reference vectors of global node representations, using VQ within each GNN layer. Our framework avoids the “neighbor explosion” problem of GNNs using quantized representations combined with a low-rank version of the graph convolution matrix. We show that such a compact low-rank version of the gigantic convolution matrix is sufﬁcient both theoretically and experimentally. In company with VQ, we design a novel approximated message passing algorithm and a nontrivial back-propagation rule for our framework. Experiments on various types of GNN backbones demonstrate the scalability and competitive performance of our framework on large-graph node classiﬁcation and link prediction benchmarks. 1
+
+Introduction
+The rise of Graph Neural Networks (GNNs) has brought the modeling of complex graph data into a new era. Using message-passing, GNNs iteratively share information between neighbors in a graph to make predictions of node labels, edge labels, or graph-level properties. A number of powerful GNN architectures [1–4] have been widely applied to solve down-stream tasks such as recommendation, social analysis, visual recognition, etc.
+With the soaring size of realistic graph datasets and the industrial need to model them efﬁciently,
+GNNs are hindered by a scalability problem. An L-layer GNN aggregates information from all L-hop neighbors, and standard training routines require these neighbors to all lie on the GPU at once. This prohibits full-batch training when facing a graph with millions of nodes [5].
+∗Equal contribution. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: In our framework, VQ-GNN, each mini-batch message passing (left) is approximated by a VQ codebook update (middle) and an approximated message passing (right). All the messages passed to the nodes in the current mini-batch are effectively preserved. Circles are nodes, and rectangles are VQ codewords. A double circle indicates nodes in the current mini-batch. Color represents codeword assignment. During VQ codebook update, codeword assignment of nodes in the mini-batch is refreshed (node 1), and codewords are updated using the assigned nodes. During approximated message passing, messages from out-of-mini-batch nodes are approximated by messages from the corresponding codewords, messages from nodes assigned to the same codeword are merged (a and b), and intra-mini-batch messages are not changed (c and d).
+A number of sampling-based methods have been proposed to accommodate large graphs with limited
+GPU resources. These techniques can be broadly classiﬁed into three categories: (1) Neighbor-sampling methods [2, 6] sample a ﬁxed-number of neighbors for each node; (2) Layer-sampling methods [7, 8] sample nodes in each layer independently with a constant sample size; (3) Subgraph-sampling methods [9, 10] sample a subgraph for each mini-batch and perform forward and back-propagation on the same subgraph across all layers. Although these sampling-based methods may signiﬁcantly speed up the training time of GNNs, they suffer from the following three major draw-backs: (1) At inference phase, sampling methods require all the neighbors to draw non-stochastic predictions, resulting in expensive predictions if the full graph cannot be ﬁt on the inference device; (2) As reported in [5] and in Section 6, state-of-the-art sampling-baselines fail to achieve satisfactory results consistently across various tasks and datasets; (3) Sampling-based methods cannot be uni-versally applied to GNNs that utilize many-hop or global context in each layer, which hinders the application of more powerful GNNs to large graphs.
+This paper presents VQ-GNN, a GNN framework using vector quantization to scale most state-of-the-art GNNs to large graphs through a principled and fundamentally different approach compared with the sampling-based methods. We explore the idea of using vector quantization (VQ) as a means of dimensionality reduction to learn and update a small number of quantized reference vectors (codewords) of global node representations. In VQ-GNN, mini-batch message passing in each GNN layer is approximated by a VQ codebook update and an approximated form of message passing between the mini-batch of nodes and codewords; see Fig. 1. Our approach avoids the “neighbor explosion” problem and enables mini-batch training and inference of GNNs. In contrast to sampling-based techniques, VQ-GNN can effectively preserve all the messages passed to a mini-batch of nodes. We theoretically and experimentally show that our approach is efﬁcient in terms of memory usage, training/inference time, and convergence speed. Experiments on various GNN backbones demonstrate the competitive performance of our framework compared with the full-graph training baseline and sampling-based scalable algorithms.
+Paper organization. The remainder of this paper is organized as follows. Section 2 summarizes
+GNNs that can be re-formulated into a common framework of graph convolution. Section 3 deﬁnes the scalability challenge of GNNs and shows that dimensionality reduction is a potential solution.
+In Section 4, we describe our approach, VQ-GNN, from theoretical framework to algorithm design and explain why it solves the scalability issue of most GNNs. Section 5 compares our approach to the sampling-based methods. Section 6 presents a series of experiments that validate the efﬁciency, robustness, and universality of VQ-GNN. Finally, Section 7 concludes this paper with a summary of limitations and broader impacts. 2
+Table 1: Summary of GNNs re-formulated as generalized graph convolution.
+Model Name
+Design Idea
+Conv. Matrix Type
+# of Conv. Convolution Matrix
+GCN1 [1]
+Spatial Conv.
+SAGE-Mean2 [2] Message Passing
+Fixed
+Fixed 1 2
+GAT3 [3]
+Self-Attention
+Learnable
+# of heads
+C = (cid:101)D−1/2 (cid:101)A (cid:101)D−1/2 (cid:40)
+C (1) = In
+C (2) = D−1A
+C(s) = A + In and a(l,s)(X (l) h(s) (X (l) i,: , X (l) i,: W (l,s) (cid:102) X (l)
+
+
+ j,: ) = exp (cid:0)LeakyReLU( j,: W (l,s)) · a(l,s))(cid:1) 1 Where (cid:101)A = A + In, (cid:101)D = D + In. 3 Need row-wise normalization. C (l,s) i,j 2 C (2) represents mean aggregator. Weight matrix in [2] is W (l) = W (l,1) is non-zero if and only if Ai,j = 1, thus GAT follows direct-neighbor aggregation. (cid:102) W (l,2). 2 Preliminaries: GNNs deﬁned as Graph Convolution
+Notations. Consider a graph with n nodes and m edges (average degree d = m/n). Connectivity is given by the adjacency matrix A ∈ {0, 1}n×n and features are deﬁned on nodes by X ∈ Rn×f0 with f0 the length of feature vectors. Given a matrix C, let Ci,j, Ci,:, and C:,j denote its (i, j)-th entry, i-th row, j-th column, respectively. For a ﬁnite sequence (cid:104)ib(cid:105) : i1, . . . , ib, we use C(cid:104)ib(cid:105),: to denote the matrix whose rows are the ib-th rows of matrix C. We use (cid:12) to denote the element-wise (Hadamard) product. (cid:107) · (cid:107)p denotes the entry-wise (cid:96)p norm of a vector and (cid:107) · (cid:107)F denotes the Frobenius norm.
+We use In ∈ Rn×n to denote the identity matrix, 1n ∈ Rn to denote the vector whose entries are n to denote the unit vector in Rn whose i-th entry is 1. The 0-1 indicator function is all ones, and ei 1{·}. We use diag(c) to denote a diagonal matrix whose diagonal entries are from vector c. And (cid:102) represents concatenation along the last axis. We use superscripts to refer to different copies of same kind of variable. For example, X (l) ∈ Rn×fl denotes node representations on layer l. A Graph
+Neural Network (GNN) layer takes the node representation of a previous layer X (l) as input and produces a new representation X (l+1), where X = X (0) is the input features.
+A common framework for generalized graph convolution. Although many GNNs are designed fol-lowing different guiding principles including neighborhood aggregation (GraphSAGE [2], PNA [11]), spatial convolution (GCN [1]), spectral ﬁltering (ChebNet [12], CayleyNet [13], ARMA [14]), self-attention (GAT [3], Graph Transformers [15–17]), diffusion (GDC [18], DCNN [19]), Weisfeiler-Lehman (WL) alignment (GIN [4], 3WL-GNNs [20, 21]), or other graph algorithms ([22, 23]).
+Despite these differences, nearly all GNNs can be interpreted as performing message passing on node features, followed by feature transformation and an activation function. As pointed out by Balcilar et al. [24], GNNs can typically be written in the form
+X (l+1) = σ (cid:33)
+C (s)X (l)W (l,s)
+, (cid:32) (cid:88) s (1) where C (s) ∈ Rn×n denotes the s-th convolution matrix that deﬁnes the message passing operator, s ∈ Z+ denotes index of convolution, and σ(·) denotes the non-linearity. W (l,s) ∈ Rfl×fl+1 is the learnable linear weight matrix for the l-th layer and s-th ﬁlter.
+Within this common framework, GNNs differ from each other by choice of convolution matrices
+C (s), which can be either ﬁxed or learnable. A learnable convolution matrix relies on the inputs and learnable parameters and can be different in each layer (thus denoted as C (l,s)): i,j = C(s)
+C (l,s) i,j (cid:124)(cid:123)(cid:122)(cid:125)
+ﬁxed
+· h(s) (cid:124) i,: , X (l)
+θ(l,s) (X (l) j,: ) (cid:123)(cid:122) (cid:125) learnable (2) where C(s) denotes the ﬁxed mask of the s-th learnable convolution, which may depend on the adjacency matrix A and input edge features Ei,j. While h(s)(·, ·) : Rfl × Rfl → R can be any learnable model parametrized by θ(l,s). Sometimes a learnable convolution matrix may be further row-wise normalized as C (l,s) j C (l,s)
+, for example in GAT [3]. We stick to Eq. (2) in i,j the main paper and discuss row-wise normalization in Appendices A and E. The receptive ﬁeld of a i,j ← C (l,s) i,j / (cid:80) 3
+layer of graph convolution (Eq. (1)) is deﬁned as a set of nodes R1 determines X (l+1) framework; see Table 1 and Appendix A for more. j,: | j ∈ Ri}
+. We re-formulate some popular GNNs into this generalized graph convolution i whose features {X (l) i,:
+The back-propagation rule of GNNs deﬁned by Eq. (1) is as follows,
+∇X (l)(cid:96) = (cid:88) (cid:16)
+C (l,s)(cid:17)T (cid:18)
+∇X (l+1) (cid:96) (cid:12) σ(cid:48)(cid:16)
+σ−1(cid:0)X (l+1)(cid:1)(cid:17)(cid:19) (cid:16)
+W (l,s)(cid:17)T
+, (3) s which can also be understood as a form of message passing. σ(cid:48) and σ−1 are the derivative and inverse of σ respectively and ∇X (l+1) (cid:96) (cid:12) σ(cid:48)(cid:0)σ−1(X (l+1))(cid:1) is the gradients back-propagated through the non-linearity. 3 Scalability Problem and Theoretical Framework
+When a graph is large, we are forced to mini-batch the graph by sampling a subset of b (cid:28) n nodes in each iteration. Say the node indices are i1, . . . , ib and a mini-batch of node features is denoted by XB = X(cid:104)ib(cid:105),:. To mini-batch efﬁciently for any model, we hope to fetch Θ(b) information to the training device, spend Θ(Lb) training time per iteration while taking (n/b) iterations to traverse through the entire dataset. However, it is intrinsically difﬁcult for most of the GNNs to meet these three scalability requirements at the same time. The receptive ﬁeld of L layers of graph convolution
+RL−1 (Eq. (1)) is recursively given by RL i ⊇ {i} ∪ Ni), and its size j grows exponentially with L. Thus, to optimize on a mini-batch of b nodes, we require Ω(bdL) inputs and training time per iteration. Sampling a subset of neighbors [2, 6] for each node in each layer does not change the exponential dependence on L. Although layer- [7, 25] and subgraph-sampling [9, 10] may require only Ω(b) inputs and Ω(Lb) training time per iteration, they are only able to consider an exponentially small proportion of messages compared with full-graph training. Most importantly, all existing sampling methods do not support dense convolution matrices with O(n2) non-zero terms.
+Please see Section 5 for a detailed comparison with sampling-based scalable methods after we introduce our framework. (starting with R1 i = (cid:83) j∈R1 i
+B
+= X (l+1)
+Idea of dimensionality reduction. We aim to develop a scalable algorithm for any GNN models that can be re-formulated as Eq. (1), where the convolution matrix can be either ﬁxed or learnable, and either sparse or dense. The major obstacle to scalability is that, for each layer of graph convolution, to compute a mini-batch of forward-passed features X (l+1) (cid:104)ib(cid:105),: , we need O(n) entries of
+B = C (l,s)
+C (l,s) (cid:104)ib(cid:105),: and X (l), which will not ﬁt in device memory.
+Our goal is to apply a dimensionality reduction to both convolution and node feature matrices, and then apply convolution using compressed “sketches” of C (l,s) and X (l). More speciﬁcally, we look for a projection matrix R ∈ Rn×k with k (cid:28) n, such that the product of low-dimensional sketches (cid:101)C (l,s)
+B = C (l,s)
+B X (l).
+The approximated product (of all nodes) (cid:101)C (l,s) (cid:101)X (l) = C (l,s)RRTX (l) can also be regarded as the result of using a low-rank approximation C (l,s)RRT ∈ Rn×n of the convolution matrix such that rank (cid:0)C (l,s)RRT(cid:1) ≤ k. The distributional Johnson–Lindenstrauss lemma [26] (JL for short) shows the existence of such projection R with m = Θ(log(n)), and the following result by Kane and Nelson
+[27] shows that R can be chosen to quite sparse:
+Theorem 1. For any convolution matrix C ∈ Rn×n, any column vector X:,a ∈ Rn of the node feature matrix X ∈ Rn×f (where a = 1, . . . , f ) and ε > 0, there exists a projection matrix
+R ∈ Rn×k (drawn from a distribution) with only an O(ε)-fraction of entries non-zero, such that
+B R ∈ Rb×k and (cid:101)X (l) = RTX (l) ∈ Rk×fl is approximately the same as C (l,s)
+B
+Pr (cid:0)(cid:107)CRRTX:,a − CX:,a(cid:107)2 < ε(cid:107)CX:,a(cid:107)2 (cid:1) > 1 − δ, (4) with k = Θ(log(n)/ε2) and δ = O(1/n).
+Now, the sketches (cid:101)C (l,s) and (cid:101)X (l) take up O(b log(n)) and Θ(fl log(n)) memory respectively and can ﬁt into the training and inference device. The sparsity of projection matrix R is favorable
+B 4
+because:(1) if the convolution matrix C (l,s) is sparse (e.g., direct-neighbor message passing where only O(d/n)-fraction of entries are non-zero), only an O(εd)-fraction of entries are non-zero in the sketch (cid:101)C (l,s); (2) During training, (cid:101)X (l) is updated in a “streaming” fashion using each mini-batch’s inputs X (l)
+B , and a sparse R reduces the computation time by a factor of O(ε). However, the projection R produced following the sparse JL-lemma [27] is randomized and requires O(log2(n)) uniform random bits to sample. It is difﬁcult to combine this with the deterministic feed-forward and back-propagation rules of neural networks, and there is no clue when and how we should update the projection matrix. Moreover, randomized projections destroy the “identity” of each node, and for learnable convolution matrices (Eq. (2)), it is impossible to compute the convolution matrix only using the sketch of features (cid:101)X (l). For this idea to be useful, we need a deterministic and identity-preserving construction of the projection matrix R ∈ Rn×k to avoid these added complexities. 4 Proposed Method: Vector Quantized GNN
+Dimensionality reduction using Vector Quantization (VQ). A natural and widely-used method to reduce the dimensionality of data in a deterministic and identity-preserving manner is Vector
+Quantization [28] (VQ), a classical data compression algorithm that can be formulated as the following optimization problem: min
+R∈{0,1}n×k, (cid:101)X∈Rk×f (cid:107)X − R (cid:101)X(cid:107)F s.t. Ri,: ∈ {e1 k, . . . , ek k}, (5) which is classically solved via k-means [28]. Here the sketch of features (cid:101)X is called the feature
+“codewords.” R is called the codeword assignment matrix, whose rows are unit vectors in Rk, i.e.,
+Ri,v = 1 if and only if the i-th node is assigned to the v-th cluster in k-means. The objective in Eq. (5) is called Within-Cluster Sum of Squares (WCSS), and we can deﬁne the relative error of
+VQ as (cid:15) = (cid:107)X − R (cid:101)X(cid:107)F /(cid:107)X(cid:107)F . The rows of (cid:101)X are the k codewords (i.e., centroids in k-means), and can be computed as (cid:101)X = diag−1(RT1n)RTX, which is slightly different from the deﬁnition in Section 3 as a row-wise normalization of RT is required. The sketch of the convolution matrix (cid:101)C can still be computed as (cid:101)C = CR. In general, VQ provides us a principled framework to learn the low-dimensional sketches (cid:101)X and (cid:101)C, in a deterministic and node-identity-preserving manner.
+However, to enable mini-batch training and inference of GNNs using VQ, three more questions need to be answered:
+• How to approximate the forward-passed mini-batch features of nodes using the learned codewords?
+• How to back-propagate through VQ and estimate the mini-batch gradients of nodes?
+• How to update the codewords and assignment matrix along with the training of GNN?
+In the following part of this section, we introduce the VQ-GNN algorithm by answering all the three questions and presenting a scalability analysis. in = (C (l,s)
+Intra-mini-batch messages C (l,s)
+Approximated forward and backward message passing. To approximate the forward pass through a GNN layer (Eq. (1)) with a mini-batch of nodes (cid:104)ib(cid:105), we can divide the messages intra-mini-batch messages, and messages from out-of-mini-batch nodes; into two categories: see the right ﬁgure of Fig. 1.
+B can always be computed exactly, where C (l,s)
+B ):,(cid:104)ib(cid:105) ∈ Rb×b, because they only rely on the previous layer’s node features of the current mini-batch. Equipped with the codewords (cid:101)X (l) and the codeword assignment of all nodes R(l), we can approximate the messages from out-of-mini-batch nodes as (cid:101)C (l,s) out (cid:101)X (l), where (cid:101)X (l) = diag−1(RT1n)RTX (l) as deﬁned above and (cid:101)C (l,s) out R. Here,
+C (l,s) is the remaining part of the convolution matrix after removing the intra-mini-batch mes-out sages, thus (C (l,s)
+B ):,j1{j ∈ (cid:104)ib(cid:105)} for any j ∈ {1, . . . , n}, and (cid:101)C (l,s) is the sketch of
+C (l,s) out . In general, we can easily approximate the forward-passed mini-batch features X (l+1) by (cid:98)X (l+1) out ):,j = (C (l,s) out (cid:101)X (l))W (l,s)(cid:1). out = C (l,s) in X (l)
+B + (cid:101)C (l,s) in X (l)
+= σ(cid:0) (cid:80) s(C (l,s)
+B
+B 5
+Figure 2: Three types of messages contribute to the mini-batch features and gradients. We only need “red” and “green” messages for the forward-pass. However,
+“blue” messages are required for back-propagation.
+The “red”, “blue”, and “green” messages are character-ized by (cid:101)Cout, ( (cid:102)CT)out, and Cin respectively (Eqs. (6) and (7)).
+Figure 3: For each layer, VQ-GNN estimates the forward-passed mini-batch features using the previ-ous layer’s mini-batch features and the feature code-words through approximated forward message-passing (Eq. (6)). The back-propagated mini-batch gradients are estimated in a symmetric manner with the help of gradient codewords (Eq. (7)).
+B
+B (cid:96) given the gradients of the (approximated) output ∇
+However, the above construction of (cid:98)X (l+1) does not allow us to back-propagate through VQ straight-forwardly using chain rules. During back-propagation, we aim at approximating the previous layer’s mini-batch gradients ∇X (l) (cid:96) (Eq. (3)).
+Firstly, we do not know how to compute the partial derivative of (cid:101)C (l,s) out and (cid:101)X (l) with respect to X (l)
+B , because the learning and updating of VQ codewords and assignment are data dependent and are usually realized by an iterative optimization algorithm. Thus, we need to go through an iterative computation graph to evaluate the partial derivative of R(l) with respect to X (l)
+B , which requires access to many historical features and gradients, thus violating the scalability constraints. Secondly, even if we apply some very rough approximation during back-propagation as in [29], that is, assuming that the partial derivative of R(l) with respect to X (l)
+B can be ignored (i.e., the codeword assignment matrix is detached from the computation graph, known as “straight through” back-propagation), we are not able to evaluate the derivatives of codewords (cid:101)X (l) because they rely on some node features out of the current mini-batch and are not in the training device. Generally speaking, designing a back-propagation rule for VQ under the mini-batch training setup is a challenging new problem. (cid:98)X (l+1)
+B
+It is helpful to re-examine what is happening when we back-propagate on the full graph. In Section 2, we see that back-propagation of a layer of convolution-based GNN can also be realized by message passing (Eq. (3)). In Fig. 2, we show the messages related to a mini-batch of nodes can be classiﬁed into three types. The “green” and “red” messages are the intra-mini-batch messages and the messages from out-of-mini-batch nodes, respectively. Apart from them, although the “blue” messages to out-of-mini-batch nodes do not contribute to the forward-passed mini-batch features, they are used during back-propagation and are an important part of the back-propagated mini-batch gradients. Since both forward-pass and back-propagation can be realized by message passing, can we approximate the back-propagated mini-batch gradients ∇X (l) (cid:96) in a symmetric manner? We can introduce a set of gradient codewords (cid:101)G(l+1) = diag−1(RT1n)RTG(l+1) using the same assignment matrix, where (cid:98)X (l+1) (cid:96) (cid:12) σ(cid:48)(cid:0)σ−1(X (l+1))(cid:1) is the gradients back-propagated through non-linearity.
+G(l+1) = ∇
+Each gradient codeword corresponds one-to-one with a feature codeword since we want to use only one assignment matrix R. Each pair of codewords are concatenated together during VQ updates.
+Following this idea, we deﬁne the approximated forward and backward message passing as follows:
+B (cid:34) (cid:98)X (l+1)
+B (cid:35) (cid:32) (cid:88)
+= σ
+• s (cid:34) ( (cid:124) out (cid:101)C (l,s) 0
+C (l,s) in (cid:94)
+C (l,s)T)out (cid:123)(cid:122) approx. message passing weight matrix C (l,s) (cid:35) (cid:125) (cid:35) (cid:34)
+X (l)
+B (cid:101)X (l) (cid:124) (cid:123)(cid:122) (cid:125) mini-batch features and feat. codewords (cid:33)
+,
+W (l,s)
+
+ (cid:98)∇
+X (l)
+B
+•
+ (cid:96)
+ = (cid:88)
+C (l,s)(cid:17)T (cid:16) s 6 (cid:16)
+W (l,s)(cid:17)T
+, (cid:34) (cid:35)
+G(l+1)
+B (cid:101)G(l+1) (cid:123)(cid:122) mini-batch gradients and grad. codewords (cid:125) (cid:124) (6) (7)
+where C (l,s) ∈ R(b+m)×(b+m) is the approximated message passing weight matrix and is shared during the forward-pass and back-propagation process. The lower halves of the left-hand side vectors of Eqs. (6) and (7) are used in neither the forward nor the backward calculations and are never calculated during training or inference. The approximated forward and backward message passing enables the end-to-end mini-batch training and inference of GNNs and is the core of our VQ-GNN framework.
+Error-bounds on estimated features and gradients. We can effectively upper bound the estima-tion errors of mini-batch features and gradients using the relative error (cid:15) of VQ under some mild conditions. For ease of presentation, we assume the GNN has only one convolution matrix in the following theorems.
+Theorem 2. If the VQ relative error of l-th layer is (cid:15)(l), the convolution matrix C (l) is either ﬁxed or learnable with the Lipschitz constant of hθ(l) (·) : R2fl → R upper-bounded by Lip(hθ(l)), and the Lipschitz constant of the non-linearity is Lip(σ), then the estimation error of forward-passed mini-batch features satisﬁes,
+B (cid:107) (cid:98)X (l+1)
+− X (l+1)
+B (cid:107)F ≤ (cid:15)(l) · (1 + O(Lip(hθ(l) )))Lip(σ)(cid:107)C (l)(cid:107)F (cid:107)X (l)(cid:107)F (cid:107)W (l)(cid:107)F .
+Corollary 3. If the conditions in Theorem 2 hold and the non-linearity satisﬁes |σ(cid:48)(z)| ≤ σ(cid:48) any z ∈ R, then the estimation error of back-propagated mini-batch gradients satisﬁes, (8) max for (cid:107) (cid:98)∇X (l)
+B (cid:96) − ∇X (l)
+B (cid:96)(cid:107)F ≤ (cid:15)(l) · (1 + O(Lip(hθ(l)))σ(cid:48) max(cid:107)C (l)(cid:107)F (cid:107)∇X (l+1) (cid:96)(cid:107)F (cid:107)W (l)(cid:107)F . (9)
+Note that the error bounds rely on the Lipschitz constant of h(·) when the convolution matrix is learnable. In practice, we can Lipshitz regularize GNNs like GAT [3] without affecting their performance; see Appendix E.
+VQ-GNN: the complete algorithm and analysis of scalability. The only remaining question is how to update the learned codewords and assignments during training? In this paper, we use the
+VQ update rule proposed in [29], which updates the codewords as exponential moving averages of the mSeini-batch inputs; see Appendix E for the detailed algorithm. We ﬁnd such an exponential moving average technique suits us well for the mini-batch training of GNNs and resembles the online k-means algorithm. See Fig. 3 for the schematic diagram of VQ-GNN, and the complete pseudo-code is in Appendix E.
+With VQ-GNN, we can mini-batch train and perform inference on large graphs using GNNs, just like a regular neural network (e.g., MLP). We have to maintain a small codebook of k codewords and update it for each iteration, which takes an extra O(Lkf ) memory and O(Lnkf ) training time per epoch, where L and f are the numbers of layers and (hidden) features of the GNN respectively. We can effectively preserve all messages related to a mini-batch while randomly sampling nodes from the graph. The number of intra-mini-batch messages is O(b2d/n) when the nodes are sampled randomly.
+Thus we only need to pass O(b2d/n + bk) messages per iteration and O(bd + nk) per epoch. In practice, when combined with techniques including product VQ and implicit whitening (see Ap-pendix E), we can further improve the stability and performance of VQ-GNN. These theoretical and experimental analyses justify the efﬁciency of the proposed VQ-GNN framework. 5

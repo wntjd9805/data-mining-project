@@ -1,0 +1,160 @@
+Abstract
+Graph Convolutional Networks (GCNs) have shown promising results in modeling graph-structured data. However, they have difﬁculty with processing digraphs because of two reasons: 1) transforming directed to undirected graph to guarantee the symmetry of graph Laplacian is not reasonable since it not only misleads message passing scheme to aggregate incorrect weights but also deprives the unique characteristics of digraph structure; 2) due to the ﬁxed receptive ﬁeld in each layer,
+GCNs fail to obtain multi-scale features that can boost their performance. In this paper, we theoretically extend spectral-based graph convolution to digraphs and derive a simpliﬁed form using personalized PageRank. Speciﬁcally, we present the Digraph Inception Convolutional Networks (DiGCN) which utilizes digraph convolution and kth-order proximity to achieve larger receptive ﬁelds and learn multi-scale features in digraphs. We empirically show that DiGCN can encode more structural information from digraphs than GCNs and help achieve better performance when generalized to other models. Moreover, experiments on various benchmarks demonstrate its superiority against the state-of-the-art methods. 1
+
+Introduction
+Learning from digraph (directed graph) data to solve practical problems, such as trafﬁc prediction
+[25, 36], knowledge discovery [12] and time-series problems [4, 9], has attracted increasing attention.
+There are two general categories of GCNs: spatial-based [16, 40] and spectral-based [19, 23, 11].
+The spatial-based approaches achieve digraph convolution by using self-deﬁned neighbour traversal methods to aggregate features, which usually adds signiﬁcant computational overhead [44, 45, 48].
+Correspondingly, spectral-based GCNs [19, 44] use adjacency matrices based on spectrum analysis theory to explore neighborhood instead of traversal search, which greatly reduces the training time.
+However, they are limited to use undirected graphs as input by deﬁnition, the graph Laplacian needs to be symmetric [45]. How to extend spectral-based GCNs to the digraphs needs to be explored.
+A majority of spectral-based GCNs transform digraphs to undirected by relaxing its direction structure
+[19, 44], i.e., trivially adding edges to symmetrize the adjacency matrices. It will not only mislead message passing scheme to aggregate the features with incorrect weights but also discard distinctive direction structure [43], such as irreversible time-series relationships. Besides, there are several works that learn speciﬁc structure by deﬁning motifs [28], inheritance relationship [18] and second-order proximity[39]. However, these methods have to stipulate learning templates or rules in advance, and is not capable to deal with complex structures beyond their deﬁnitions.
+∗Corresponding author 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Besides, most of the existing spectral-based GCNs enhance their capabilities of feature extraction by stacking a number of graph convolutional layers [22, 13]. However, it often leads to feature dilution as well as overﬁtting problem when models become deep [18, 22]. Inspired by Inception Network for image classiﬁcation [37], some works [32, 46, 1] widen their layers to obtain larger receptive ﬁelds and increase learning abilities. However, they use the ﬁxed adjacency matrix in one layer, which increases the difﬁculty to capture multi-scale features. A scalable neighborhood would be desirable to provide more scale information, especially for nodes belonging to communities with different sizes.
+Moreover, choosing a proper receptive ﬁeld scheme to fuse multi-scale features together can help handle complex structures in digraphs.
+To address these issues, we ﬁrst extend the spectral-based graph convolution to digraphs by leveraging the inherent connections between graph Laplacian and stationary distributions of PageRank [29].
+Since original digraph is not necessarily irreducible and aperiodic, the corresponding Markov chain does not have unique stationary distribution. To solve this problem, we add a chance of teleporting back to every node based on PageRank. However, the derived digraph Laplacian is too dense, and it is extremely time-consuming to perform convolution. Thus, referring to personalized PageRank
+[3], we introduce an extra auxiliary node as the teleport connected with every node to simplify fully-connected links in PageRank. The simpliﬁed digraph Laplacian can dramatically reduce the number of edges without changing the properties (irreducible and aperiodic). In addition, we theoretically analyze its properties and ﬁnd that our Laplacian is the intermediate form between the undirected and directed graph, and the degree of conversion is determined by the teleport probability α.
+Moreover, inspired by the Inception Network [37], we exploit kth-order proximity between two nodes in a digraph, which is determined through the shared kth-order neighborhood structures of these two nodes. This does not require direct kth-hop paths between them. By using this method, we design scalable receptive ﬁelds, which not only allows us to learn features of different sizes within one convolutional layer but also get larger receptive ﬁelds. This notion of proximity also appears in network analysis (HITS[20, 51]), psychology [30] and daily life: people who have a lot of common friends are more likely to be friends. In this way, we avoid yielding unbalanced receptive ﬁelds caused by the asymmetric paths in digraphs. Besides that, to obtain r-range receptive ﬁeld, our model only requires stacking ⌈logk r⌉ layers instead of r GCN layers in conventional approaches.
+Through experiments, we empirically show that Digraph Incpetion Convolutional Networks (DiGCN) outperforms against competitive baselines. Additionally, our digraph convolution is superior to GCN’s convolution in the mainstream directed graph benchmarks, especially over 20% accuracy on CORA-ML dataset. Our implement can be obtained at https://github.com/flyingtango/DiGCN. 2 Digraph Convolution
+In this section, we ﬁrst give the deﬁnition of digraph Laplacian based on PageRank, which is too dense to perform convolution well. We then simplify it by personalized PageRank and analyze its properties. Finally, we give the deﬁnition of digraph convolution based on the above operations. 2.1 Digraph Laplacian based on PageRank
+Formally, given a digraph (directed graph) G = (V, E), its adjacency matrix can be denoted as
+A = {0, 1}n×n, where n = ∣V∣. The nodes are described by the feature matrix X ∈ Rn×c, with the number of features c per node. GCN [19] proposes the spectral graph convolution as Zu = ˆAuXΘ, where Zu ∈ Rn×d is the convolved result with output dimension d, Θ ∈ Rc×d is trainable weight and ˆAu is the normalized self-looped version of undirected adjacency matrix Au (see [19]). GCN and its variants need the undirected symmetric adjacency matrix Au as input, therefore, they transform asymmetric A to symmetric form by relaxing direction structure of digraphs, e.g., let
+Au = (A + AT )/2 in their experiments1.
+Noticing the inherent connections between graph Laplacian and stationary distributions of PageRank
+[29], we can use the properties of Markov chain to help us solve the problem in digraphs. Given a digraph G = (V, E), a random walk on G is a Markov process with transition matrix Prw = D−1A, 1There are various ways to construct an undirected graph from a digraph. In this paper, we consider one of the most commonly used methods that averaging edge weights when combination. 2
+where the diagonal degree matrix D(i, i) = ∑j A(i, j). The G may contain isolated nodes in the periphery or could be formed into bipartite graph. Thus, Prw is not necessarily irreducible and aperiodic, we can not guarantee this random walk has unique stationary distribution.
+In order to relax this constraint, we slightly modify the random walk to PageRank which adds a small chance of teleporting back to every node. The PageRank transition matrix is deﬁned as n 1n×n, where α ∈ (0, 1) is the teleport probability [8] and be controlled to keep
+Ppr = (1 − α)Prw + α the probability α n in a small range. It is easy to prove Ppr is irreducible and aperiodic, thus, it has a unique left eigenvector πpr (also called Perron vector) which is strictly positive with eigenvalue 1 according to Perron-Frobenius Theory [5].
+The row-vector πpr corresponds to the stationary distribution of Ppr and we have πpr(i) =
+∑i,i→j πpr(i)Ppr(i, j). That is, the probability of ﬁnding the walk at vertex i is the sum of all the incoming probabilities from vertices j that have a directed edges to i. Thus, πpr has analogy property with nodes degree matrix ˜Du in undirected graph that reﬂecting the connectivity between nodes [15]. Using this property, we deﬁne the digraph Laplacian using PageRank Lpr in symmetric normalized format [10] as follows:
+Lpr = I − 1 2 1 2 (Π prPprΠ
+− 1 pr + Π 2
+− 1 pr PT 2 1 2 prΠ pr) , (1) 1
+∣∣πpr∣∣1
+Diag(πpr) to replace ˜Du in undirected graph Laplacian [19]. In contrast where we use Πpr = to Ppr, this matrix is symmetric. Likewise, another work [26] also employs this idea to solve digraph problem. However, it is deﬁned on the strongly connected digraphs, which is not universally applicable to any digraphs. Our method can easily generalize to it by α → 0.
+Adding a chance of teleporting back to every node guarantees πpr exists and makes Lpr a Rn×n dense matrix at the same time. Using this Laplacian matrix leads to greatly increase computational overhead of convolution operation and memory requirement of O (n2) for training (see time usage in
+Section 6). To deal with it, we propose a simpliﬁed sparse Laplacian using personlized PageRank. 2.2 Approximate Digraph Laplacian based on Personalized PageRank n 1n×n of PageRank. Instead of
+To solve this issue, reconsider the equation Ppr = (1 − α)Prw + α viewing it as a combination of the random walk Prw with a fully-connected teleport transition matrix, we can also view it as a variant of personalized PageRank matrix using all the nodes as teleports. To retain properties while sparse the Laplacian, we design an auxiliary node scheme.
+Using Auxiliary Node as Teleport. More precisely, we introduce an auxiliary node ξ ∉ V as the personalized PageRank teleport set T = {ξ}. Based on it, we deﬁne the transition matrix of personalized PageRank Pppr in the graph Gppr as follows:
+Pppr =
+⎡
+⎢
+⎢
+⎢
+⎢
+⎢
+⎣ (1 − α) ˜P α1n×1 1 n 11×n 0
+⎤
+⎥
+⎥
+⎥
+⎥
+⎥
+⎦
+, Pppr ∈ R(n+1)×(n+1), (2) where ˜P = ˜D−1 ˜A, ˜A = A + In×n denotes the adjacency matrix with added self-loops and ˜D(i, i) =
+˜A(i, j). Adding self-loops makes Pppr aperiodic due to the greatest common divisor of the
+∑j lengths of its cycles is one. Meanwhile, each node in V has a α possibility of linking to ξ and ξ has a 1/n possibility of teleporting back to every node in V, which guarantees Pppr to be irreducible. Thus,
+Pppr has a unique left eigenvector πppr ∈ Rn+1 which is strictly positive with eigenvalue 1.
+Approximate Digraph Laplacian. Our target is ﬁnding the Laplacian of ˜P for spectral analysis, however, ˜P is not necessarily irreducible, which means the eigenvector ˜π ∈ Rn with the largest eigenvalue of ˜P is not unique. Thus, we use the stationary distribution of Pppr to approximate the stationary distribution of ˜P. We can split πppr into two parts: πppr = (πappr, πξ), where πappr ∈ Rn is the unique stationary distribution of the ﬁrst n points and πξ ∈ R1 is the unique stationary distribution of the auxiliary node ξ. πappr can converge to stationary distribution of ˜P according to THEOREM 1.
+THEOREM 1 Based on the deﬁnitions, when teleport probability α → 0, πappr ˜P − πappr → 0. 3
+We can control α in a small range then simplify Equation 1 to:
+Lappr = I − ( ˜Π 1 2 1 2 ˜P ˜Π− 1 2 + ˜Π− 1 2 ˜PT ˜Π 1 2 ) ≈ I − 1 2 (Π 1 2 appr ˜PΠ
+− 1 appr + Π 2
+− 1 appr ˜PT Π 2 1 2 appr) , (3) where ˜Π = 1
+∣∣˜π∣∣1 sparsity of O (∣E∣). Next, we give the conditions to converge to other forms in THEOREM 2.
+Diag(πappr). Note that Lappr retains the graph’s
+Diag(˜π) and Πappr = 1
+∣∣πappr∣∣1
+THEOREM 2 Based on the above deﬁnitions, given an input graph G, when teleport probability α → ( ˜P + ˜PT ), 1, Πappr → 1 n which is a trivial-symmetric Laplacian matrix. Specially, if G is undirected, then the approximate digraph Laplacian converges as Lappr → I − ˜D−1 ˜A, which is a random-walk normalized Laplacian.
+⋅ In×n and the approximate digraph Laplacian converges as Lappr → I − 1 2
+Generalization. We show in THEOREM 2 that two common used undirected Laplacian matrices are special cases of our method under certain conditions: the trivial-symmetric one mentioned in Section 2.1 and random-walk normalized one. When α tends to 1, the form of our method is closer to the form of undirected graph Laplacian. That is to say α can control the degree of conversion from a directed form to an undirected form. The smaller α retains the more directed properties, and vice versa. Proofs of THEOREM 1 and 2 are attached in the Supplementary Material. 2.3 Digraph Convolution
+As we have deﬁned the digraph Laplacian in Equation 3 and it is symmetric, we can follow the spectral analysis in GCN [19] to derive the deﬁnition of the digraph convolution as:
+Z = 1 2 (Π 1 2 appr ˜PΠ
+− 1 appr + Π 2
+− 1 appr ˜PT Π 2 1 2 appr) XΘ, (4) where Z ∈ Rn×d is the convolved result with d output dimension, X ∈ Rn×c is node feature matrix and Θ ∈ Rc×d is trainable weight. Note that we carry out row normalization to the input weighted adjacency matrix. This propagation scheme has complexity O(∣E∣cd) which is same with GCN [19], as digraph Laplacian is sparse and can be calculated during preprocessing. 3 Digraph Inception Network
+In this section, ﬁrst, we introduce kth-order Proximity as scalable receptive ﬁeld and then we present
+DiGCN, a multi-scale inception network, to learn from features of different size in digraphs. 3.1 Scalable Receptive Field for Digraph based on kth-order Proximity
+We start by explaining the feature spreading ways in GCNs. Xu et al. [47] have shown that the information of node i spreads to node j in an analogous random walk manner, which means path is the way of feature transmission and the size of receptive ﬁeld is determined by the length of the path in a graph. However, in digraph, long paths only exist between a few points and are often not bidirectional, which is not conducive to obtaining global features. Meanwhile, different communities have various node degrees of in and out, which may cause unbalanced receptive ﬁelds (paths) in digraphs. To solve this problem, we propose kth-order Proximity in digraphs which not only obtains the node’s features from its directly adjacent nodes, but also extract the hidden information from kth-order neighbor nodes. That is, if two nodes share common neighhors, they tend to be similar.
+DEFINITION 1 kth-order Proximity. Given a graph G = (V, E), for k ⩾ 2, if ∃ e ∈ V and a path vj, we deﬁne this path as kth-order between node i and j ( i, j ∈ V) in this form: vi → ⋯ →
+·„„„„„„„„‚„„„„„„„„¶ k−1 edges ve ← ⋯ ←
+·„„„„„„„„‚„„„„„„„„¶ k−1 edges i,j . Similarity, the kth-order diffusion path Di,j meeting path M(k) (k) is vi ← ⋯ ←
+·„„„„„„„„‚„„„„„„„„¶ k−1 edges ve → ⋯ →
+·„„„„„„„„‚„„„„„„„„¶ k−1 edges vj. If (k) between node i and j, we think they are kth-order proximity there exist both Mi,j and e is their kth-order common neighbor. Note that one node is 0th-order proximity with itself and 1st-order proximity with its directly connected neighbors. (k) and Di,j 4
+Figure 1: Illustration of DiGCN model. For a digraph G, we use kth-order proximity to generate k receptive ﬁelds based on the input adjacency matrix A shown in the Subﬁgure (a). Then we convolute them with input feature matrix Z(l−1)
+I after fusion. We encapsulate this process as an Inception block shown in the Subﬁgure (b), where l ∈ Z+ is the number of layers and the initial input Z(0)
+I = X. Multi-layer networks can be implemented by stacking Inception blocks.
+The schematic of kth -order proximity shows in Figure 1(a). Based on Deﬁnition 1, we build a kth-order proximity matrix to connect similar nodes together. and gain the output Z(l)
+I
+DEFINITION 2 kth-order Proximity Matrix. In order to model the kth-order proximity, we deﬁne the kth-order proximity matrix P(k)(k ∈ Z) in the graph G:
+P(k) =
+⎧⎪⎪⎪⎪
+⎪⎪⎪⎪⎩
+⎨
+Intersect ((P(1)) k−1
+I
+˜D−1 ˜A k−1 (P(1)T )
+, (P(1)T ) k = 0 k = 1 k−1 k−1 (P(1))
+) /2 k ⩾ 2
+. (5)
+˜A is the adjacency matrix with self-loops of G and ˜D is corresponding diagonalized degree matrix.
+Intersect(⋅) denotes the element-wise intersection of matrices that only when the corresponding positions have both meeting and diffusion paths, the sum operation is performed, otherwise, it is 0.
+The kth-order proximity matrix P(k) is symmetric if k ⩾ 2 because of the intersection operation. k represents distance between two similar nodes, that is, the size of the receptive ﬁelds. We can get scalable receptive ﬁelds by setting different k. 3.2 Multi-scale Inception Network Structure
+Based on the proposed kth-order proximity matrix, we deﬁne the multi-scale digraph convolution as:
+Z(k) =
+⎧⎪⎪⎪⎪⎪
+⎪⎪⎪⎪⎪⎩
+⎨ (Π(1) 1 2 1 2 P(1)Π(1)− 1
+W(k)− 1
+XΘ(0) 2 + Π(1)− 1 2 P(k)W(k)− 1 2 XΘ(k) 2 P(1)T
+Π(1) 1 2 ) XΘ(1) k = 0 k = 1 k ⩾ 2
+. (6)
+Z(k) ∈ Rn×d are convolved results with d output dimension, X ∈ Rn×c is node feature matrix, W(k) is diagonalized weight matrix of P(k) and Θ(k) ∈ Rc×d is trainable weight. Note that when k = 1,
+Z(1) is calculated by digraph convolution with P(1) in Section 2.3 and Π(1) is the corresponding approximate diagonalized eigenvector.
+Inspired by the Inception module proposed in [37], we build the multi-scale digraph Inception network. We can compare P(k=0) to 1 × 1 convolution kernel and treat Z(k=0) as a skip connection term carrying non-smoothed features. Moreover, Z(k⩾1) is designed to encode multi-scale directed structure features. Finally, we use fusion operation Γ to fusion multi-scale features together as an
+Inception block ZI:
+ZI = σ(Γ(Z(0), Z(1), ..., Z(k))), (7) where σ is activation function. Fusion function Γ can be various, such as normalization, summation and concatenation. In practice, we use Γ to keep the feature dimensions unchanged, that is keeping
+ZI ∈ Rn×d for stacking the same block. The schematic of Inception block shows in Figure 1(b).
+We notice that a recent work SIGN uses a similar Inception structure to handle large scale graph learning [32]. Differently, they use SGC [44] as basic block which is not applicable to digraphs and 5
+concatenate these block of different size together into a FC layer. However, concatenation is a kind of features fusion method, and in some cases, the effect of concatenation is not as good as summation, we illustrate this in Section 6.
+Generalization to other Models. Our method using kth-order proximity to improve the convolution receptive ﬁeld has strong generalization ability. In most spectral-based models, we can use our
+Inception block to replace the original layer (see Table 1).
+Table 1: Our Inception block can generalizate to other models only need to modify some parameters.
+Here, Λ is Laplacian eigenvalue matrix deﬁned in ChebNet [11] and Au is the symmetric form of A.
+Undigraph Digraph Adj
+ChebNet [11]
+GCN [19]
+SGC [44]
+SIGN [32]
+Ours (DiGCN)
+✓
+✓
+✓
+✓
+✓
+Λ
+Au
+Au
+Au
+A
+✓
+Scale Range
+Weights
+[0, 1, .., k] Θ0, ..., Θk 1 k
+Θ
+Θ
+[0, 1, .., k] Θ0, ..., Θk
+[0, 1, .., k] Θ0, ..., Θk
+Fusion Method
+Sum
+None
+None
+Concate
+Any Γ
+Taking SGC [44] as an example, we can generalize our method to the SGC by replacing the origin kth -power of adjacency matrix by Inception block. Experimental results in Section 6 show that integrating our method can help improve accuracy.
+Time and Space Complexity. For digraph convolution deﬁned in the Equation 4, we can use a sparse matrix to store Laplacians. And as we use full batch training, the memory space cost for one adjacency matrix is O(∣E∣).
+For Inception block deﬁned in the Equation 7, due to the asymmetry of the digraphs mentioned in Section 3.1, long paths normally exist between a few points and are not bidirectional. Thus, using kth-order prox-imity will get unbalanced receptive ﬁeld and introduce computational complexity. Intersection and union of meeting and diffusion paths both can handle unbal-ancing problem. We compare the number of edges per Inception block with different k on CORA-ML [6] and CITESEER [33] shown in Figure 2 and ﬁnd that the edges in kth-order matrix will not increase expo-nentially and intersection does help to reduce memory consume. Thus, the memory space cost for one Incep-tion block in practical is O(k∣E∣). However, the worst case does exist when the input graph is undirected and strongly connected. Though it is unsuitable to our model, which mainly treats reducible digraphs, the worst space complexity is O(k∣V∣2).
+Figure 2: # of edges per Inception block
+We can calculate eigenvalue decomposition in the Equation 3 during the preprocessing and store the results, therefore the computational complexity is O(∣V∣3). At the same time, we use the sparse matrix multiplication. Thus, we can obtain the complexity of convolution as O(k∣E∣cd). 4

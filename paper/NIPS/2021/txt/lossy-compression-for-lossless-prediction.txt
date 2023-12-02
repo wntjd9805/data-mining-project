@@ -1,0 +1,179 @@
+Abstract
+Most data is automatically collected and only ever “seen” by algorithms. Yet, data compressors preserve perceptual ﬁdelity rather than just the information needed by algorithms performing downstream tasks. In this paper, we characterize the bit-rate required to ensure high performance on all predictive tasks that are invariant under a set of transformations, such as data augmentations. Based on our theory, we design unsupervised objectives for training neural compressors. Using these objectives, we train a generic image compressor that achieves substantial rate savings (more than 1000× on ImageNet) compared to JPEG on 8 datasets, without decreasing downstream classiﬁcation performance. 1
+
+Introduction
+Progress in important areas requires processing huge amounts of data. For climate prediction, models are still data-limited [1], despite the Natl. Center for Computational Sciences storing 32 million gigabytes (GB) of climate data [2]. For autonomous driving, capturing a realistic range of rare events with current methods requires around 3 trillion GB of data.1 At these scales, data are only processed by task-speciﬁc algorithms, and storing data in human-readable formats can be prohibitive. We need compressors that retain only the information needed for algorithmic execution of downstream tasks.
+Existing lossy compressors are not up to the chal-lenge, because they aim to reconstruct the data for hu-man perception [5–10]. However, much of perceptual information is not needed to perform the tasks that we care about. Consider classifying images, which can require about 1 MB to store. Classiﬁcation is typ-ically invariant under small image transformations, such as rescalings or rotations, and could instead be performed using a representation that discards such information (see Fig. 1). The amount of unnecessary perceptual information is likely substantial, as illus-trated by the fact that typical image classiﬁcation can be performed using a detailed caption, which requires only about 1 kB to store (1000× fewer bits).
+Source
+Our rec.
+Standard rec.
+Figure 1: Our unsupervised coder improves compression by only keeping information nec-(left) source aug-essary for typical tasks. mented MNIST digit; (center) a neural percep-tual compressor achieves 130 bit-rate; (right) our invariant compressor achieves 48 bit-rate. 1Kalra and Paddock [3] estimated that autonomous vehicles would have to drive hundreds of billions of miles to demonstrate reliability in rare events. At 1 TB / hour [4] and 30 miles / hour, this is 3e12 GB. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Our goal is to quantify the bit-rate needed to ensure high performance on a collection of prediction tasks. In the simple case of a single supervised task, the minimum bit-rate is achieved by compressing predicted labels, and essentially corresponds to the Information Bottleneck (IB; [11]). Our challenge, instead, is to ensure good performance on any future tasks of interest, which will rarely be completely known at compression time, or might be too large to enumerate.
+We overcome this challenge by focusing on sets of tasks that are invariant under user-deﬁned transformations (e.g., translation, brightness, cropping), as is the case for many tasks of interest to humans [12, 13]. This structure allows us to characterize a worst-case invariant task, which bounds the relative predictive performance on all invariant tasks. As a result, the bit-rate required to perform well on all invariant tasks is exactly the rate to compress the worst-case labels. At a high level, the worst-case task is to recognize which examples are transformed versions of one another, and rate savings come from discarding information from those transformations.
+We also provide two unsupervised neural compressors to target the optimal rates. One is similar to a variational autoencoder [14] that reconstructs canonical examples (Fig. 1). Our second is a simple modiﬁcation of contrastive self-supervised learning (SSL; [15]), which allows us to convert pre-trained SSL models into powerful, generic compressors. Our contributions are:
+• We formalize the notion of compression for downstream predictive tasks.
+• We characterize the bits needed for high performance on any task invariant to augmentations.
+• We provide unsupervised objectives to train compressors that approximate the optimal rates.
+• We show that our compressor outperforms JPEG by orders of magnitude on 8 datasets on which it was never trained (i.e., zero-shot). E.g., on ImageNet [16], it decreases the bit-rate by 1000×. 2 Rate-distortion theory background
+The goal of lossy compression theory is to ﬁnd the number of bits (bit-rate) required to store outcomes x of a random variable (r.v.) X, so that it can be reconstructed within a certain tolerance. This is accomplished in Shannon’s [17] rate-distortion (RD) theory by mapping X into a r.v. Z with low mutual information I[X; Z]. Speciﬁcally, given a distortion measure D[X, Z], the RD theory characterizes the minimal achievable bit-rate for a distortion threshold δ by
+Rate(δ) = min p(Z|X)
+I[X; Z] such that D[X, Z] ≤ δ . (1)
+In lossy compression, Z is usually a reconstruction of X, i.e., it aims to faithfully approximate X. As a result, typical distortions, e.g., the mean squared error (MSE), assume that the sample spaces X , Z of both r.v.s are the same. This assumption is not required. Indeed, any distortion d : X × Z → R≥0 of the form D[X, Z] = Ep(X,Z)[d(X, Z)], where there exists a z ∈ Z such that D[X, z] is ﬁnite, is a valid choice [18]. This shows that RD theory can be used outside of reconstructions. In the following we refer to Z as a compressed representation of X to distinguish it from a reconstruction. 3 Minimal bit-rate for high predictive performance
+In this section, we characterize the bit-rate needed to represent X to ensure high performance on downstream tasks. Our argument has three high-level steps: (i) deﬁne a distortion that controls downstream performance when predicting from Z instead of X; (ii) simplify and validate this distortion when desired tasks satisfy an invariance condition; (iii) apply RD theory with the valid distortion. For simplicity, our presentation is relatively informal; formal proofs are in Apps. A and B. 3.1 A distortion for worst-case predictive performance
+Suppose X is an image. Potential downstream tasks might include Ydog, whether the image displays a dog; or Yhd, whether the image is hand-drawn. Formally, these and other downstream tasks are expressed as T = {Ydog, Yhd, . . .}, a set of random variables that are jointly distributed with X. Let
+R[Y | X] denote the Bayes (best possible) risk when predicting Y from X. For ease of presentation in the main paper, we consider only classiﬁcation tasks T and Bayes risk of the standard log loss
+R[Y | X] := inf q Ep(X,Y )[− log q(Y |X)]. We deal with MSE and regression in Appx. B.6. 2
+(a) Rotation (b) Scaling (c) Any transformation f (d) Permutation (e) Graph isomorphism (f) Any data augmentation
+Figure 2: Maximal invariants M (X) are representatives of equivalence classes. Example M s include the: (a) Euclidean norm for rotations; (b) unit vector for scaling; (c) f when equivalence classes are pre-images by f ; (d) empirical measure for permutations; (e) canonical graph for graph isomorphisms; (f) unaugmented input for data augmentations.
+In this setting, a meaningful distortion DT [X, Z] quantiﬁes the difference between predicting any
+Y ∈ T from the compressed Z, as opposed to using X. This is the worst-case excess risk,
+DT [X, Z] := sup
+Y ∈T
+R[Y | Z] − R[Y | X] . (2)
+If DT [X, Z] = 0, it is possible to achieve lossless prediction: performing as well using Z as using
+X. More generally, bounding DT by δ ensures that R[Y | Z] − R[Y | X] ≤ δ for all tasks in T .
+However, there are two issues that need to be addressed before Eq. (2) can be used. First, it is not clear whether DT is a valid distortion for RD theory. Second, the worst excess-risk DT assumes access to all downstream tasks of interest T during compression, which is unrealistic in general. 3.2
+Invariant tasks
+The tasks that we care about are not arbitrary, and often share structure. One such structure is invariance to certain pre-speciﬁed transformations of input data. For example, computer vision tasks are often invariant to mild transformations such as brightness changes. Such invariance structure is common in realistic tasks, as seen by the wide-spread use of data augmentations [13] in machine learning (ML), which encourage predictions to be the same for an unaugmented x and an augmented x+. Motivated by this we focus on sets of invariant tasks T .
+We consider a general notion of invariance, namely invariance speciﬁed by an equivalence relation
+∼ on X .2 The equivalence induces a partition of X into disjoint equivalence classes, and we are interested in tasks whose conditional distributions are constant within these classes.
+Deﬁnition 1. The set of invariant tasks of interest with respect to an equivalence (X , ∼), denoted
+T∼, is all random variables Y such that x ∼ x+ =⇒ p(Y | x) = p(Y | x+) for any x, x+ ∈ X . 3.3 Rate-distortion theory for invariant task prediction
+The key to simplifying DT∼ is the existence of a (non-unique) worst-case invariant task, denoted
+M (X). Such task contains all and only information to which tasks Y ∈ T∼ are not invariant; we call them maximal invariants. A maximal invariant M ( • ) with respect to ∼ is any function satisfying3 x ∼ x+ ⇐⇒ M (x) = M (x+) for any x, x+ ∈ X . (3) 2As a reminder, ∼ is an equivalence relation iff for all x, x(cid:48), x(cid:48)(cid:48) ∈ X : (reﬂexivity) x ∼ x, (symmetry) x ∼ x(cid:48) ⇐⇒ x(cid:48) ∼ x, and (transitivity) x ∼ x(cid:48) and x(cid:48) ∼ x(cid:48)(cid:48) =⇒ x ∼ x(cid:48)(cid:48). 3This extends the deﬁnition of maximal invariants [19] beyond invariances to group actions. 3
+A maximal invariant removes all information that tasks are invariant to, as it maps equivalent inputs to the same output, i.e., M (x) = M (x+). Yet, it retains the minimal information needed to perform invariant tasks, by mapping non-equivalent inputs x (cid:54)∼ x− to different outputs M (x) (cid:54)= M (x−).
+In other words, M (x) indexes the equivalence classes. For example, the Euclidean norm is a maximal invariant for rotation invariance, as all vectors that are rotated versions of one another can be characterized by their radial coordinate. For data augmentations, the canonical (unaugmented) version of the input is a maximal invariant. Other examples are shown in Fig. 2.
+We prove in Appx. B.2 that under weak regularity conditions, maximal invariant tasks exist in T∼, and that they achieve the supremum in Eq. (2). This allows us to show that DT∼ reduces to the Bayes risk of predicting M (X) from Z and that it is a valid distortion measure. Crucially, this allows us to quantify downstream performance without enumerating invariant tasks.
+Proposition 1. Let (X , ∼) be an equivalence relation and M a maximal invariant that takes at most countably many values, with H[M (X)] < ∞. Then DT∼ (2) with log loss is a valid distortion and
+DT∼ [X, Z] = R[M (X) | Z] . (4)
+Here we used R[M (X) | X] = 0, as M is a deterministic function. Also, note that the countable requirement holds when tasks are invariant to some rounding of the input, as is typically the case due to ﬂoating-point storage. We accommodate the uncountable case for squared-error loss in Appx. B.6.
+With a valid distortion in hand, we invoke the RD theorem with DT∼ to obtain our “Rate-Invariance” (RI) theorem. The RI theorem characterizes the bit-rate needed to store X while ensuring small log-loss on invariant tasks. We obtain analogous results for squared-error loss.
+Theorem 2 (Rate-Invariance). Assume the conditions of Prop. 1. Let δ ≥ 0, and Rate(δ) denote the minimum achievable bit-rate for transmitting Z such that for any Y ∈ T∼ we have R[Y | Z] −
+R[Y | X] ≤ δ. Then Rate(δ) = 0 if δ ≥ H[M (X)] and otherwise it is ﬁnite and
+Rate(δ) =
+H[M (X)] (cid:124) (cid:125) (cid:123)(cid:122) information needed to predict T∼
+− δ (cid:124)(cid:123)(cid:122)(cid:125) acceptable decrease in predictive loss
+=
+H[X] (cid:124) (cid:123)(cid:122) (cid:125) standard compression
+− H[X | M (X)] (cid:123)(cid:122) (cid:125) (cid:124) gains due to invarainces
+− δ. (5)
+To ensure lossless prediction, i.e., Rate(0), our theorem states that we require a bit-rate of H[M (X)]. Intuitively, this is because M (X) contains the minimal information needed to predict losslessly any Y ∈ T∼.4 Furthermore, the theorem relates compression and prediction by show-ing that allowing a δ decrease in log-loss performance on all tasks can save exactly δ bits. Intuitively, this is a linear relationship, because expected log-loss is measured in bits.
+On the right of Eq. (5) we further decompose H[M (X)] into two terms to provide another interpretation: (i) H[X], which, for discrete X, is the bit-rate required to losslessly compress X, and (ii) H[X | M (X)], which quantiﬁes the information removed due to the invariance of desired tasks.
+Importantly, removing this information does not impact the best possible predictive performance. See Fig. 3.
+Figure 3: Rate-Invariance function.
+The bit-rate gains can be substantial, depending on the invariances. Consider compressing a sequence of n i.i.d. fair coin ﬂips. Suppose one is only interested in predicting permutation invariant labels.
+Then instead of compressing the entire sequence in H[X n] = n H[X] = n bits, one could compress the number of heads, which is a maximal invariant for permutation invariance, in O(log n) bits.5 As more interesting examples, we recover in Appx. B.4 results from (i) unlabeled graph compression
+[20]; (ii) multiset compression [21]; (iii) single task compression (IB; [11]). The equivalence ∼ can be induced by any transformations, such as transforming an image to its caption. We use this idea in
+Sec. 5.3 to obtain >1000× compression on ImageNet without sacriﬁcing predictive performance. 4We prove in Appx. B.5 that Rate(0) = H[M (X)] for any losses used in ML. 5The number of heads K follow a binomial distribution so H[K] ∈ O(log n). Here K is also a minimal sufﬁcient statistic for X n. More generally, if P (X (cid:48)) is invariant to ∼ and ∼ is the coarsest such relation, then minimal sufﬁciency coincides with maximal invariance. In practice, however, P (X (cid:48)) will rarely be ∼ invariant. 4
+Figure 4: Our unsupervised objectives for invariant image compression under data augmentation use the same encoder, but differ in their approximation to the invariance distortion. Both models encode the augmented data, pass the representation through an entropy bottleneck which ensures that they are compressed, and use a distortion to retain the information about the identity of the original data.
+The models differ in how they retain that information: (VIC) by reconstructing unaugmented inputs; (BINCE) by recognizing which inputs come from the same original data. 4 Unsupervised training of invariant neural compressors
+In this section, we design practical, invariant neural compressors that bound optimal rates. Derivations are in Appx. C. In particular, we are interested in the arg min encoders p(Z|X) of the RD function (Eq. (1)) under the invariance distortion DT∼. To accomplish this, we can optimize the following equivalent (i.e., it induces the same RI function) Lagrangian, where β takes the role of δ,6 arg min p(Z|X)
+I[X; Z] + β · R[M (X) | Z] . (6)
+In ML, the maximal invariant M is often not available. Instead, invariances are implicitly speciﬁed by sampling a random augmentation from A, applying it to a datapoint X, and asking that the model’s prediction be invariant between X and A(X). For example, invariance to cropping can be enforced by randomly cropping images while retaining the original label. We show in Appx. C, that in such case, we can treat the augmented A(X) as the new source, Z as the representation of A(X), and the unaugmented X as the maximal invariant task M (A(X)). Indeed, R[M (A(X)) | Z] is equal to
+R[X | Z] up to a constant, so we can rewrite Eq. (6) as the following equivalent objective, arg min p(Z|A(X))
+I[A(X); Z] + β · R[X | Z] . (7)
+Such reformulation is possible if random augmentations retain the invariance structure X ∼ A(X) but “erase” enough information about equivalent inputs, speciﬁcally, if X⊥⊥A(X) | M (X). We discuss the second requirement in Appx. C but note that it will likely not be a practical issue if the dataset is small compared to the support |D| (cid:28) |X |. With this, we have an objective whose r.v.s. are easy to sample from. However, both terms in Eq. (7) are still challenging to estimate.
+In the following, we develop two practical variational bounds to Eq. (7), which can be optimized by stochastic gradient descent [23] over the encoder’s parameters. Both approximations use the standard lossy neural compression bound I[Z; A(X)] ≤ H[Z] ≤ minθ Ep(Z)[− log qθ(Z)] where qθ(Z) is called an entropy model (or a prior) [24, 25]. This has the advantage that the learned qθ can be used for entropy coding Z [26, 27]. See Ballé et al. [28] for possible entropy models. Our two approximations differ in how they upper bound R[X | Z]. The ﬁrst uses a reconstruction loss, which attempts to reconstruct the unaugmented input x ∈ D from A(x). The second uses a discrimination loss, which attempts to recognize which examples are augmented versions of the input. 4.1 Variational Invariant Compressor (VIC)
+Our ﬁrst model is a modiﬁed neural compressor in which inputs are augmented but target reconstruc-tions are not. We refer to it as a variational invariant compressor (VIC). See Fig. 4 for an illustration.
+VIC has an encoder pϕ(Z|A(X)), an entropy model qθ(Z), and a decoder qφ(X|Z). Given a data sample x ∈ D, we apply a random augmentation A(x), and encode it to get a representation Z. The decoder then attempts to reconstruct the unaugmented x from Z. This leads to the objective,
+LVIC(φ, θ, ϕ) := − (cid:88) x∈D
+Ep(A)pϕ(Z|A(x))[log qθ(Z) + β · log qφ(x | Z)] . (8) 6As the RI function is not strictly convex (Fig. 3), it should be beneﬁcial to use R[M (X) | Z]2 to ensure that sweeping over β is equivalent to sweeping over δ [22]. We did not see any difference in practice. 5
+The term log qθ(Z) is an entropy bottleneck, which bounds the rate I[A(X); Z] and ensures that unnecessary information is removed. The term log qφ(x | Z) bounds the distortion R[X | Z] ≤
+Ep(X,Z)[− log qφ(X | Z)] and ensures that VIC preserves the information needed for invariant tasks. 4.2 Bottleneck InfoNCE (BINCE)
+Our second compressor retains all predictive information without reconstructing the data. It has two components: an entropy bottleneck and an InfoNCE [15] objective, which is the standard in contrastive SSL. We refer to this as the bottleneck InfoNCE (BINCE), see Fig. 4. BINCE has an advantage over VIC in that it avoids the problem of reconstructing possibly high dimensional data.
+Algorithm 1 shows how to train BINCE, where each call to A returns an independent augmentation of its input. As with VIC, for every datapoint x ∈ D, we obtain a representation Z by applying an aug-mentation A(x) and passing it through the encoder pϕ(Z | A(X)). We then sample a “positive” exam-ple Z + by encoding a different augmented version of the same underlying datapoint x. Finally, we sample n “negative” examples Z − i by encoding aug-mentations A(x− i ) of datapoints x− i ∈ D that are different from x. This results in a sequence Z = (Z +, Z − n ). For conciseness we will denote the above sampling procedure as pϕ(Z, Z | A, D, x).
+The ﬁnal loss uses a discriminator fψ that is opti-mized to score the equivalence of two representation, 1 , . . . , Z −
+Algorithm 1 BINCE’s forward pass for x (cid:46) Augment (cid:46) Encode i }n i=1 ← select(D \{x}) n times
+Require: pϕ, qθ, fψ, D, A, β, n, x 1: ˜x ← sample(A(x)) 2: z ← sample(pϕ(Z|˜x)) 3: rate_loss ← − log qθ(z) 4: {x− 5: ˜x ← sample([A(x), A(x− 6: z ← sample(pϕ(Z|˜x)) 7: z+ ← z[0] 8: softmax ← exp fψ (z+,z) ((cid:80) 9: distortion_loss ← − log(softmax) 10: return rate_loss + β · distortion_loss 1 ), . . . , A(x− z(cid:48) ∈z exp fψ (z(cid:48),z)) n )])
+LBINCE(ϕ, θ, ψ) := − (cid:88) x∈D
+Ep(A)pϕ(Z,Z|A,D,x) (cid:20) log qθ(Z) + β · log exp fψ(Z +, Z)
+Z(cid:48)∈Z exp fψ(Z (cid:48), Z) (cid:80) (cid:21)
+. (9)
+BINCE retains the necessary information by classifying (as seen by the softmax) which Z is associated with an equivalent example X. Both VIC and BINCE give rise to efﬁcient compressors by passing
+X through pϕ(Z|X) and entropy coding using qθ(Z). In theory they can both recover the optimal rate for lossless predictions, i.e., H[M (X)], in the limit of inﬁnite samples (|D|,n) and unconstrained variational families. In practice, BINCE has the advantage over VIC of (i) not requiring a high dimensional decoder; and (ii) giving (for suitable fψ) representations that are approximately linearly separable [29–31] and thus easy to predict from [15, 32]. The disadvantages of BINCE are that it (i) does not provide to reconstructions diminishes interpretability; and (ii) has a high bias, unless the number of negative samples n is large [33, 34], which is computationally intensive. 5 Experiments
+We evaluated our framework focusing on two questions: (i) What compression rates can our frame-work achieve at what cost? (ii) Can we train a general purpose predictive image compressor? For all experiments, we train the compressors, freeze them, train the downstream predictors, and ﬁnally evaluate both on a test set. For classical compressors, standard neural compressors (VC) and our VIC, we used either reconstructions ˜X as inputs to the predictors or representations Z. As BINCE does not provide reconstructions, we predicted from the compressed Z using a multi-layer perceptron (MLP).
+We used ResNet18 [35] for encoders and image predictors. For entropy models we used Ballé et al.’s
+[28] hyperprior, which uses uniform quantization. We optimized hyper-parameters on validation using random search. For classiﬁcation tasks, we report classiﬁcation error instead of log-loss. The former is more standard and gave similar results (see Appx. F.2). For experimental details see Appx. E.
+For additional results see Appx. F. Code is at github.com/YannDubs/lossyless. 5.1 Building intuition with toy experiments
+To build an visual intuition, we compressed samples from a 2D banana source distribution [36], assuming rotation invariant tasks, e.g., classifying whether points are in the unit circle. We also compressed MNIST digits as in Fig. 1. Digits are augmented (rotations, translations, shearing, scaling) both at train and test time to ensure that our invariance assumption still holds. 6
+(b) VC high rate (c) VC (d) VC low rate (a) Rate-Invariance curves (e) VIC high rate (f) VIC (g) VIC low rate
+Figure 5: Compression rates of a Banana source [36] can be decreased when downstream tasks are rotation invariant. (Left) Our invariant compressor (VIC, blue) outperforms neural compressors (VC, orange). 5 runs with standard errors in gray. (Right) VIC quantizes the space using disks to remove unnecessary angular information. Pink lines are quantization boundaries, dots are code vectors with size proportional to learned probabilities. Low rates correspond to low β in Eq. (7).
+Where do our rate gains come from? For rotation invariant tasks, our method (VIC) discards unnecessary angular information by learning disk-shaped quantizations (Fig. 5, bottom right). Specif-ically, VIC retains only radial information by mapping all randomly rotated points (disks) back to maximal invariants (pink dots). In contrast, standard neural compressors (VC) attempt to reconstruct all information, which requires a ﬁner partition (Fig. 5, top right). As a result (Fig. 5a), VIC needs a smaller bit-rate (y-axis) for the same desired performance (DT∼ , x-axis). The area under the RD curve (AURD) for VIC is 35.8±4.2 against 48.1±0.3 for VC, i.e., expected bit-rate gains are around 70%. Similar gains are achieved for augmented MNIST in Fig. 6 by reconstructing canonical digits. (a) Rate-Error curve (b) Reconstructions that allow 99% downstream accuracy
+Figure 6: (Left) By reconstructing prototypical digits our VIC (blue) achieves higher compression of augmented MNIST digits than standard neural compressors (VC, orange) without hindering downstream classiﬁcation. 5 runs. (Right) The source examples (ﬁrst row) as well as reconstructions for the non-invariant (second row) and invariant compressor (last row).
+Can we recover the optimal bit-rate? We investigated whether our losses can achieve the optimal bit-rate for lossy prediction by using supervised augmentations, i.e., A(x) randomly samples a train example x+ that has the same label. For MNIST the single-task optimal bit-rate is H[Y ] = log(10) ≈ 3.3 bits. VIC and BINCE respectively achieve 5.7 and 5.9 bits, which shows that our losses are relatively good despite practical approximations. Details in Appx. F.2.
+What is the impact of the choice of augmentations? The choice of augmentation A implicitly deﬁnes the desired task-set T , i.e., T is the set of all tasks for which A does not remove information.
+As a result Theorem 2 can be rewritten as Rate(δ) = I[X; A(X)] − δ, so the rate decreases when A removes more information from X. To illustrate this we trained our VIC using three augmentation sets on MNIST, all of which keep the true label invariant but progressively discard more X information.
+VIC respectively achieves a rate of 185.3, 79.0, and 5.7 bits, which shows the importance of using augmentations that remove X information. Details and BINCE results are in Appx. F.2. 7
+5.2 Evaluating our methods with controlled experiments
+To investigate our methods, we compressed the STL10 dataset [37]. We augment (ﬂipping, color jittering, cropping) the train and test set, to ensure that the task invariance assumptions are satisﬁed.
+In each experiment, we sampled 100
+We focus on more realistic settings in the next section. combinations of hyper-parameters to ensure equal computational budget across models and baselines.
+Table 1: Invariant compressors (BINCE, VIC) outperform classical (PNG, JPEG, WebP) and neural (VC) compressors on STL10. BINCE achieves lossless prediction but compresses 121× better.
+PNG [38]
+JPEG [39] WebP [40] VC ˜X VIC ˜X VIC Z
+BINCE
+Decrease in test acc.
+Compression gains 0 1× 0.7 3× 1.1 13× 21.0 63× 25.1 269× 16.1 175× 0.0 121×
+How do our BINCE and VIC compare to standard compressors? In Table 1 we compare com-pressors at the lowest downstream error that they achieved. As benchmark, we use PNG’s lossless compression. Predicting from PNG corresponds to standard image classiﬁcation, and obtains a rate of 1.42e4 bits per image for 80.8% accuracy. Classical lossy methods (JPEG, WebP) achieved up to 13× bit-rate gains with little drop in performance. In comparison, our BINCE method achieved 121× compression gains with no impact on predictions. Both our invariant (VIC) and standard (VC) neural compressors signiﬁcantly decreased classiﬁcation accuracy, which we believe can be explained by the encoders architecture (ResNet18) that we use for consistency (see Appx. F.3).
+Should we predict from representations Z or reconstructions X? In Table 1 we analyzed the impact of predicting from Z instead of ˜X for VIC and see that this increases accuracy by 9%. In contrast, predicting from Z for VC decreases performance by 12% (see Appx. F.3). This suggests that invariant reconstructions ˜X might not be easy to predict from with standard image predictors.
+Are we learning invariant compressors? Invariant compressors should provide RD curves that are robust to test distribution shift in the desired augmentations. We thus trained our VIC by applying the augmentations 50% of the time but varying that probability p at test time. In Appx. F.3 we show that this distribution shift have negligible inﬂuence on RD curves. 5.3 A zero-shot compressor using pre-trained self-supervised models
+BINCE includes a standard contrastive SSL loss. So, we investigated whether existing pre-trained
+SSL models [32, 41] can be used to build generic compressors. In particular, we investigated whether
+CLIP [41] could be quickly turned into a powerful task-centric compressor for computer vision. In the introduction, we motivated large compression gains by noting that typical image classiﬁcation tasks can be predicted from detailed captions instead of images (around 1000× more bits). CLIP is a vision transformer [42] pre-trained on 400M pairs of images and text (ximage, x+ text) using a contrastive loss.
+The “augmentation” A is then a function that maps ximage to its associated x+ text and vis-versa. This will partition the images and texts into sets, each of which are associated directly or by transitivity in CLIP’s dataset. This suggests that CLIP is retaining the image information that corresponds to a detailed caption, and may be turned into a generic compressor for image classiﬁcation.
+CLIP can essentially be seen as a BINCE model with an image-to-text augmentation, but without an entropy bottleneck. (For details about the CLIP-BINCE relation see Appx. C.5.) We thus constructed an approximation of our desired image-to-text BINCE compressor by two simple steps. First, we downloaded and froze CLIP’s parameters. Second, we trained, on the small MSCOCO dataset [43], an entropy bottleneck to compress CLIP’s representation. The latter step can be done by training any lossy compressor on CLIP’s representations, we did so using Ballé et al.’s [28] hyperprior entropy model with a learned rounded precision. We then evaluated our resulting compressor on 8 datasets (various classiﬁcation tasks and image shapes) that were never seen during training (zero-shot), by training an MLP for downstream predictions on each dataset. One can see this as a multi-task setting (each dataset is a distinct task). We investigate the case of multiple labels per images in Appx. F.5.
+Can we use pretrained SSL to obtain a generic compressor? Table 2 shows that we can exploit existing state-of-the-art (SOTA) SSL models to get a powerful image compressor, which achieves 1000× bit-rate gains on ImageNet compared to JPEG (at the quality level used for storing ImageNet).
+The bit-rate gains (1st row) are signiﬁcant across all zero-shot datasets, even for biological tissues (PCam; [44]). Importantly, these gains come at little cost in test performance. Indeed, the test 8
+Table 2: Converting a pretrained SSL model into a zero-shot compressor achieves substantial bit-rate gains while allowing test accuracies similar to supervised models predicting from raw images.
+ImageNet
+STL
+PCam
+Cars CIFAR10
+Food
+Pets Caltech
+Rate gains vs JPEG 1104× 35× 64× 131× 7× 109× 150× 126×
+Our Acc. [%]
+Supervised Acc. [%] 76.3 76.1 98.7 99.0 80.9 82.6 79.6 49.1 95.2 96.7 88.3 81.8 89.5 90.4 93.4 94.5 accuracies of MLPs from our representations (2nd row) is similar to a near SOTA model trained on the uncompressed images (3rd row is from Radford et al. [41]). These results are not surprising as
+JPEG is optimized to retain perceptual rather than classiﬁcation information. Note that the large variance in rate gains come from JPEG rates due to different images shapes (see Table 3).
+Our CLIP compressor retains all the information needed to get 0 error for those tasks. Table 2 provides the test performance for MLPs, while our theory discusses Bayes risk, which is independent of speciﬁc predictors and generalization. We estimated the excess Bayes risk for our datasets by counting the images (in train and test) that get compressed to the same Z but have different labels.
+We found that we are in the lossless prediction regime for those datasets.
+Table 3: Our entropy bottleneck (EB) on CLIP improves compression of representations up to 17× with little impact on predictions. The same compressor is used across datasets. Rates are per image. e t a
+R
+-t i
+B
+JPEG
+CLIP
++EB high β
++EB β
++EB low β
+. CLIP c c
+A t s e
+T
++EB high β
++EB β
++EB low β
+ImageNet
+STL
+PCam
+Cars CIFAR10
+Food
+Pets Caltech 1.49e6 1.52e4 2.47e3 1.35e3 9.63e2 76.5 76.6 76.3 76.0 4.71e4 1.52e4 2.46e3 1.34e3 9.52e2 98.6 98.7 98.7 98.7 9.60e4 1.52e4 2.61e3 1.49e3 1.09e3 84.5 82.7 80.9 80.1 1.92e5 1.52e4 2.59e3 1.47e3 1.07e3 80.8 80.4 79.6 78.9 1.05e4 1.52e4 2.53e3 1.41e3 1.02e3 95.3 95.3 95.2 94.8 1.54e5 1.52e4 2.39e3 1.27e3 8.89e2 88.5 88.5 88.3 87.6 1.81e5 1.52e4 2.33e3 1.21e3 8.35e2 89.7 89.6 89.5 88.6 1.69e5 1.52e4 2.46e3 1.34e3 9.53e2 93.2 93.5 93.4 92.9
+What is the effect of the entropy bottleneck? In Table 3 we compare the pretrained CLIP, to our
+CLIP compressor with an entropy bottleneck (EB) trained at different values for β. When trained with a high β, our EB improves bit-rates by an average of 6× without impacting predictions. For our compressor from Table 2 (CLIP+EB β) the gains increase to 11× with little predictive impact.
+The sacriﬁce in predictions is more clear for 16× bit-rate gains (low β). This shows that CLIP’s raw representations retain unnecessary information as it not explicitly trained to discard information.
+How would end-to-end BINCE compare to staggered training? Compression gains can likely be larger by end-to-end training of BINCE, which would require access to CLIP’s original dataset.7 To get an idea of potential gains we compared end-to-end and staggered BINCE on augmented MNIST in Appx. F.2. We found signiﬁcant rate improvements (358 to 131 bits) for similar test accuracy.
+Our CLIP compressor is simple to use. In Appx. E.7, we provide a minimal script (150 lines) to train a generic compressor in less than ﬁve minutes on a single GPU. The script contains an efﬁcient entropy coder for our model (200 images/second), which shows its practicality. As usual in SSL, the compressed representations are also more computationally efﬁcient to work with than standard compressors. In our minimal script we achieve the desired performance (98.7% on STL) using a linear model that is trained in one second, which is 1000× faster than the baseline in Table 2. This shows that our pipeline can improve computational efﬁciency in addition to storage efﬁciency.
+What augmentations to use for SSL compression? Table 4 compares two ResNet50 pretrained with contrastive learning using invariance to text-image (CLIP) or standard image augmentations (SimCLR
+[32]) such as cropping or ﬂipping. We see that CLIP’s augmentation usually give better compression and downstream performance, which shows the importance of the choice of augmentations. This also supports our motivation of using text-image augmentations, which are likely label-preserving for a vast amount of tasks but discard large amounts of unnecessary information. 7We investigated ﬁnetuning CLIP on MSCOCO but it suffered from catastrophic forgetting. 9
+Table 4: Text-image invariance is better than invariance to standard augmentations for image classiﬁ-cation. CLIP and SimCLR are both ResNet50 pretrained with InfoNCE but different augmentations.
+ImageNet
+STL
+PCam
+Cars CIFAR10
+Food
+Pets Caltech e CLIP+EB t a
+R
+SimCLR+EB
+. CLIP+EB c c
+A
+SimCLR+EB 2108 2811 63.2 62.8 1962 2732 92.0 91.9 1949 2769 78.6 81.4 2421 2751 68.0 29.6 2111 2950 65.5 78.6 1991 2077 74.1 60.0 1867 2839 81.8 78.9 1968 2502 83.0 79.0 6

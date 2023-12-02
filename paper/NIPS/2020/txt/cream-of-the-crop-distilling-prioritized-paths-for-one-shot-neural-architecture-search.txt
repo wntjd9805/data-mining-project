@@ -1,0 +1,221 @@
+Abstract
+One-shot weight sharing methods have recently drawn great attention in neural architecture search due to high efﬁciency and competitive performance. However, weight sharing across models has an inherent deﬁciency, i.e., insufﬁcient training of subnetworks in hypernetworks. To alleviate this problem, we present a simple yet effective architecture distillation method. The central idea is that subnetworks can learn collaboratively and teach each other throughout the training process, aiming to boost the convergence of individual models. We introduce the concept of prioritized path, which refers to the architecture candidates exhibiting superior performance during training. Distilling knowledge from the prioritized paths is able to boost the training of subnetworks. Since the prioritized paths are changed on the ﬂy depending on their performance and complexity, the ﬁnal obtained paths are the cream of the crop. We directly select the most promising one from the prioritized paths as the ﬁnal architecture, without using other complex search meth-ods, such as reinforcement learning or evolution algorithms. The experiments on
+ImageNet verify such path distillation method can improve the convergence ratio and performance of the hypernetwork, as well as boosting the training of subnet-works. The discovered architectures achieve superior performance compared to the recent MobileNetV3 and EfﬁcientNet families under aligned settings. Moreover, the experiments on object detection and more challenging search space show the generality and robustness of the proposed method. Code and models are available at https://github.com/microsoft/cream.git2. 1
+
+Introduction
+Neural Architecture Search (NAS) is an exciting ﬁeld which facilitates the automatic design of deep networks. It has achieved state-of-the-art performance on a variety of tasks, surpassing manually designed counterparts [e.g., 1–3]. Recently, one-shot NAS methods became popular due to low computation overhead and competitive performance. Rather than training thousands of separate models from scratch, one-shot methods only train a single large hypernetwork capable of emulating any architecture in the search space. The weights are shared across architecture candidates, i.e., subnetworks. Such strategy is able to reduce the search cost from thousands of GPU days to a few.
+However, all architectures sharing a single set of weights cannot guarantee each individual subnetwork obtains sufﬁcient training. Although one-shot models are typically only used to sort architectures in the search space, the capacity of weight sharing is still limited. As revealed by recent works [4], weight sharing degrades the ranking of architectures to the point of not reﬂecting their true performance, thus reducing the effectiveness of the search process. There are a few recent works addressing this issue from the perspective of knowledge distillation [5–7]. They commonly introduce a high-performing teacher network to boost the training of subnetworks. Nevertheless, these methods require the teacher model to be trained beforehand, such as a large pretrained model [5] or a third-party model [6]. This limits the ﬂexibility of search algorithms, especially when the search tasks or data are entirely new and there may be no available teacher models.
+∗Equal contribution. Work done when Hao and Hongyuan were interns at MSRA. †Corresponding authors. 2We also provide another implementation based upon Microsoft NNI AutoML open source toolkit at here. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+In this paper, we present prioritized paths to enable the knowledge transfer between architectures, without requiring an external teacher model. The core idea is that subnetworks can learn collabora-tively and teach each other throughout the training process, and thus boosting the convergence of individual architectures. More speciﬁcally, we create a prioritized path board which recruits the subnetworks with superior performance as the internal teachers to facilitate the training of other models. The recruitment follows the selective competition principle, i.e., selecting the superior and eliminating the inferior. Besides competition, there also exists collaboration. To enable the informa-tion transfer between architectures, we distill the knowledge from prioritized paths to subnetworks.
+Instead of learning from a ﬁxed model, our method allows each subnetwork to select its best-matching prioritized path as the teacher based on the representation complementary. In particular, a meta network is introduced to mimic this path selection procedure. Throughout the course of subnetwork training, the meta network observes the subnetwork’s performance on a held-out validation set, and learns to choose a prioritized path from the board so that if the subnetwork beneﬁts from the prioritized path, the subnetwork will achieve better validation performance.
+Such prioritized path distillation mechanism has three advantages. First, it does not require introducing third-party models, such as human-designed architectures, to serve as the teacher models, thus it is more ﬂexible. Second, the matching between prioritized paths and subnetworks are meta-learned, which allows a subnetwork to select various prioritized paths to facilitates its learning. Last but not the least, after hypernetwork training, we can directly pick up the best performing architecture from the prioritized paths, instead of using either reinforcement learning or evolutional algorithms to further search a ﬁnal architecture from the large-scale hypernetwork.
+The experiments demonstrate that our method achieves clear improvements over the strong baseline and establishes state-of-the-art performance on ImageNet. For instance, with the proposed prioritized path distillation, our search algorithm ﬁnds a 481M Flops model that achieving 79.2% top-1 accuracy on ImageNet. This model improves the SPOS baseline [8] by 4.5% while surpassing the EfﬁcientNet-B0 [9] by 2.9%. Under the efﬁcient computing settings, i.e., Flops ≤ 100M, our models consistently outperform the MobileNetV3 [10], sometimes by nontrivial margins, e.g., 3.0% under 43M Flops.
+The architecture discovered by our approach transfers well to downstream object detection task, getting an AP of 33.2 on COCO validation set, which is superior to the state-of-the-art MobileNetV3.
+In addition, distilling prioritized paths allows one-shot models to search architectures over more challenging search space, such as the combinations of MBConv [11], residual block [12] and normal 2D Conv, thus easing the restriction of designing a carefully constrained space. 2 Preliminary: One-Shot NAS
+One-shot NAS approaches commonly adopt a weight sharing strategy to eschew training each subnetwork from scratch [13–15, 8, 16, among many others]. The architecture search space A is encoded in a hypernetwork, denoted as N (A, W ), where W is the weight of the hypernetwork. The weight W is shared across all the architecture candidates, i.e., subnetworks α ∈ A in N . The search of the optimal architecture α∗ in one-shot methods is formulated as a two-stage optimization problem.
+The ﬁrst-stage is to optimize the weight W by
+WA = arg min
+W
+Ltrain(N (A, W )), (1) where Ltrain represents the loss function on training dataset. To reduce memory usage, one-shot methods usually sample subnetworks from N for optimization. We adopt the single-path uniform sampling strategy as the baseline, i.e., each batch only sampling one random path from the hypernet-work for training [16, 8]. The second-stage is to search architectures via ranking the performance of subnetworks α ∈ A based on the learned weights WA, which is formulated as
+α∗ = arg max
+α∈A
+Accval (N (α, wα)) , (2) where the sampled subnetwork α inherits the weight from WA as wα, and Accα val indicates the top-1 accuracy of the architecture α on validation dataset. Since that it is impossible to enumerate all the architectures α ∈ A for evaluation, prior works resort to random search [16, 15], evolution algorithms [17, 8] or reinforcement learning [14, 18] to ﬁnd the most promising one. 2
+Figure 1: (a) Previous one-shot NAS methods use pretrained models for knowledge distillation. (b) Our prioritized path distillation enables knowledge transfer between architecture candidates. It contains three parts: hypernetwork, prioritized path board and meta network. The meta network is to select the best matching prioritized path to guide the training of the sampled subnetwork. 3 Distilling Priority Paths for One-Shot NAS
+The weight sharing strategy reduces the search cost by orders of magnitude. However, it brings a potential issue, i.e., the insufﬁcient training of subnetworks within the hypernetwork. Such issue results in the performance of architectures ranked by the one-shot weight is weakly correlated with the true performance. Thus, the search based on the weight W may not ﬁnd a promising architecture.
+To boost the training of subnetworks, we present prioritized path distillation. The intuitive idea is to leverage the well-performing subnetwork to teach the under-trained ones, such that all architectures converge to better solutions. In the following, we ﬁrst present the mechanism of prioritized path board, which plays a fundamental role in our approach. Then, we describe the search algorithm using the prioritized paths and knowledge transfer between architectures. The overall framework is visualized in Fig. 1. 3.1 Prioritized Path Board
+Prioritized paths refer to the architecture candidates which exhibit promising performance during hypernetwork training. The prioritized path board is an architecture set which contains K prioritized paths ˆαk, i.e., B={ˆαk}K k=1. The board is ﬁrst initialized with random paths, and then changed on the
+ﬂy depending on the path performance. More speciﬁcally, for each batch, we randomly sample a single path α from the hypernetwork N and train the path to update the corresponding shared-weight wα. After that, we evaluate the path α on the validation dataset (a subset is used to save computation cost), and get its performance Accval(N (α, wα)). If the current path α performs superior than the least competitive prioritized paths in B, then it will replace that prioritized path as
+ˆαk ← {α | Accval((N (α, wα)) ≥ Accval(N (ˆαk, w ˆαk )) & Flops(α) ≤ Flops(ˆαk), ˆαk ∈ B}, where Flops(·) counts the multiply-add operations in models. Eq. (3) indicates the update of prioritized path board follows the selective competition, i.e., selecting models with higher performance and lower complexity. Thus, the prioritized paths are changed on the ﬂy. The ﬁnal left paths on the board B are the Pareto optima [19] among all the sampled paths during the training process. (3) 3.2 Architecture Search with Prioritized Paths
+Our solution to the insufﬁcient training of subnetworks is to distill the knowledge from prioritized paths to the weight sharing subnetworks. Due to the large scale of the search space, the structure of subnetworks are extremely diverse. Some subnetworks may be beneﬁcial to other peer architectures, while others may not or even harmful. Hence, we allow each subnetwork to ﬁnd its best matching collaborator from the prioritized path board, such that the matched path can make up its deﬁciency.
+We propose to learn the matching between prioritized paths and subnetworks by a meta network M.
+Since there is no available groundtruth to measure the matching degree of two architectures, we use the learning state (i.e., validation loss) of subnetworks as the signal to supervise the learning of the meta network. The underlying reason is that if the gradient updates of the meta network encourage the subnetworks to learn from the selected prioritized path and achieve a small validate loss, then this matching is proﬁtable.
+The hypernetwork training with prioritized path distillation includes three iterative phases. 3
+Algorithm 1 Architecture Search with Prioritized Paths
+Input: Training and validation data, hypernetwork N with weight W , meta network M with weight θ and its update interval τ , path board B, max iteration T , user speciﬁed min and max Flops.
+Randomly sample a path α from N k in B according to Eq. (4)
+Select the best ﬁt path ˆα∗
+Calculate the loss LCE and LKD over one train batch
+Update the weight w(t)
+Calculate Flops(α) and top-1 accuracy Accα on val subset
+Update B according to Eq. (3) if t Mod τ = 0 then
+Output: The most promising architecture. 1: Random initialize W , θ, B with path Flops ∈ [min, max] 2: while search step t ∈ [0, T ] and not converged do 3: 4: 5: 6: 7: 8: 9: 10: 11: end if 12: 13: end while 14: Select the best performing architecture from B on validation dataset.
+Calculate loss LCE on val dataset with the updated weight w(t+1)
+α
+Update the weight θ of meta network M by calculating ∇θR
+α of path α according to Eq. (5) according to Eq. (6)
+Phase 1: choosing the prioritized path. For each batch, we ﬁrst randomly sample a subnetwork
+α. Then, we use the meta network M to select the best ﬁt model from the prioritized path board B, aiming to facilitate the training of the sampled path. The selection is formulated as
+ˆα∗ k = arg max
+ˆαk∈B
+{ρ | ρ = M( (N (x, ˆαk, w ˆαt) − N (x, α, wα)), θ ) }, (4) where ρ is the output of the meta network M and represents the matching degree (the higher the better) between the prioritized path ˆαk and the subnetwork α, x indicates the training data, and θ denotes the weight of M. The input to the meta network M is the difference of the feature logits between the subnetworks N (ˆαk, w ˆαk ) and N (α, wα). Such difference reﬂects the complementarity of the two paths. The meta network learns to select the prioritize path ˆα∗ k that is complementary to the current subnetwork α.
+Phase 2: distilling knowledge from the prioritized path. With the picked prioritized path ˆα∗ k, we perform knowledge distillation to boost the training of the subnetwork α. The distillation is supervised by a weighted average of two different objective functions. The ﬁrst objective function LCE is the cross entropy with the correct labels y. This is computed using the logits in softmax of the subnetwork, i.e., p(x, wα) = softmax(N (x, α, wα)). The second objective function LKD is the cross entropy with the soft target labels and this cross entropy distills knowledge from the prioritized path ˆα∗ k to the subnetwork α. The soft targets q(x, w ˆα∗
+) are generated by a softmax function that converts feature logits to a probability distribution. We use SGD with a learning rate η to optimize the objective functions and update the subnetwork weight wα as
+α − η∇wα ( LCE(y, p(x, w(t)
+α )) + ρLKD(q(x, w ˆα∗
+), p(x, w(t) w(t+1)
+α
+= w(t) (5)
+, k
+α )) )|w(t)
+α k where t is the iteration index. It is worth noting that we use the matching degree ρ as the weight for the distillation objective function. The underlying reason is if the selected prioritized path are well-matched to the current path, then it can play an more important role to facilitate the learning, and vise versa. After the weight update, we evaluate the performance of the subnetwork α on the validation subset and calculate its model complexity. If both performance and complexity satisfy
+Eq. (3), then the path α is added into the prioritized path board B.
+Phase 3: updating the meta network. Since there is no available groundtruth label measuring the matching degree and complementarity of two architectures, we resort to the loss of the subnetwork to guide the training of the matching network M. The underlying reason is that if one prioritized path ˆα∗ k is complementary to the current subnetwork α, then the updated subnetwork with the weight w(t+1) can achieve a lower loss on the validation data. We evaluate the new weight w(t+1) on the
+α
+α validatation data (x, y) using the cross entropy loss LCE(y, p(x,w(t+1) depends on
+ρ via Eq. (5) while ρ depends on θ via Eq. (4), this validation cross entropy loss is a function of θ.
+Speciﬁcally, dropping (x, y) from the equations for readability, we can write:
+)) (cid:44) R(w(t+1)
+)
+α − η∇wα ( LCE(y, p(x, w(t)
+α )) + ρ LKD(q(x, w ˆα∗
+LCE(y, p(x, w(t+1)
+)). Since w(t+1)
+), p(x, w(t)
+= R(w(t) (6)
+).
+α
+α
+α
+α
+α )) )|w(t)
+α k 4
+This dependency allows us to compute ∇θR to update θ and minimize R(w(t+1)
+). The differentiation
+∇θR requires computing the gradient of gradient, which is time-consuming, we thereby updates
+θ every τ iterations. In essence, the meta network observing the subnetwork’s validation loss to improve itself is similar to an agent in reinforcement learning performing on-policy sampling and learning from its own rewards [20]. In implementation, we adopts one fully-connected layer with 1,000 hidden nodes as the architecture of meta network, which is simple and efﬁcient.
+α
+The above three phases are performed iteratively to train the hypernetwork. The iterative procedure is outlined in Alg. 1. Thanks to the prioritized path distillation mechanism, after hypernetwork training, we can directly select the best performing subnetwork from the prioritized path board as the ﬁnal architecture, instead of further performing search on the hypernetwork. 4 Experiments
+In this section, we ﬁrst present ablation studies dissecting our method on image classiﬁcation task, and then compare our method with state-of-the-art NAS algorithms. The experiments on object detection and more challenging search space are performed to evaluate the generality and robustness. 4.1
+Implemention Details
+Search space. Similar to recent works [9, 10, 5–7], we perform architecture search over the search space consisting of mobile inverted bottleneck MBConv [11] and squeeze-excitation modules [21] for fair comparisons. There are seven basic operators, including MBConv with kernel sizes of {3,5,7} and expansion rates of {4,6}, and an additional skip connection to enable elastic depth of architectures.
+The space contains about 3.69 × 1016 architecture candidates in total.
+Hypernetwork. Our hypernetwork is similar to the baseline SPOS [8]. The architecture details are presented in Appendix A of the supplementary materials. We train the hypernetwork for 120 epochs using the following settings: SGD optimizer [22] with momentum 0.9 and weight decay 4e-5, initial learning rate 0.5 with a linear annealing. The meta network is updated every τ =200 iterations to save computation cost. The number of prioritized paths K is empirically set to 10, while the number of images sampled from validation set for prioritized path selection in Eq. (3) is set to 2,048.
+Retrain. We retrain the discovered architectures for 500 epochs on Imagenet using similar settings as EfﬁcientNet [9]: RMSProp optimizer with momentum 0.9 and decay 0.9, weight decay 1e-5, dropout ratio 0.2, initial learning rate 0.064 with a warmup [23] in the ﬁrst 3 epochs and a cosine annealing, AutoAugment [24] policy and exponential moving average are adopted for training. We use 16 Nvidia Tesla V100 GPUs with a batch size of 2,048 for the retrain. 4.2 Ablation Study
+We dissect our method and evaluate the effects of each components. Our baseline is the single-path one-shot method, which trains the hypernetwork with uniform sampling and searches architectures by an evolution algorithm [8]. We re-implement this algorithm in our codebase, and it achieves 76.3% top-1 accuracy on ImageNet, being superior to the original 74.7% reported in [8] due to different search spaces (ShufﬂeUnits [8] v.s. MBConv [11]). If we replace the evolution search with the proposed prioritized path mechanism, the performance is still comparable to the baseline, as presented in Tab. 1(#1 v.s. #2). This suggests the effectiveness of the prioritized paths. By comparing
+#2 with #4/#5, we observe that the knowledge distillation between prioritized paths and subnetworks is indeed helpful for both hypernetwork training and the ﬁnal performance, even when the matching between prioritized paths and subnetworks is random, i.e. #4. The meta-learned matching function is superior to random matching by 1.3% in terms of top-1 accuracy on ImageNet. The ablation between #5 and #6 shows that the evolution search over the hypernetwork performs comparably to
+Single-path
+Training (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88)
+# 1 2 3 4 5 6
+Alg. (cid:88) (cid:88)
+Evolution Priority Fixed
+Random Meta
+Path Match Match Match (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88) (cid:88)
+Kendall Rank on subImageNet
+Hypernet on ImageNet
+Top-1 Acc on ImageNet
+Model
+FLOPS 0.19 0.19 0.23 0.25 0.37 0.37 63.5 63.5 64.9 65.4 67.0 67.0 76.3 76.5 77.6 77.9 79.2 79.2 450M 433M 432M 451M 481M 487M
+Table 1: Component-wise analysis. Fixed, Random and Meta matching represent performing distillation with the largest subnetwork, random sampled prioritized path and meta-learned prioritized path, respectively. 5
+Table 2: Ablation for the number of prioritized paths.
+Board Size K 1 5 10 20 50
+Table 3: Ablation for the number of val images. 10k 50k 0.5k 1k
+Image Numbers 5k 2k
+Hypernetwork (Top-1)
+Search Cost (GPU days) 65.4 65.9 67.0 67.3 67.5 27 12 16 10 9
+Kendall Rank (Top-1)
+Kendall Rank (Top-5) 0.72 0.74 0.75 0.85 0.94 0.47 0.50 0.66 0.76 0.89 1 1
+Figure 2: Comparison with state-of-the-art methods on ImageNet under mobile settings (Flops≤600M). the prioritized path distillation, suggesting that the ﬁnal paths left in the prioritized path board is the
+"cream of the crop".
+We further perform a correlation analysis to evaluate whether the enhanced training of the hypernet-work can improve the ranking of subnetworks. To this end, we randomly sample 30 subnetworks and calculate the rank correlation between the weight sharing performance and the true performance of training from scratch. Unfortunately, training such many subnetworks on ImageNet is very com-putational expensive, we thus construct a subImageNet dataset, which only consists of 100 classes randomly sampled from ImageNet. Each class has 250 training images and 50 validation images (Image lists are released with the code). Its size is about 50× smaller than the original ImageNet. The
+Kendall rank correlation coefﬁcient [25] on subImageNet is reported in Tab. 1. It is clear to observe that after performing prioritized path distillation, the ranking correlation is improved signiﬁcantly, e.g., from the baseline 0.19 to 0.37 (#1 v.s. #5 in Tab. 1).
+There are two hyperparameters in our method: one is the size of the prioritized path board and the other is the number of validation images for prioritized path selection in Eq. (3). The impact of these two hyperparameters are reported in Tab. 2 and 3 respectively. We observe that when the number of prioritized paths is increased, the performance of hypernetwork becomes better, yet bringing more search overhead. Considering the tradeoff, we empirically set the number of prioritized paths to 10 in the experiments. A similar situation is occurred on the number of val images. We randomly sample 2,048 images from the validation set (50k images in total) for prioritized path selection because it allows fast evaluations and keep a relatively high Kendall rank. 4.3 Comparison with State-of-the-Art NAS Methods
+Fig. 2 presents the comparison of our method with state-of-the-arts under mobile settings on
+ImageNet.
+It shows that when the model Flops are smaller than 600M, our method consis-tently outperforms the recent MobileNetV3 [10] and EfﬁcientNet-B0/B1 [9]. In particular, our method achieves 77.6% top-1 accuracy on ImageNet with 287M Flops, which is 1.0% higher than
+MobileNetV31.25x while using 1.2× fewer Flops. Moreover, our method is ﬂexible to search low complexity models, only requiring the users input a desired minimum and maximum Flops con-straint. From Fig. 2(right), we can see that when the Flops are smaller than 100M, our models establishes new state-of-the-arts. For example, when using 43M Flops, MobileNetV3 is inferior to our model by 3.0%. Besides model complexity, we are also interested in inference latency.
+As shown in Tab. 4, where we re-port the average latency of 1,000 runs, our method runs 1.1× faster than EfﬁcientNet-B0 [9] and 1.7× faster than MobileNetV3 on a sin-gle core of Intel Xeon CPU E5-2690. Also, the performance of our
+Table 4: Inference latency comparison. Latency is measured with batch size 1 on a single core of Intel Xeon CPU E5-2690. 76.3% @ 96ms MobileNetV3small [10] 77.6% @ 89ms 1.1x
+EfﬁcientNet-B0 [9]
+Ours (287M Flops)
+Speedup 51.7% @ 15ms 53.8% @ 9ms 1.7x
+Ours (14M Flops)
+Speedup
+Acc. @ Latency
+Acc. @ Latency 6
+Table 5: Comparison of state-of-the-art NAS methods on ImageNet. †: TPU days, (cid:63): reported by [8],
+‡: searched on CIFAR-10.
+Methods
+Top-1 (%)
+Top-5 (%)
+Flops (M)
+Params (M)
+Memory cost
+Hypernet train (GPU days)
+Search cost (GPU days) s MobileNetV3Large1.0 [10] p o l
+F
+M 0 5 3 – 0 0 2
+M 0 0 5 – 0 5 3
+M 0 0 6 – 0 0 5
+OFA [5]
+AKD [26]
+MobileNetV2 [11]
+MnasNet-A1 [18]
+FairNAS-C [27]
+SPOS [8]
+Cream-S (Ours)
+SCARLET-A [27]
+GreedyNAS-A [28]
+EfﬁcientNet-B0 [9]
+ProxylessNAS [29]
+Cream-M (Ours)
+DARTS [30]
+BigNASModel-L [7]
+OFALarge [5]
+DNA-d [6]
+EfﬁcientNet-B1 [9]
+Cream-L (Ours) 75.2 76.9 73.0 72.0 75.2 74.7 74.7 77.6 76.9 77.1 76.3 75.1 79.2 73.3 79.5 80.0 78.4 79.2 80.0
+--92.2 91.0 92.5 92.1
+-93.3 93.4 93.3 93.2
+-94.2 91.3
+--94.0 94.5 94.7 219 230 300 300 312 321 328 287 365 366 390 465 481 574 586 595 611 734 604 5.3
+--3.4 3.9 4.4
+-6.0 6.7 6.5 5.3 7.1 7.7 4.7 6.4
+-6.4 7.8 9.7 single path two paths single path
+-single path single path single path two paths single path single path
+-two paths two paths whole hypernet two paths two paths single path
+-two paths 288† 53
+--288† 10 12 12 10 7
+-15(cid:63) 12 4‡ 96† 53 24
+-12
+-2 1000†
+--2
+< 1 0.02 12
+< 1
+--0.02
+--2 0.6
+-0.02 method is 1.3% superior to EfﬁcientNett-B0 and 2.4% superior to MobileNetV3. This suggests our models are competitive when deployed on real hardwares.
+Tab. 5 presents more comparisons. It is worth noting that there are few recent works leveraging knowledge distillation techniques to boost training [5–7]. Compared to these methods, our prioritized path distillation is also superior. Speciﬁcally, DNA [6] recruits EfﬁcientNet-B7 [6], a very high-performance third-party model, as the teacher and achieves 78.4% top-1 accuracy (without using
+AutoAugment), while our method (Cream-L) gets a superior accuracy of 80.0% without using any other pretrained models. Our method performs comparably to the recent OFA [5] yet taking much less time on hypernetwork training, i.e., 12 v.s. 53 GPU days. Thanks to the prioritized path mechanism, our method only need to evaluate K=10 prioritized paths on the validation set and then select the best performing one. This procedure only takes 0.02 GPU days, which is 30× faster than other approaches of using evolutional search algorithm, such as SPOS [8] and OFA [5]. The learned architectures are plotted in Appendix B. 4.4 Generality and Robustness
+To further evaluate the generalizability of the architecture found by our method, we transfer it to the downstream object detection task. We use the discovered architecture as a drop-in replace-ment for the backbone feature extractor in RetinaNet [31] and compare it with other backbone networks on COCO dataset [32]. We perform the training on train2017 set (∼118k images) and the evaluation on val2017 set (5k images) with 32 batch size on 8 V100 GPUs. The same as [27], we train the detection model by 12 epochs. The initial learning rate is 0.04 and multiplied by 0.1 at the epochs 8 and 11. The optimizer is SGD with 0.9 momentum and 1e-4 weight decay.
+As shown in Tab. 7, our method surpasses Mo-bileNetV2 by 4.9% while using fewer Flops.
+Compared to MnasNet [18], our method utilizes 19% fewer Flops while achieving 2.7% higher performance, suggesting the architecture has good generalization capacity when transferred to other vision tasks. If we further increase the model complexity, our method can achieve an
+AP of 36.8%, which is comparable to the recent
+Hit-Detector [33] (36.9AP with 1839M Flops) but uses much less Flops.
+Table 6: Search on different space. †: calculated on subImageNet using the sampled 30 subnetworks. ‡: re-trained on ImageNet with 120 epochs.
+A robust search algorithm should be capable of searching architectures over diverse search spaces. To evaluate this, we evaluate our method on more challenging space, i.e., the combinations of operators from different designed space, including
+SPOS[8]
+Ours
+SPOS[8]
+Ours
+SPOS[8]
+Ours
+Kendall Rank†
++ResBlock [12]
+MBconv [10]
+Search Space
++ 2D Conv 75.0 77.2 0.09 0.28 75.8 77.7 0.19 0.37 74.0 77.1 0.04 0.25
+Top-1‡
+Method 7
+Table 7: Object detection results of various drop-in backbones on the COCO val2017. Top-1 represents the top-1 accuracy on ImageNet. †: reported by [27].
+Backbones
+FLOPs (M) AP (%) AP50 AP75 APS APM APL
+Top-1 (%)
+MobileNetV2† [11]
+SPOS† [8]
+MnasNet-A2† [18]
+MobileNetV3† [10]
+MixNet-M† [34]
+FairNAS-C [27]
+MixPath-A [35]
+Cream-S (Ours) 300 365 340 219 360 325 349 287 28.3 30.7 30.5 29.9 31.3 31.2 31.5 33.2 46.7 49.8 50.2 49.3 51.7 50.8 51.3 53.6 29.3 32.2 32.0 30.8 32.4 32.7 33.2 34.9 14.8 15.4 16.6 14.9 17.0 16.3 17.4 18.2 30.7 33.9 34.1 33.3 35.0 34.4 35.3 36.6 38.1 41.6 41.1 41.1 41.9 42.3 41.8 44.4 72.0 75.0 75.6 75.2 77.0 76.7 76.9 77.6
+MBConv [10], Residual Block [12] and normal 2D convolutions. Due to limited space, we present the detailed settings of the new search spaces in Appendix C. As the results reported in Tab. 6, we observe that when the search space becomes more challenging, the performance of the baseline SPOS algorithm [8] is degraded. In contrast, our method shows relatively stable performance, demonstrating it has potentials to search for architectures over more ﬂexible spaces. The main reason is attributed to the prioritised path distillation, which improves the ranking correlation of architectures. 5

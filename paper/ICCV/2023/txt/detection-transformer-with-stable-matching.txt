@@ -1,0 +1,238 @@
+Abstract
+This paper is concerned with the matching stability prob-lem across different decoder layers in DEtection TRans-formers (DETR). We point out that the unstable matching in DETR is caused by a multi-optimization path problem, which is highlighted by the one-to-one matching design in
+DETR. To address this problem, we show that the most im-portant design is to use and only use positional metrics (like
+IOU) to supervise classification scores of positive examples.
+Under the principle, we propose two simple yet effective modifications by integrating positional metrics to DETR’s classification loss and matching cost, named position-supervised loss and position-modulated cost. We verify our methods on several DETR variants. Our methods show con-sistent improvements over baselines. By integrating our methods with DINO, we achieve 50.4 and 51.5 AP on the
+COCO detection benchmark using ResNet-50 backbones under 1× (12 epochs) and 2× (24 epochs) training settings, achieving a new record under the same setting. We achieve 63.8 AP on COCO detection test-dev with a Swin-Large backbone. Our code will be made available at https:// github.com/IDEA-Research/Stable-DINO. 1.
+
+Introduction
+Object detection is a fundamental task in vision with wide applications. Great progress has been made in the last
+*Equal contributions. List order is random.
+†This work was done when Shilong Liu, Hao Zhang, Feng Li, and
+Hongyang Li were interns at IDEA.
+‡Corresponding authors.
+Figure 1: Comparison of our methods (named Stable-DINO in figures) and baselines. We compare models with ResNet-50 backbones in the left figure and models with Swin-Transformer Large backbones in the right figure. All mod-els use a maximum 1/8 resolution feature map from a back-bone, except AdaMixer uses a maximum 1/4 resolution fea-ture map. decades with the development of deep learning, especially the convolutional neural network (CNN) [36, 14, 16, 7].
+Detection Transformer (DETR) [3] proposed a novel
+Transformer-based object detector, which attracted a lot of interest in the research community.
+It gets rid of the need for all hand-crafted modules and enables end-to-end training. One key design in DETR is the matching strat-egy, which uses Hungarian matching to one-to-one assign predictions to ground truth labels. Despite its novel de-signs, DETR also has certain limitations associated with this innovative approach, including slow convergence and inferior performance. Many follow-ups tried to improve
+DETR from many perspectives, like introducing positional prior [32, 41, 28, 14], extra positive examples [22, 4, 5], and efficient operators [47, 34]. With many optimizations,
+Figure 2: Explanation of the multi-optimization path prob-lem. We use the term “CLS” as classification scores. Each prediction has a probability to be assigned as the positive example in bipartite matching and be encouraged towards ground truth during training, which can be different opti-mization paths. With the position-supervised loss, only one optimization path will have in the training, which can stabi-lize the matching.
+DINO [46] set a new record on the COCO detection leader-board, making the Transformer-based method become a main-stream detector for large-scale training.
+Although DETR-like detectors1 achieve impressive per-formance, one critical issue that has received insufficient attention to date, which may potentially compromise the model training stability. This issue pertains to the unstable matching problem across different decoder layers. DETR-like models stack multiple decoder layers in the Trans-former decoder. The models assign predictions and calcu-late losses after each decoder layer. However, the labels assigned to these predictions may differ across different lay-ers. This discrepancy may lead to conflict optimization tar-gets under the one-to-one matching strategy of DETR vari-ants, where each ground truth label is matched with only one prediction.
+To the best of our knowledge, only one work [22] has at-tempted to address the issue of unstable matching problem to date. DN-DETR [22] proposed a novel de-noising train-ing approach by introducing extra hard-assigned queries to avoid mismatching. Some other work [19, 5] added extra queries for faster convergence but did not focus on the un-stable matching problem. In contrast, we solve this problem by focusing on the matching and loss calculation process2.
+We present that the key to the unstable matching problem is the multi-optimization path problem. As shown in Fig. 2, there are two imperfect predictions during training. Predic-tion A has a higher Intersection over Union (IoU) score but a lower classification score, while prediction B is the op-posite. This is the simplest but most common case during training. The model will assign one of them to the ground truth, resulting in two optimization preferences: one that encourages A, which means encouraging predictions with high positional metrics to get better classification results, 1We focus on DETR-like models with Huagurian matching for label assignments in this paper. 2We have tried some direct but useless solutions for the problem, which will be shown in Sec. A. and the other is to encourage B, which means encourag-ing predictions with high semantic metrics (classification scores here) to get better IOU scores. We refer to these preferences as different optimization paths. Due to the ran-domness during training, each prediction has a probability of being assigned as a positive example, with the other be-ing viewed as a negative example. Given the default loss designs, whether A or B is selected as the positive exam-ple, the model will optimize it towards its alignment with the ground truth bounding box, which means the model has multi-optimization paths, as shown in the right table in Fig. 2. This issue is less significant in traditional de-tectors, as multiple queries will be selected as positive ex-amples. However, the one-to-one matching in DETR-like models magnifies the optimization gap between predictions
+A and B, which makes model training less efficient.
+To solve the problem, we find the most critical design is to use and only use positional metrics (e.g., IOU) to su-pervise the classification scores of positive examples. More formal presentations are available in Sec. 2.2. If we use position information to constrain classification scores, the prediction B will not be encouraged if it is matched since it has a low IoU score. As a result, only one optimiza-tion path will be available, mitigating the multi-optimization paths issue. If extra classification score-related supervision is introduced, the multi-optimization path will still impair the model performance, since the prediction B has a bet-ter classification score. With this principle, we propose two simple but effective modifications to the loss and matching cost: position-supervised loss and position-modulated cost.
+Both of them enable faster convergence and better perfor-mance of models. Our proposed approach also establishes a link between DETR-like models and traditional detectors, as both encourage predictions with high positional scores to have better classification scores. More detailed analyses are available in Sec. 2.4.
+Moreover, we have observed that fusing the backbone and encoder features of models can facilitate the utiliza-tion of the pre-trained backbone features, leading to faster convergence, especially in early training iterations, and bet-ter performance of models with nearly no extra costs. We propose three fusion ways and empirically select the dense memory fusion for the experiments. See Sec. 3 for more details.
+We verify our methods on several different DETR vari-ants. Our methods show consistent improvement in all ex-periments. We then build a strong detector named Stable-DINO by combining our methods with DINO. Stable-DINO presents impressive results on the COCO detection benchmark. The comparison between our model and other
+DETR variants is shown in Fig. 1. Stable-DINO achieves 50.4 and 51.5 AP with four feature scales from a ResNet-50 backbone under 1× and 2× training schedulers, with +1.4
+and +1.1 AP gains compared with DINO baselines. With a stronger backbone Swin Transformer Large, Stable-DINO can achieve 57.7 and 58.6 AP with 1× and 2× training schedulers. To the best of our knowledge, these are the best results among DETR variants under the same settings. 2. Stable Matching
+This section presents our solution to the unstable match-ing problem in DETR-like models. We first review the loss functions and matching strategies in previous work (Sec. 2.1). To solve the unstable matching problem, we demon-strate our modifications on losses and matching costs in Sec. 2.2 and Sec. 2.3, respectively. 2.1. Revisit DETR Losses and Matching Costs
+Most DETR variants [3, 32, 41, 28, 22, 46, 47] have a similar loss and matching design. We use the state-of-the-art model DINO as an example. It inherits loss and match-ing from Deformable DETR [47] and the design is com-monly used in DETR-like detectors [47, 32, 28, 22, 15].
+Some other DETR-like models [3] may use a different de-sign but with only minor modifications.
+The final losses in DINO are composed of three parts, a classification loss Lcls, a box L1 loss Lbbox, and a GIOU loss LGIOU [37]. The box L1 loss and GIOU loss are used for object localization, which will not be modified in our model. We focus on the classification loss in the paper.
+DINO uses the focal loss [26] as the classification loss:
+Npos (cid:88)
+Lcls =
+|1 − pi|γBCE(pi, 1) +
+Nneg (cid:88) pγ i BCE(pi, 0), i=1 i=1 (1) where Npos and Nneg are the number of positive and neg-ative examples, BCE means binary cross-entropy loss, the pi is the predicted probability of the ith example, the γ is a hyperparameter for focal losses, and the notation | · | is used for absolute value.
+A matching process determines the positive and negative examples. Typically, a ground truth will be assigned only one prediction as the positive example. Predictions with no ground truths assigned will be viewed as negative examples.
+To assign predictions with ground truths, we first cal-culate a cost matrix C ∈ RNpred×Ngt between them. The
+Npred and Ngt are the number for predictions and ground truths. Then a Hungarian matching algorithm will perform on the cost matrix to assign each ground truth a prediction by minimizing sum costs.
+Similar to the loss functions, the final cost includes three items, a classification cost Ccls, a box L1 cost Cbbox, and a
+GIOU cost CGIOU [37]. We focus only on the classification cost as well. For the ith prediction and the jth ground truth, the classification cost is:
+Ccls(i, j) = |1 − pi|γBCE(pi, 1)−pγ i BCE(1−pi, 1). (2)
+The formulation is similar to the focal cost but has a lit-ter modification3. The focal loss only encourages positive examples to predict 1, while the classification cost adds an additional penalty term to avoid it to 0. 2.2. Position-Supervised Loss
+To solve the multi-optimization problem, we only4 use a positional score to supervise the training probabilities of positive examples. Inspiring by previous work [13, 25], we can simply modify the classification loss Eq. 1 as:
+L(new) cls =
+Npos (cid:88) i=1 (|f1(si) − pi|γBCE(pi, f1(si))
++
+Nneg (cid:88) i=1 pγ i BCE(pi, 0), (3) where we mark the difference with Eq. 1 in red. We use the si as a positional metric like IOU between the ith ground truth and its corresponding prediction. As some examples, we can use f1(si) as si, s2 i , and esi in implementations.
+In our experiments, We found that f1(si) = ε(s2 i ) works best in our implementations, where ε is a transformation to rescale numbers to avoid some degenerated solutions, as
+IOU values may be very small sometimes. We tried two rescale strategies, first is to ensure the highest s2 i is equal to the max IOU value among all possible pairs in a training example, which is inspired by [13], and the other is to en-sure the highest s2 i is equal to 1.0, which is a simpler way.
+We find the former works better for detectors with more queries like DINO (900 queries), and the latter works better for detectors with 300 queries.
+The design tries to supervise classification scores with positional metrics like IOU. It encourages predictions with low classification scores and high IOU scores, while pe-nalizing predictions with high classification scores but low
+IOU scores. 2.3. Position-Modulated Matching
+The position-supervised classification loss aims to en-courage predictions with high IOU scores but low classifica-tion scores. Following the spirit of the new loss, we would like to make some modifications to the matching costs. We rewrite Eq. 2 as follows: 3We formulate the implementations of Deformable DETR (https:
+//github.com/fundamentalvision/Deformable-DETR/ blob/main/models/matcher.py#L79-L81) (https://github.com/IDEA-Research/detrex/ blob/main/detrex/modeling/matcher/matcher.py#
+L132-L134). and
+DINO 4The “only” means that the f1(·) function in Eq. 3 is related to posi-tional metrics only.
+C(new) cls (i, j) =|1 − pif2(s′
+− (pif2(s′ i)|γBCE(pif2(s′ i), 1) i))γBCE(1 − pif2(s′ i), 1), (4) where we mark the difference with Eq. 2 in red. s′ i is an-other positional metric, which we use a rescaled GIOU in our implementations. As GIOU ranges from [-1,1], we shift and rescale it to the range [0,1] as a new metric. f2 is an-other function to tune. We empirically use f2(s′ i)0.5 in our implementations.
+Intuitively, the f2(s′ i) is used as a modulated function to down-weight the predictions with inaccurate prediction boxes. It helps to align classification scores and bounding box predictions better as well. i) = (s′
+One interesting question is why we do not directly use the new classification loss (Eq. 3) as a new classification cost. The matching is calculated between all predictions and ground truths, under which there will be many low-quality predictions. Ideally, we hope a prediction with a high IOU score and a high classification score will be selected as a positive example for its low matching cost. However, a pre-diction with a low IOU score and a low classification score will also have a low matching cost, making the model de-generative. 2.4. Analyses 2.4.1 Why Supervise Classification with Positional
+Scores only?
+We argue that the source of unstable matching is the multi-optimization path problem. Discuss the simplest scenario:
+We have two imperfect predictions, A and B. As shown in
+Fig. 2, prediction A has a higher IOU score, but a lower classification score since its center locates in the back-ground. In contrast, prediction B has a larger classification score but a lower IOU score. The two predictions will com-pete for the ground truth object.
+If anyone is assigned a positive example, the other will be set as a negative one.
+A ground truth with two imperfect candidates is common during training, especially in the early steps.
+Due to the randomness during training, Each one of the two predictions has a probability of being assigned as a pos-itive example. Under the default DETR variants loss de-signs, each possibility will be amplified since the default loss design will encourage positive and restrain negative ex-amples, as shown in table 1. Detection models have two different optimization paths: models prefer high IOU sam-ples or high classification score samples. The different op-timization paths can confuse the model during training. A good question is if the model can encourage both predic-tions. Unfortunately, it will violate the requirements of one-to-one matching. The problem is not significant in tradi-tional detectors, which assign multiple predictions to each ground truth. The one-to-one matching strategy in DETR-like models will amplify the conflicts.
+Figure 3: Comparisons of the unstable scores of DINO and
+DINO with stable matching.
+In contrast, if we supervise classification scores with po-sitional metrics (like IOU), the problem will be eliminated, as shown in the last row of Table 1. Only Prediction A will be encouraged toward the target. If prediction B is matched, it will not be optimized continuously since it has a low IOU score. There will be only one optimization path for the model, which will stable the training.
+How about using classification information to supervise classification scores? Some previous work in traditional de-tectors tried to align classification and IOU scores by using a quality score [13, 25], which is a combination of both clas-sification and IOU scores. Unluckily, the design is not suit-able for DETR-like models, which will be shown in Sec. 4.4, as it cannot solve the root of the unstable matching, multi-optimization path problem. Suppose both classifica-tion and IOU scores are included in the targets. In that case, prediction B will also be encouraged if matched since it has a high classification score. The multi-optimization path problem also exists, which damages the model training.
+Prediction A Matched
+Prediction B Matched
+Default Matching
+Stable Matching encourage A restrain B encourage A restrain B restrain A encourage B restrain A slightly
+No encourage
+Table 1: Detailed explanation of the multi-optimization path problem. Suppose we have two imperfect predictions: A with a higher IOU score and lower classification score, while B is on the opposite. An example is shown in Fig.2.
+Another direct question is whether we can optimize the model toward another path.
+If we would like to guide models to prefer a high classification score, i.e., encourage matching prediction B in the example. There will be am-biguity if there are two objects of the same category. For example, there are two cats in an image. The classification score is determined by semantic information, which means that a box near any cat will have a high classification score, which can damage the model training.
+2.4.2 Rethink the Role of Classification Scores in De-tection Transformers
+The new matching loss connects the DETR-like models to traditional detectors as well. Our new loss design shares a similar optimization path as traditional detectors.
+An object detector has two optimization paths: one is to find a good predicted box and optimize its classification score; the other is to optimize a prediction with a high clas-sification score to the ground truth box. Most traditional detectors assign predictions by checking their positional ac-curacy only. The models encourage anchor boxes that are near the ground truth. It means that most traditional detec-tors select the first optimization way. Differently, DETR-like matching additionally considers classification scores and uses the weighted sum of classification and localiza-tion scores as the final cost matrix. The new matching way results in conflicts between the two ways.
+Since then, why still DETR-like models used classifi-cation scores during Training? We argue that it is more like a reluctant design for one-to-one matching. Previous work [40] has shown that introducing classification cost is the key to one-to-one matching.
+It can ensure only one positive example of the ground truth. As the localization losses (box L1 loss and GIOU loss) do not restrain nega-tive examples, all predictions near a ground truth will be optimized toward the ground truth. There will be unsta-ble results if only position information is considered during matching. With the classification scores in the matching, the classification scores are used as marks to denote which prediction should be used as positive examples, which can promise a stable matching during training compared with position-only matching.
+However, as the classification scores are optimized in-dependently, without any interaction with positional infor-mation, it sometimes leads the model to another optimiza-tion path, i.e., encourage the box with a larger classification score but a worse IOU score. Our position-supervised loss can help to align the classification and localization, which not only ensures a one-to-one matching, but also solves the multi-optimization problem.
+With our new loss, the DETR-like models work more like traditional detectors as they both encourage predictions with larger IOU scores but a worse classification score. 2.4.3 Comparisons of Unstable Scores
+To present the effectiveness of our methods. We compare the unstable scores between vanilla DINO and DINO with stable matching in Fig. 3. The unstable scores are the in-consistent matching results between adjacent decoder lay-ers. For example, if we have 10 ground truth boxes in an image, and only one box has a different prediction indexed matched in the (i − 1)th and ith layers, then the unstable
+Figure 4: Comparison of our methods and baselines. We compare the (a) original memory feature with our proposed three memory fusion ways: (b) simple memory fusion, (c)
+U-like memory fusion, and (d) dense memory fusion. score of the layer i is 1/10 × 100.00 = 10.00%. Typically, a model has six decoder layers. The unstable score of layer 1 is calculated by comparing the matching results of the en-coder and the first decoder layer.
+We use model checkpoints at the 5000th step and evalu-ate models on all images in the COCO val2017 dataset.
+The results show that our model is more stable than DINO.
+The unstable score generally decreases from the first de-coder layer to the last decoder layer, which means the higher decoder layers (with larger indexes) may have more stable predictions. 3. Memory Fusion
+To further enhance the model convergence speed at the early training stage. We proposed a straightforward feature fusion technique termed memory fusion, which involves merging the encoder output features at different levels with the multi-scale backbone features. We propose three dif-ferent memory fusion ways, named simple fusion, U-like fusion, and dense fusion, which are shown in Fig. 4 (b), (c), and (d). For multiple features to fuse, we first con-catenate them along the feature dimension and then project the concatenated feature to the original dimensions. More implementation details of memory fusion are available in
+Appendix Sec. B.
+The dense fusion achieves better performance in our ex-periments, which is used as our default feature fusion. We compare the training curves of DINO and DINO with dense
+It shows that the fusion enables a faster fusion in Fig.5. convergence, especially in the early steps. 4. Experiments 4.1. Settings
+Dataset. We conduct experiments on the COCO 2017 ob-ject detection dataset [27]. All models were trained using the train2017 set without extra data and evaluated their performance on the val2017 set. We report our results with two different backbones, including ResNet-50 [17] pretrained on ImageNet-1k [10] and Swin-L [30] pretrained
+Model
+Backbone
+#epochs
+Conditional-DETR [32]
+SAM-DETR [45]
+SAM-DETR + SMCA [45]
+Anchor-DETR [41]
+Dynamic-DETR [8]
+SMCA-DETR [14]
+AdaMixer [15]
+CF-DETR [2]
+Sparse-DETR [38]
+Efficient-DETR [43]
+BoxeR-2D [33]
+Deformable-DETR [47]
+Deformable-DETR [47]
+DAB-Deformable-DETR [28]
+DN-Deformable-DETR [22]
+DN-Deformable-DETR [22]
+H-DETR [19]
+H-DETR [19]
+Co-DETR [48]
+DINO-4scale [46]
+DINO-5scale [46]
+DINO-4scale [46]
+DINO-4scale [46]
+Stable-DINO-4scale (ours)
+Stable-DINO-5scale (ours)
+Stable-DINO-4scale (ours)
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50
+R50 108 50 50 50 12 108 36 36 50 36 50 50 50 50 12 50 12 36 12 12 12 24 36 12 12 24
+AP 43.0 39.8 41.8 42.1 42.9 45.6 47.0 47.8 46.3 45.1 50.0 46.2 46.9 46.8 43.4 48.6 48.7 50.0 49.5 49.0 49.4 50.4 50.9 50.4 (+1.4) 50.5 (+1.1) 51.5 (+1.1)
+AP50 64.0 61.8 63.2 63.1 61.0 65.5 66.0 66.5 66.0 63.1 67.9 65.0 65.6 66.0 61.9 67.4 66.4 68.3 67.6 66.6 66.9 68.3 69.0 67.4 66.8 68.5
+AP75 45.7 41.6 43.9 44.9 46.3 49.1 51.1 52.4 50.1 49.1 54.7 50.0 51.0 50.4 47.2 52.7 52.9 54.4 54.3 53.5 53.8 54.8 55.3 55.0 55.3 56.3
+APS 22.7 20.5 22.1 22.3 24.6 25.9 30.1 31.2 29.0 28.3 30.9 28.3 29.6 29.1 24.8 31.0 31.2 32.9 32.4 32.0 32.3 33.3 34.6 32.9 32.6 35.2
+APM 46.7 43.4 45.9 46.2 44.9 49.3 50.2 50.6 49.5 48.4 52.8 49.2 50.1 49.8 46.8 52.0 51.5 52.7 52.7 52.3 52.5 53.7 54.1 54.0 54.0 54.7
+APL 61.5 59.6 60.9 60.0 54.4 62.6 61.8 62.8 60.8 59.0 62.6 61.5 61.6 62.3 59.4 63.7 63.5 65.3 63.7 63.0 63.9 64.8 64.6 65.5 65.3 66.5
+Table 2: Comparison to prior DETR variants on COCO val2017 with ResNet-50 backbones. The numbers in brackets are
+AP improvements compared with corresponding DINO models under the same settings.
+Model
+H-DETR [19]
+H-DETR [19]
+Co-DETR [48]
+DINO-4scale [46]
+DINO-4scale [46]
+Stable-DINO-4scale (ours)
+Stable-DINO-4scale (ours)
+Backbone
+#epochs
+Swin-L (IN-22K)
+Swin-L (IN-22K)
+Swin-L (IN-22K)
+Swin-L (IN-22K)
+Swin-L (IN-22K)
+Swin-L (IN-22K)
+Swin-L (IN-22K) 12 36 12 12 36 12 24
+AP 56.1 57.6 56.9 56.8 58.0 57.7 (+0.9) 58.6 (+0.6)*
+AP50 75.2 76.5 75.5 75.6 77.1 75.7 76.7
+AP75 61.3 63.2 62.6 62.0 66.3 63.4 64.1
+APS 39.3 41.4 40.1 40.0 41.3 39.8 41.8
+APM 60.4 61.7 61.2 60.5 62.1 62.0 63.0
+APL 72.4 73.9 73.3 73.2 73.6 74.7 74.7
+Table 3: Comparison to prior DETR variants on COCO val2017 with Swin-Transformer Large backbones. * We compare our 24-epoch Stable-DINO with 36-epoch DINO here. epoch. In the case of 24-epoch settings, the learning rate is decreased at the 20th epoch. We set the weight decay to 10−4. We conduct all our experiments based on detrex
+[12]. We follow their hyperparameters as default for other
+DETR variants. As the new loss design results in a smaller scale of classification loss, we empirically choose a 6.0 as the classification loss weight. Moreover, we found a proper
+Non-Maximum Suppression (NMS) can still help the final performance for about 0.1−0.2 AP. We use NMS by default with a threshold 0.8. We use a random seed 60 in all our experiments to ensure the results are reproducible. DINO with the seed 60 in detrex [12] has the same results (49.0
+AP) as the original paper. 4.2. Main Results
+As shown in Table 2, we firstly compare our Stable-DINO on COCO object detection val2017 set with other
+DETR variants with ResNet-50 [18] backbone. Stable-Figure 5: Comparison of the convergence speed of DINO and DINO with our dense memory fusion. on ImageNet-22k [10].
+Implementation Details. We test the effectiveness of our stable matching strategy based on DINO [46]. We trained our models on COCO training using AdamW optimizer [31, 21] with a learning rate of 1 × 10−4 for 12 epochs, and the learning rate is reduced by a factor of 0.1 at the 11th
+Model
+Mask2Former [6]
+MaskDINO [23]
+Stable-MaskDINO (ours) 100 300 300
+#queries
+Mask AP
+Box AP 38.7 41.4
+− 45.7
+APmask 50 59.8 62.9
+APmask 75 41.2 44.6
+APmask
+S 18.2 21.1
+APmask
+M 41.5 44.2
+APmask
+L 59.8 61.4 42.1(+0.7) 47.0(+1.3) 63.4 45.7 21.9 44.5 62.2
+Table 4: Results of Stable-MaskDINO compared with other state-of-the-art instance segmentation models on COCO val2017. All models trained with a ResNet-50 backbone for 12 epochs.
+DINO-4scale and Stable-DINO-5scale can achieve 50.2 AP and 50.5 AP on 1× scheduler, which gains 1.2 and 1.1 AP over the DINO-4&5 scale 1× baselines. And with 2× train-ing scheduler, Stable-DINO-4scale even increased AP by 1.1 and 0.6 compared with DINO-4scale 2× and 3× base-lines. Table 3 compares our models to other state-of-the-art
+Transformer-based detectors with large backbones, such as the ImageNet-22k [10] pre-trained Swin-Large backbone.
+Stable-DINO-4scale can achieve 57.7 AP on 1× and obtain 58.6 AP for 2× scheduler, which outperforms the DINO 1× and 3× baselines by 0.9 and 0.6 AP. Comparisons with
+SOTA methods are available in Table 10. 4.3. Generalization of our Methods
+To verify the generalization of our models, we ran exper-iments on other DETR variants. The results are available in Table 5. Our methods show consistent improvement on existing models, including Deformable-DETR [47], DAB-Defomable-DETR [28], and H-DETR [4].
+Model
+Deformable-DETR [47]
+Stable-Deformable-DETR (Ours)
+DAB-Deformable-DETR [28]
+Stable-DAB-Deformable-DETR (Ours)
+H-DETR [28]
+Stable-H-DETR (Ours)
+AP 43.8 45.1(+1.3) 44.2 45.2(+1.0) 48.6 49.2 (+0.6)
+APs APm APl 58.0 47.0 26.7 61.3 48.8 28.6 27.5 27.7 30.7 32.7 47.1 49.0 51.2 52.8 58.6 61.6 63.5 64.9
+Table 5: Effectiveness of our methods on other DETR vari-ants. All models are trained with a ResNet-50 backbone for 12 epochs. The models with the prefix “Stable” use our pro-posed methods.
+To further present the effectiveness of our methods on different tasks, we implement our methods on MaskDINO
+[23] for both object detection and segmentation. We name the new model Stable-MaskDINO. Stable-MaskDINO out-performs MaskDINO on both detection and segmentation tasks, as shown in Fig. 4. 4.4. Ablation Study
+We present ablations in this section. We use ResNet-50 backbones and 12-epoch training as the default setting.
+Effectiveness of model designs. We first verify the effec-tiveness of each design in our model. The results are avail-able in Table 6. To make a fair comparison, we test DINO with NMS 0.8 in row 1 of the table. The model has 0.2 gains compared with the default test way, The results show that the position-supervised loss and the position-modulated cost help the final results, with +0.6 AP and +0.4 AP gains, respectively. It is worth noting that the DINO has achieved high performance already; hence each gain is hard to obtain.
+We find that dense fusion works best among the three ways by comparing the different memory fusion ways. It brings
++0.2 AP and +0.5 AP50 compared with baselines. More-over, the fusion helps a lot during the early training steps, as shown in Sec. 3.
+Comparisons of different loss designs. We compared the effectiveness of different loss designs in Table 7. We ignore the transformation function ε (see Sec. 2.2) for sim-plifications in the table. To keep a fair comparison, we use loss weight as 10.0 in all experiments in the table. All models train trained without memory fusion and position-modulated cost. There are some interesting observations in the experiments. First, with positional metrics as super-vision, the model has performance gains most of the time.
+The methods are robust to the function design. For example, it even works well with the f1(s) = (es − 1)/(e − 1) func-tion. Second, the introduction of classification scores (like probabilities) will result in a performance drop in models, as shown in the lines 5, 6, and 7 in Table 7. it verifies our analysis in Sec. 1 and Sec. 2.4. It also demonstrates the effectiveness of our methods design. At last, convex func-tions like f1(s) = s2 work better than concave functions like f1(s) = s0.5. As a special case, the concave function sin(s × π/2) even results in a performance drop, since it reaches 1 fast with the increasing of s.
+Comparisons of different loss weights. We test different loss weights for our position-supervised loss in this section.
+The results are available in Table 8. The results show that our model works well for most classification weights, e.g. from 4.0 to 10.0. We use the position-modulated cost and use no memory in this ablation.
+Ablations for the position-modulated cost. We compare results with different function and cost weight designs in this section. The results are available in Table 9. We choose f2(s) = s0.5 and cost weight 2.0 by default. 5.

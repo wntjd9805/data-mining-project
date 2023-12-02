@@ -1,0 +1,265 @@
+Abstract
+Human-Object Interaction (HOI) detection is the task of identifying a set of ⟨human, object, interaction⟩ triplets from an image. Recent work proposed transformer encoder-decoder architectures that successfully eliminated the need for many hand-designed components in HOI detection through end-to-end training. However, they are limited to single-scale feature resolution, providing suboptimal per-formance in scenes containing humans, objects, and their interactions with vastly different scales and distances. To tackle this problem, we propose a Multi-Scale TRansformer (MSTR) for HOI detection powered by two novel HOI-aware deformable attention modules called Dual-Entity at-tention and Entity-conditioned Context attention. While ex-isting deformable attention comes at a huge cost in HOI detection performance, our proposed attention modules of
+MSTR learn to effectively attend to sampling points that are essential to identify interactions.
+In experiments, we achieve the new state-of-the-art performance on two HOI detection benchmarks. 1.
+
+Introduction
+Human-Object Interaction (HOI) detection is a task to predict a set of ⟨human, object, interaction⟩ triplets in an image [9]. Previous methods have indirectly addressed this task by detecting human and object instances and in-dividually inferring interaction labels for every pair of the detected instances with either neural networks (i.e., two-stage HOI detectors [1, 6–8, 10, 16, 18, 19, 21–24, 26, 28– 30, 32, 33, 35]) or triplet matching (i.e., one-stage HOI de-tectors [12, 20, 31]). The additional complexity caused by this indirect inference structure and post-processing (e.g.,
+*this work was done in Kakao Brain
+Figure 1. Multi-scale attention of MSTR on interactions including: (a) large human with small object, (b) distant human and object, and (c) small human and a large object. The top row (high resolu-tion) and the bottom row (low resolution) captures the context of the interaction in various scales. Best viewed in color.
+NMS) stage behaved as a major bottleneck in inference time in HOI detection. To deal with this bottleneck, transformer-based HOI detectors [4, 13, 25, 37] have been proposed to achieve end-to-end HOI detection without the need for the post-processing stage mentioned above. These works have shown competitive performance in both accuracy and infer-ence time with direct set-level prediction and transformer attentions that can exploit the contextual information be-tween humans, objects, and their interactions.
+However, due to the huge computational costs raised when processing multi-scale feature maps (with about 20× more image tokens) with transformer attention, current transformer-based HOI detectors are limited to using only single-scale feature maps. Due to this limitation, previous transformer-based approaches demonstrate suboptimal per-formance, especially for scenes where humans, objects, and the contextual information for their interactions exist at var-ious scales.
+In this paper, we propose Multi-Scale TRasnformer (MSTR), a transformer-based HOI detector that can exploit multi-scale feature maps for HOI detection. Inspired by pre-viously proposed deformable attention for standard object detection [36], we aim to efficiently explore multi-scale fea-ture maps by attending to only a small number of sampling points generated from the query element instead of calcu-lating the attention values for the entire spatial dimension.
+Yet, we found out in our preliminary experiments that di-rectly applying na¨ıve deformable attention in HOI detection leads to a serious performance drop.
+To overcome this deterioration, we equipped MSTR with two novel HOI-aware deformable attentions, referred by
+Dual-Entity Attention and Entity-conditioned Context At-tention, which are designed to capture the complicated semantics of Human-Object Interaction throughout multi-resolution feature maps (see Figure 1). Specifically, precise entity-level semantics for humans and objects are captured by Dual-Entity attention, while the contextual information for the interaction is conditionally reimbursed by Entity-conditioned Context attention. To further improve perfor-mance, we delve into decoder architectures that can effec-tively handle the multiple semantics obtained from the two
+HOI-aware attentions above.
+The main contributions of our work are threefold:
+• We propose MSTR, the first transformer-based HOI detector that exploits multi-scale visual feature maps.
+• We propose new deformable attention modules, called
+Dual-Entity attention and Entity-conditioned Context attention, which effectively and efficiently capture hu-man, object, and context information associated with
+HOI queries.
+• We explore decoder architectures to handle the mul-tiple semantics captured by our proposed deformable attentions and further improve HOI detection perfor-mance. 2. Preliminary
+In this section, we start with a basic pipeline of a transformer-based end-to-end HOI detector [25]. Then, we explain the deformable attention module [36] that reduces computational cost in attention, thus enabling the trans-former to take multi-scale feature maps as an input. After-ward, we discuss why the direct application of multi-scale deformable attentions is not suitable for HOI detection. 2.1. End-to-End HOI Detection with Transformers
+Out of the multiple candidates [4, 13, 25, 37] using trans-formers for HOI detection, we adopt QPIC [25] as our base-line due to its simple structure and good performance.
+Set Prediction. Transformer-based HOI detectors formu-late the task as a set-level prediction problem. It is achieved by exploiting a fixed number of HOI queries, each of which generates four types of predictions: 1) the coordinate of the human bounding box (i.e., subject of the interaction), 2) the coordinate of the object bounding box (i.e., target of the in-teraction), 3) the object class and 4) the interaction type.
+Note that the set-level predictions are learned using losses based on Hungarian Matching with ground-truths.
+Transformer Encoder-Decoder Architecture. The ar-chitecture of QPIC [25] consists of a backbone CNN, a transformer encoder, and a transformer decoder. Given an image, a single-scale visual feature map is extracted by the backbone CNN, and then positional information is added to the feature map. The transformer encoder takes the visual features and returns contextualized visual features with self-attention layers. In the transformer decoder, HOI queries are first processed by the self-attention layer, and then the cross-attention layer associates the HOI queries with the contextualized visual features (given by the encoder) to capture relevant HOI representations. Finally, predictions for HOI are computed from individual contextualized HOI query embeddings as mentioned above. Note that both self-attention and cross-attention adopt multi-head attention.
+To be specific, given a single-scale input feature map x ∈ RC×H×W where C is the feature dimension, the single-scale multi-head attention f sg q = SSAttn(zq, x) for the qth query feature zq (either an image token for the en-coder or an HOI query for the decoder) is calculated by f sg q =
+M (cid:88) m=1 (cid:2) (cid:88)
+Wm
+Amqk · W ′ mxk (cid:3), (1) k∈Ωk q U T mVmxk
+√
+Cv where Amqk indicates an attention weight calculated with learnable weights Um, Vm ∈ RCv×C as exp(cid:0) zT (cid:1).
+Throughout this paper, for the attention module, we let m index the attention head (1 ≤ m ≤ M ), q ∈ Ωq indexes a query element with feature zq ∈ RC, k ∈ Ωk indexes a key element with feature zk ∈ RC, while Ωq and Ωk specify the set of query and key elements, respectively. Wm and W ′ m are learnable embedding parameters for mth attention head, and Amqk is normalized as (cid:80)
+Amqk = 1. k∈Ωk
+Complexity. Given an input feature map x ∈ RC×H×W and N HOI queries, the complexity of transformer en-coder and decoder are O(H 2W 2C) and O(HW C 2 +
+N HW C + 2N C 2 + N 2C), respectively. Since the com-plexity grows in quadratic scale as the spatial resolution (H,W ) increases, it raises significant complexity when ex-ploiting multi-resolution feature maps where there are about 20× more features to process.
+Towards Multi-Scale HOI detection.
+In HOI detection, not only do humans and objects exist at various scales, but they also interact at various distances in images. Therefore, it is essential to exploit multi-scale feature maps {x}L l=1 (where xl ∈ RC×Hl×Wl , l indexes the feature level) to deal with the various scales of objects and contexts to capture in-teractions precisely. However, as multi-scale feature maps have almost ×20 more elements to process than a single-scale feature map, it provokes a serious complexity issue in calculating Eq. (1). 2.2. Revisiting Deformable Transformers
+The deformable attention module is proposed to deal with the problem of high complexity in the transformer at-tention. The core idea is to reduce the number of key ele-ments in the attention module by sampling the small num-ber of spatial locations related to regions of interest for each query element.
+Sampling Locations for Deformable Attention. Given a multi-scale input feature map {xl}L l=1 where xl ∈
+RC×Hl×Wl , the K sampling locations of interest for each attention head and each feature level are generated from each query element zq ∈ RC. Because direct prediction of coordinates of sampling location is difficult to learn, it is formulated as prediction of a reference point rq ∈ [0, 1]2 and K sampling offsets ∆rq ∈ RM ×L×K×2. Then, the kth sampling location at lth feature level and mth attention head for query element zq is defined by pmlqk = ϕl(rq)+∆rmlqk where ϕl(·) is a function to re-scale the coordinate of refer-ence point to the input feature map of the lth level.
+Deformable Attention Module. Given a multi-scale in-put feature map {xl}L l=1, the multi-scale deformable atten-tion f ms l=1) for query ele-ment zq is calculated using a set of predicted sampling lo-cations pq as follows: q = MSDeformAttn(zq, pq, {xl}L f ms q =
+M (cid:88)
+Wm
+L (cid:88)
+K (cid:88) (cid:2) m=1 l=1 k=1
+Amlqk · W ′ mΦmlqk (cid:3), (2) where l, k and m index the input feature level, the sampling location and the attention head, respectively, while Amlqk indicates an attention weight for the kth sampling location at the lth feature level and the mth attention head. Φmlqk means the sampled kth key element at lth feature level and mth attention head using the sampling location, which is obtained by bilinear interpolation as Φmlqk = xl(pmlqk) = xl(ϕl(rq) + ∆rmlqk). Note that for each query element, the attention computation is performed with only sampled regions of interest where the sampled number (= LM K) is much smaller than the number of all the key elements ((cid:80)L l=1 HlWl), thus leads to a reduced computational cost.
+Problem with Direct Application to HOI Detection.
+Deformable attention effectively reduces the complexity of exploiting multi-scale features with transformers to an ac-ceptable level. However, while the sampling procedure above does not deteriorates performance in standard object detection, it causes a serious performance drop in HOI de-tection (29.07 → 25.53) as shown in Table 3. We conjec-ture that this is partly due to the following reasons. First, unlike the object detection task where an object query is associated with a single object, an HOI query is entangled with multiple semantics (i.e., human, object, and their in-teraction); thus learning to sample the region of interest for multiple semantics with individual HOI queries (especially with sparse information) is much challenging compared to the counterpart of object detection. Second, deformable at-tention is learned to attend only to the sampling points near the localized objects; this leads to the loss of contextual in-formation that is an essential clue for precise HOI detection.
+The following sections describe how we resolve these issues and improve performance. 3. Method
+In this section, we introduce MSTR, a novel deformable transformer architecture that is suitable for multi-scale HOI detection. To resolve the problems described in our prelimi-nary, MSTR features new HOI-aware deformable attentions designed for HOI detection, referred by Dual-Entity atten-tion and Entity-conditioned Context attention. 3.1. HOI-aware Deformable Attentions
+The objective of our HOI-aware deformable attentions (Dual-Entity attention and Entity-conditioned Context at-tention) is to efficiently and effectively extract information of HOIs from multi-scale feature maps for a given HOI query. Figure 2 shows conceptual illustrations of (a) de-formable attention in literature [36], (b) Dual-Entity atten-tions and (c) Entity-conditioned Context attention.
+Dual-Entity attention for Human/Object.
+In HOI de-tection, the HOI query includes complex and entangled in-formation of multiple semantics: human, object, and inter-action information. Therefore, it is challenging to accu-rately predict sampling locations appropriate for each se-mantic from a single HOI query. To make sampling loca-Figure 2. Illustration of (a) Deformable Attention, (b) Dual-Entity Attention, (c) Entity-conditioned Context Attention (abbrevieated as
+EC). The sampling point for deformable attention is obtained by combining the reference points with sampling offset. In (a), both reference points rq = (rqx, rqy) and sampling offsets ∆rq = (∆rqx, ∆rqy) are obtained from a single hoi query feature zq. In (b), the reference points and sampling offsets for the humans hq = (hqx, hqy), ∆hq = (∆hqx, ∆hqy) and objects oq = (oqx, oqy), ∆oq = (∆oqx, ∆oqy) are obtained from zh q , respectively, which is obtained by a linear projection of zq (dotted line).
+In (c), the sampling offsets
+∆cq = (∆cqx, ∆cqy) are obtained from zq while the reference points are obtained in conditional to entities in (b). q and zo q ) and objects (po tions easier, given an HOI query feature zq, our Dual-Entity attention separately identifies sampling locations for the hu-mans (ph q). First, we project zq with two linear layers to obtain zh q . The kth sampling location at lth feature level and mth attention head for human and object are represented by q and zo ph mlqk = ϕl(hq) + ∆hmlqk, po mlqk = ϕl(oq) + ∆omlqk, (3) where hq, ∆h is the reference point and sampling offsets for humans, and oq, ∆o is the reference point and sampling offsets for objects, each obtained by a linear projection of q and zo zh q , respectively. Then, based on the sampled loca-tions, attended features for human (f h q ) are computed by q ) and object (f o q = MSDeformAttn(zh f h q = MSDeformAttn(zo f o q , ph q , po q , {xl}L q, {xl}L l=1), l=1). (4)
+Entity-conditioned Context attention.
+In HOI detec-tion, contextual information often gives an important clue in identifying interactions. From this point of view, utilizing the local features obtained from near the human and object regions through the Dual-Entity attention is not sufficient to capture contextual information (see our experimental result in Table 3). To compensate for this, we define an attention with an additional set of sampling points, namely Entity-conditioned Context attention, that is designed to capture the contextual information in specific.
+Given the 2D reference points for the human hq = (hqx, hqy) and the object oq = (oqx, oqy), the reference 2
+, hqy+oqy 2 point for Entity-conditioned Context attention is condition-ally computed with the two references. Motivated by ex-isting works [20, 31, 34], we define the reference points i.e., for interaction as the center of human and object, cq = (cid:0) hqx+oqx (cid:1). Note that we empirically observe that such simple reference points offer competitive perfor-mance compared to ones predicted using an additional net-work, while being much faster. Then, we predict the sam-pling offsets ∆cq from the HOI query feature, obtaining pc mlqk = ϕl(cq) + ∆cmlqk. Finally, the attended feature for contextual information f c q is computed using sampling location pc q as follows: q = MSDeformAttn(zq, pc f c q, {xl}L l=1). (5) 3.2. MSTR Architecture
+In this section, the overall architecture of MSTR with our suggested two deformable attentions will be described (see Figure 3). MSTR follows the previous transformer encoder-decoder architecture, where the encoder performs self-attention given the image features while the decoder performs self-attention for HOI queries followed by cross-attention between updated HOI queries and the encoded im-age features.
+Encoder. The encoder of MSTR takes multi-scale input feature maps given by a backbone CNN, performs a se-ries of deformable attention modules in Eq.(2), and finally generates encoded feature maps. Positional encoding [2] is added to preserve spatial information while level embed-Figure 3. Overall pipeline of MSTR. On top of the standard transformer encoder-decoder architecture for HOI detection (i.e., QPIC), we leverage deformable samplings for the encoder self-attention and the decoder cross-attention modules to deal with the huge complexity caused by using multi-scale feature maps. For the decoder cross-attention, we leverage three sets of key elements sampled for our Dual-Entity attention (denoted as DE sampling, DE attention) and Entity-conditioned Context attention (denoted as EC sampling, EC attention). plying individual self-attention demonstrates the best per-formance (see Table 3 and Appendix). The input for the (k + 1)-th layer of our HOI-aware deformable attention
+¯zk+1 q is written as: q = SA(f h
+¯zk+1 q (k)) + SA(f o q (k)) + SA(f c q (k)), (6) q (k), f c q (k), f o where f h q (k) denotes the multiple semantic outputs of the previous (k-th) decoder obtained by Eq.(4) and Eq.(5), respectively. SA denotes Multi-Head Self-Attention operation with Eq.(1) [27] and ¯z1 q = SA(zq) +
+SA(zh q ) + SA(zo q ).
+MSTR Inference. Given the cross attention results of the q and f o final decoder layer where f h q is obtained by Eq. (4) and f c q is obtained by Eq. (5), the final prediction heads in
+MSTR predict the ⟨bboxh q, actq⟩ using FFN as follows: q , bboxo q, clso
+Figure 4. Comparison of a simple 2-layer Decoder architec-ture for Transformer-based HOI detectors: (a) conventional one introduced in QPIC, and (b) HOI-aware one in MSTR. Entity-conditioned Context attention is abbreviated as Context Attention.
+MSTR stacks decoder layers by merging the self attention outputs, which further improves performance (see Table 3). ding [36] is added to denote which resolution did the image feature comes from.
+Decoder. By leveraging our HOI-aware deformable atten-tions, the cross-attention layer in MSTR decoder extracts three different semantics (human, object, and contextual information) for each HOI query from the encoded image features. For each decoder layer, we discovered that com-positing the multiple semantics obtained from the previous cross-attention layer [5] by summing the semantics after ap-(uqx, uqy, uqw, uqh) = FFNhbox(f h q ), (vqx, vqy, vqw, vqh) = FFNobox(f o q ), clsq = σ(FFNcls(f o actq = σ(FFNact(f c q )), q )), (7) (8) (9) (10) where clsq and actq each denote predictions for object the class and the action class after sigmoid function, and fi-q is predicted with the center point (cid:0)σ(uqx + nal bboxh
+σ−1(hqx)), σ(uqy + σ−1(hqy))(cid:1), width uqw, and height uqh. Likewise, the bboxo q is predicted with center point as (cid:0)σ(vqx + σ−1(oqx)), σ(vqy + σ−1(oqy))(cid:1), width vqw, and height vqh. σ and σ−1 denote the sigmoid and inverse sig-moid function, respectively, and is used to normalize the reference points hq, oq and the predicted coordinates of hu-man boxes and object boxes uq{x,y,w,h}, vq{x,y,w,h} ∈ R.
+4. Experiment
+Method
+Backbone AP #1 role
+AP #2 role
+In this section, we show the experimental results of our model in HOI detection. We first describe the experimen-tal settings such as datasets and evaluation metrics. Next, we compare MSTR with state-of-the-art works on two dif-ferent benchmarks (V-COCO and HICO-DET) and provide detailed ablation study for each component. Through the experiments, we demonstrate that MSTR successfully ex-tends conventional transformer-based HOI detectors to uti-lize multi-scale feature maps, and emphasize that each com-ponent of MSTR contributes to the final HOI detection per-formance. Lastly, we provide extensive qualitative results of MSTR. 4.1. Datasets and Metrics
+We evaluate our model on two widely-used public benchmarks: the V-COCO (Verbs in COCO) [9] and HICO-DET [3] datasets. V-COCO is a subset of COCO com-posed of 5,400 trainval images and 4,946 test images. For
+V-COCO dataset, we report the AProle over 25 interactions in two scenarios. HICO-DET contains 37,536 and 9,515 images for each training and test split with annotations for 600 ⟨verb, object⟩ interaction types. We follow the previ-ous settings and report the mAP over two evaluation set-tings (Default and Known Object), each with three different category sets: (1) all 600 HOI categories in HICO (Full), (2) 138 HOI categories with less than 10 training instances (Rare), and (3) 462 HOI categories with 10 or more train-ing instances (Non-Rare). See Appendix for details of the evaluation settings. 4.2. Quantitative Results
+We use the standard evaluation code 1 following the pre-vious works [4,13,25,37] to calculate metric scores for both
+V-COCO and HICO-DET. role and +4.2p in AP#1
+Comparison to State-of-The-Art. We compare MSTR with state-of-the-art methods in Table 1 and Table 2.
+In
+Table 1, MSTR outperforms the previous state-of-the-art method in V-COCO dataset by a large margin (+3.2p in
+AP#1 role). Similar to this, in Table 2,
+MSTR achieves the highest mAP on HICO-DET dataset in all Full, Rare, and Non-Rare classes obtaining +2.1p,
++3.46p, and +1.69p gain for each compared to the previous state-of-the-art. We use the same scoring function as QPIC without any modification for a fair comparison. Note that
+MSTR benefits from the advantages of using deformable attention: the fast convergence for training [36] (see more details and the convergence graph in our Appendix). 1https://github.com/YueLiao/PPDM
+Models with external features
+TIN (RPDCD) [19]
+Verb Embedding [32]
+RPNN [35]
+PMFNet [28]
+PastaNet [18]
+PD-Net [33]
+ACP [14]
+FCMNet [21]
+ConsNet [22]
+Sequential HOI Detectors
+VSRL [9]
+InteractNet [8]
+BAR-CNN [15]
+GPNN [24] iCAN [7]
+TIN (RCD) [19]
+DCA [30]
+VCL [11]
+DRG [6]
+VSGNet [26]
+IDN [17]
+Parallel HOI Detectors
+UnionDet [12]
+IPNet [31]
+HOI Transformer [37]†
+ASNet [4]†
+GGNet [34]
+HOTR [13]†
+QPIC [25]†
+MSTR (Ours)
+R50
+R50
+R50
+R50-FPN
+R50-FPN
+R50
+R152
+R50
+R50-FPN
+R50-FPN
+R50-FPN
+R50-FPN
+R152
+R50
+R50
+R50
+R50-FPN
+R50-FPN
+R152
+R50
+R50-FPN
+HG104
+R101
+R50
+HG104
+R50
+R50
+R50 47.8 45.9
+-52.0 51.0 52.0 53.0 53.1 53.2 31.8 40.0 43.6 44.0 45.3 43.2 47.3 48.3 51.0 51.8 53.3 47.5 51.0 52.9 53.9 54.7 55.2 58.8 62.0
+--47.5
+-57.5
+-----48.0
+--52.4
+----57.0 60.3 56.2
+----64.4 61.0 65.2
+Table 1. Comparison of performance on V-COCO test set. AP #1 role ,
+AP #2 role denotes the performance under Scenario 1 and Scenario 2 in V-COCO, respectively. † denotes end-to-end HOI detectors with transformers, which are the main baselines for our work. 4.3. Ablation Study
+We perform ablations to check the effects of our pro-posed Dual-Entity attention, Entity-conditioned Context at-tention, and our proposed decoder architecture that merges the self-attention of the multiple semantics.
+Baselines. On basis of QPIC [25] structure, we define several variants for baselines by applying different combi-nations of sub-components from MSTR: multi-scale feature maps (MS), Deformable Attention (DA), Dual-Entity atten-tion (DE), and Entity-conditioned Context attention (EC).
+Specifically, since deformable attention can be also applied to a single-scale feature map, SS-Baseline denotes QPIC where the attention in the transformer is replaced by DA.
+Our work can be seen as a process of improving the score
+Method
+Detector
+Backbone
+Feature
+Full
+Rare
+Non Rare
+Full
+Rare
+Non Rare
+Default
+Known Object
+Sequential HOI Detectors
+Functional Gen. [1]
+TIN [19]
+VCL [11]
+ConsNet [22]
+DRG [6]
+IDN [17]
+HICO-DET
+HICO-DET
+HICO-DET
+HICO-DET
+HICO-DET
+HICO-DET
+Parallel HOI Detectors
+HICO-DET
+UnionDet [12]
+PPDM [20]
+HICO-DET
+HOI Transformer [37]† HICO-DET
+HOTR [13]†
+HICO-DET
+HICO-DET
+GGNet [34]
+AS-Net [4]†
+HICO-DET
+QPIC [25]†
+HICO-DET
+MSTR (Ours)
+HICO-DET
+R50
+R101
+R50
+R50
+A+S+L
+A+S+P
+A+S
+R50-FPN A+S+L
+R50-FPN
+R50
+A+S
+A+S
+R50-FPN
+HG104
+R50
+R50
+HG104
+R50
+R50
+A
+A
+A
+A
+A
+A
+A
+A 21.96 22.90 23.63 24.39 24.53 24.58 17.58 21.10 23.46 25.10 28.83 28.87 29.07 16.43 14.97 17.21 17.10 19.47 20.33 11.72 14.46 16.91 17.34 22.13 24.25 21.85 31.17 25.31 23.62 25.26 25.55 26.56 26.04 25.86 19.33 23.09 25.41 27.42 30.84 30.25 31.23 32.92
+--25.98 30.34 27.98 27.89 19.76 24.81 26.15
+-27.36 31.74 31.68
+--19.12 23.40 23.11 23.64 14.68 17.09 19.24
+-20.23 27.07 24.14 34.02 28.83
+--28.03 32.41 29.43 29.16 21.27 27.12 28.22
+-29.48 33.14 33.93 35.57
+Table 2. Performance comparison in HICO-DET. The Detector column is denoted as ‘HICO-DET’ to show that the object detector is fine-tuned on the HICO-DET training set. Each letter in Feature column stands for A: Appearance (Visual Features), S: Interaction Patterns (Spatial Correlations), P: Pose Estimation, L: Linguistic Priors, V: Volume. † denotes end-to-end HOI detectors with transformers. Note that all the baseline models without † are already based on multi-scale feature maps.
+Method (a) QPIC (b) SS-Baseline (c) SS-Baseline + DE (d) SS-Baseline + DE + EC (e) MS-Baseline (f) MS-Baseline + DE (g) MS-Baseline + DE + EC (h) MSTR (Ours)
+MS DA DE
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+EC mAP 29.07 25.53 27.06
+✓ 27.70 27.52 28.30
+✓ 30.14
+✓ 31.17
+Table 3. Comparison of MSTR with our baseline QPIC and its variants in the HICO-DET test set. SS and MS denote the mod-els using single scale feature map and multi-scale feature maps, respectively. DE and EC indicate our proposed Dual-Entity atten-tion and Entity-conditioned Context attention, respectively. to the state-of-the-art by adapting MS, DE, EC step by step to SS-Baseline. MS-Baseline+DE+EC represents MSTR without merging with self-attention, instead simply passing the sum of the outputs to the next decoder layer.
+HOI-Aware Deformable Attentions.
+In Table 3, we ex-plore the effect of our proposed HOI-Aware Deformable At-tentions: Dual-Entity attention and Entity-conditioned Con-text attention. As deformable attentions can also be applied in a single-scale feature map, we verify the effectiveness of our proposed deformable attentions on both single-scale and multi-scale baselines. As we described in our prelim-inary, the na¨ıve implementation of deformable attention on top of QPIC (for single-scale) significantly degrades the score in both single-scale and multi-scale environments (see (a vs. b) and (a vs. e)). The use of Dual-Entity atten-tion (DE) consistently improves the score in both single-scale (+1.53p in (b vs. c)) and multi-scale environments (+0.78p in (e vs. f)). As well, Entity-conditioned Con-text attention (EC) contributes in the multi-scale environ-ment when jointly used with DE (+0.64p in SS and +1.84p in MS). Therefore, we conclude that disentangling the ref-erences (DE) and conditionally reimbursing context infor-mation (EC) each gradually contributes to the final perfor-mance of HOI detection in both single-scale and multi-scale environments, enabling MSTR to effectively explore multi-scale feature maps to achieve state-of-the-art performance.
+Single-scale vs. Multi-scale.
+In Table 1 and Table 2, we demonstrate that our method using the multi-scale feature maps outperform all previous methods, including transformer-based methods [4, 13, 25, 37] and the ones that already use multi-scale feature maps heavily [6, 11, 12, 17, 22, 34]. To analyze further, Table 3 compares single-scale version and the multi-scale version of our baselines (see (b-e) and (e-h)). In all cases of converting the single-scale fea-ture map to the multi-scale one, we observe consistent per-formance gains (see (b vs. e), (c vs. f), and (d vs. g,h)).
+The gain is maximized when DE and EC are used together.
+We further provide a detailed analysis of the effectiveness of MSTR in multi-scale environments in our Appendix.
+in the higher resolution feature maps, the sampling points capture the detail of the interacting human and object while the lower resolution feature maps tend to capture the over-all pose or context of the interaction. In Figure 1 and Fig-ure 6, we can observe how MSTR attends to test images that include various scales of humans, target objects, and distances. More details along with quantitative results will be provided in our Appendix. 5.

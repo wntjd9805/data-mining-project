@@ -1,0 +1,73 @@
+Abstract
+High-cardinality categorical features are a major challenge for machine learning methods in general and for deep learning in particular. Existing solutions such as one-hot encoding and entity embeddings can be hard to scale when the cardinality is very high, require much space, are hard to interpret or may overﬁt the data. A special scenario of interest is that of repeated measures, where the categorical feature is the identity of the individual or object, and each object is measured several times, possibly under different conditions (values of the other features).
+We propose accounting for high-cardinality categorical features as random effects variables in a regression setting, and consequently adopt the corresponding negative log likelihood loss from the linear mixed models (LMM) statistical literature and in-tegrate it in a deep learning framework. We test our model which we call LMMNN on simulated as well as real datasets with a single categorical feature with high cardinality, using various baseline neural networks architectures such as convolu-tional networks and LSTM, and various applications in e-commerce, healthcare and computer vision. Our results show that treating high-cardinality categorical features as random effects leads to a signiﬁcant improvement in prediction performance compared to state of the art alternatives. Potential extensions such as accounting for multiple categorical features and classiﬁcation settings are discussed. Our code and simulations are available at https://github.com/gsimchoni/lmmnn 1
+
+Introduction
+In recent years deep neural networks (DNNs) have served as the method of choice for learning complex non-linear relations between features of large datasets and for hard prediction tasks. Yet, despite their advanced machinery such as stochastic gradient descent (SGD) and convolutional layers,
+DNNs (as other machine learning tools) do not readily lend themselves to handling categorical features of high cardinality. Such features are often seen in modeling tasks, a good recent example would be Lin et al. [16] who used electronic medical records (EMR) of hospital patients to predict hospital readmission, and had to deal with the patient’s diagnosis as a categorical feature with thousands of levels. In a recent review Hancock and Khoshgoftaar [13] surveyed the approaches taken by DNN practitioners for turning the levels of categorical features into numeric form, of which the most used approaches are one-hot encoding (OHE) and entity embeddings. OHE and embeddings also appear as the go-to solution in one of the most cited handbooks of machine learning by Géron
+[9]. See Section 4 for a more detailed discussion of these approaches.
+A different approach for handling high-cardinality categorical features is that of linear mixed models (LMM), see e.g. McCulloch et al. [18]. In the LMM framework statisticians differentiate between 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+ﬁxed effects (FE) which are regular parameters to be estimated from the data and random effects (RE), which are parameters that are not directly estimated, but rather treated as random variables, and their distribution is estimated instead. This mechanism is often used to deal with high cardinality categorical variables or "cluster" indicators. In a typical setting a statistician would be interested in the effect few designed experimental conditions have on a dependent variable, e.g. the effect of treatment A versus treatment B on a patient’s blood pressure. The treatment effect would be considered a ﬁxed effect, while the effect of the city in which a subject resides — a categorical feature with possibly thousands of levels — would be considered a RE variable, often having normal distribution N (cid:0)0, σ2 b being an unknown "variance component" to be estimated (see Section 2 for a formal description). Another common example of a RE variable is the subject of the experiment herself, in a repeated measures setting, where a subject is treated to both treatments A and B. In such a setting a statistician would usually deem a subject’s effect as random, i.e. coming from a possibly inﬁnite population of subjects, and use proper LMM machinery to handle such a variable. (cid:1) with σ2 b
+In this paper we are interested in examining modern big-data predictive modeling domains, where
+DNNs would be a natural choice of modeling approach, but where high dimensional categorical variables or repeated measures are an important aspect of prediction. Examples we pursue might include: predicting the gaze direction of a person’s eyes from repeated facial images of the same individuals [24], detection of diabetic retinopathy from retinal fundus photographs where each patient is photographed for both left and right eyes [11], prediction of a person’s ﬂuid intelligence from dozens of features including a person’s job which can take hundreds of levels [14] and predicting the price of an Airbnb rental with host being one of tens of thousands [15].
+To address such challenges we seek a simple extension to DNN which allows to treat high-cardinality categorical features as RE and ultimately improve the network’s prediction performance in a regression setting. We do this by generalizing the LMM-framework negative log likelihood (NLL) function and treating it as a natural loss function for the entire network, minimizing both the "ﬁxed" and
+"random" parts, and improving the bottom line test mean squared error (MSE). We demonstrate the superiority of our method over using existing methods such as OHE, entity embeddings and standard
+LMM via R’s lme4 package (Bates et al. [2]), as well as previous attempts at integrating RE in DNN (MeNets, Xiong et al. [22]), on both simulated and real datasets from various applications such as healthcare and computer vision. Finally we discuss future directions, such as using RE in DNN in a classiﬁcation setting and with more complex covariance structures such as kriging. 2 A Brief Tour of Linear Mixed Models
+The canonical linear model assumes: y = Xβ + (cid:15), (1) where X is the n × p model matrix where the ith row is xi, β ∈ Rp is a vector of model parameters to be estimated and (cid:15) ∈ Rn is normal i.i.d noise, i.e. (cid:15) ∼ N (cid:0)0, σ2 e is a variance parameter and I is the n × n identity matrix. e I(cid:1), where σ2
+A linear mixed model treats the β parameters as ﬁxed effects, and allows additional data to enter the model in the form of a n × q matrix Z and a vector of random effects b ∈ Rq: y = Xβ + Zb + (cid:15) (2)
+Here b are random variables, typically assumed to have a multivariate normal distribution N (0, D) where D is a q × q positive semi-deﬁnite matrix holding usually unknown variance components to be estimated, let these be θ, so D could be written as D(θ). The structure of this covariance matrix is up to the researcher but there are typically simpliﬁed structures used. It is further assumed that there is no dependence between the normal noise and the random effects, i.e. cov ((cid:15), b) = 0.
+Let us write the vector of all variance components as ψ = [σ2 e , θ]. How to estimate β, ψ? The statistical approach of choice is maximum likelihood estimation (MLE). We write the marginal distribution of y as N (Xβ, V ) where V (ψ) = ZD(θ)Z (cid:48) + σ2 e I, and from here it is straightforward to see that the log likelihood is: l(β, ψ|y) = − 1 2 (y − Xβ)(cid:48) V (ψ)−1 (y − Xβ) − 1 2 log |V (ψ)| − n 2 log 2π (3)
+The MLEs for β, ψ maximize l(β, ψ|y) or equivalently minimize the negative log likelihood (NLL) in (3). Typically maximizing the likelihood is difﬁcult with given constraints on ψ (which are non-negative variance components), and to get less biased estimates for ψ alternatives methods such as 2
+restricted maximum likelihood estimation (REML) are preferred. For full details see e.g. McCulloch et al. [18].
+Of particular interest is the random intercepts model, in which a single categorical random variable, such as "subject" or "city", is assumed. If this so-called "clustering" variable has q levels, then Z is an indicator matrix holding at entry [i, j] 1 if observation i belongs to cluster j and zero otherwise. In this case it is often assumed that the random effects for this variable are independent of one another, hence: D = σ2 b ZZ (cid:48) + σ2 e I is a block diagonal matrix and its inversion can be avoided in (3). More on that in Section 3. b I. In this setting V (ψ) = σ2
+How to predict ˆyte in a machine learning scenario, where (X, Z, y) are typically split into training and testing sets (Xtr, Ztr, ytr) and (Xte, Xte, yte)? In general one would use y’s conditional distribution: where ˆβ = (X (cid:48) tr components ˆψ are input into ˆV , and:
+ˆV −1Xtr)−1X (cid:48) tr
+ˆyte = Xte (4)
+ˆV −1ytr are the estimated ﬁxed effects once the estimated variance
+ˆβ + Zte
+ˆb,
+ˆb = ˆDZ (cid:48) tr
+ˆV −1 (cid:16) ytr − Xtr (cid:17)
+ˆβ (5) is the so called best linear unbiased predictor (BLUP), as b are not actually parameters to be estimated, but random variables to be predicted.
+Sometimes, however, (4) is not possible such as in the case of the random intercepts model, where
+Zte holds levels of the random variable unseen before, e.g. a new subject. In this case it is customary
+ˆβ, i.e. without the random part. Finally, to use y’s marginal distribution and predict ˆyte to be Xte still under the random intercepts model, it can be shown that for a given level j and corresponding random effect ˆbj, the computation can be simpliﬁed to avoid the inversion of ˆV giving:
+ˆbj = nj ˆσ2 b e + nj ˆσ2
+ˆσ2 b (cid:0)¯ytr;j − Xtrβj (cid:1) , (6) where (cid:0)ˆσ2
+¯ytr;j and Xtrβj are the true and predicted mean values of y in cluster j respectively. (cid:1) are the estimated variance components, nj is the no. of observations in cluster j and e , ˆσ2 b 3 LMMNN: Our Proposed Approach
+Let us change (2) into: y = f (X) + g (Z) b + (cid:15), (7) where f and g are non-trivial functions which DNNs are suitable for, e.g. non-linear and involving interactions. We propose to use NLL as a natural loss function, where Xβ is replaced by the DNN outputs f (X):
+N LL(f, g, ψ|y) = 1 2 (y − f (X))(cid:48) V (g, ψ)−1 (y − f (X)) + 1 2 log |V (g, ψ)| + n 2 log 2π, (8) where V (g, ψ) = g(Z)D(θ)g(Z)(cid:48) + σ2 e I. Note that f and g are kept general as possible, to allow any acceptable DNN architecture, including convolutional and recurrent neural networks. See Figure 1 for a schematic description of our approach which we call LMMNN, in the case f and g are approximated with a simple multilayer perceptron.
+We propose using existing DNN machinery, mainly SGD, to ﬁt the model and its variance components.
+To be more speciﬁc, we implemented a custom NLL loss layer where at each epoch (8) is calculated on a small batch typically of size 30-50 observations and auto-differentiation is handled by Keras [4].
+An alternative could be using explicit formulas for the variance components ψ derivatives in case
+V (ψ) is simple:
+= −
+∂N LL
+∂ψ
+∂ψ is g(Z) ∂D(θ) (y − f (X))(cid:48) V −1 ∂V
+∂ψ
+∂θ g(Z)(cid:48) for the θ variance components and I for σ2 e .
+V −1 (y − f (X)) + 1 2 1 2 tr where ∂V (cid:18)
+V −1 ∂V
+∂ψ (cid:19)
+, (9) 3
+The main challenge in implementing mini-batch SGD on (8) is the inverse and determinant of V (g, ψ) which may not decompose into sums on batches. An important exception is the main setting of interest in our paper in the random intercepts model, when g(Z) = Z and V (g, ψ) is a block-diagonal matrix. If all blocks are identical, such that each level of the categorical feature has m observations (Xj, yj) where j = 1, . . . q, we can write V (ψ) = diag(V1, ..., Vq) where each Vj block is of size m × m and V (ψ)j = σ2 e Im where Jm is a m × m all 1s matrix. This means we can write the inverse in (8) as block diagonal as well, V (ψ)−1 = diag(V −1
+, ..., V −1
+), and the log determinant in (8) as a sum of log determinants: log |V (ψ)| = (cid:80)q j=1 log |Vj|. The NLL in (8) can now be written as a sum: N LL(f, ψ|y) = (cid:80)q 2 log 2π. Most j importantly, the gradient in (9) can be decomposed into a sum of gradients over mini-batches of size m: 2 (yj − f (Xj))(cid:48) V −1 (yj − f (Xj)) + 1 2 log |Vj| + m b Jm + σ2 j=1 1 1 q
+∂N LL
+∂ψ
+= q (cid:88) (cid:20) j=1
+− 1 2 (yj − f (Xj))(cid:48) V −1 j
+∂Vj
+∂ψ
+V −1 j (yj − f (Xj)) + (cid:18) 1 2 tr
+V −1 j
+∂Vj
+∂ψ (cid:19)(cid:21) (10)
+If all blocks are not identical but small (the typical case), we can still make sure that mini-batches consist of each level j’s nj observations. For more general cases the mini-batch approach (where inverse and determinant are calculated on the mini-batch) still seems to work well in practice, some related theory can be found in Chen et al. [3], see Section 6 for further discussion on more LMM scenarios.
+For prediction, we accommodate (4) as well:
+ˆyte = ˆf (Xte) + ˆg (Zte) ˆb, where ˆf and ˆg are the outputs of the DNNs used to approximate f and g, and ˆb are the predicted random effects with the modiﬁed BLUP: ˆb = D( ˆψ)ˆg (Ztr)(cid:48) V (ˆg, ˆψ)−1 (cid:16)
+Note further that in the likely case where g is simply the identity matrix and we are interested in a single clustering variable as in the random intercepts model, we can also avoid inversion of V in the loss function as described in [18], as well as in computing the modiﬁed BLUP: ytr − ˆf (Xtr) (11) (cid:17)
+ˆbj = nj ˆσ2 b e + nj ˆσ2
+ˆσ2 b (cid:16)
+¯ytr;j − ˆf (Xtr)j (cid:17) (12) 4

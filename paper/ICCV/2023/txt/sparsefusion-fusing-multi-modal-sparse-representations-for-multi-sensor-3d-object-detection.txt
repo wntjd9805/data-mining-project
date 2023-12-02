@@ -1,0 +1,66 @@
+Abstract
+BEV Features (LiDAR)
+BEV Features (Fusion)
+By identifying four important components of existing
+LiDAR-camera 3D object detection methods (LiDAR and camera candidates, transformation, and fusion outputs), we observe that all existing methods either ﬁnd dense candi-dates or yield dense representations of scenes. However, given that objects occupy only a small part of a scene,
+ﬁnding dense candidates and generating dense represen-tations is noisy and inefﬁcient. We propose SparseFusion, a novel multi-sensor 3D detection method that exclusively uses sparse candidates and sparse representations. Speciﬁ-cally, SparseFusion utilizes the outputs of parallel detectors in the LiDAR and camera modalities as sparse candidates for fusion. We transform the camera candidates into the Li-DAR coordinate space by disentangling the object represen-tations. Then, we can fuse the multi-modality candidates in a uniﬁed 3D space by a lightweight self-attention module.
+To mitigate negative transfer between modalities, we pro-pose novel semantic and geometric cross-modality trans-fer modules that are applied prior to the modality-speciﬁc detectors. SparseFusion achieves state-of-the-art perfor-mance on the nuScenes benchmark while also running at the fastest speed, even outperforming methods with stronger backbones. We perform extensive experiments to demon-strate the effectiveness and efﬁciency of our modules and overall method pipeline. Our code will be made publicly available at https://github.com/yichen928/SparseFusion. 1.
+
+Introduction
+Autonomous driving cars rely on multiple sensors, such as LiDAR and cameras, to perceive the surrounding envi-ronment. LiDAR sensors provide accurate 3D scene oc-cupancy information through point clouds with points in the xyz coordinate space, and cameras provide rich se-mantic information through images with pixels in the RGB
+* indicates equal contribution.
+Image Features
+BEV Features (Camera) (a) mAP vs. FPS (b) Dense-to-dense fusion.
+LiDAR Modality Inputs
+Instance Features (LiDAR) 3D 
+Detector
+Information
+Transfer
+Camera 
+Detector
+… …
+… …
+… …
+Instance Features (Fusion)
+Camera Modality Inputs
+Instance Features (Camera) (c) Overview of our sparse fusion strategy. We extract instance-level features from the LiDAR and camera modalities separately, and fuse them in a uniﬁed 3D space to perform detection.
+Figure 1: Compared to existing fusion algorithms, Sparse-Fusion achieves state-of-the-art performance as well as the fastest inference speed on nuScenes test set. † : Ofﬁcial code of [5] uses ﬂip as test-time augmentation. ‡ : We use
+BEVFusion-base results in the ofﬁcial repository of [28] to match the input resolutions of other methods. § : Swin-T [27, 21] is adopted as image backbone. color space. However, there are often signiﬁcant discrepan-cies between representations of the same physical scene ac-quired by the two sensors, as LiDAR sensors capture point clouds using 360-degree rotation while cameras capture im-ages from a perspective view without a sense of depth. This impedes an effective and efﬁcient fusion of the LiDAR and camera modalities. To tackle this challenge, multi-sensor fusion algorithms were proposed to ﬁnd correspondences between multi-modality data to transform and fuse them into a uniﬁed scene representation space.
+Dense representations, such as bird-eye-view (BEV), volumetric, and point representations, are commonly used
+Table 1: For each LiDAR-camera fusion method, we identify the LiDAR candidates and camera candidates that are used, the transformation process used to fuse these candidates into a uniﬁed space, and the fusion outputs generated to represent 3D scenes using information from both modalities. Based on these components, we categorize the methods into the following categories: Dense+Sparse→Dense approaches relate the sparse region proposals in images to a dense frustum point cloud and fuse them into a dense point space. Dense+Dense→Dense approaches align each point feature in the point cloud to the corresponding pixel feature in the image and represent the 3D scenes using dense features such as point/BEV features.
+Sparse+Dense→Sparse approaches generate sparse queries by detecting instance features in the point cloud and then apply-ing cross-attention with dense image features. Dense+Dense→Sparse approaches predict objects using queries that combine dense features from each modality. Sparse+Sparse→Sparse (ours) extracts sparse instance features from each modality and directly fuses them to obtain the ﬁnal sparse instance features used for detection.
+Category
+Dense+Sparse→Dense
+Dense+Dense→Dense
+Method
+LiDAR Candidate Camera Candidate
+Transformation
+Fusion Outputs
+Frustum PointNets [35] point features region proposals proj. & concat.
+PointPainting [39]
+PointAugmenting [40]
+PAI3D [25]
+BEVFusion [28]
+AutoAlignV2 [5] point features point features point features
+BEV features voxel features segm. output image features segm. output image features image features proj. & concat. proj. & concat. proj. & concat. depth. est. & proj. & concat. proj. & attn. point features point features point features point features
+BEV features voxel features
+Sparse+Dense→Sparse
+TransFusion [1] instance features image features proj. & attn. instance features
+Dense+Dense→Sparse
+FUTR3D [4]
+UVTR [18]
+DeepInteraction [47]
+CMT [45] voxel features voxel features
+BEV features
+BEV features image features image features image features image features attn. depth. est. & proj. & attn. proj. & attn. attn. instance features instance features instance features instance features
+Sparse+Sparse→Sparse
+SparseFusion (Ours) instance features instance features proj. & attn. instance features to represent 3D scenes [28, 5, 39, 25, 40, 15]. Most pre-vious works fuse different modalities by aligning low-level data or high-level features to yield dense features that de-scribe the entire 3D scene, e.g., as shown in Fig 1b. How-ever, for the task of 3D object detection, such dense rep-resentations are superﬂuous since we are only interested in instances/objects, which only occupy a small part of the 3D space. Furthermore, noisy backgrounds can be detrimen-tal to object detection performance, and aligning different modalities into the same space is a time-consuming process.
+For example, generating BEV features from multi-view im-ages takes 500ms on an RTX 3090 GPU [28].
+In contrast, sparse representations are more efﬁcient, and methods based on them have achieved state-of-the-art per-formance in multi-sensor 3D detection [1, 4, 18, 47]. These methods use object queries to represent instances/objects in the scene and interact with the original image and point cloud features. However, most previous works do not take into account the signiﬁcant domain gap between features from different modalities [44]. The queries may gather information from one modality that has a large distribu-tion shift with respect to another modality, making iter-ative interaction between modalities with large gaps sub-optimal. Recent work [47] mitigates this issue by incorpo-rating modality interaction, i.e. performing cross-attention between features from two different modalities. However, the number of computations performed in this method in-creases quadratically with the dimensions of features and is thus inefﬁcient. We categorize previous works into four groups by identifying four key components, which are out-lined in Table 1. Further discussion of the methods in these groups is presented in Sec. 2.
+In this paper, we propose SparseFusion, a novel method (Fig. 1c) that simultaneously utilizes sparse candidates and yields sparse representations, enabling efﬁcient and effec-tive 3D object detection. SparseFusion is the ﬁrst LiDAR-camera fusion method, to our knowledge, to perform 3D detection using exclusively sparse candidates and sparse fu-sion outputs. We highlight a key common ground between the two modalities: an image and a point cloud that rep-resent the same 3D scene will contain mostly the same in-stances/objects. To leverage this commonality, we perform 3D object detection on the inputs from each modality in two parallel branches. Then, the instance features from each branch are projected into a uniﬁed 3D space. Since the instance-level features are sparse representations of the same objects in the same scene, we are able to fuse them with a lightweight attention module [38] in a soft manner.
+This parallel detection strategy allows the LiDAR and cam-era branches to take advantage of the unique strengths of the point cloud and image representations, respectively. Never-theless, the drawbacks of each single-modality detector may result in negative transfer during the fusion phase. For ex-ample, the point cloud detector may struggle to distinguish between a standing person and a tree trunk due to a lack of detailed semantic information, while the image detector is hard to localize objects in the 3D space due to a lack of ac-curate depth information. To mitigate the issue of negative
+transfer, we introduce a novel cross-modality information transfer method designed to compensate for the deﬁciencies of each modality. This method is applied to the inputs from both modalities prior to the parallel detection branches.
+SparseFusion achieves state-of-the-art results on the competitive nuScenes benchmark [2]. Our instance-level sparse fusion strategy allows for a lighter network and much higher efﬁciency in comparison with prior work. With the same backbone, SparseFusion outperforms the current state-of-the-art model [47] with 1.8x acceleration. Our con-tributions are summarized as follows:
+• We revisit prior LiDAR-camera fusion works and iden-tify four important components that allow us to catego-rize existing methods into four groups. We propose an entirely new category of methods that exclusively uses sparse candidates and representations.
+• We propose SparseFusion, a novel method for LiDAR-camera 3D object detection that leverages instance-level sparse feature fusion and cross-modality infor-mation transfer to take advantage of the strengths of each modality while mitigating their weaknesses.
+• We demonstrate that our method achieves state-of-the-art performance in 3D object detection with a lightweight architecture that provides the fastest infer-ence speed. 2.

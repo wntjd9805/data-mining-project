@@ -1,0 +1,231 @@
+Abstract
+Despite recent advances, goal-directed generation of structured discrete data re-mains challenging. For problems such as program synthesis (generating source code) and materials design (generating molecules), ﬁnding examples which satisfy desired constraints or exhibit desired properties is difﬁcult. In practice, expensive heuristic search or reinforcement learning algorithms are often employed. In this paper we investigate the use of conditional generative models which directly attack this inverse problem, by modeling the distribution of discrete structures given properties of interest. Unfortunately, maximum likelihood training of such models often fails with the samples from the generative model inadequately respecting the input properties. To address this, we introduce a novel approach to directly optimize a reinforcement learning objective, maximizing an expected reward. We avoid high-variance score-function estimators that would otherwise be required by sampling from an approximation to the normalized rewards, allowing simple
+Monte Carlo estimation of model gradients. We test our methodology on two tasks: generating molecules with user-deﬁned properties, and identifying short python expressions which evaluate to a given target value. In both cases we ﬁnd improvements over maximum likelihood estimation and other baselines. 1
+
+Introduction
+Machine learning models for structured data such as program source code and molecules typically represent the data as a sequence of discrete values. However, even as recent advances in sequence models have made great strides in predicting properties from the sequences, the inverse problem of generating sequences for a given set of pre-deﬁned properties remains challenging. These sorts of structure design problems have great potential in many application areas; e.g., in materials design, where one may be interested in generating molecular structures appropriate as batteries, photovoltaics, or drug targets. However, as the underlying sequence is discrete, directly optimizing it with respect to target properties becomes problematic: gradients are unavailable, meaning we can not directly estimate the change in (say) a material that would correspond to a desired change in properties.
+An open question is how well machine learning models can help us quickly and easily explore the space of discrete structures that correspond to particular properties. There are a few approaches based on generative models which aim to directly simulate likely candidates. Neural sequence models [23, 2] are used to directly learn the conditional distributions by maximizing conditional log likelihoods and have shown potential in text generation, image captioning and machine translation. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Fundamentally, a maximum likelihood (ML) objective is a poor choice if our main goal is not learning the exact conditional distribution over the data, but rather to produce a diverse set of generations which match a target property. Reinforcement learning (RL) offers an alternative, explicitly aiming to maximize an expected reward. The fundamental difference is between “many to one” and “one to many” settings. A ML objective works well for prediction tasks where the goal is to match each input to its exact output. For instance, consider the models which predict properties from molecules, since each molecule has a well-determined property. However, for the inverse problem the data severely underspeciﬁes the mapping, since any given property combination has many diverse molecules which match; nearly all of these are not present in the training data. As the ML objective is only measured on the training pairs, any output that is different from the training data target is penalized. Therefore, a model which generates novel molecules with the correct properties would be penalized by ML training, as it does not produce the exact training pairs; but, it would have a high reward and thus be encouraged by an RL objective.
+Recent work has successfully applied policy gradient optimization [25] on goal oriented sequence generation tasks [6, 11]. These methods can deal with the non-differentiability of both the data and the reward function. However, policy gradient optimization becomes problematic especially in high dimensional action spaces, requiring complicated additional variance reduction techniques
+[10]. Those two schemes, ML estimation and RL training, are both equivalents to minimizing a KL divergence between an exponentiated reward distribution (deﬁned accordingly) and model distribution but in the opposite directions [18]. If all we care about is generating realistic samples, the direction corresponding to the RL objective is the more appropriate to optimize [13]: the only question is how to make training efﬁcient.
+We formulate the conditional generation of discrete sequence as a reinforcement learning objective to encourage the generation of sequences with speciﬁc desired properties. To avoid the inefﬁciency of the policy gradient optimization, which requires large sample sizes and variance reduction techniques, we propose an easy alternative formulation that instead leverages the underlying similarity structure of a training dataset. 2 Methods
+In this section, we introduce a new approach which targets an RL objective, maximizing expected reward, to directly learn conditional generative models of sequences given target properties. We sidestep the high variance of the gradient estimation which would arise if we directly apply policy gradient methods, by an alternative approximation to the expected reward that removes the need to sample from the model itself.
+Suppose we are given a training set of pairs D = {(xi, yi)}, i = 1, . . . , N , where xi = xi,1...T is a length T sequence of discrete variables, and yi ∈ Y is the corresponding output vector, whose domain may include discrete and continuous dimensions. Assume the input-output instances (xi, yi) are i.i.d. sampled from some unknown probability distribution ˜p(x, y), with f the ground truth function that maps xi to yi for all pairs (xi, yi) ∼ ˜p(x, y). Our goal is to learn a distribution pθ(x|y) such that for a given y in ˜p(y), we can generate samples x that have properties close to y. 2.1 Maximizing expected reward
+We can formulate this learning problem in a reinforcement learning setting, where the model we want to learn resembles learning a stochastic policy pθ(x|y) that deﬁnes a distribution over x for a given state y. For each x that is generate for a given state y, we can deﬁne a reward function R(x; y) such that it assigns higher value for x when d(f (x), y) is small and vice versa, where d is a meaningful distance deﬁned on Y. This model can be learned by maximizing the expected reward
+J = E ˜p(y)Epθ(x|y)[R(x; y)].
+When there is a natural notion of distance d(y, y(cid:48)) for values in Y, then we can deﬁne a reward
+R(x; y) = exp{−λd(f (x), y)}. If the model pθ(x|y) deﬁnes a distribution over discrete random variables or if the reward function is non-differentiable, a direct approach requires admitting high-variance score-function estimators of the gradient of the form (1)
+∇θJ = E ˜p(y)Epθ(x|y)[R(x; y)∇θ log pθ(x|y)].
+The inner expectation in this gradient estimator would typically be Monte Carlo approximated via sampling from the model pθ(x|y). The reward is often sparse in high dimensional action spaces, (2) 2
+leading to a noisy gradient estimate. Typically, to make optimization work with score-function gradient estimators, we need large samples sizes, control variate schemes, or even warm-starting from pre-trained models. Instead of sampling from the model distribution and look for the direction where we get high rewards, we consider an alternative breakdown of the objective to avoid direct
+Monte Carlo simulation from pθ(x|y).
+Assume we have a ﬁnite non-negative reward function R(x; y), with 0 ≤ R(x; y) < ∞, and let c(y) = (cid:80) x R(x; y). We can then rewrite the objective in Eq. (1), using the observation that
+Epθ(x|y)[R(x; y)] = c(y)E ¯R(x|y)[pθ(x|y)], (3) where we take the expectation instead over the “normalized” rewards distribution ¯R(x|y) =
+R(x; y)/c(y). (A detailed derivation is in Appendix A.) Leaving aside for the moment any practical challenges of normalizing the rewards, we note that this formulation allows us instead to employ a path-wise derivative estimator [21]. Using the data distribution to approximate expectations over
+˜p(y) in Eq. 2, we have
+∇θJ ≈ 1
+N
+N (cid:88) i=1 c(yi)E ¯R(x|yi)[∇θpθ(x|yi)]. (4)
+To avoid numeric instability as pθ(x|y) may take very small values, we instead work in terms of log probabilities. This requires ﬁrst noting that arg maxθ J = arg maxθ log J where we then have: log J = log (cid:0)E ˜p(y)c(y)E ¯R(x|y)[pθ(x|yi)](cid:1) ≥ E ˜p(y) log (cid:0)c(y)E ¯R(x|y)[pθ(x|yi)](cid:1)
+= E ˜p(y) log E ¯R(x|y)[pθ(x|y)] + const.
+From Jensen’s inequality, we have log E ¯R(x|y)[pθ(x|y)] ≥ E ¯R(x|y)[log pθ(x|y)], which motivates optimizing instead a lower-bound on log J , an objective we refer to as
+Again using the data distribution to approximate expectations over ˜p(y), the gradient is simply
+L = E ˜p(y)E ¯R(x|y)[log pθ(x|y)]
+∇θL ≈ 1
+N
+N (cid:88) i=1
+E ¯R(x|yi)[∇θ log pθ(x|yi)]. (5) (6) 2.2 Approximating expectations under the normalized reward distribution
+Of course, in doing this we have introduced the potentially difﬁcult task of sampling directly from the normalized reward distribution. Fortunately, if we are provided with a reasonable training dataset
+D which well represents ˜p(x, y) then we propose not sampling new values at all, but instead re-weighting examples x from the dataset as appropriate to approximate the expectation with respect to the normalized reward.
+For a ﬁxed reward function R(x, y) = exp{−λd(f (x), y)}, when restricting to the training set we can instead re-express the normalized reward distribution in terms of a distribution over training indices. Given a ﬁxed yi, consider the rewards as restricted to values x ∈ {x1, . . . , xN }; each potential xj has a paired value yj = f (xj). Using our existing dataset to approximate the expectations in our objective, we have for each yi
+E ¯R(x|yi)[log pθ(x|yi)] ≈
+N (cid:88) j=1
+¯R(xj|yi) log pθ(xj|yi) ≈ Ep(j|i)[log pθ(xj|yi)] (7) where the distribution over indices p(j|i) is deﬁned as p(j|i) =
+R(xj; yi) j=1 R(xj; yi) (cid:80)N
+. (8)
+Note that there are two normalized distributions which we consider. The ﬁrst ¯R(x|yi) is deﬁned by normalizing the reward across the entire space of possible values x,
+¯R(x|yi) =
+R(x; yi) x R(x; yi) (cid:80)
+=
+R(x; yi) c(yi) (9) 3
+The second is p(j|i) which is deﬁned by normalizing instead across the empirical distribution of values x in the training set, yielding the distribution over indices as given in equation 8. The restriction of ¯R(x|yi) to the discrete points in the training set is not the same and our approximation is off by a scalar multiplicative factor (cid:80)N j=1 R(xj|yi)/ (cid:80) x R(x|yi). However, this factor does not dramatically affect outcomes: its value is independent of x, depending only on yi. Any bias which is introduced would come into play only in the evaluation of Eq. (6), where entries from different y values may effectively be assigned different weights. So while this may affect unconditional generations from the model, and means that some y values may be inappropriately considered “more important” than others during training, it should not directly bias conditional generation for a ﬁxed y.
+Full discussion of this point is in Appendix B.
+Thus, for any choice of reward, we can deﬁne a sampling distribution from which to propose examples xj given yi by computing and normalizing the rewards across (i, j) pairs in the dataset. While naïvely computing this sampling distribution for every i requires constructing an N × N matrix, in practice typically very few of the N datapoints have normalized rewards which are numerically much greater than zero, allowing easy pre-computation of a N arrray of dimention Ki where K is the maximum number of non-zero elements each entry i, under the distance d(f (xj), yi). This can then later be used as a sampling distribution for xj at training time. 2.3 Sequence diversiﬁcation
+Our sampling procedure operates exclusively over the training instances. This, coupled with the fact that we operate over sequences of discrete elements, can restrict in a considerable manner the generation abilities of our model. To encourage a more diverse exploration of the sequence space and thus more diverse generations we couple our objective with an entropy regulariser. In addition to the likelihood of the generated sequences, we propose also maximizing their entropy, with max
+θ
+N (cid:88) i=1
+[E ¯R(x|yi)[log pθ(x|yi)] + λH(pθ(x|yi))]. (10)
+In a discrete sequence model the gradient of the entropy term can be computed as
+∇θH(pθ(x|y)) = −∇θEpθ(x|y) log pθ(x|y) = −Epθ(x|y)[(1 + log pθ(x|y))∇θ log pθ(x|y)]; (11) for details see Appendix C. Sufﬁce it to say, a naïve Monte Carlo approximation suffers from high variance and sample inefﬁciency. We instead use an easily-differentiable approximation to the entropy.
+We decompose the entropy of the generated sequence into a sequence of individual entropy terms
+H(pθ(x|y)) = −Epθ (x|y)
+T (cid:88) t=1 log pθ(xt|x1:t−1, y) = H(pθ(x1|y)) +
+T (cid:88) t=2
+Epθ (x1:t−1|y) [H(pθ(xt|x1:t−1, y))] .
+We can compute analytically the entropy of each individual pθ(xt|x1:t−1, y) term, since this is a discrete probability distribution with a small number of possible outcomes given by the dictionary size, and use sampling to generate the values we condition on at each step. Instead of using a Monte
+Carlo estimation of the expectation term, we generate the sequence in a greedy manner, selecting the maximum probability element, x∗ t , at each step. This results in approximating the entropy term as
+H(pθ(x|y)) ≈ H[pθ(x1|y)] +
+T (cid:88) t=2 (cid:2)H[pθ(xt|x∗ 1:t−1, y)](cid:3) .
+Its gradient is straightforward to compute since each individual entropy term can be computed analyt-ically. In Appendix J we provide an experimental evaluation suggesting the above approximation outperforms simple Monte Carlo based estimates, as well as the straight-through estimator. 3 Experiments
+We evaluate our training procedure on two conditional discrete structure generation tasks: generating python integer expressions that evaluate to a given value, and generating molecules which should exhibit a given set of properties. We do a complete study of our model without the use of the entropy-based regulariser and then explore the behavior of the regulariser. 4
+S −> Expr Op Expr
+Expr −> Number
+[ 1 . 0 ]
+[ 0 . 4 ]
+| Expr Op Expr
+[ 0 . 4 ]
+|
+Number −> Nonzero D i g i t s
+Nonzero −> 1 [ 0 . 1 1 1 1 ] 4 [ 0 . 1 1 1 1 ] 7 [ 0 . 1 1 1 1 ]
+L Expr Op Expr R [ 0 . 2 ]
+[ 0 . 9 ]
+| 2 [ 0 . 1 1 1 1 ]
+| 5 [ 0 . 1 1 1 1 ]
+| 8 [ 0 . 1 1 1 1 ]
+| Nonzero [ 0 . 1 ]
+| 3 [ 0 . 1 1 1 1 ]
+| 6 [ 0 . 1 1 1 1 ]
+| 9 [ 0 . 1 1 1 1 ]
+[ 0 . 0 5 ]
+D i g i t s −> D i g i t
+D i g i t −> 0 [ . 1 ]
+Op −> ’+ ’
+[ 0 . 3 ]
+’∗ ’
+[ 0 . 2 ]
+L −> ’ ( ’
+R −> ’ ) ’
+[ 1 . 0 ]
+[ 1 . 0 ]
+| D i g i t D i g i t s
+[ 0 . 9 5 ]
+| Nonzero [ 0 . 9 ]
+|
+|
+’−’
+’ / / ’
+[ 0 . 3 ]
+[ 0 . 2 ]
+|
+Listing 1: CFG for inverse calculator
+Objective
+Valid
+Unique
+Novel
+ML 0.9888 ± 0.0002 0.9903 ± 0.0003
+Ours 0.9681 ± 0.0004 0.9635 ± 0.0006 0.9301 ± 0.0003 0.9271 ± 0.0005
+|
+|
+Table 1: Python integer expression generation results
+MAE
+Accuracy
+Within ± 3 − log p(x|y)
+ML
+Ours 13.917 ± 0.117 11.823 ± 0.145 0.166 ± 0.001 0.166 ± 0.001 0.596 ± 0.001 0.682 ± 0.001 1.830 1.986
+Table 2: Python integer expression conditional gener-ation results
+In all experiments, we model the conditional distributions pθ(x|y) using a 3-layer stacked LSTM sequence model; for architecture details see Appendix D and Fig. D.3. We evaluate the performance of our model both in terms of the quality of the generations, as well as its sensitivity to values of the conditioning variable y. Generation quality is measured by the percentage of valid, unique, and novel sequences that the model produces, while the quality of the conditional generations is evaluated by computing the error between the value y we condition on, and the property value f (x) that the generated sequence x exhibits. We compared our model against a vanilla maximum likelihood (ML) trained model, where we learn the distribution pθ(x|y) by maximizing the conditional log-likelihood of the training set. We also test against two additional data augmentation baselines, including the reward augmented maximum likelihood (RAML) procedure of Norouzi et al. [18]. 3.1 Conditional generation of mathematical expressions
+Before considering the molecule generation task, we ﬁrst look at a simpler constrained “inverse calculator” problem, in which we attempt to generate python integer expressions that evaluate to a certain target value. We generate synthetic training data by sampling form the probabilistic context free grammar presented in Listing 1. We generate approximately 300k unique, valid expressions of length 30 characters or less, that evaluate to integers in the range (−1000, 1000); we split them into training, test, and validation subsets. Full generation details are in Appendix E.
+We deﬁne a task-speciﬁc reward based on permitting a small squared-error difference between the equations’ values and the conditioning value; i.e. R(x|y) = exp (cid:8)− 1 2 (f (x) − y)2(cid:9), which means for a given candidate yi the normalized rewards distribution forms a discretized normal distribution.
+We can sample appropriate matching expressions xj by ﬁrst sampling a target value from y(cid:48) from a
+Gaussian N (y(cid:48)|y, ) truncated to (−999, 999), rounding the sampled y(cid:48), and then uniformly sampling x from all training examples such that EVAL(x) = round(y(cid:48)). We found training to be most stable by pre-sampling these, drawing 10 values of x for each yi in the training and validation sets and storing these as a single, larger training and validation set which can be used to directly estimate the expected reward.
+To evaluate the performance of the generated integer expressions, we sample 25 expressions for 10k values in the test set; we repeat this process 6 times and report means and standard deviations.
+Generated expressions which evaluate to non-ﬁnite values, or to values outside the (−1000, 1000) range, are discarded as invalid. In Table 1 we show the statistics for the validity, uniqueness, and novelty (relative to the training set) of the generated expressions.s Both models perform well, and quite comparably; about 99% of generated expressions are valid, with few duplicates either of the other samples or of the training expressions. Table 2 reports (for the valid expressions) the mean absolute error (MAE), the exact accuracy (i.e. whether EVAL(x) = y), an “approximate” accuracy checking if the value is within ±3, as well as the negative log likelihood on the test set. While the exact accuracy does not change, we do see better performance in our training regime at both MAE and approximate accuracy, suggesting that “wrong” expressions are in some sense less wrong. We also note the tradeoff between objectives: our model trained to improve generation accuracy slightly underﬁts in terms of test log likelihood. 3.2 Conditional generation of molecules
+We now attempt to learn a model that can directly generate molecules that exhibit a given set of properties. We experiment with two datasets: QM9 [19] which contains 133k organic compounds that have up to nine heavy atoms and ChEMBL [17] of molecules that have been synthesized and tested against biological targets, which includes relatively larger molecules (up to 16 heavy atoms).
+For details of the datasets see Appendix D. We represent molecules by SMILES strings [24], and 5
+Model Valid Unique Novel Valid Unique Novel
+QM9
+ChEMBL
+Model
+QM9
+Validity Unicity Novelty
+ML
+Ours 0.962 0.989 0.967 0.963 0.366 0.261 0.895 0.945 0.999 0.9986 0.990 0.981
+Classic data augmentation
+RAML-like data augmentation
+Ours + Entropy regularizer (λ = 0.0008) 0.937 0.940 0.977 0.980 0.986 0.961 0.464 0.747 0.274
+Table 3: Molecule generation quality
+Table 4: Molecule generation quality
+Model
+ML
+Ours rotatable bonds 0.0468 0.0166 aromatic rings 0.0014 0.0005 logP 0.0390 0.0184
+QM9: MSE
+QED 0.0010 0.0004
+TPSA 11.18 3.859 bertz mol weight 4.425 80.77 1.184 63.67
+ﬂuorine count 0.0023 0.0004
+# rings 0.0484 0.0120
+ML
+Ours
+ML
+Ours
+ML
+Ours 0.9809 0.9937 0.1552 0.1555 0.9936 0.9934
+QM9: Correlation coefﬁcient 0.9944 0.9972 0.9805 0.9901 0.9063 0.9634 0.9871 0.9954 0.9843 0.9840
+ChEMBL: MSE 0.0388 0.0268 0.9862 0.9901 0.1450 0.1320 0.0050 0.0046 27.64 35.05 1708. 2512.
+CheEMBL: Correlation coefﬁcient 0.9777 0.9796 0.9450 0.9496 0.9906 0.9878 0.9934 0.9902 0.9651 0.9887 103.9 174.9 0.9956 0.9926 0.9783 1.0000 0.9817 0.9948 0.0128 0.0074 0.0226 0.0191 0.9940 0.9966 0.9931 0.9943
+Table 5: Conditional generation performance for the molecules datasets. condition on nine molecule properties which are present in the goal-directed generation tasks of
+Brown et al. [5]: number of rotatable bonds, number of aromatic rings, logP, QED score, tpsa, bertz, molecule weight, atom counter and number of rings; these properties can all be readily estimated by open-source chemoinformatics software RDKit (www.rdkit.org). For training purposes we normalize the properties values to a zero mean and a standard deviation of one.
+Sampling from the reward-based distribution During training, we need samples from ¯R(x|yi) for each yi from the training set. We deﬁne the reward as
+R(x; yi) = (cid:26)exp(−λ(cid:96)1(f (x), yi)), 0, if (cid:96)1(f (x), yi) ≤ (cid:15) otherwise, (12) where (cid:96)1(·, ·) is the (cid:96)1 distance of its arguments, and λ is a temperature hyper-parameter that prevents p(·|i), i.e., the approximation of ¯R(x; yi) using the training set, from becoming uniform over the non-zero reward samples; it controls how peaked is the p(·|i) distribution at the ground truth. We determine the values of the hyper-parameters based on the statistics of the (cid:96)1(f (xj), yi) distance on the training set, details are explained section D. We pre-compute the probability table p(·|i) for all yi in the training set and save the non-zero entries and the corresponding x indices. During training, for each yi in the mini batch, we sample ten x samples from p(·|i).
+Results To evaluate the performance we do one sample generation for each yi in the test set from the learned model pθ(x|yi). In Table 3, we provide the generation performance results over full test set. In the Table 5, we present the result for conditional generation where we do one sample generation per yi and calculate the error between the obtained molecules property and target yi. To account for the randomness that occur due to the sampling, we repeat such process ten times and report the statistics over ten trials. In the case of ChEMBL, repeating such generation ten times over a test set of size 238k was too expensive so we limited to 10k randomly selected instances. In
+Appendix G we report the results of a single molecule sampling over the full test set, consistent with the results we provide here.
+For QM9 our model has smaller MSE than the ML baseline model and better correlation on all properties. In the larger ChEMBL dataset the results are mixed, with our model achieving an MSE lower than that of the ML in ﬁve out of the nine properties and higher in the remaining four. More results are presented included in appendix (Table G.1).
+To check the plausibility of the generated molecules, we then run a series of quality ﬁlters from Brown et al. [5], which aim to detect those which are “potentially unstable, reactive, laborious to synthesize, or simply unpleasant”. Of our valid generated molecules, we ﬁnd 71.3% pass the quality ﬁlters, nearly the same success rate as the test set molecules themselves, 72.2%; if we were to normalize as in Table 1 of Bradshaw et al. [4], our performance of ≈ 98.7% outperforms nearly all approaches considered. Figure 1 shows example generations from the model trained on the ChEMBL, 12 out of 6
+Target
+Kang & Cho
+Ours
+MolWt=250
+MolWt = 350
+MolWt = 450
+Logp = 1.5
+Logp = 3
+Logp = 4.5
+QED= 0.5
+QED = 0.7
+QED = 0.9 250.3±6.7 349.6±7.3 449.6±8.9 1.539±0.301 2.984±0.295 4.350±0.309 0.527±0.094 0.719±0.088 0.840± 0.070
+Table 6: Comparing with the conditional VAE model of Kang and Cho [14] on the condi-tional molecule generation task. 253.8 ±11.8 351.7 ±12.5 450.9±13.2 1.571±0.371 3.034± 0.348 4.499±0.338 0.502±0.079 0.691 ±0.063 0.882± 0.044
+Figure 1: Example generated molecules from the ChEMBL model; red indicates failing the quality ﬁlters. 16 generated molecules passed the quality ﬁlter. In Fig. K.9 in appendix we provide an example of ten generations our QM9 model produces when we condition on a given target property vector. Among the ten generated molecules we have nine distinct ones. Five of these (the boxed ones) have never been seen in the training set. QM9 does not represent any real molecule distribution — we do note that all the molecules we show have 9 heavy atoms, consistent with the training dataset. Our model does not simply rank and propose training instances for a given property: it successfully generates novel molecules. 3.3 Testing against a strong baseline: Data augmentation -based sampling
+Here we explore two additional data augmentation -based approaches to sampling of learning instances for the molecule generation datasets. The ﬁrst of these is RAML [18], which maximizes a conditional log probability of the augmented versions of the training instances. Given a training instance (x∗, y∗), it samples from a distribution q(x|x∗; τ ) which is implicitly deﬁned by an appropriate augmentation/perturbation strategy from the training instance x∗. It was designed for text tasks such as machine translation, where for example the training instances correspond to sentences in a source and target language. In that setting an effective perturbation strategy is simply an edit-distance-based modiﬁcation of the x∗ instance. Such an approach will work well when the augmentation strategy produces instances x ∼ q(x|x∗; τ ) which will exhibit a property y that does not signiﬁcantly stray away from from y∗ — that is, f (x) ≈ f (x∗) when x and x∗ are close in edit distance. We will evaluate the ability of edit-distance-based augmentation to generate sequences whose properties are close to those of the original training sequence x∗, with edit-distance-based RAML as a baseline.
+In addition, since we can evaluate the properties of the augmented sequences we will do so and add the resulting (x, y = f (x)) instances in the an extended training set, in what can be seen as a standard data augmentation strategy for an additional baseline. Note this is only possible because in this particular setting we are able to evaluate our ground truth function f ; in general one cannot expect this to be available.
+We also tested a REINFORCE approach where we actually use a score function gradient estimator (Eq. 2), with warm-start from a model trained with maximum likelihood. This is uncompetitive with any of the other baselines; we discuss these RL results in Appendix I, and Tables I.4 and
+I.5. Moreover, we also compare with other existing models that purely designed for conditional molecule generation. Most other work for molecule generation cannot do so in one step, instead using the model as part of an iterative optimization procedure (e.g. RL or Bayesian optimization).
+The most competitive model we are aware of is Kang and Cho [14], which can indeed do direct conditional generation. In Table 6 we compare our results using the ChEMBL-trained model on the task considered in their paper, generating conditioned on a single target property. Despite our model not being tailored for this task, we perform similarly well or better in terms of property accuracy, and furthermore, we do so far faster — their model employs a beam search decoder averaging 4.5 seconds per molecule, with ours requiring 6 milliseconds.
+Edit distance on SMILES We ﬁrst study the appropriateness of the edit-distance-based augmenta-tions, used in RAML, in the sequence problems we examine. Given a sampled SMILES string from the training set we do m edit-distance-based perturbations of it by removing, inserting or swapping m number of the characters. We sample randomly 100 SMILES string from the training set and 7
+m validity unicity
+MSE
+One
+Two
+Three
+Four
+Five
+Six 0.265 0.095s 0.046 0.0276 0.0204 0 0.322 0.421 0.393 0.422 0.480
+-194.945 468.556 725.128 985.451 1496.023
+-Table 7: Edit distance aug-mentation evaluation on QM9 dataset
+Figure 2: Effect of the entropy on the generated sequences from the validation set.
+Model
+Classic data augmentation
+RAML-like data augmentation
+Ours + entropy (λ = 0.0008)
+# rotatable bonds 0.0584 0.9666 0.0228
+# aromatic ring 0.0107 0.0876 0.0007 logP 0.0631 0.5991 0.0262
+QED 0.0017 0.0071 0.0007
+TPSA 7.7358 181.7502 6.3374 bertz molecule weight 6.4299 2031.7948 2.2935 133.6868 2677.7330 80.2370
+ﬂuorine count 0.0009 0.0182 0.0006
+# rings 0.0755 0.5356 0.0191
+QM9: MSE
+QM9: Correlation coefﬁcient 0.976660 0.662532 0.990437
+Classic data augmentation 0.971779
+RAML-like data augmentation 0.817079
+Ours + entropy (λ = 0.0008) 0.994428
+Table 8: Conditional generation performance for the molecule datasets of the data augmentation based sampling and our entropy regulariser. Due to space constraints, standard deviations are omitted here, but can be found in Appendix Table L.7. 0.970758 0.665283 0.999046 0.914065 0.080851 0.982855 0.969238 0.724079 0.987524 0.853202 0.499901 0.941259 0.969615 0.554120 0.983400 0.991058 0.790727 0.992992 0.987762 0.795729 0.980721 generate for each one of them 1000 augmentations for every m ∈ [1, 6]. We report the validity and uniqueness of the perturbed molecules and the distance (MSE) of their properties from the properties of the original molecule in Table 7.
+As we can see in Table 7, the property of a molecule is very sensitive to perturbations. The same holds for the integer expressions as well. Even a one character edit can lead to a drastic property change. This puts into question the use of edit-distance-based augmentations as a means to sample learning instances when we deal with sequences that are sensitive to local perturbations.
+Importance sampling with edit distance proposals Although our approach restricts the domain of the normalized rewards distribution to allow easy sampling, our reward function Eq. (12) is able to assign reward for any given sequence. Since the edit-distance-based augmentation can propose new sequences, we can use the q(x|x∗, τ ) as a proposal distribution and importance sample, with
+E ¯R(x|y∗) [log pθ(x|y∗)] = Eq(x|x∗,τ ) (cid:20) ¯R(x|y∗) q(x|x∗, τ ) (cid:21) log pθ(x|y∗)
+.
+We follow the same edit distance sampling process as Norouzi et al. [18] and set τ = 0.745 so that if we sample 10 values, the zero edit distance will be sampled with p = 0.1. The average (cid:96)1 distance of the properties of the augmented instances from the target property is 4641.0. As a result most of the sequences proposed by q(x|x∗, τ ) will have ¯R(x|y∗) = 0 and contribute nothing to learning.
+Data augmentation on SMILES Even though the edit distance does not preserve properties, we can still evaluate their properties using RDKit; thus, we can pair every augmented instance x with its evaluated property f (x), and add these couples in the training dataset. We call this baseline “Classic data augmentation”. For completeness we will also evaluate the “RAML-like data augmentation” where we pair the augmented instances x with the property of the original x∗ from which they were produced, even though as we have seen such a pairing is not appropriate.
+In Table 4 we give the quality of the generations of the augmentation-based sampling approaches.
+In terms of validity the two augmentation-based approaches have a lower performance compared to our method in Table 3. For novelty they have considerably higher scores, to be expected since they are actually generating new training data. However, when it comes to the quality of the conditional generations, as measured by MSE in, Table 8, as expected the RAML-based approach performs very poorly, and while “Classic data augmentation” performs acceptably is it still considerably worse than our training method results in Table 5. 8
+3.4 Deploying the entropy-based regulariser
+Our basic approach achieves a high novelty score on the larger ChEMBL dataset. However this is not the case for the smaller dataset QM9. In an effort to improve the novelty of our method in small data regimes, we introduce the entropy regulariser, from Eq. (10). We evaluate its effect for λ in a range of values from 0.0001 to 0.005 for QM9, using the same experimental settings as above. We measured trained models’ generation performance on the hold out validation set. Uniqueness stays rather stable, while validity slightly drops as λ increases. Fig. 2 shows there is a trade-off between novelty and conditional generation performance: increased novelty comes at the cost of property
+MSE. In Tables 4 and 8, we include the results of using the entropy-regularized model trained with a
+λ value that improves the novelty while still matching MSE performance of ML training. 4

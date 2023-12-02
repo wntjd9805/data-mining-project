@@ -1,0 +1,247 @@
+Abstract
+The goal of this paper is to extract the visual-language correspondence from a pre-trained text-to-image diffusion model, in the form of segmentation map, i.e., simultaneously generating images and segmentation masks for the corre-sponding visual entities described in the text prompt. We make the following contributions: (i) we pair the existing
+Stable Diffusion model with a novel grounding module, that can be trained to align the visual and textual embedding space of the diffusion model with only a small number of
+* Both the authors have contributed equally to this project.
+† denotes corresponding author. object categories; (ii) we establish an automatic pipeline for constructing a dataset, that consists of {image, segmen-tation mask, text prompt} triplets, to train the proposed grounding module; (iii) we evaluate the performance of open-vocabulary grounding on images generated from the text-to-image diffusion model and show that the module can well segment the objects of categories beyond seen ones at training time, as shown in Fig. 1; (iv) we adopt the aug-mented diffusion model to build a synthetic semantic seg-mentation dataset, and show that, training a standard seg-mentation model on such dataset demonstrates competitive performance on the zero-shot segmentation (ZS3) bench-mark, which opens up new opportunities for adopting the
+powerful diffusion model for discriminative tasks. 1.
+
+Introduction
+In the recent literature, text-to-image generative models have gained increasing attention from the research com-munity and wide public, one of the main advantages of such models is the strong correspondence between visual pixels and language, learned from large corpus of image-caption pairs, such correspondence, for instance, enables to generate photorealistic images from the free-form text prompt [26, 29, 39, 25]. In this paper, we aim to explicitly extract such visual-language correspondence from the gen-erative model in the form of segmentation map, i.e., simul-taneously generating photorealistic images, and infer seg-mentation masks for corresponding visual objects described in the text prompts. The beneﬁt of extracting such visual-language correspondence from generative model is signiﬁ-cant, as it enables to synthesize inﬁnite number of images with pixel-wise segmentation for categories within the vo-cabulary of generative model, serving as a free source for augmenting the ability of discriminative segmentation or detection models, i.e., be able to process more categories.
+To achieve such goal, we propose to pair the existing
+Stable Diffusion [26] with a novel grounding module, that can segment the corresponding visual objects described in the text prompt, from the generated image. This is achieved by explicitly aligning the text embedding space of desired entity and the visual features of synthetic images, i.e., in-termediate layers of diffusion model. Once trained, objects of interest can be segmented by their category names, for both seen and unseen objects at training time, resembling an open-vocabulary object segmentation for generative model.
+To properly train the proposed architecture, we estab-lish a pipeline for automatically constructing a dataset with
+{synthetic image, segmentation mask, text prompt} triplets, in particular, we adopt an off-the-shelf object detector, and do inference on images generated from the existing Stable
+Diffusion model, advocating no extra manual annotation.
+Theoretically, such a pipeline enables to generate inﬁnite data samples for each category within the vocabulary of ex-isting object detector, for example, we adopt the Mask R-CNN [21] pre-trained on COCO with 80 categories. We show that the grounding module trained on a pre-deﬁned set of object categories, can segment images from Stable
+Diffusion well beyond the vocabulary of any off-the-shelf detector, as shown in Fig. 1, for example, Pikachu, uni-corn, phoenix, etc, effectively resembling a form of visual instruction tuning, for establishing visual-language corre-spondence from generative model.
+To quantitatively validate the effectiveness of our pro-posed grounding module, we initiate two protocols for eval-uation: ﬁrst, we compare the segmentation results with a strong off-the-shelf object detector on synthetic images; second, we construct a synthesized semantic segmentation dataset with Stable Diffusion and our grounding module, then train a segmentation model on it. While evaluat-ing zero-shot segmentation (ZS3) on COCO and PASCAL
+VOC, we outperform prior state-of-the-art models on un-seen categories and show competitive performance on seen categories, reﬂecting the effectiveness of our constructed datasets. Even more crucially, we demonstrate an appeal-ing application for training discriminative models with syn-thetic data from generative model, for example, to expand the vocabulary beyond any existing detector can do. 2. Preliminary on Diffusion Model
+Diffusion models refer to a series of probabilistic gen-erative models, that are trained to learn a data distribu-tion by gradually denoising the randomly sampled Gaus-sian noises. Theoretically, the procedure refers to learning the reverse process of a ﬁxed Markov Chain of length T .
+As for text-to-image synthesis, given a dataset of image-caption pairs, i.e., Dtrain = {(I1, y1), . . . , (IN , yN )}, the models can be interpreted as an equally weighted sequence of conditional denoising neural network that iteratively pre-dicts a denoised variant of the input conditioned on the text prompt, namely (cid:2)θ(I t i , t, yi), where I t i denotes a noisy ver-sion of the input image, and t = 1, . . . , T refers to the timestep, i ∈ {1, . . . , N }. For simplicity, we only describe the training and inference procedure for a single image, thus ignoring the subscript in the following sections.
+In particular, this paper builds on a variant of diffusion model, namely, Stable Diffusion [26], which conducts the diffusion process in latent space. We will brieﬂy describe its architecture and training procedure in the following.
+Architecture. Stable Diffusion consists of three compo-nents: a text encoder for producing text embeddings; a pre-trained variational auto-encoder that encodes and de-codes latent vectors for images; and a time-conditional U-Net ((cid:2)θ(·)) for gradually denoising the latent vectors, with the progressive convolutional operation that downsamples and upsamples the visual feature maps with skip connec-tions. The visual-language interaction occurs in the U-Net via cross-attention layers, speciﬁcally, a text encoder is used to project the text prompt y to textual embeddings, that then are mapped into Key and Value, and the spatial feature map of the noisy image is linearly projected into Query, iteratively attending the conditioned text prompt for update.
+Training and Inference. The training procedure of Stable
+Diffusion can be described as follows: given a training pair (I, y), the input image I is ﬁrst mapped to a latent vector z and get a variably-noised vector zt := αtz + σt(cid:2), where (cid:2) ∼ N (0, 1) is a noise term and αt, σt are terms that con-trol the noise schedule and sample quality. At training time,
+Synthetic images generated  by diffusion model
+Oracle GT masks produced  by off-the-shelf detector
+A photograph of a  dog near a cat (cid:55)
+Diffusion Model (cid:2188)(cid:2778) …(cid:2188)(cid:2779)
+… (cid:2188)(cid:2168)
+Visual 
+Encoder a photograph of {        }  dog
+. . . cat (cid:55)
+Text 
+Encoder
+. . .
+Q (K, V)
+.
+.
+.
+Fusion Module
+. . .
+⊗
+Text Prompts
+Diffusion Model
+Text Prompts
+Our Model
+Grounding
+Synthetic images and corresponding masks generated  by our grounded generation model
+Figure 2: Overview. The left ﬁgure shows the knowledge induction procedure, where we ﬁrst construct a dataset with synthetic images from diffusion model and generate corresponding oracle groundtruth masks by an off-the-shelf object detector, which is used to train the open-vocabulary grounding module. The right ﬁgure shows the architectural detail of our grounding module, that takes the text embeddings of corresponding entities and the visual features extracted from diffusion model as input, and outputs the corresponding segmentation masks. During training, both the diffusion model and text encoder are kept frozen. the time-conditional U-Net is optimised to predict the noise (cid:2) and recover the initial z, conditioned on the text prompt y, the model is trained with a squared error loss on the pre-dicted noise term as follows: (cid:2) (cid:3)
+Ldiffusion = Ez,(cid:3)∼N (0,1),t,y
+||(cid:2) − (cid:2)θ(zt, t, y)||2 2 the model to be open-vocabulary, that means, it should be able to output the corresponding segmentation mask for any objects that can be generated by diffusion model, without limitation of the semantic categories. (1) 4. Open-vocabulary Grounding where t is uniformly sampled from {1, . . . , T }.
+At inference time, Stable Diffusion is sampled by iter-atively denoising zT ∼ N (0, I) conditioned on the text prompt y. Speciﬁcally, at each denoising step t = 1, . . . , T , zt−1 is obtained from both zt and the predicted noise term of U-Net whose input is zt and text prompt y. After the
+ﬁnal denoising step, z0 will be mapped back to yield the generated image I. 3. Problem Formulation
+In this paper, we aim to augment an existing text-to-image diffusion model with the ability of open-vocabulary segmentation, by exploiting the visual-language correspon-dence, i.e., simultaneously generating images, and the seg-mentation masks of corresponding objects described in the text prompt, as shown in Fig. 2 (left):
+{I, m} = Φ diffusion+ ((cid:2), y) (2) where Φ diffusion+ (·) refers to a pre-trained text-to-image dif-fusion model with a grounding module appended, it takes the sampled noise ((cid:2) ∼ N (0, I)) and language description y as input, and generates an image (I ∈ RH×W ×3) with corresponding segmentation masks (m ∈ {0, 1}H×W ×O) for a total of O objects of interest. Note that, we expect
+Assuming there exists a training set of N triplets, i.e.,
+Dtrain = {(F1, mgt
+N , yN )}, the predicted segmentation mask for all objects, i.e., mi ∈ RH×W ×Oi can be obtained by: 1 , y1), . . . , (FN , mgt mi = Φfuse(Φv-enc(f 1 i , . . . , f n i
+), Φt-enc(g(yi))) (3) i , . . . , f n i where yi denotes the text prompt for image generation,
+Fi = {f 1
+} refers to the intermediate representa-tion from Stable Diffusion at t = 5 (this has been ex-perimentally validated in supplementary material). Our proposed grounding module consists of three functions, namely, Φv-enc(·), Φt-enc(·) and Φfuse(·), denoting visual en-coder, text encoder, and fusion module, respectively. g(·) denotes a group of templates that decorate each of the visual categories in the text prompt, e.g., ‘a photograph of a [cat-egory name]’. At training time, there are totally Oi object categories in the text prompt, and they fall into a pre-deﬁned set of vocabularies Ctrain; while at inference time, we expect the model to be highly generalizable, that should equally be capable of segmenting objects from unseen categories, i.e.,
+Ctest ⊃ Ctrain.
+In the following sections, we start by introducing the procedure for automatically constructing a training set in
+Sec. 4.1, followed by the architecture design for open-vocabulary grounding in Sec. 4.2, lastly, we detail the visual    
+instruction tuning procedure, that trains the model with only a handful of image-segmentation pairs as visual demonstra-tions in Sec. 4.3. 4.1. Dataset Construction
+Here, we introduce a novel idea to automatically con-struct {visual feature, segmentation, text prompt} triplets, that are used to train our proposed grounding module. In practise, we ﬁrst prepare a vocabulary with common object categories, e.g., the classes in PASCAL VOC can form a category set as Cpascal = {‘dog’, ‘cat’, . . . }, |Cpascal| = 20, then we randomly select a number of classes to construct text prompts for image generation (e.g., ‘a photograph of a dog and cat’). Repeating the above operation, we can theo-retically generate an inﬁnite number of image (intermediate visual representation, i.e., F) and text prompt pairs. To ac-quire the segmentation masks, we take an off-the-shelf ob-ject detector, e.g., pre-trained Mask R-CNN [21], and run the inference procedure on the generated images: mgt i
+= Φdetector(Ii), where Ii = Φdiffusion((cid:2), yi), (4)
+∈ {0, 1}H×W ×Oi refers to the predicted masks where mgt i for a total of Oi objects in the generated image Ii, condi-tioning on the text prompt yi.
+To evaluate the effectiveness of our proposed induction procedure for open-vocabulary grounding, we divide the vocabulary into seen categories (Cseen) and unseen cate-gories (Cunseen), the training set (Dtrain) only has images of seen categories, and the test set (Dtest) has both seen and unseen categories. Note that, in addition to using the off-the-shelf detector to generate oracle masks and construct dataset, we also explore to utilize real public dataset, e.g.
+PASCAL VOC, to train our grounding module via DDIM inverse process. We show the details in Sec. ??. 4.2. Architecture 2k × w
+∈ R h
+Given one speciﬁc training triplet, we now detail three components in the proposed grounding module: visual en-coder, text encoder, and fusion module.
+Visual Encoder. Given the visual representation, i.e., la-tent features from the Stable Diffusion, we concatenate features with the same spatial resolution (from U-Net en-coding and decoding path) to obtain {f 1
+}, where 2k ×dk , k ∈ {0, . . . , n} denotes layer indices of f k i
+U-Net, dk refers to the feature dimension. i , . . . , f n i i , . . . , f n i
+Next, we input {f 1
+} to visual encoder for gen-erating the fused visual feature ˆFi = Φv-enc({f 1
+}).
+As shown in Fig 3, visual encoder consists of 4 types of blocks: (1) 1×1 Conv for reducing feature dimensionality, (2) Upsample for upsampling the feature to a higher spa-tial resolution, (3) Concat for concatenating features, and (4) Mix-conv for blending features from different spatial i , . . . , f n i (cid:2188)(cid:2196) (cid:2188)(cid:2196)(cid:2879)(cid:2778) (cid:2188)(cid:2196)(cid:2879)(cid:2779)
+.
+.
+. (cid:2188)(cid:2778) (cid:2778) × (cid:2778) Conv
+Upsample
+Visual Encoder (cid:2778) × (cid:2778) Conv
+Concat
+Mix-Conv
+Upsample (cid:2778) × (cid:2778) Conv
+Concat
+Mix-Conv
+Upsample
+.
+.
+. (cid:2778) × (cid:2778) Conv
+Concat
+Mix-Conv
+Upsample
+Figure 3: The architecture of visual encoder. The features ex-tracted from U-Net are ﬁrst grouped according to their resolution, then gradually upsampled and fused into the ﬁnal visual feature. resolutions, that includes two 3 × 3 Conv operations with residual connection and a conditional batchnorm operation, similar to [17].
+= Φt-enc(g(yi)).
+Text Encoder. We adopt the language model from pre-trained Stable Diffusion, speciﬁcally, given the text prompt yi, the text encoder output the corresponding embeddings for all visual objects: Eobji
+Fusion Module. The fusion module computes interaction between visual and text embeddings, then outputs segmen-In speciﬁc, we use a tation masks for all visual objects. standard transformer decoder with three layers, the text em-beddings are treated as Query, that iteratively attend the visual feature for updating, and are further converted into per-segmentation embeddings with a Multi-Layer Percep-tron (MLP). The object segmentation masks can be obtained by dot producting visual features with the per-segmentation embeddings. Formally, the procedure can be denoted as:
+Esegi
+= ΦTRANSFORMER-D(W Q·Eobji , W K· ˆFi, W V · ˆFi) (5) (6) mi = ˆFi · [ΦMLP(Esegi
+)]T where the transformer decoder generates per-segmentation
+∈ RN ×de for all visual objects described embedding Esegi in the text prompt, W Q, W K, W V refer to the learnable pa-rameters for Query, Key and Value projection. 4.3. Training
+With the constructed dataset, we can now start super-vised training the proposed grounding module:
+L = − 1
+N
+N(cid:2) i=1
+[mgt i · log(σ(mi)) + (1 − mgt i ) · log(σ(1 − mi))]
+∈ RH×W ×Oi refers to the oracle groundtruth where mgt i segmentation from the off-the-shelf object detector, and mi ∈ RH×W ×Oi refers to the predicted segmentation from our grounding module, σ(·) refers to Sigmoid function.
+In practise, while using the off-the-shelf detector to gen-erate segmentation masks, the model may sometimes fail to
+Test
+Setting
+DAAM [31]
+Ours
+PASCAL-sim
+COCO-sim
+# Objects
+One
+Two
+One
+Two
+Categories
+Seen
+Unseen
+Seen
+Seen +Unseen Unseen
+Seen
+Unseen
+Seen
+Seen +Unseen Unseen
+Split1
+Split2
+Split3
+Average
+Split1
+Split2
+Split3
+Average 61.66 65.75 67.11 64.84 90.16 90.08 90.67 90.30 75.63 59.25 53.82 62.90 83.19 86.19 79.86 83.08 46.74 49.08 48.80 48.21 78.93 78.68 79.68 79.10 51.31 47.98 48.28 49.19 66.07 67.10 70.42 67.86 69.94 41.50 41.41 50.95 57.93 47.21 62.07 55.74 62.25 60.08 62.81 61.71 83.35 82.83 84.85 83.68 55.56 65.55 52.48 57.76 76.81 74.93 67.89 73.21 49.68 48.80 50.85 49.78 64.64 63.39 65.70 64.16 52.06 54.66 49.84 52.19 57.15 57.18 54.60 56.31 43.35 33.22 45.80 40.79 47.77 42.82 42.62 44.40
+Table 1: Quantitative result for Protocol-I evaluation on grounded generation. Our model has been trained on the synthesized training dataset, that consists of images with one or two objects from only seen categories, and test on our synthesized test dataset that consists of images with one or two objects of both seen and unseen categories. Split1, Split2 and Split3 refer to 3 different splits of C that construct 3 different (Cseen, Cunseen) pairs, respectively. Our model outperforms the DAAM [31], by a large margin, see text for more detailed discussion. detect the objects mentioned in the text prompt, and out-put incorrect segmentation masks. Such error comes from two sources, (i) the diffusion model may fail to generate high-quality images; (ii) off-the-shelf detector may fail to detect the objects in the synthetic image, due to the domain gap between synthetic and real images. Here, we consider two training strategies, Normal Training, where we fully trust the off-the-shelf detector, and use all predicted seg-mentation masks to train the grounding module; alterna-tively, we also try Training w.o. Zero Masks, as we em-pirically found that the majority of failure cases come from false negatives, that is to say, the detector failed to detect the objects and output an all-zero mask, therefore, we can train the grounding modules by ignoring the all-zero masks. 5. Experiments
+In this section, we present the evaluation detail for val-idating the effectiveness of grounding module and its use-fulness for training discriminative models, speciﬁcally, we consider two protocols: in Sec. 5.1, we train the grounding module with the constructed training set, and test the seg-mentation performance on synthetically generated images from Stable Diffusion, then compare with a strong off-the-shelf object detector; in Sec. 5.2, we use our augmented dif-fusion model to construct a synthesized semantic segmen-tation dataset and train a semantic segmentation model for zero-shot segmentation. Lastly, in Sec. 5.3, we conduct a series of ablation studies on the different training strategies and effects on the number of seen categories. 5.1. Protocol-I: Open-vocabulary Grounding
+Here, we train the grounding module with our con-structed training set, as described in Sec. 4.1. Speciﬁcally, the training set only consists of a subset of common (seen) categories, while the test set consists of both seen and un-seen categories. In the following, we describe the imple-mentation and experimental results in detail, to thoroughly assess the model on open-vocabulary grounding.
+Following the dataset construction procedure as intro-duced in Sec. 4.1, we make PASCAL-sim and COCO-sim, with the same category split of PASCAL VOC [8] and
+COCO [19] as in [10, 35, 7]: (i) PASCAL-sim contains 15 seen and 5 unseen categories respectively; (ii) COCO-sim has 65 seen and 15 unseen categories respectively.
+Training Set. For PASCAL-sim or COCO-sim, we gen-erate a synthetic training set by randomly sampling im-ages from pre-trained Stable Diffusion. This exposes our grounding module to a great variety of data (> 40k) at training time, and the model is unlikely to see the same labeled examples twice during training. Unlike BigDate-setGAN [17], where only a single object is considered, we construct the text prompt with one or two objects at a time, note that, for training, only the seen categories are sampled.
+Although we can certainly generate images with more than two object categories, the quality of the generated images tends to be unstable, limited by the generation ability of
+Stable Diffusion, thus we only consider synthesized images with less than three object categories.
+Testing Set. For evaluation purpose, we generate two synthetic test sets with ofﬂine sampling for PASCAL-sim and COCO-sim, respectively.
+In total, we have collected about 1k images for PASCAL-sim, and about 5k images for COCO-sim, we run the off-the-shelf object detector on these generated images to produce the oracle segmentation.
+For both test sets, the images containing two categories will be divided into three groups: both seen, both unseen, one seen and one unseen. We leave the detailed statistics of our synthetic dataset in the supplementary material. Note that, we have manually checked all the images and the segmenta-tion produced from the off-the-shelf detector, and only keep the high-quality ones, thus the performance evaluation of our grounding module can be a close proxy.
+motorbike motorbike bottle dog bottle train backpack backpack apple apple frisbee sofa sofa car car hot dog hot dog bear bear
+Image
+Ours
+Oracle GT
+Image
+Ours
+Oracle GT
+Image
+Ours
+Oracle GT
+Image
+Ours
+Oracle GT
+Figure 4: Segmentation results of PASCAL-sim (left) and COCO-sim (right) on seen (motorbike, bottle, backpack, and apple) and unseen (sofa, car, hot dog, and bear) categories. Our grounded generation model achieves comparable segmentation results to the oracle groundtruth generated by the off-the-shelf object detector. dog train boat car bottle horse bus chair sofa sheep pottedplant person motorbike cat pottedplant bird bottle cow train pottedplant boat boat motorbike person bird bottle dog
+Figure 5: Our synthesized semantic segmentation dataset with one category (left) and two categories (right) for Protocol-II training. (cid:4)
+Evaluation Metrics. We use the category-wise mean intersection-over-union (mIoU) as evaluation metric, de-ﬁned as averages of IoU over all the categories: mIoU
+= 1 c=1 IoUc, where C is the number of all target cate-C gories, and IoUc is the intersection-over-union for the cate-gory with index is c.
+C
+Baseline. DAAM [31] is used as a baseline for comparison, where the attention maps are directly upsampled and aggre-gated at each time step to explore the inﬂuence area of each word in the input text prompt.
+Implementation Details. We use the pre-trained Stable
+Diffusion [26] and the text encoder of CLIP [24] in our im-plementation. We choose the Mask R-CNN [21] trained on
+COCO dataset as our object detector for oracle groundtruth segmentation. We fuse features from U-Net and upsample them into 512 × 512 spatial resolution, the text and visual embeddings are both mapped into 512 dimensions before feeding into the fusion module. We train our grounding module with two NVIDIA GeForce RTX 3090 GPUs for 5k iterations with batch size equal to 8, ADAM[14] opti-miser with β1 = 0.9, β2 = 0.999. The initial learning rate is set to 1e-4 and the weight decay is 1e-4.
+Results. As shown in Tab. 1, we provide experimental re-sults for our grounding module, we change the composi-tion of categories three times and compute the results for each split. Here, we can make the following observations:
+ﬁrst, our model signiﬁcantly outperforms the unsupervised method DAAM [31] in the mIoU on all test settings. This is because DAAM tends to result in ambiguous segmenta-tions, as the textual embedding for individual visual entity will largely be inﬂuenced by other entities and the global sentence at the text encoding stage; second, our grounding module achieves superior performance on both seen and un-seen categories, indicating its open-vocabulary nature, i.e., the guided diffusion model can synthesize images and their corresponding segmentations for more categories beyond the vocabulary of the off-the-shelf detector.
+Visualization. We demonstrate the visualization results in
+Fig. 4. On both seen and unseen categories, our model can successfully ground the objects in terms of segmenta-tion mask. Impressively, as shown in Fig. 1, our grounding module can even segment the objects beyond any off-the-shelf detector can do, showing the strong open-vocabulary grounding ability of our model. 5.2. Protocol-II: Open-vocabulary Segmentation
+In the previous protocol, we have validated the ability for open-vocabulary grounding on synthetically generated images. Here, we consider to adopt the images and ground-ing masks for tackling discriminative tasks. In particular, we ﬁrst construct a synthesized image-segmentation dataset with the Stable Diffusion and our grounding module, then train a standard semantic segmentation model on such a synthetic dataset, and evaluate it on public image segmen-tation benchmarks.
+Synthetic Dataset. To train the semantic segmentation
+PASCAL VOC
+COCO
+Training Set / # Categories mIOU
+Training Set / # Categories mIOU
+Real / 15
+Synthetic / 15+5 (# Objects)
+Seen Unseen Harmonic Real / 65
+Synthetic / 65+15 (# Objects)
+Seen Unseen Harmonic (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:3) (cid:3) (cid:3) (cid:2) (cid:2) (cid:3) (cid:3) (cid:3) (cid:3) (cid:3) (cid:3) (cid:3) (cid:2)(one) (cid:2)(two) (cid:2)(mixture) (cid:2)(mixture) 78.0 77.8 78.6 77.7 82.7 83.5 86.4 62.8 65.8 69.5 83.0 21.2 25.8 30.3 32.5 35.6 41.3 63.6 50.0 60.1 63.2 71.3 (cid:2)(mixture) 83.4 74.4 33.3 38.8 43.7 45.9 49.8 55.3 73.3 55.7 62.8 66.2 76.7 78.7 (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:3) (cid:3) (cid:3) (cid:2) (cid:2) (cid:3) (cid:3) (cid:3) (cid:3) (cid:3) (cid:3) (cid:3) (cid:2)(one) (cid:2)(two) (cid:2)(mixture) (cid:2)(mixture)
+-33.0
+-57.9 22.2
+-53.3 28.8 37.3 38.3 50.0
+-21.9
+-8.6 20.4
+-34.5 32.6 37.0 38.1 38.2 (cid:2)(mixture) 53.4 37.8
+-26.3
+-14.9 21.3
+-41.9 30.6 37.1 38.2 43.2 44.3
+Method
+ZS3 [3]
+SPNet [35]
+CaGNet [10]
+Joint [1]
+STRICT [23]
+SIGN [5]
+ZegFormer[7]
+Model-A (Ours)
+Model-B (Ours)
+Model-C (Ours)
+Model-D (Ours)
+Model-E (Ours) (complicated prompt)
+Table 2: Comparison with previous ZS3 methods on the test sets of PASCAL VOC and COCO. These ZS3 methods are trained on real training sets. The results on PASCAL VOC are from [7]. And we retrained these ZS3 methods on COCO using their ofﬁcial codes, however, due to missing implementation details, we failed to reproduce ZS3 [3], CaGNet [10] and SIGN [5].
+Image
+GT Mask
+Zegformer
+Ours (Maskformer)
+Image
+GT Mask
+Zegformer
+Ours (Maskformer)
+Figure 6: Qualitative results compared with the state-of-the-art zero-shot semantic segmentation method (Zegformer) on Pascal
+VOC. While training on our synthetic dataset and real dataset (only PASCAL VOC seen) together, a standard MaskFormer architecture can achieve better performance than Zegformer on unseen categories, i.e. pottedplant, sofa and tvmonitor. Note that, the synthetic data for training MaskFormer are generated from our grounding module, which has only been trained on seen categories, with no extra manual annotation involved whatsoever. model, in addition to the provided datasets from public benchmarks, we also include two synthetically generated datasets: (i) 10k image-segmentation pairs for 20 cate-gories in PASCAL VOC; (ii) 110k pairs for 80 categories in COCO, as shown in Fig. 5. All the image-segmentation pairs are generated by the Stable Diffusion and our pro-posed grounding module, that has only been trained on the corresponding seen categories (15 seen categories in PAS-CAL VOC and 65 seen categories in COCO). That is to say, generating these two datasets requires no extra manual an-notations whatsoever.
+Training Details. To compare with other open-vocabulary methods, our semantic segmentation model uses Mask-Former [4] with ResNet101 as its backbone. The image res-olution for training is 224×224 pix, and we train the model on our synthetic dataset for 40k iterations with batch size equal to 8. We use the ADAMW as our optimizer with a learning rate of 1e-4 and the weight decay is 1e-4.
+Comparison on Zero-Shot Segmentation (ZS3). While evaluating on the test sets of real images (1,449 images for PASCAL VOC and 5000 images for COCO), we com-pare with the existing zero-shot semantic segmentation ap-proaches. As shown in Tab. 2, while only trained on syn-thetic dataset, our model-A,B,C have already outperformed most of ZS3 approaches on unseen categories. Speciﬁcally, the model-C trained on the mixture of one and two ob-jects achieves the best performance. Additionally, ﬁnetun-ing on the real dataset with images of seen categories can
+Training Type
+One
+Two
+Seen Unseen Seen Seen +Unseen Unseen
+Train Set
+# Seen / Unseen
+One
+Two
+Seen Unseen
+Seen
+Seen +Unseen Unseen
+Normal Training 89.88 71.18 77.66
+Training w.o. Zero Masks 90.16 83.19 78.93 57.24 66.07 44.22 57.93
+Table 3: Ablation on training type on the constructed dataset.
+Performance is measured by mIoU on PASCAL-sim test set. 5 20 35 50 65
+/
+/
+/
+/
+/ 75 60 45 30 15 94.81 91.91 87.23 84.55 83.85 72.42 73.33 73.85 73.20 76.81 87.19 71.59 66.91 66.41 64.64 49.60 56.27 55.99 54.39 57.15 39.00 41.91 43.28 42.71 47.77 further improve the performance, especially on seen cat-egories (model-D). We also try to construct the synthetic dataset with more complicated prompt, e.g., ‘A photograph of a bus crossing a busy intersection in Seoul’s bustling city center’, and the model-E gets a slight boost on ﬁnal perfor-mance. Qualitative results can be seen in Fig. 6, our model obtains accurate semantic segmentation on both seen and unseen categories.
+Discussion. Overall, we can draw the following conclu-sions: (i) the grounding module is capable of segment-ing unseen categories despite it has never seen any seg-mentation mask during the knowledge induction procedure, validating the strong generalisation of the grounding mod-ule; (ii) it is possible to segment more object categories by simply training on synthesized datasets, and the addi-tion of real datasets with only seen categories can narrow the data gap thus resulting in better performance; (iii) with our proposed idea for extracting the visual-language corre-spondence from generative model, it introduces promising applications for applying the powerful diffusion model for discriminative tasks, i.e., constructing dataset with genera-tive model, and use it to train discriminative models, e.g., expand the vocabulary of an object segmentor or detector. 5.3. Ablation study
+In this section, we show the effect of different training loss and different numbers of seen categories. Due to the space limitation, we refer the reader for supplementary ma-terial, for the study on the different timestep for extracting visual representation, the number of objects in the synthetic datasets, and the effect of different datasets.
+Normal Training v.s. Training without Zero Masks. As shown in Tab. 3, Normal Training results in unsatisfac-tory performance on unseen categories, we conjecture this is because the errors from detector tend to be false nega-tive, that bias our grounding module to generate all-zero segmentation masks when encountering unseen categories; in contrast, by ignoring all-zero masks at training, Train-ing w.o. Zero Masks achieves equally good performance on both seen and unseen categories.
+Effect on the Number of Seen Categories. We ablate the number of seen categories to further explore the generalisa-tion ability of our proposed grounding module. As shown in
+Tab. 4, the grounding module can generalise to unseen cat-egories, even with as few as ﬁve seen categories; when in-Table 4: Ablation on the number of seen categories on COCO-sim. The bolded number indicates the best result. Our model can generalise to unseen categories, even as few as ﬁve seen categories. troducing more seen categories, the performance on unseen ones consistently improves, but decreases on seen ones, due to the increasing complexity on seen categories. 6.

@@ -1,0 +1,42 @@
+Abstract
+The main challenge of monocular 3D object detection is the accurate localization of 3D center. Motivated by a new and strong observation that this challenge can be remedied by a 3D-space local-grid search scheme in an ideal case, we propose a stage-wise approach, which combines the in-formation flow from 2D-to-3D (3D bounding box proposal generation with a single 2D image) and 3D-to-2D (proposal verification by denoising with 3D-to-2D contexts) in a top-down manner. Specifically, we first obtain initial proposals from off-the-shelf backbone monocular 3D detectors. Then, we generate a 3D anchor space by local-grid sampling from the initial proposals. Finally, we perform 3D bounding box denoising at the 3D-to-2D proposal verification stage.
+To effectively learn discriminative features for denoising highly overlapped proposals, this paper presents a method of using the Perceiver I/O model [20] to fuse the 3D-to-2D geometric information and the 2D appearance information.
+With the encoded latent representation of a proposal, the verification head is implemented with a self-attention mod-ule. Our method, named as MonoXiver, is generic and can be easily adapted to any backbone monocular 3D detectors.
+Experimental results on the well-established KITTI dataset and the challenging large-scale Waymo dataset show that
+MonoXiver consistently achieves improvement with limited computation overhead. 1.
+
+Introduction
+Detecting and locating objects in 3D using a single im-age, known as monocular 3D object detection, is a highly challenging task due to its ill-posed nature. However, the practical applications of low-cost system setups in fields such as self-driving cars and robotic manipulation have led
+*Work partially conducted during an internship of X. Liu at OPPO Seat-tle Research Center, USA in 2022. to the development of robust monocular 3D object detec-tion systems, making it a prominent research topic in the computer vision community.
+Although significant progress has been achieved in this field [37], accurate 3D center localization remains a ma-jor challenge for state-of-the-art (SOTA) methods as indi-cated in [39]. Most of these methods follow a bottom-up paradigm, where a single 2D image is used to directly pre-dict 3D bounding boxes (2D-to-3D) with or without extra information (e.g. LiDAR). However, due to the inherent depth ambiguity of this task, relying solely on bottom-up 2D-to-3D paradigms may not be enough to completely ad-dress this challenge.
+In this paper, we observe that bottom-up 2D-to-3D pre-dicted 3D bounding boxes are able to provide informa-tive priors for monocular 3D object detection. We pro-pose to leverage these contexts to improve detection per-formance in a top-down manner. Our proposed approach is motivated by a strong empirical upper-bound analysis with
+SOTA bottom-up monocular 3D object detectors.
+The empirical upper-bound experiment. We analyze ve-hicle detection performance on the well-established KITTI validation set [5–7]. We start with the recently proposed
+MonoCon [30] because it achieves SOTA performance with a very simple design. By using MonoCon’s prediction re-sults as bottom-up 3D anchors, we sample 3D bounding box proposals along both the x and z axes (i.e., in the bird-eye’s view) with a simple strategy. First, we define a 2D local grid with a range (e.g., 2 meter) and a stride (e.g., 0.1 meter).
+For each bottom-up anchor, with its center located at the local-grid origin, we replicate the anchor at each grid vertex without changing its size, orientation and prediction score.
+We use all the generated 3D bounding boxes as top-down proposals and compute the empirical upper-bound of 3D de-tection performance by searching for the best match within top-down proposals for each ground-truth 3D object bound-ing box based on 3D Intersection-over-Union (3D IoU).
+A strong observation from the experiment. As shown
+Range
+Stride
+MonoCon [30]
+Easy 26.33
+± 2
+± 1.5
+± 1.5
+± 1.5
+± 1.5
+± 1.5 0.1 0.1 0.2 0.3 0.5 0.75 76.98 ↑50.65 76.45 ↑50.12 74.00 ↑47.67 64.80 ↑38.47 54.00 ↑27.67 41.58 ↑15.25
+Moderate 19.01 64.93 ↑45.92 62.27 ↑43.26 61.78 ↑42.77 56.20 ↑37.19 45.93 ↑26.92 34.44 ↑15.43
+Hard 15.98 56.91 ↑40.93 54.34 ↑38.36 53.64 ↑37.66 50.66 ↑34.68 40.99 ↑25.01 30.12 ↑14.14
+#Bboxes mean IoU5 avg n 1600·n 900·n 225·n 121·n 49·n 25·n
+-0.931 0.931 0.868 0.812 0.714 0.612
+Table 1: A strong empirical upper-bound analysis. Our
+MonoXiver is motivated by the observation that bottom-up monocular 3D object detectors can be significantly im-proved by leveraging a simple 3D-space local-grid search scheme in an ideal case. This highlights the potential of exploring the 3D proposal space. However, this improve-ment comes at a cost: 1) the proposal verification stage ex-periences significant increases in number of bounding box proposals, and 2) a more powerful refinement module is re-quired to handle highly overlapped boxes. in Table 1, despite the evaluation result of initial bottom-up proposals is relatively low in 3D average precision (AP3D) (e.g., 19.01 in Moderate settings), most of predicted 3D cen-ters are already in the close proximity of the GT ones. An empirical upper-bound of 34.4 AP3D can be achieved even with a coarse sampling scheme (e.g., the last row), which is significantly higher than SOTA methods. We also obtained similar observations from other backbone 3D object detectors such as the MonoDLE [39] and the
+SMOKE [33]. These strong empirical observations demon-strate the potential of integrating the bottom-up initial pro-posals with top-down sampling and verification.
+The challenge in the 3D-to-2D proposal verification.
+The 3D-to-2D proposal verification phase can be treated as a 3D bounding box denoising process, as we want to search for the “best” bounding boxes from the top-down proposal set. This process is extremely challenging, as the proposals generated from the same bottom-up anchor are highly over-lapped in both 3D and 2D (after projection), which leads to the long-standing problem of handling the “crowd” in detec-tion. To quantitatively analyze the overlap extent after pro-jection for top-down proposals, we consider one proposal and its top-k overlapping neighbors in terms of Intersection-over-Union (IoU), which is denoted by IoUk avg as the aver-age IoU over the top-k neighbors. The last column in Ta-ble 1 shows the statistics.
+The statistics clearly demonstrates the difficulty of de-noising densely generated top-down proposal set (e.g., stride=0.1, IoU5 avg=0.931). Even for a relative sparse generated top-down proposal stride=0.75,
+IoU5 avg=0.612), the challenge still exists because propos-als sampled in front and behind of the same anchor will almost collapse to the same 2D bounding box, especially when they are far away from the camera. So, how can we (e.g., set encode the 3D bounding box proposal for verification under the monocular setting? From this perspective, we note that many methods that work well in multi-view 3D object de-tection are often not applicable for monocular 3D objection because they mainly rely on features that are obtained by fusing projection features from multi-view feature maps.
+Based on the intuition that even though highly over-lapped proposals have similar appearance features, their in-herent 3D-to-2D geometric features (e.g. 3D location, pro-jected geometry, etc.) are extremely different, we propose to fuse these 3D-to-2D geometric feature with their corre-spondent appearance features to learn discriminative fea-tures for bounding box denoising. We present a method of using the Perceiver I/O model [20] to effectively fuse these contexts, as Perceiver has shown strong capabilities to fuse multi-modal inputs. With the encoded latent represen-tation of a proposal, the verification head is implemented by a self-attention module (see the top in Fig. 1). The proposed method is named as MonoXiver, indicating its general ap-plicability to any backbone monocular 3D detectors and the integration of the Perceiver model.
+In experiments, we evaluate our proposed MonoXiver on the well-established KITTI benchmark [14] and the chal-lenging large-scale Waymo [51] dataset with various back-bone monocular 3D detectors.
+It achieves consistent and significant performance improvement on both datasets with limited computation overhead. Moreover, it achieves the 1st place among monocular methods on the KITTI vehicle de-tection benchmark, outperforming the previous works by a large margin. 2.

@@ -1,0 +1,106 @@
+Abstract
+Deep learning has advanced from fully connected architectures to structured models organized into components, e.g., the transformer composed of positional elements, modular architectures divided into slots, and graph neural nets made up of nodes.
+The nature of structured models is that communication among the components has a bottleneck, typically achieved by restricted connectivity and attention. In this work, we further tighten the bottleneck via discreteness of the representations transmitted between components. We hypothesize that this constraint serves as a useful form of inductive bias. Our hypothesis is motivated by past empirical work showing the beneﬁts of discretization in non-structured architectures as well as our own theoretical results showing that discretization increases noise robustness and reduces the underlying dimensionality of the model. Building on an existing tech-nique for discretization from the VQ-VAE, we consider multi-headed discretization with shared codebooks as the output of each architectural component. One motivat-ing intuition is human language in which communication occurs through multiple discrete symbols. This form of communication is hypothesized to facilitate trans-mission of information between functional components of the brain by providing a common interlingua, just as it does for human-to-human communication. Our ex-periments show that discrete-valued neural communication (DVNC) substantially improves systematic generalization in a variety of architectures—transformers, modular architectures, and graph neural networks. We also show that the DVNC is robust to the choice of hyperparameters, making the method useful in practice. 1
+
+Introduction
+In AI, there has long been a tension between subsymbolic and symbolic architectures. Subsymbolic architectures, like neural networks, utilize continuous representations and statistical computation.
+Symbolic architectures, like production systems (Laird et al., 1986) and traditional expert systems, use discrete, structured representations and logical computation. Each architecture has its strengths: subsymbolic computation is useful for perception and control, symbolic computation for higher level, abstract reasoning. A challenge in integrating these approaches is developing uniﬁed learning procedures.
+As a step toward bridging the gap, recent work in deep learning has focused on constructing structured architectures with multiple components that interact with one another. For instance, graph neural networks are composed of distinct nodes (Kipf et al., 2019; Scarselli et al., 2008; Kipf et al., 2018;
+∗co-ﬁrst author. Address correspondence to liudianbo@gmail.com, alex6200@gmail.com, and kkawaguchi@fas.harvard.edu. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Santoro et al., 2017; Raposo et al., 2017; Bronstein et al., 2017; Gilmer et al., 2017; Tacchetti et al., 2018; Van Steenkiste et al., 2018), transformers are composed of positional elements (Bahdanau et al., 2014; Vaswani et al., 2017), and modular models are divided into slots or modules with bandwidth limited communication (Jacobs et al., 1991; Bottou and Gallinari, 1991; Goyal and Bengio, 2020;
+Ronco et al., 1997; Reed and De Freitas, 2015; Lamb et al., 2021; Andreas et al., 2016; Rosenbaum et al., 2017; Fernando et al., 2017; Shazeer et al., 2017; Rosenbaum et al., 2019; Kucinski et al., 2021).
+Although these structured models exploit the discreteness in their architectural components, the present work extends these models to leverage discreteness of representations, which is an essential property of symbols. We propose to learn a common codebook that is shared by all components for inter-component communication. The codebook permits only a discrete set of communicable values.
+We hypothesize that communication based on the use and re-use of discrete symbols will provide two beneﬁts:
+• Discrete symbols limit the bandwidth of representations whose interpretation needs to be learned and synchronized across modules. It may therefore serve as a common language for interaction and facilitate learning.
+• The use of shared discrete symbols will promote systematic generalization by allowing for the re-use of previously encountered symbols in new situations. This makes it easier to hot-swap one component for another when new out-of-distribution (OOD) settings arise that require combining existing components in novel ways.
+Our work is inspired by cognitive science, neuroscience, and mathematical considerations. From the cognitive science perspective, we can consider different components of structured neural architectures to be analogous to autonomous agents in a distributed system whose ability to communicate stems from sharing the same language. If each agent speaks a different language, learning to communicate would be slow and past experience would be of little use when the need arises to communicate with a new agent. If all agents learn the same language, each beneﬁts from this arrangement. To encourage a common language, we limit the expressivity of the vocabulary to discrete symbols that can be combined combinatorially (Tomasello, 2009). From the neuroscience perspective, we note that various areas in the brain, including the hippocampus (Sun et al., 2020; Quiroga et al., 2005; Wills et al., 2005), the prefrontal cortex (Fujii and Graybiel, 2003), and sensory cortical areas (Tsao et al., 2006) are tuned to discrete variables (concepts, actions, and objects), suggesting the evolutionary advantage of such encoding, and its contribution to the capacity for generalization in the brain. From a theoretical perspective, we present analysis suggesting that multi-head discretization of inter-component communication increases model sensitivity and reduces underlying dimensions (Section 2). These sources of inspiration lead us to the proposed method of Discrete-Valued Neural
+Communication (DVNC).
+Architectures like graph neural networks (GNNs), transformers, and slot-based or modular neural networks consist of articulated specialist components, for instance, nodes in GNNs, positions in transformers, and slots/modules for modular models. We evaluate the efﬁcacy of DVNC in GNNs, transformers, and in a modular recurrent architecture called RIMs. For each of these structured architectures, we keep the original architecture and all of its specialist components the same. The only change is that we impose discretization in the communication between components (Figure 1).
+Our work is organized as follows. First, we introduce DVNC and present theoretical analysis showing that DVNC improves sensitivity and reduces metric entropy of models (the logarithm of the covering number). Then we explain how DVNC can be incorporated into different model architectures. And
+ﬁnally we report experimental results showing improved OOD generalization with DVNC. 2 Discrete-Value Neural Communication and Theoretical Analysis
+In this section, we begin with the introduction of Discrete-Value Neural Communication (DVNC) and proceed by conducting a theoretical analysis of DVNC affects the sensitivity and metric entropy of models. We then explain how DVNC can be used within several different architectures.
+Discrete-Value Neural Communication (DVNC) The process of converting data with continuous attributes into data with discrete attributes is called discretization (Chmielewski and Grzymala-Busse, 2
+(a) DVNC in Graph Neural
+Network (b) DVNC in Transformer (c) DVNC in Modular Recurrent Mecha-nisms (RIMs)
+Figure 1: Communication among different components in neural net models is discretized via a shared codebook. In modular recurrent neural networks and transformers, values of results of attention are discretized. In graph neural networks, communication from edges is discretized. 1996). In this study, we use discrete latent variables to quantize information communicated among different modules in a similar manner as in Vector Quantized Variational AutoEncoder (VQ-VAE) (Oord et al., 2017). Similar to VQ-VAE, we introduce a discrete latent space vector e ∈ RL×(m/G) where L is the size of the discrete latent space (i.e., an L-way categorical variable), and m is the dimension of each latent embedding vector ej. Here, L and m are both hyperparameters. In addition, by dividing each target vector into G segments or discretization heads, we separately quantize each head and concatenate the results (Figure 2). More concretely, the discretization process for each vector h ∈ H ⊂ Rm is described as follows. First, we divide a vector h into G segments s1, s2, . . . , sG with h = CONCATENATE(s1, s2, . . . , sG), where each segment si ∈ Rm/G with m
+G ∈ N+. Second, we discretize each segment si separately: eoi = DISCRETIZE(si), where oi = argmin j∈{1,...,L}
+||si − ej||.
+Finally, we concatenate the discretized results to obtain the ﬁnal discretized vector Z as
+Z = CONCATENATE(DISCRETIZE(s1), DISCRETIZE(s2), ..., DISCRETIZE(sG)).
+The multiple steps described above can be summarized by Z = q(h, L, G), where q(·) is the whole discretization process with the codebook, L is the codebook size, and G is number of segments per vector. It is worth emphasizing that the codebook e is shared across all communication vectors and heads, and is trained together with other parts of the model.
+The overall loss for model training is: (cid:32) G (cid:88)
+L = Ltask + 1
+G
+|| sg(si) − eoi||2 2 + β (cid:33)
+||si − sg(eoi)||2 2
+G (cid:88) i (1) i i || sg(si) − eoi||2 where Ltask is the loss for speciﬁc task, e.g., cross entropy loss for classiﬁcation or mean square error loss for regression, sg refers to a stop-gradient operation that blocks gradients from ﬂowing into its argument, and β is a hyperparameter which controls the reluctance to change the code. The second term (cid:80)G 2 is the codebook loss, which only applies to the discrete latent vector and brings the selected eoi close to the output segment si. The third term (cid:80)G 2 is the commitment loss, which only applies to the target segment si and trains the module that outputs si to make si stay close to the chosen discrete latent vector eoi. We picked β = 0.25 as in the original
+VQ-VAE paper (Oord et al., 2017). We initialized e using k-means clustering on vectors h with k = L and trained the codebook together with other parts of the model by gradient descent. When there were multiple h vectors to discretize in a model, the mean of the codebook and commitment loss across all h vectors was used. Unpacking this equation, it can be seen that we adapted the vanilla
+VQ-VAE loss to directly suit our discrete communication method (Oord et al., 2017). In particular, the VQ-VAE loss was adapted to handle multi-headed discretization by summing over all the separate discretization heads. i ||si − sg(eoi)||2
+In the next subsection, we use the following additional notation. The function φ is arbitrary and thus can refer to the composition of an evaluation criterion and the rest of the network following discretization. Given any function φ : Rm → R and any family of sets S = {S1, . . . , SK} with k (h) = 1{h ∈ Sk}φ(h) for all
+S1, . . . , SK ⊆ H, we deﬁne the corresponding function φS k ∈ [K], where [K] = {1, 2, . . . , K}. Let e ∈ E ⊂ RL×m be ﬁxed and we denote by (Qk)k∈[LG] all the possible values after the discretization process: i.e., q(h, L, G) ∈ ∪k∈[LG]{Qk} for all h ∈ H. k by φS 3
+Figure 2: In structured architectures, communica-tion is typically vectorized. In DVNC, this commu-nication vector is ﬁrst divided into discretization heads. Each head is discretized separately to the nearest neighbor of a collection of latent codebook vectors which is shared across all the heads. The discretization heads are then concatenated back into the same shape as the original vector.
+Table 1: Communication with discretized values achieves a noise-sensitivity bound that is independent of the number of dimensions m and network lipschitz constant ¯ςk and only depends on the number of discretization heads G and codebook size L.
+Communication Type
+Communication with continuous signals is expressive but can take a huge range of novel values, leading to poor systematic generalization
+Communication with multi-head discrete-values is both expressive and sample efﬁcient
+Example
+O m ∼ 105
+“John owns a car”
+G = 15
+L = 30
+Sensitivity Bounds (Thm 1, 2) (cid:18)(cid:113) m ln(4 nm)+ln(2/δ)
+√ (cid:19) 2n
++ ¯ςkRH√ n (cid:18)(cid:113) G ln(L)+ln(2/δ) (cid:19) 2n
+O
+Theoretical Analysis This subsection shows that adding the discretization process has two potential advantages: (1) it improves noise sensitivity or robustness and (2) it reduces metric entropy. These are proved in Theorems 1–2, illustrated by examples (Table 1), and explored in analytical experiments using Gaussian-distributed vectors (Figure 3).
+To understand the advantage on noise sensitivity or robustness, we note that there is an additional error incurred by noise without discretization, i.e., the second term ¯ςkRH/ n ≥ 0 in the bound of
+Theorem 2 (¯ςk and RH are deﬁned in Theorem 2). This term is deﬁned to be the noise sensitivity (or robustness) term. This term due to noise disappears with discretization in the bound of Theorem 1 as the discretization process reduces the sensitivity to noise. This is because the discretization process lets the communication become invariant to noise within the same category; e.g., the communication is invariant to different notions of “cats”.
+√
+√
+To understand the advantage of discretization on dimensionality, we can see that it reduces the metric nm) without discretization (in Theorem 2) to that of G ln(L) with discretization entropy of m ln(4 (in Theorem 1). As a result, the size of the codebook L affects the underlying dimension in a weak (logarithmic) fashion, while the number of dimensions m and the number of discretization heads G scale the underlying dimension in a linear way. Thus, the discretization process successfully lowers the metric entropy for any n ≥ 1 as long as G ln(L) < m ln(4 m). This is nearly always the case as the number of discretization heads G is almost always much smaller than the number of units m.
+Intuitively, a discrete language has combinatorial expressiveness, making it able to model complex phenomena, but still lives in a much smaller space than the world of unbounded continuous-valued signals (as G can be much smaller than m).
+Theorem 1. (with discretization) Let Sk = {Qk} for all k ∈ [LG]. Then, for any δ > 0, with probability at least 1 − δ over an iid draw of n examples (hi)n i=1, the following holds for any
+φ : Rm → R and all k ∈ [LG]: if |φS k (h)| ≤ α for all h ∈ H, then n (cid:88) (cid:114)
+√ (cid:33) (cid:32)
+= O
+α
+G ln(L) + ln(2/δ) 2n
+, (2) 1 n i=1
+φS (cid:12) (cid:12) (cid:12) k (q(hi, L, G)) (cid:12) (cid:12)
+Eh[φS k (q(h, L, G))] − (cid:12) (cid:12) (cid:12) (cid:12) (cid:12) where no constant is hidden in O.
+Theorem 2. (without discretization) Assume that (cid:107)h(cid:107)2 ≤ RH for all h ∈ H ⊂ Rm. Fix C ∈ argmin ¯C{| ¯C| : ¯C ⊆ Rm, H ⊆ ∪c∈ ¯CB[c]} where B[c] = {x ∈ Rm : (cid:107)x − c(cid:107)2 ≤ RH/(2 n)}. Let
+Sk = B[ck] for all k ∈ [|C|] where ck ∈ C and ∪k{ck} = C. Then, for any δ > 0, with probability at i=1, the following holds for any φ : Rm → R and all least 1 − δ over an iid draw of n examples (hi)n k (h(cid:48))| ≤ ςk(cid:107)h − h(cid:48)(cid:107)2 for all h, h(cid:48) ∈ Sk, then k (h) − φS k (h)| ≤ α for all h ∈ H and |φS k ∈ [|C|]: if |φS (cid:32) (cid:114) n (cid:88) nm) + ln(2/δ) m ln(4
+√
+√ (cid:33) k (h)] −
+φS k (hi)
+= O
+α
++
+¯ςkRH√ n
+, (3) (cid:12) (cid:12)
+Eh[φS (cid:12) (cid:12) (cid:12) 1 n i=1 (cid:12) (cid:12) (cid:12) (cid:12) (cid:12) 2n 4
+Figure 3: We perform empirical analysis on Gaussian vectors to build intuition for our theoretical analysis. Expressiveness scales much faster as we increase discretization heads than as we increase the size of the codebook. This can be seen when we measure the variance of a collection of Gaussian vectors following discretization (left), and can also be seen when we plot a vector ﬁeld of the effect of discretization (center). Discretizing the values from an attention layer trained to select a ﬁxed
+Gaussian vector makes it more robust to novel Gaussian distractors (right). For more details, see
+Appendix B. where no constant is hidden in O and ¯ςk = ςk (cid:0) 1 n (cid:80)n i=1 1{hi ∈ B[ck]}(cid:1).
+The two proofs of these theorems use the same steps and are equally tight as shown in Appendix
+D. Equation (3) is also as tight as that of related work as discussed in Appendix C.2. The set S is chosen to cover the original continuous space H in Theorem 2 (via the (cid:15)-covering C of H), and its discretized space in Theorem 1. Equations (2)–(3) hold for all functions φ : Rm → R, including the maps that depend on the samples (hi)n i=1 via any learning processes. For example, we can set
+φ to be an evaluation criterion of the latent space h or the composition of an evaluation criterion and any neural network layers that are learned with the samples (hi)n i=1. In Appendix A, we present additional theorems, Theorems 3–4, where we analyze the effects of learning the map x (cid:55)→ h and the codebook e via input-target pair samples ((xi, yi))n
+Intuitively, the proof shows that we achieve the improvement in sample efﬁciency when G and L are small, with the dependency on G being signiﬁcantly stronger (details in Appendix). Moreover, the dependency of the bound on the Lipschitz constant ςk is eliminated by using discretization. Our theorems 1–2 are applicable to all of our models for recurrent neural networks, transformers, and graph neural networks (since the function φ is arbitrary) in the following subsections. i=1.
+Communication along edges of Graph Neural Network One model where relational information is naturally used is in a graph neural network for modelling object interactions and predicting the next time frame. We denote node representations by ζ t i,j, and actions applied to each node by at i. Without DVNC, the changes of each nodes after each time step is computed by
+ζ t+1 t ) and (cid:15)t i , where ∆ζ t i + ∆ζ t i = ζ t
+In this present work, we discretize the sum of all edges connected to each node with DVNC, as so:
+∆ζ t i , edge representations by (cid:15)t i,j = fedge(ζ t i = fnode(ζ t j(cid:54)=i (cid:15)i,j t, (cid:80)
+, L, G)). i , ai i , zt j). i = fnode(ζ t i , ai t, q((cid:80) j(cid:54)=i (cid:15)i,j t
+Communication Between Positions in Transformers
+In a transformer model without DVNC, at each layer, the scaled dot product multi-head soft attention is applied to allow the model to jointly attend to information from different representation subspaces at different positions (Vaswani et al., 2017) as:
+Output = residual + MULTIHEADATTENTION(B, K, V ), where MULTIHEADATTENTION(B, K, V ) = CONCATENATE(head1, head2, .....headn)W O and i ). Here, W O, W B, W K, and W V are projection headi = SOFTATTENTION(BW B matrices, and B, K, and V are queries, keys, and values respectively. i , KW K i
+, V W V
+In this present work, we applied the DVNC process to the results of the attention in the last two layers of transformer model, as so:
+Output = residual + q(MULTIHEADATTENTION(B, K, V ), L, G).
+Communication with Modular Recurrent Neural Networks There have been many efforts to introduce modularity into RNN. Recurrent independent mechanisms (RIMs) activated different 5
+i = RNN(zt i , xt) for active modules, and ˆzt+1 modules at different time step based on inputs (Goyal et al., 2019). In RIMs, outputs from different modules are communicated to each other via soft attention mechanism. In the original RIMs method, we have ˆzt+1 i(cid:48) for inactive modules, where t is the time step, i is index of the module, and xt is the input at time step t. Then, the dot product query-key soft attention is used to communication output from all modules i ∈ {1, . . . , M } such that i = SOFTATTENTION(ˆzt+1 ht+1
+In this present work, we applied the DVNC process to the output of the soft attention, like so: i = ˆzt+1 zt+1
+, L, G). Appendix E presents the pseudocode for RIMs with discretization. i + q(ht+1 i(cid:48) = zt
+, ....ˆzt+1
+, ˆzt+1 2
+M ). 1 i 3

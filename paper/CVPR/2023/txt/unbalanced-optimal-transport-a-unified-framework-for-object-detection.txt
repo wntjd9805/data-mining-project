@@ -1,0 +1,42 @@
+Abstract
+During training, supervised object detection tries to cor-rectly match the predicted bounding boxes and associated classification scores to the ground truth. This is essen-tial to determine which predictions are to be pushed to-wards which solutions, or to be discarded. Popular match-ing strategies include matching to the closest ground truth box (mostly used in combination with anchors), or match-ing via the Hungarian algorithm (mostly used in anchor-free methods). Each of these strategies comes with its own properties, underlying losses, and heuristics. We show how
+Unbalanced Optimal Transport unifies these different ap-proaches and opens a whole continuum of methods in be-tween. This allows for a finer selection of the desired prop-erties. Experimentally, we show that training an object de-tection model with Unbalanced Optimal Transport is able to reach the state-of-the-art both in terms of Average Preci-sion and Average Recall as well as to provide a faster initial convergence. The approach is well suited for GPU imple-mentation, which proves to be an advantage for large-scale models. 1.
+
+Introduction
+Object detection models are in essence multi-task mod-els, having to both localize objects in an image and classify them. In the context of supervised learning, each of these tasks heavily depends on a matching strategy. Indeed, deter-mining which predicted object matches which ground truth object is a non-trivial yet essential task during the training (Figure 1a). In particular, the matching strategy must en-sure that there is ideally exactly one prediction per ground truth object, at least during inference. Various strategies have emerged, often relying on hand-crafted components.
+They are proposed as scattered approaches that seem to have nothing in common, at least at first glance.
+*These authors contributed equally. 1
+A 4
+B 3 5 2
+Image №163 from the COCO training (a) dataset. The ground truth boxes are colored, and the predictions are outlined in black. 1 2 3 4 5 1 2 3 4 5 1 2 3 4 0.61 0.96 0.8 1.34 0.88 0.8 0.88 0.89 0.8 0.4 0.65 0.8 5 1.11 0.73 0.8
+A B ∅ (b) Costs between the predictions and the truth ground (1 − GIoU). The background cost is c∅ = 0.8. 1 2 3 4 5
+A B ∅ best
+Prediction (c) ground to truth (Unbalanced
+OT with ϵ = 0,
+τ1 → +∞ and
+τ2 = 0).
+A B ∅ (d)
+Hungarian matching (OT with
+ϵ = 0, τ1 → +∞ and τ2 → +∞).
+A B ∅ (e) Ground truth to best prediction (Un-balanced OT with
+ϵ = 0, τ1 = 0 and
+τ2 → +∞). 1 2 3 4 5 1 2 3 4 5 1 2 3 4 5
+A B ∅ (f) Unbalanced OT with ϵ = 0.05,
+τ1 = 100 and τ2 = 0.01.
+A B ∅ (g) OT with ϵ = 0.05 (τ1 → +∞ and τ2 → +∞).
+A B ∅ (h) Unbalanced OT with ϵ = 0.05,
+τ1 = 0.01 and
+τ2 = 100.
+Figure 1. Different matching strategies. All are particular cases of
+Unbalanced Optimal Transport.
+1.1. A Unifying Framework
+To perform any match, a matching cost has to be deter-mined. The example at Fig. 1b uses the Generalized Inter-section over Union (GIoU) [46]. Given such a cost matrix, matching strategies include:
+• Matching each prediction to the closest ground truth object. This often requires that the cost lies under a certain threshold [37, 45, 44, 33], to avoid matching predictions that may be totally irrelevant for the current image. The disadvantage of this strategy is its redun-dancy: many predictions may point towards the same ground truth object. In Fig. 1c, both predictions 1 and 4 are matched towards ground truth object A. Further-more, some ground truth objects may be unmatched. A solution to this is to increase the number of predicted boxes drastically. This is typically the case with an-chors boxes and region proposal methods.
+• The opposite strategy is to match each ground truth object to the best prediction [25, 37]. This ensures that there is no redundancy and every ground truth object is matched. This also comes with the opposite problem: multiple ground truth objects may be matched to the same prediction. In Fig. 1e, both ground truth objects
+A and B are matched to prediction 4. This can be mit-igated by having more predictions, but then many of those are left unmatched, slowing convergence [37].
+• A compromise is to perform a Bipartite Matching (BM), using the Hungarian algorithm [29, 40], for ex-ample [6, 55]. The matching is one-to-one, minimiz-ing the total cost (Definition 2). Every ground truth object is matched to a unique prediction, thus reducing the number of predictions needed, as shown in Fig. 1d.
+A downside is that the one-to-one matches may vary from one epoch to the next, again slowing down con-vergence [31]. This strategy is difficult to parallelize, i.e. to take advantage of GPU architectures.
+All of these strategies have different properties and it seems that one must choose either one or the other, option-ally combining them using savant heuristics [37]. There is a need for a unifying framework. As we show in this paper,
+Unbalanced Optimal Transport [9] offers a good candidate for this (Figure 1). It not only unifies the different strategies here above, but also allows to explore all cases in between.
+The cases presented in Figures 1c, 1d and 1e correspond to the limit cases. This opens the door for all intermediate set-tings. Furthermore, we show how regularizing the problem induces smoother matches, leading to faster convergence of
+DETR, avoiding the problem described for the BM. In addi-tion, the particular choice of entropic regularization leads to a class of fast parallelizable algorithms on GPU known as scaling algorithms [10, 8], of which we provide a compiled implementation on GPU. Our code and additional resources are publicly available1. 1.2.

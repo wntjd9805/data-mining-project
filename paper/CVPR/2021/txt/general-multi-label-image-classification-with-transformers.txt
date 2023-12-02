@@ -1,0 +1,224 @@
+Abstract
+Multi-label image classiﬁcation is the task of predicting a set of labels corresponding to objects, attributes or other entities present in an image. In this work we propose the
+Classiﬁcation Transformer (C-Tran), a general framework for multi-label image classiﬁcation that leverages Trans-formers to exploit the complex dependencies among visual features and labels. Our approach consists of a Trans-former encoder trained to predict a set of target labels given an input set of masked labels, and visual features from a convolutional neural network. A key ingredient of our method is a label mask training objective that uses a ternary encoding scheme to represent the state of the la-bels as positive, negative, or unknown during training. Our model shows state-of-the-art performance on challenging datasets such as COCO and Visual Genome. Moreover, be-cause our model explicitly represents the label state during training, it is more general by allowing us to produce im-proved results for images with partial or extra label anno-tations during inference. We demonstrate this additional ca-pability in the COCO, Visual Genome, News-500, and CUB image datasets. 1.
+
+Introduction
+Images in real-world applications generally portray many objects and complex situations. Multi-label image clas-siﬁcation is a visual recognition task that aims to predict a set of labels corresponding to objects, attributes, or ac-tions given an input image [18, 48, 50, 52, 6, 31, 10]. This task goes beyond the more thoroughly studied problem of single-label multi-class classiﬁcation where the objective is to extract and associate image features with a single concept per image. In the multi-label setting, the output set of labels has some structure that reﬂect the structure of the world. For example, dolphin is unlikely to co-occur with grass, while knife is more likely to appear next to a fork. Effective mod-els for multi-label classiﬁcation aim to extract good visual features that are predictive of image labels, but also exploit the complex relations and dependencies between visual fea-tures and labels, and among labels themselves.
+Figure 1. We propose a transformer-based model for multi-label image classiﬁcation that exploits dependencies among a target set of labels using an encoder transformer. During training, the model learns to reconstruct a partial set of labels given randomly masked input label embeddings and image features. During inference, our model can be conditioned only on visual input or a combination of visual input and partial labels, leading to superior results.
+To this end, we present the Classiﬁcation Transformer (C-Tran), a multi-label classiﬁcation framework that lever-ages a Transformer encoder [49].
+Transformers have demonstrated a remarkable capability of being able to ex-ploit dependencies among sets of inputs using multi-headed self-attention layers.
+In our approach, a Transformer en-coder is trained to reconstruct a set of target labels given an input set of masked label embeddings and a set of fea-tures obtained from a convolutional neural network. C-Tran uses label masking during training to represent the state of the labels as positive, negative, or unknown – analogous to how language models are trained with masked tokens [15].
+At test time, C-Tran is able to predict a set of target labels using only input visual features by masking all the input labels as unknown. Figure 1 gives an overview of this strat-egy. We demonstrate that this approach leads to superior re-sults on a number of benchmarks compared to other recent approaches that exploit label relations using graph convolu-tional networks and other recently proposed strategies.
+Beyond obtaining state-of-the-art results on standard multi-label classiﬁcation, C-Tran is a more general model for reasoning under prior label observations. Because our approach explicitly models the label state (positive, nega-16478
+Figure 2. Different inference settings for general multi-label image classiﬁcation: (a) Standard multi-label classiﬁcation takes only image features as input. All labels are unknown yu.; (b) Classiﬁcation under partial labels takes as input image features as well as a subset of the target labels that are known. The labels rain coat and truck are known labels yk, and all others are unknown labels yu; (c) Classiﬁcation under extra labels takes as input image features and some related extra information. The labels city and rain are known extra labels ye k, and all others are unknown target labels yt u. tive, or unknown) during training, it can also be used at test time with partial or extra label annotations by setting the state of some of the labels as either positive or nega-tive instead of masking them out as unknown. For instance, consider the example shown in Figure 2(a) where a model is able to predict person and umbrella with relatively high accuracies, but is not conﬁdent for categories such as rain coat, or car that are clearly present. Suppose we know some labels and set them to their true positive (for rain coat) or true negative (for truck) values. Provided with this new information, the model is able to predict car with a high conﬁdence as it moves mass probability from truck to car, and predicts other objects such as umbrella with even higher conﬁdence than in the original predictions (Figure 2(b)). In general, we consider this setting as realistic since many im-ages also have metadata in the form of extra labels such as location or weather information (Figure 2(c)). This type of conditional inference is a much less studied problem.
+C-Tran is able to naturally handle all these scenarios un-der a uniﬁed framework. We compare our results with a competing method relying on iterative inference [51], and against sensitive baselines, demonstrating superior results under variable amounts of partial or extra labels.
+The beneﬁts of C-Tran can be summarized as follows:
+•
+•
+•
+It
+Flexibility: that can be de-is the ﬁrst model ployed in multi-label image classiﬁcation under arbi-trary amounts of extra or partial labels. We use a uni-ﬁed model architecture and training method that lets users to apply our model easily in any setting.
+Accuracy: We evaluate our model on six datasets across three inference settings and achieve state-of-the-art results on all six. The label mask training strat-egy enhances the correlations between visual concepts leading to more accurate predictions.
+Interactivity: The use of state embeddings enables users to easily interact with the model and test any counterfactuals. C-Tran can take human interventions as partial evidence and provides more interpretable and accurate predictions. 2. Problem Setup
+We consider three multi-label image classiﬁcation sce-narios as follows:
+Regular Multi-label Classiﬁcation. In this setting the goal is to predict a set of labels for an input image. Let x be an image, and y be a ground truth set of ℓ binary labels
+. The goal of multi-label clas-0, 1 y1, y2, ..., yℓ
+{
+} siﬁcation is to construct a classiﬁer, f , to predict a set of labels given an image so that: ˆy = f (x).
+, yi
+}
+∈ {
+⊆
+Inference with Partial Labels. While regular classiﬁca-tion methods aim to predict the full set of ℓ labels given only an input image, some subset of labels yk y may be observed, or known, at test time. This is also known as having partial labels available. For example, many im-ages on the web are labeled with text such as captions or
+In this reformulated setting, comments on social media. the goal is to predict the unknown labels (yu = y yk) given both the image and the known labels during infer-ence: ˆyu = f (x, yk). Note that we assume that all labels are available during training. This setting is speciﬁcally for inference with partially annotated labels, and it differs from other works that tackle the problem of training models from partially annotated data [54, 17, 28].
+\
+Inference with Extra Labels. Similar to partially labeled images, there are many cases where we observe extra labels that describe an image, but are not part of the target label set. For example, we may know that an image was taken in a city. While city might not be one of the target labels, it can still alter our expectations about what else might be present in the image. In this setting, we append any extra labels ye to the target label set yt. If there are ℓt target labels, and ℓe extra labels, we have a set of ℓt + ℓe total labels that we use to train the model. Variable y now represents the concate-nation of all target and extra labels. During inference, the known labels, ye k, come from the set of extra labels, but we are only interested in evaluating the unknown target labels yt u. In other words, during inference, we want to compute the following: ˆyt k). u = f (x, ye 16479
+Figure 3. C-Tran architecture and illustration of label mask training for general multi-label image classiﬁcation. In this training image, the labels person, umbrella, and sunglasses were randomly masked out and used as the unknown labels, yu. The labels rain coat and truck are used as the known labels, yk. Each unknown label is added the unknown state embedding U, and each known label is added its corresponding state embedding: negative (N) , or positive (P). The loss function is only computed on the unknown label predictions ˆyu. 3. Method: C-Tran
+We propose Classiﬁcation Transformers (C-Tran), a gen-eral multi-label classiﬁcation framework that works in all three previously described settings. During inference, our method predicts a set of unknown labels yu given an input image x and a set of known labels yk. In regular inference no labels are known, in partial label inference some labels are known, and in extra label inference some labels external to the target set are known. In Sections 3.1-3.3, we intro-duce the C-Tran architecture, and in Section 3.4, we explain our label mask training procedure. 3.1. Feature, Label, and State Embeddings
+∈
+×
+Image Feature Embeddings Z: Given input image x
+∈
+RH×W ×3, the feature extractor outputs a tensor Z
+∈
+Rh×w×d, where h, w, and d are the output height, width, and channel, respectively. We can then consider each vec-Rd from Z, with i ranging from 1 to P (where tor zi w), to be representative of a subregion that maps
+P = h back to patches in the original image space.
+Label Embeddings L: For every image, we retrieve a set
+Rd, which are of label embeddings L = representative of the ℓ possible labels in y. Label embed-dings are learned from an embedding layer of size d
+Adding Label Knowledge via State Embeddings S: In traditional architectures, there is no mechanism to encode partially known or extra labels as input to the model. To address this drawback, we propose a technique to easily in-corporate such information. Given label embedding li, we simply add a “state” embedding vector, si l1, l2, ..., lℓ
+Rd:
+, li
+×
+ℓ.
+∈
+}
+{
+∈
+˜li = li + si, (1) where the si takes on one of three possible states: unknown (U), negative (N), or positive (P). For instance, if label yi is a known positive value prior to inference (meaning that we have prior knowledge that the label is present in the im-age), si is the positive embedding, P. The state embeddings are retrieved from a learned embedding layer of size d 3, where the unknown state vector (U) is ﬁxed with all zeros.
+State embeddings enable a user to (1) not use any prior in-formation by adding the unknown embedding, (2), use par-tially labeled or extra information by adding the negative and positive embeddings to those labels, and (3) easily test interventions in the model by asking “how does the predic-tion change if a label is changed to either positive or nega-tive?”. We note that using prior information is completely optional as input to our model during testing, enabling it to also ﬂexibly handle the regular inference setting.
+× 3.2. Modeling Feature and Label Interactions with a Transformer Encoder
+To model interactions between image features and label embeddings we leverage Transformers [49], as these are effective models for capturing dependencies between vari-ables. Our formulation allows us to easily input image fea-tures and label embeddings jointly into a Transformer en-coder. Transformer encoders are suitable because they are order invariant, allowing for any type of dependencies be-tween all features and labels to be learned.
+Let H = z1, ..., zh×w, ˜l1, ..., ˜lℓ
+{ be the set of embed-dings that are input to the Transformer encoder. In Trans-formers, the importance, or weight, of embedding hj
+H with respect to hi
+H is learned through self-attention.
+The attention weight, αt ij between embedding i and j is computed in the following manner. First, we compute a normalized scalar attention coefﬁcient αij between embed-dings i and j. After computing αij for all i and j pairs, we update each embedding hi to h′ i using a weighted sum of
+∈
+∈
+} 16480
+all embeddings followed by a nonlinear ReLU layer:
+αij = softmax(cid:0)(Wqhi)
+⊤ (Wkhj)/√d(cid:1),
+¯hi =
+M
+X j=1
+αijWvhj, h′ i = ReLU(¯hiWr + b1)Wo + b2, (2) (3) (4) where Wk is the key weight matrix, Wq is the query weight matrix, Wv is the value weight matrix, Wr and Wo are transformation matrices, and b1 and b2 are bias vectors.
+This update procedure can be repeated for L layers where the updated embeddings h′ i are fed as input to the succes-sive Transformer encoder layer. The learned weight matri-Rd×d are not shared be-ces tween layers. We denote the ﬁnal output of the Transformer encoder after L layers as H ′ =
+Wk, Wq, Wv, Wr, Wo
+{ h×w, l′
+} ∈ 1, ..., z′ z′
+{ 1, ..., l′
+.
+ℓ} 3.3. Label Inference Classiﬁer labels because the ground truth value is used as input to
+C-Tran alongside the image. Our model predicts the un-known labels yu, and binary cross entropy is used to up-date the model parameters. By masking random amounts of unknown labels (and therefore using random amounts of known labels) during training, the model learns many pos-sible known label combinations, and adapts the model to be used with arbitrary amounts of known information.
+We mask out at least 0.25ℓ labels for each training sam-ples for several reasons. First, most masked language model training methods mask out around 15% of the words [15, 4].
+Second, we want our model to be able to incorporate any-where from 0 to 0.75ℓ known labels during inference. We assume that knowing more than 75% of the labels is an unrealistic inference scenario. Our label mask training pipeline thus aims to minimize the following loss:
+L =
+Ntr
+X n=1
+Ep(yk){
+CE(ˆy(n) u , y(n) u ) yk
+,
+}
+| (6)
+Lastly, after feature and label dependencies are modeled via the Transformer encoder, a classiﬁer makes the ﬁnal la-bel predictions. We use an independent feedforward net-work (FFNi) for ﬁnal label embedding l′ i. FFNi contains a single linear layer, where weight wc d vector, and σ is a simoid function: i for label i is a 1
+× where CE represents the cross entropy loss function.
+Ep(yk)( yk) denotes to calculate the expectation regarding the probability distribution of known labels: yk. We pro-vide an explanation of the LMT algorithm in the Appendix.
+·| 3.5. Implementation Details
+ˆyi = FFNi(l′ i) = σ(cid:0)(wc i · 3.4. Label Mask Training (LMT) l′ i) + bi(cid:1) (5)
+State embeddings (Eq. 1) let us easily incorporate known labels as input to C-Tran. However, we want our model to be ﬂexible enough to handle any amount of known labels during inference. To solve this problem, we introduce a novel training procedure called Label Mask Training (LMT) that forces the model to learn label correlations, and allows
+C-Tran to generalize to any inference setting.
+Inspired by the Cloze task [46] and BERT’s masked lan-guage model training [15] which works by predicting miss-ing words from their context, we implement a similar proce-dure. During training, we randomly mask a certain amount of labels, and use the ground truth of the other labels (via state embeddings) to predict the masked labels. This dif-fers from masked language model training in that we have a ﬁxed set of inputs (all possible labels) and we randomly mask a subset of them for each sample.
+Given that there are ℓ possible labels, the number of “un-known” (i.e. masked) labels for a particular sample, n, is chosen at random between 0.25ℓ and ℓ. Then, n unknown labels, denoted yu, are sampled randomly from all possible labels y. The unknown state embedding is added to each unknown label. The rest are “known” labels, denoted yk and the corresponding ground truth state embedding (pos-itive or negative) is added to each. We call these known
+×
+Image Feature Extractor. For fair comparisons, we use the same image size and pretrained feature extractor as the previous state-of-the-art in each setting. For all datasets ex-cept CUB, we use the ResNet-101 [21] pretrained on Im-ageNet [14] as the feature extractor (for CUB, we use the same as [25]). Since the output dimension of ResNet-101 is 2048, we set our embedding size d as 2048. Follow-ing [8, 7], images are resized to 640 640 and randomly
+× 576 with random horizontal ﬂips during cropped to 576 training. Testing images are center cropped instead. The d tensor, so there are a output of ResNet-101 is an 18
+Rd. total of 324 feature embedding vectors, zi
+Transformer Encoder. In order to allow a particular em-bedding to attend to multiple other embeddings (or multiple groups), C-Tran uses 4 attention heads [49]. We use a L=3 layer Transformer with a residual layer [21] around each embedding update and layer norm [1].
+Optimization. Our model, including the pretrained feature extractor, is trained end-to-end. We use Adam [24] for the optimizer with betas=(0.9, 0.999) and weight decay=0. We train the models with a batch size of 16 and a learning rate of 10−5. We use dropout with p = 0.1 for regularization. 18
+×
+×
+∈ 4. Experimental Setup and Results
+In the following subsections, we explain the datasets, baselines, and results for the three multi-label classiﬁcation inference settings. 16481
+mAP
+CP
+CNN-RNN [50]
+RNN-Attention [52]
+Order-Free RNN [6]
+ML-ZSL [31]
+SRN [58]
+ResNet101 [21]
+Multi-Evidence [19]
+ML-GCN [10]
+SSGRL [8]
+KGGR [7]
+C-Tran 61.2
+---77.1 77.3
+-83.0 83.8 84.3 85.1
+----81.6 80.2 80.4 85.1 89.9 85.6 86.3
+All
+CR
+----65.4 66.7 70.2 72.0 68.5 72.7 74.3
+CF1 OP
+----71.2 72.8 74.9 78.0 76.8 78.6 79.9
+----82.7 83.9 85.2 85.8 91.3 87.1 87.7
+OR
+----69.9 70.8 72.5 75.4 70.8 75.6 76.5
+OF1
+----75.8 76.8 78.4 80.3 79.7 80.9 81.7
+Top 3
+CF1 OP 60.4 67.4 67.4 69.0 67.4 69.7 70.6 74.6 72.7 75.0 76.0 69.2 84.0 84.0
+-87.4 89.1 89.1 90.5 93.8 91.3 92.1
+CR 55.6 58.7 58.7 64.5 58.8 59.4 62.2 64.1 62.5 64.6 65.7
+CP 66.0 79.1 79.1 74.1 85.2 84.1 84.5 89.2 91.9 89.4 90.1
+OR 66.4 63.0 63.0
+-62.5 62.8 64.3 66.5 64.1 66.6 71.4
+OF1 67.8 72.0 72.0
+-72.9 73.6 74.7 76.7 76.2 77.0 77.6
+Table 1. Results of regular inference on COCO-80 dataset. The threshold is set to 0.5 to compute precision, recall and F1 scores (%). Our method consistently outperforms previous methods across multiple metrics under the settings of all and top-3 predicted labels. Best results are shown in bold. “-” denotes that the metric was not reported.
+ResNet101[21]
+ML-GCN [10]
+SSGRL [8]
+KGGR [7]
+C-Tran mAP
+CP 30.9 32.6 36.6 37.4 38.4 39.1 42.8
+-47.4 49.8
+All
+CR 25.6 20.2
+-24.7 27.2
+CF1 OP 31.0 27.5
+-32.5 35.2 61.4 66.9
+-66.9 66.9
+OR 35.9 31.5
+-36.5 39.2
+OF1 45.4 42.8
+-47.2 49.5
+CP 39.2 39.4
+-48.7 51.1
+CR 11.7 10.6
+-12.1 12.5
+Top 3
+CF1 OP 18.0 16.8
+-19.4 20.1 75.1 77.1
+-78.6 80.2
+OR 16.3 16.4
+-17.1 17.5
+OF1 26.8 27.1
+-28.1 28.7
+Table 2. Results of regular inference on VG-500 dataset. All metrics and setups are the same as Table 1. Our method achieves notable improvement over previous methods. 4.1. Regular Inference
+Datasets. We use two large-scale regular multi-label clas-siﬁcation datasets: COCO-80 and VG-500. COCO [34], is a commonly used large scale dataset for multi-label classi-ﬁcation, segmentation, and captioning. It contains 122, 218 images containing common objects in their natural context.
+The standard multi-label formulation for COCO, which we call COCO-80, includes 80 object class annotations for each image. We use 82, 081 images as training data and evaluate all methods on a test set consisting of 40, 137 images. The
+Visual Genome dataset [27], contains 108, 077 images with object annotations covering thousands of categories. Since the label distribution is very sparse, we only consider the 500 most frequent objects and use the VG-500 subset intro-duced in [7]. VG-500 consists of 98, 249 training images and 10, 000 test images.
+Baselines and Metrics. For COCO-80, we compare to ten well known multi-label classiﬁcation methods. For VG-500 we compare to four previous methods that used this dataset.
+Referencing previous works [10, 8, 7], we employ several metrics to evaluate the proposed method and existing meth-ods. Concretely, we report the average per-class precision (CP), recall (CR), F1 (CF1) and the average overall preci-sion (OP), recall (OR), F1 (OF1), under the setting that a predicted label is positive if the output probability is greater than 0.5. We also report the mean average precision (mAP).
+A detailed explanation of the metrics are shown in the Ap-pendix. For fair comparisons to previous works [19, 58], we also consider the setting where we evaluate the Top-3 pre-dicted labels following. In general, mAP, OF1, and CF1 are the most important metrics [10].
+Results. C-Tran achieves state-of-the-art performance al-most across all metrics on both datasets, as shown in Ta-ble 1 and Table 2. Considering that COCO-80 and VG-500 are two widely studied multi-label datasets, absolute mAP increases of 0.8 and 1.0, respectively, can be considered no-table improvements. Importantly, we do not use any pre-deﬁned feature and label relationship information (e.g. pre-trained word embeddings). This signals that our method can effectively learn the relationships. 4.2. Inference with Partial Labels
+Datasets. We use four datasets to validate our approach in the partial label setting. In all four datasets, we simu-late four amounts of partial labels during inference. More speciﬁcally, for each testing image, we select ǫ percent of labels as known. ǫ is set to 0% / 25% / 50% / 75% in our experiments. ǫ=0% denotes no known labels, and is equiv-alent to the regular inference setting. 16482
+Partial Labels Known (ǫ)
+Feedbackprop [51]
+C-Tran
+COCO-80
+VG-500
+NEWS-500
+COCO-1000 0% 25% 50% 75% 0% 25% 50% 75% 0% 25% 50% 75% 0% 25% 50% 75% 80.1 80.6 80.8 80.9 85.1 85.2 85.6 86.0 29.6 30.1 30.8 31.6 38.4 39.3 40.4 41.5 14.7 21.1 23.7 25.9 18.1 29.7 35.5 39.4 29.2 30.1 31.5 33.0 34.3 35.9 37.4 39.1
+Table 3. Results of inference with partial labels on four multi-label image classiﬁcation datasets. Mean average precision score (%) is reported. Across four simulated settings where different amounts of partial labels are available (ǫ), our method signiﬁcantly outperforms the competing method. With more partial labels available, we achieve larger improvement.
+Extra Label Groups Known (ǫ)
+Standard [25]
+Multi-task [25]
+ConceptBottleneck [25]
+C-Tran 0% 36% 54% 71% 82.7 82.7 82.7 82.7 83.8 83.8 83.8 83.8 80.1 87.0 93.0 97.5 83.8 90.0 97.0 98.0
+Table 4. Results of inference with extra labels on CUB-312 dataset. We report the accuracy score (%) for the 200 multi-class target labels. We achieve similar or greater accuracy than the base-lines across all amounts of known extra label groups.
+In addition to COCO-80 and VG-500, we benchmark our method on two more multi-label image classiﬁcation datasets. Wang et al. [51] derived the top 1000 frequent words from the accompanying captions of COCO images to use as target labels, which we call COCO-1000. There are 82, 081 images for training, and 5, 000 images for val-idation and testing, respectively. We expect that COCO-1000 provides more and stronger dependencies compared to
+COCO-80. We also use the NEWS-500 dataset [51], which was collected from the BBC News. Similar to COCO-1000, the target label set consists of 500 most frequent nouns de-rived from image captions. There are 151, 873 images for training, 10, 304 for validation and 10, 451 for testing.
+Baselines and Metrics. Feedback-prop [51] is an inference method introduced for partial label inference that make use of arbitrary amount of known labels. This method back-propagates the loss on the known labels to update the in-termediate image representations during inference. We use the LF method on ResNet-101 Convolutional Layer 13 as in [51]. We compute the mean average precision (mAP) score of predictions on unknown labels.
+Results. As shown in Table 3, C-Tran outperforms Feed-backprop, in all ǫ percentages of partially known labels on all datasets. In addition, as the percentage of partial labels increases, the improvement of C-Tran over Feedbackprop also increases. These results demonstrate that our method can effectively leverage known labels and is very ﬂexible with the amount of known labels. Feedbackprop updates image features which implicitly encode some notion of la-bel correlation. C-Tran, instead, explicitly models the corre-lations between labels and features, leading to improved re-sults especially when partial labels are known. On the other hand, Feedback-prop requires careful hyperparameter tun-ing on a separate validation set and needs time-consuming iterative feature updates. Our method does not require any hyperparameter tuning and just needs a standard one-pass inference. Further comparisons and qualitative examples are included in the Appendix. 4.3. Inference with Extra Labels
+Datasets. For the extra label setting, we use the Caltech-It contains
+UCSD Birds-200-2011 (CUB) dataset [53]. 9,430 training samples and 2,358 testing samples. We con-duct a multi-classiﬁcation task with 200 bird species on this dataset. Multi-class classiﬁcation is a speciﬁc instantiation of multi-label classiﬁcation, where the target classes are mutually exclusive. In other words, each image has only one correct label. We use the processed CUB dataset from
+Koh et al. [25] where they include 112 extra labels related to bird species. We call this dataset CUB-312. They further cluster extra labels into 28 groups and use varying amounts of known groups at inference time. To make a fair com-parison, we consider four different amounts of extra label groups for inference: 0 group (0%), 10 groups (36%), 15 groups (54%), and 20 groups (71%).
+Baselines and Metrics. Concept Bottleneck Models [25] incorporate the extra labels as intermediate labels ( “con-cepts” in the original paper). These models use a bottleneck layer to ﬁrst predict the extra labels, and then use those pre-dictions to predict bird species. I.e., if we let ye be the extra information labels, [25] predicts the target class labels yt yt. As using the following computation graph: x in [25], we also consider two baselines: A standard multi-layer perceptron, and a multi-task learning model that pre-dicts the target and concept labels jointly. For fair com-parison, we use the same feature extraction method for all experiments, Inception-v3 [44]. We evaluate target predic-tions using multi-class accuracy scores.
+Results. Table 4 shows that C-Tran achieves an improved accuracy over Concept Bottleneck models on the CUB-312 task when using any amount of extra label groups. Notably, the multi-task learning model produces the best perform-ing results when ǫ=0. However, it is not able to incorporate known extra labels (i.e., ǫ >0). C-Tran instead, consistently achieves the best performance. Additionally, we can test in-terventions, or counterfactuals, using C-Tran. For example,
+“grey beak” is one of the extra labels, and we can set the ye
+→
+→ 16483
+state embedding of “grey beak” to be positive or negative and observe the change in bird class predictions. We pro-vide samples of extra label interventions in the Appendix. 4.4. Ablation and Model Analysis
+We conduct ablation studies to analyze the contributions of each C-Tran component. We examine two settings: reg-ular inference (equivalent to 0% known partial labels) and 50% known partial label inference. We evaluate on four datasets: COCO-80, VG-500, NEWS-500, and COCO-1000. First, we remove the image features Z and predict unknown labels given only known labels. This experiment,
+C-Tran (no image), tells us how much information model can learn just from labels. Table 5 shows that we get rela-tively high mean average precision scores on some datasets (NEWS-500 and COCO-1000). This indicates that even without image features, C-Tran is able to effectively learn rich dependencies from label annotations .
+Second, we remove the label mask training procedure to test the effectiveness of this technique. More speciﬁcally, we remove all label state embeddings, S; thus all labels are unknown during training. Table 5 shows that for both set-tings, regular (0%) and 50% partial labels known, the per-formance drops without label mask training. This signiﬁes two critical ﬁndings of label mask training: (1) it helps with dependency learning as we see improvement when no par-tial labels are available during inference. This is particularly true for datasets that have strong label co-occurrences, such as NEWS-500 and COCO-1000. (2) given partial labels, it can signiﬁcantly improve prediction accuracy. We provide a t-SNE plot [36] of the label embeddings learned with and without label mask training. As shown in Figure 4, em-beddings learned with label mask training exhibit a more meaningful semantic topology; i.e. objects belonging to the same group are clustered together.
+We also analyze the importance of the number of Trans-former layers, L, for regular inference in COCO-80. Mean average precision scores for 2, 3, and 4 layers were 85.0, 85.1, and 84.3, respectively. This indicates : (1) our method is fairly robust to the number of Transformer layers, (2) multi-label classiﬁcation does not seem to require a very large number of layers as in some NLP tasks [4]. While we show C-Tran is a powerful method in many multi-label classiﬁcation settings, we recognize that Transformer lay-ers are memory-intensive for a large number of inputs. This limits the number of possible labels ℓ in our model. Using four NVIDIA Titan X GPUs, the upper bound of ℓ is around 2000 labels. However, it is possible to increase the number of labels. We currently use the ResNet-101 output channel size (d = 2048) for our Transformer hidden layer size. This can be linearly mapped to a smaller number. Additionally, we could apply one of the Transformer variations that have been proposed to model very large input sizes [11, 43].
+Partial Labels
+Known (ǫ)
+COCO-80 VG-500 NEWS-500 COCO-1000 0% 50% 0% 50% 0% 50% 0% 50%
+C-Tran (no image) 3.60 21.7 2.70 24.6 6.50 33.3 1.50 27.8
+C-Tran (no LMT) 84.8 85.0 38.3 38.8 16.9 17.1 33.1 34.0 85.1 85.6 38.4 40.4 18.1 35.5 34.3 37.4
+C-Tran
+Table 5. C-Tran component ablation results. Mean average pre-cision score (%) is reported. Our proposed Label Mask Training technique (LMT) improves the performance, especially when par-tial labels are available. 5.

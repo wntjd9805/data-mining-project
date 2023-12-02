@@ -1,0 +1,268 @@
+Abstract
+This paper presents an improved DETR detector that maintains a “plain” nature: using a single-scale feature map and global cross-attention calculations without spe-cific locality constraints, in contrast to previous leading
+DETR-based detectors that reintroduce architectural induc-tive biases of multi-scale and locality into the decoder. We show that two simple technologies are surprisingly effective within a plain design to compensate for the lack of multi-scale feature maps and locality constraints. The first is a box-to-pixel relative position bias (BoxRPB) term added to the cross-attention formulation, which well guides each query to attend to the corresponding object region while also providing encoding flexibility. The second is masked image modeling (MIM)-based backbone pre-training which helps learn representation with fine-grained localization ability and proves crucial for remedying dependencies on the multi-scale feature maps. By incorporating these tech-nologies and recent advancements in training and problem formation, the improved “plain” DETR showed exceptional improvements over the original DETR detector. By leverag-ing the Object365 dataset for pre-training, it achieved 63.9 mAP accuracy using a Swin-L backbone, which is highly competitive with state-of-the-art detectors which all heavily rely on multi-scale feature maps and region-based feature extraction. Code will be available at https:// github.com/ impiga/ Plain-DETR. 1.
+
+Introduction
+The recent revolutionary advancements in natural lan-guage processing highlight the importance of keeping task-specific heads or decoders as general, simple, and lightweight as possible, and shifting main efforts towards building more powerful large-scale foundation models [37, 11, 2]. However, the computer vision community often
+†Equal contribution. (cid:0) {yuhui.yuan, hanhu}@microsoft.com
+Figure 1: We improve the plain DETR detectors, which rely on global cross-attention calculation and single-scale (s.s.) feature maps, by huge margins, using both Swin-S and Swin-L backbones. It makes plain DETRs as compet-itive as the present leading DETR detectors based on local cross-attention and multi-scale (m.s.) feature maps. continues to focus heavily on the tuning and complexity of task-specific heads, resulting in designs that are increas-ingly heavy and complex.
+The development of DETR-based object detection meth-ods follows this trajectory. The original DETR approach [4] is impressive in that it discarded complex and domain-specific designs such as multi-scale feature maps and region-based feature extraction that require a dedicated un-derstanding of the specific object detection problem. Yet, subsequent developments [55, 54] in the field have reintro-duced these designs, which do improve training speed and accuracy but also contravene the principle of “fewer induc-tive biases” [13].
+In this work, we aim to improve upon the original DETR detector, while preserving its “plain” nature: no multi-scale feature maps, no locality design for cross-attention calcu-lation. This is challenging as object detectors need to han-dle objects of varying scales and locations. Despite the lat-est improvements in training and problem formulation, as shown in Table 1, the plain DETR method still lags greatly 1
+behind state-of-the-art detectors that utilize multi-scale fea-ture maps and regional feature extraction design.
+So, how can we compensate for these architectural “in-ductive biases” in addressing multi-scale and arbitrarily located objects? Our exploration found that two sim-ple technologies, though not entirely new, were surpris-ingly effective in this context: box-to-pixel relative posi-tion bias (BoxRPB) and masked image modeling (MIM) pre-training. BoxRPB is inspired by the relative position bias (RPB) term in vision Transformers [34, 33] which en-codes the geometric relationship between pixels and en-hances translation invariance. BoxRPB extends RPB to en-code the geometric relationship between 4d- boxes and 2d-pixels. We also present an axial decomposition approach for efficient computation, with no loss of accuracy compared to using the full term. Our experiments show that the BoxRPB term can well guide the cross-attention computation to be well dedicated to individual objects (see Figure 4, and it dra-matically improves detection accuracy by +8.9 mAP over a plain DETR baseline of 37.2 mAP on the COCO benchmark (see Table 2).
+The utilization of MIM pre-training is another crucial technology in enhancing the performance of plain DETR.
+Our results demonstrate also a significant improvement of
++7.4 mAP over the plain DETR baseline (see Table 2), which may be attributed to its fine-grained localization ca-pability [49]. While MIM pre-training has been shown to moderately improve the performance of other detec-tors [20, 50], its impact in plain settings is profound. Fur-thermore, the technology has proven to be a key factor in eliminating the necessity of using multi-scale feature maps from the backbones, thereby expanding the findings in [28, 15] to detectors that utilize hierarchical backbones or single-scale heads.
+By incorporating these technologies and the latest im-provements in both training and problem formulation, our improved “plain” DETR has demonstrated exceptional im-provements over the original DETR detector, as illustrated in Figure 1. Furthermore, our method achieved an accuracy of 63.9 mAP when utilizing the Object365 dataset for pre-training, making it highly competitive with state-of-the-art object detectors that rely on multi-scale feature maps and region-based feature extraction techniques, such as cascade
+R-CNN [33] and DINO [54], among others.
+Beyond these outcomes, our methodology exemplifies how to minimize the architectural “inductive bias” when designing an effective task-specific head or decoder, as op-posed to relying on detection-specific multi-scale and local-ized designs. Our study hopes to inspire future research on using generic plain decoders, such as that of DETR, for a wider range of visual problems with minimal effort, thus allowing the field to shift more energy to developing large foundation visual models, similar to what occurs in the field of natural language processing. 2. A Modernized Plain DETR Baseline 2.1. A Review of the Original DETR
+The original DETR detector [4] is consist of 3 sub-networks:
+• A backbone network Fb to extract image features from an image. We denote the input image as I∈RH×W×3.
+The backbone network can provide multi-scale feature maps C2, C3, C4, C5, if a convectional ConvNet is used, i.e., ResNet [22]. The spatial resolutions are typ-ically 1/42, 1/82, 1/162, and 1/322 of the input im-age. The original DETR detector used the mainstream backbone architecture at the time, ResNet, as its back-bone network, and either an original ResNet or a vari-ant with a dilated stage 5 network is used. Now the mainstream backbone network has evolved to vision
+Transformers, which will be used in our experiments, e.g., Swin Transformer [34].
+• A Transformer encoder Fe to enhance the image fea-tures. It applies on P5 ∈ R HW 322 ×C (C=256), obtained via a linear projection on C5. The Transformer en-coder usually consists of several stacking Transformer blocks, i.e., 6 in the original DETR.
+• A global Transformer decoder Fd to decode object bounding boxes from the image feature map using a set of randomly initialized object queries Q =
+{q0, q1, · · · , qn}. The Transformer decoder also usu-ally consists of multiple layers, with each layer in-cluding a self-attention block, a cross-attention block, and a feed-forward block. Each of the decoder layers will produce a set of objects with labels and bounding boxes, driven by a set matching loss.
+The DETR framework possesses several merits, includ-ing: 1) Conceptually straightforward and generic in applica-bility. It views object detection as a pixel-to-object “trans-lation” task, with a generic notion of decoding image pixels into problem targets. 2) Requiring minimal domain knowl-edge, such as custom label assignments and hand-designed non-maximum suppression, due to the use of an end-to-end set matching loss. 3) Being plain, avoiding domain-specific multi-scale feature maps and region-based feature extrac-tion.
+In the following, we will first build an enhanced DETR-based detector by incorporating recent advancements re-garding both training and problem formulation, while main-taining the above nice merits. 2
+2.2. An Enhanced Plain DETR Baseline
+Basic setup. Our basic setup mostly follows the original
+DETR framework, except for the following adaptations: 1)
+We use a stronger Swin-T backbone, instead of the original
+ResNet50 backbone; 2) We create a feature map of P4 from
+C5 by deconvolution, instead of adding dilation operations to the last stage of the backbone, for simplicity purpose. 3)
+We set the number of queries as 300, and the dropout ratio of the Transformer decoder as 0. 4) We use 1× scheduler settings (12 epochs) for efficient ablation study. As shown in Table 1, this basic setup produces a 22.5 mAP on COCO val.
+In the following, we incorporate some recent advance-ments in training and problem formulation into the basic setup, and gradually improve the detection accuracy to 37.2 mAP, as shown in Table 1.
+Merging Transformer encoder into the backbone. The backbone network and Transformer encoder serve the same purpose of encoding image features. We discovered that by utilizing a Vision Transformer backbone, we are able to consolidate the computation budget of the Transformer encoder into the backbone, with slight improvement, prob-ably because more parameters are pre-trained. Specifically, we employed a Swin-S backbone and removed the Trans-former encoder. This method resulted in similar computa-tion FLOPs compared to the original Swin-T plus 6-layer
+Transformer encoder. This approach simplifies the overall
+DETR framework to consist of only a backbone (encoder) and a decoder network.
+Focal loss for better classification. We follow [55] to uti-lize focal loss [30] to replace the default cross-entropy loss, which improves the detection accuracy significantly from 23.1 mAP to 31.6 mAP.
+Iterative refinement. We follow the iterative refinement scheme [43, 55, 3] to make each decoder layer predict the box delta over the latest bounding box produced by the pre-vious decoder layer, unlike the original DETR that uses independent predictions within each Transformer decoder layer. This strategy improves the detection accuracy by +1.5 mAP to reach 33.1 mAP.
+Content-related query. We follow [55] to generate ob-ject queries based on image content. The top 300 most confident predictions are selected as queries for the subse-quent decoding process. A set matching loss is used for object query generation, thereby maintaining the merit of no domain-specific label assignment strategy. This modi-fication resulted in a +0.9 mAP improvement in detection accuracy, reaching 34.0 mAP.
+Look forward twice. We incorporate the look forward twice scheme [54, 26] to take advantage of the refined box information from previous Transformer decoder layers,
+MTE
+✗
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+FL
+✗
+✗
+✓
+✓
+✓
+✓
+✓
+✓
+IR
+✗
+✗
+✗
+✓
+✓
+✓
+✓
+✓
+TS
+✗
+✗
+✗
+✗
+✓
+✓
+✓
+✓
+LFT
+✗
+✗
+✗
+✗
+✗
+✓
+✓
+✓
+MQS
+✗
+✗
+✗
+✗
+✗
+✗
+✓
+✓
+HM
+✗
+✗
+✗
+✗
+✗
+✗
+✗
+✓
+AP 22.5 23.1 31.6 33.1 34.0 34.8 35.2 37.2
+Table 1: Preliminary ablation results on the effect of each fac-tor that is used to modernize plain DETR. MTE: merging the
+Transformer encoder. FL: classification loss as a focal loss. IR:
+Iterative refinement. TS: two-stage. LFT: look forward twice.
+MQS: mixed query selection. HM: hybrid matching. thereby more effectively optimizing the parameters across adjacent Transformer decoder layers. This modification yields +0.8 mAP improvements.
+Mixed query selection. This method [54] combines the static content queries with image-adaptive position queries
+It yields +0.4 mAP to form better query representations. improvements.
+Hybrid matching. The original one-to-one set matching is less efficacy in training positive samples. There have been several methods to improve the efficacy through an auxil-iary one-to-many set matching loss [26, 6, 27]. We opted for the hybrid matching approach [26], as it preserves the advantage of not requiring additional manual labeling noise or assignment designs. This modification resulted in a +2.0 mAP improvement in detection accuracy, achieving a final 37.2 mAP. 3. Box-to-Pixel Relative Position Bias
+In this section, we introduce a simple technology, box-to-pixel relative position bias (BoxRPB), that proves critical to compensate for the lack of multi-scale features and the explicit local cross-attention calculations.
+The original DETR decoder adopts a standard cross-attention computation:
+O = Softmax(QKT)V + X, (1) where X and O are the input and output features of each object query, respectively; Q, K and V are query, key, and value features, respectively.
+As will be shown in Figure 4, the original cross-attention formulation often attends to irrelevant image areas within a plain DETR framework. We conjecture that this may be a reason for its much lower accuracy than that with multi-Inspired by the suc-scale and explicit locality designs. cess of pixel-to-pixel relative position bias for vision Trans-former architectures [34, 33], we explore the use of box-3
+to-pixel relative position bias (BoxRPB) for cross-attention calculation:
+O = Softmax(QKT + B)V + X, (2) where B is the relative position bias determined by the ge-ometric relationship between boxes and pixels.
+Different from the original relative position bias (RPB) which is defined on 2d- relative positions, the BoxRPB needs to handle a larger geometric space of 4d. In the fol-lowing, we introduce two implementation variants.
+A Naive BoxRPB implementation. We adapt the con-tinuous RPB method [33] to compute the 4d- box-to-pixel relative position bias. The original continuous RPB method [33] produces the bias term for each relative posi-tion configuration by a meta-network applied on the cor-responding 2d- relative coordinates. When extending this method for BoxRPB, we use the top-left and bottom-right corners to represent a box and use the relative positions between these corner points and the image pixel point as input to the meta-network. Denote the relative coordi-nates as (∆x1, ∆y1) ∈ RK×H×W×2 and (∆x2, ∆y2) ∈
+RK×H×W×2, the box-to-pixel relative position bias can be defined as:
+B = MLP(∆x1, ∆y1, ∆x2, ∆y2), (3) where B is in a shape of RK×WH×M, with M de-noting the number of attention heads, K denoting the number of predicted bounding boxes, W, H denoting the the width and height of the output feature maps;
+MLP network consists of two linear layers: Linear →
+ReLU → Linear. The input/output shapes of these two linear layers are: K×H×W×4→K×H×W×256 and
+K×H×W×256→K×H×W×M, respectively.
+Our experiments show that this naive implementation al-ready performs very effectively, as shown in Table 3a. How-ever, it will consume a lot of GPU computation and memory budget and thus is not practical.
+A decomposed BoxRPB implementation. Now, we present a more efficient implementation of BoxRPB. In-stead of directly computing the bias term for a 4d- input, we consider decomposing the bias computation into two terms:
+B = unsqueeze(Bx, 1) + unsqueeze(By, 2), (4) where Bx ∈ RK×W×M and By ∈ RK×H×M are the biases regarding x- axis and y- axis, respectively. They are com-puted as:
+Bx = MLP1(∆x1, ∆x2), By = MLP2(∆y1, ∆y2), (5)
+The overall process of the decomposed BoxRPB imple-mentation is also illustrated in Figure 2. The input/out-put shapes of the two linear layers within MLP1 are:
+K×W×2→K×W×256 and K×W×256→K×W×M, re-spectively. Similarly, the input/output shapes for the two linear layers within MLP2 follow the same pattern.
+Through decomposition, both the computation FLOPs and memory consumption are significantly reduced, while the accuracy almost keeps, as shown in Table 3a. This decomposition-based implementation is used default in our experiments.
+Figure 4 shows the effect of this additional BoxRPB term
+In general, the BoxRPB for cross-attention computation. term makes the attention focused more on the objects and box boundaries, while the cross-attention without the
+BoxRPB may attend to many irrelevant areas. This may explain the significantly improved accuracy (+8.9 mAP) by the BoxRPB term, as shown in Table 2. 4. More Improvements
+In this section, we introduce two other technologies that can additionally improve the plain DETR framework.
+MIM pre-training. We leverage the recent advances of masked image modeling pre-training[1, 20, 51, 28] which have shown better locality[49]. Specifically, we initialize the Swin transformer backbone with SimMIM pre-trained weights that are learned on ImageNet without labels as in[51].
+As shown in Table 2, the MIM pre-trainig brings +7.4 mAP improvements over our plain DETR baseline. The profound gains of MIM pre-training on the plain DETR framework than on other detectors may highlight the im-portance of the learned localization ability for a plain DETR framework. On a higher baseline where BoxRPB has been involved, the MIM pre-training can still yield +2.6 mAP gains, reaching 48.7 mAP. Moreover, we note that MIM pre-training is also crucial for enabling us abandon the multi-scale backbone features with almost no loss of accuracy, as shown by Table 5b and 5c.
+Bounding box regression with re-parameterization. An-other improvement we would like to highlight is the bound-ing box re-parameterization when performing bounding box regression.
+The original DETR framework [4] and most of its vari-ants directly scale the box centers and sizes to [0,1]. It will face difficulty in detecting small objects due to the large objects dominating the loss computation. Instead, we re-parameterize the box centers and sizes of l-th decoder layer as: y x )/pl−1 w ,
+)/pl−1 h , tl x = (gx − pl−1 tl y = (gy − pl−1 w = log(gw/pl−1 tl w ), h = log(gh/pl−1 tl h ) w /pl−1 h
+/pl−1 are the predicted unnormalized (6) where pl−1 x /pl−1 y 4
+Figure 2: Illustrating the details of the proposed BoxRPB scheme. (Left): The black grid represents an input image. The blue sketch region represents a predicted bounding box. We mark the top-left and right-down corners of the box with red stars. (Middle): Our BoxRPB calculates the offsets between all positions and the two corners along both x-axis and y-axis. Then, we concatenate the offset vectors along each axis to form (∆x1, ∆x2) and (∆y1, ∆y2) and apply an independent MLP to obtain the relative position bias terms Bx and By. (Right): We broadcast and add Bx to By to get the 2D relative bias term B. We color the positions with higher attention values with red color and blue color otherwise.
+BoxRPB MIM reparam. AP AP50 AP75 APS APM APL 55.6 37.2 64.9 46.1 59.1 44.6 58.4 46.3 48.7 63.0 50.9 69.3 55.5 34.2 55.1 65.5 17.8 27.2 26.9 30.7 31.3 63.7 67.6 67.0 68.2 67.7 40.5 50.5 49.1 51.0 53.1 37.6 49.1 48.3 51.1 53.0
+✗
+✗
+✓
+✓
+✓
+✓
+✗
+✓
+✗
+✗
+✓
+✓
+✗
+✗
+✗
+✓
+✗
+✓
+Table 2: Core ablation results of the proposed components.
+Equipped with these components, a plain DETR could achieve competitive performance. box positions and sizes of (l−1)-th decoder layer.
+Table 2 shows that this modification can enhance the overall detection performance by +2.2 AP. Especially, it achieves a larger +2.9 AP improvements on small objects. 5. Ablation Study and Analysis 5.1. The importance of box relative position bias
+In Table 3, we study the effect of each factor within our
+BoxRPB scheme and report the detailed comparison results in the following discussion.
+Effect of axial decomposition. Modeling the 2D relative position without any decomposition is a naive baseline com-pared with our axial decomposition schema, and it can be parameterized as (∆x1, ∆y1, ∆x2, ∆y2) ∈ RK×H×W×4.
+This baseline requires a quadratic computation overhead and memory consumption while the decomposed one de-creases the cost to linear complexity. In Table 3a, we com-pared the two approaches and find that the axial decom-position scheme achieves comparable performance (50.9 vs. 50.8) while it requires a much lower memory footprint (9.5G vs. 26.8G) and smaller computation overhead (5.8G
+FLOPs vs. 265.4G FLOPs).
+Effect of box points. Table 3b shows the comparison of using only the center points or the two corner points. We 5 find that applying only the center points improves the base-line (fourth row of Table 2) by +1.7 AP. However, its per-formance is worse than that of using two corner points. In particular, while the two methods achieve comparable AP50 results, utilizing corner points could boost AP75 by +2.2.
+This shows that not only the position (center) but also the scale (height and width) of the query box are important to precisely model relative position bias.
+Effect of hidden dimension. We study the effect of the hidden dimension in Equation 5. As shown in Table 3c, a smaller hidden dimension of 128 would lead to a perfor-mance drop of 0.5, indicating that the position relation is non-trivial and requires a higher dimension space to model.
+Comparison with other methods. We study the effect of choosing other schemes to compute the modulation term B in Equation 2. We compared to several representative meth-ods as follows: (i) Conditional cross-attention scheme [35], which computes the modulation term based on the inner product between the conditional spatial (position) query embedding and the spatial key embedding. (ii) DAB cross-attention scheme [31], which builds on conditional cross-attention and further modulates the positional attention map using the box width and height information. (iii) Spatially modulated cross-attention scheme (SMCA) [16], which de-signs handcrafted query spatial priors, implemented with a 2D Gaussian-like weight map, to constrain the attended fea-tures to be around the object queries’ initial estimations.
+Table 3d reports the detailed comparison results. Our ap-proach achieves the best performance among all the meth-ods. Specifically, the conditional cross-attention module achieves similar performance with our center-only setting (first row of Table 3b). DAB cross-attention and SMCA are slightly better than the conditional cross-attention module, but they still lag behind the BoxRPB by a gap of 2.5 AP and 2.2 AP, respectively.
+We also compare BoxRPB with DAB cross-attention based on its official open-source code. Replacing DAB po-sitional module with BoxRPB achieves a +1.8 mAP perfor-decomp. mem. GFLOPs AP AP50 AP75 26.8G 265.4 50.8 69.3 55.4 50.9 69.3 55.5 9.5G
+✗
+✓ 5.8 box points AP AP50 AP75 48.0 69.0 53.3 center 2×corners 50.9 69.3 55.5 hidden dim. AP AP50 AP75 50.4 69.1 55.1 128 50.9 69.4 55.4 256 50.9 69.3 55.5 512 method
+AP AP50 AP75 46.3 68.2 51.1 standard cross attn. conditional cross attn. 48.3 68.8 52.9 48.4 68.9 53.4
+DAB cross attn. 48.7 69.2 53.6
+SMCA cross attn. 50.9 69.3 55.5 ours (a) axial decomposition. (b) box points. (c) hidden dim. (d) cross-attention modulation.
+Table 3: Ablation of box relative position bias scheme. (a) Axial decomposition can significantly decrease the computation overhead and GPU memory footprint. (b) The corner points perform better than the center point. (c) The higher the hidden dimension, the better performance. (d) Our approach performs much better than other related methods designed to modulate the cross-attention maps. method deformable cross attn.
+RoIAlign
+RoI Sampling
+Box Mask
+Ours
+AP AP50 AP75 APS APM APL 63.3 50.2 63.5 49.6 63.0 49.3 48.6 63.0 50.9 69.3 55.5 34.2 55.1 65.5 54.8 54.1 53.8 52.9 68.5 68.3 68.2 68.7 34.1 31.9 33.1 31.8 54.4 54.2 53.2 52.7
+Table 4: Comparison with local cross-attention scheme.
+Global cross-attention with BoxRPB outperforms all the local cross-attention counterparts and have a significant gain on large objects. mance gain. 5.2. Comparison with local attention scheme
+In this section, we compared our global attention schema with other representative local cross-attention mechanisms, including deformable cross-attention [55], RoIAlign [21],
+RoI Sampling (sampling fixed points inside the Region of
+Interest), and box mask inspired by [7]. We illustrate the key differences between those methods in the supplemen-tary material.
+As shown in Table 4, our method surpasses all the local cross-attention variants. In addition, we observed that large objects have larger improvements for our method. A similar observation is also reported in DETR [4], it may be due to more effective long-range context modeling based on the global attention scheme. 5.3. On MIM pre-training
+We explore different ways of using the backbone and de-coder feature maps with or without MIM pre-training. We evaluate the performance of three different architecture con-figurations, which are illustrated in Figure 3. We discuss and analyze the results as follows.
+MIM pre-training brings consistent gains. By comparing the experimental results under the same architecture config-uration, we found that using MIM pre-training consistently achieves better performance. For example, as shown in Ta-ble 5, using MIM pre-training outperforms using supervised backbone → decoder
+MIM AP AP50 AP75 APS APM APL (C3,C4,C5) → (P3, P4, P5) ✗ 49.6 69.2 53.8 31.5 53.4 65.2 (C3,C4,C5) → (P3, P4, P5) ✓ 51.1 69.3 56.0 34.8 55.4 65.2 (a) backbone → decoder MIM AP AP50 AP75 APS APM APL
+✗ (C3,C4,C5) → P5 64.2 50.4 28.0 47.0 68.2 51.5
+✗ (C3,C4,C5) → P4 53.7 65.5 49.6 69.8 53.4 31.4
+✗ (C3,C4,C5) → P3 65.2 53.5 49.7 69.8 53.9 32.7
+✓ (C3,C4,C5) → P5 64.9 54.7 54.9 33.4 50.3 69.3
+✓ 51.0 69.4 55.7 34.5 55.1 65.2 (C3,C4,C5) → P4
+✓ (C3,C4,C5) → P3 64.5 55.4 34.4 50.9 69.2 55.0 (b) backbone → decoder MIM AP AP50 AP75 APS APM APL
+✗
+C5 → P5 64.4 46.4 67.7
+✗
+C5 → P4 64.4 48.0 68.7
+✗
+C5 → P3 64.9 48.7 69.1
+✓
+C5 → P5 64.6 50.2 69.1
+✓ 50.9 69.3 55.5 34.2 55.1 65.5
+C5 → P4
+✓ 50.9 69.2 55.7 34.6 54.9
+C5 → P3 65.0 49.7 26.9 51.8 30.4 52.6 30.7 55.0 33.5 50.5 52.2 52.9 54.5 (c)
+Table 5: Ablation of MIM pre-training. (a) multi-scale feature maps output by the backbone + multi-scale feature maps for the
+Transformer decoder. (b) multi-scale feature maps output by the backbone + single-scale feature map for the Transformer decoder. (c) single-scale feature map output by the backbone + single-scale feature map for the Transformer decoder. pre-training by 1.5 AP in the(C3,C4,C5) → (P3, P4, P5) configuration and 2.9 AP in the C5 → P4 configuration.
+Multi-scale feature maps for the decoder can be re-moved. By comparing the results between Table 5a and
+Table 5b, we found that using high-resolution feature maps can match or even surpass the performance of using multi-For example, (C3,C4,C5) → P3 scale feature maps. achieves comparable performance with (C3,C4,C5) → (P3, P4, P5) with or without using MIM pre-training.
+This observation is not trivial as most existing detection heads still require multi-scale features as input, and it makes building a competitive single-scale plain DETR possible.
+We hope this finding could ease the design of future de-6
+(a) (C3,C4,C5) → (P3, P4, P5) (b) (C3,C4,C5) → P4 (c) C5 → P4
+Figure 3: We compare the architecture designs when using different feature maps output by the backbone and sent to the Transformer decoder. From (a) to (b), we simplify the dependency on sending multi-scale feature maps to the Transformer decoder. From (b) to (c), we remove the dependency on fusing multi-scale feature output by the backbone. We adopt (c) as our default architecture setting. method
+Cascade Mask R-CNN[3]
+Ours
+AP AP50 AP75 APS APM APL 58.7 36.9 57.4 69.1 53.7 68.9 53.8 73.4 58.9 35.9 71.9 57.0
+Table 6: Comparison of the improved plain DETR and Cas-cade Mask R-CNN with a MIM pre-trained ViT-Base back-bone. Our plain DETR with global cross-attention is slightly bet-ter than the region-based, multi-scaled Cascade Mask R-CNN. tection frameworks.
+Multi-scale feature maps from the backbone are non-necessary. We analyze the effect of removing the multi-scale feature maps from the backbone by comparing the results of Table 5b and Table 5c. When using a super-vised pre-trained backbone, adopting only the last feature map C5 from the backbone would hurt the performance.
+For example, when using the supervised pre-trained back-bone, the C5 → P5 reaches 46.4 AP, which is worse than (C3,C4,C5) → P5 (47.0 AP) by 0.6 AP. However, when using the MIM pre-trained backbone, C5 → P5 reaches 50.2 mAP, which is comparable with the performance of (C3,C4,C5) → P5 (50.3 AP). These results show that MIM pre-training can reduce the reliance on multi-scale feature maps.
+Single-scale feature map from the backbone and single-scale feature map for the decoder is enough. Based on the above observations, we can reach a surprisingly simple but important conclusion that we can completely eliminate the need for multi-scale feature maps in both the backbone and Transformer decoder by using our proposed BoxRPB scheme and MIM pre-training. 5.4. Application to a plain ViT
+In this section, we build a simple and effective fully plain object detection system by applying our approach to the plain ViT [13]. Our system only uses a single-resolution feature map throughout a plain Transformer encoder-decoder architecture, without any multi-scale de-sign or processing. We compare our approach with the state-of-the-art Cascade Mask R-CNN [3, 28] on the COCO
+Figure 4: Visualizations of the cross-attention maps of models w. or w/o. BoxRPB. For each group, the first column shows the input image and the object query. The first row presents the attention maps of the model w. BoxRPB, while the second row displays at-tention maps of the model w/o. BoxRPB. BoxRPB helps to guide the cross-attention to focus on the individual objects. dataset. For the fair comparison, We use a MAE [20] pre-trained ViT-Base as the backbone and train the object de-tector for ∼50 epochs. As shown in Table 6, our method achieves comparable results with Cascade Mask R-CNN which relies on using multi-scale feature maps for better localization across different object scales. Remarkably, our method does not train with instance mask annotations that are usually considered to be beneficial for object detection. 5.5. Visualization of cross-attention maps
+Figure 4 shows the cross-attention maps of models with or without BoxRPB. For the model with BoxRPB, the cross-attention concentrate on the individual object. In the con-trary, the cross-attention of model without BoxRPB attend to multiple objects that have similar appearance. 7
+method
+Swin [34]
+DETA [36]
+DINO-DETR [54]
+Ours∗
+DETA [36]
+DINO-DETR [54]∗
+Ours∗ framework extra data
+#params
+#epoch
+HTC
+DETR
+DETR
+DETR
+DETR
+DETR
+DETR 284M 218M 218M 228M 218M 218M 228M
+O365
+O365
+O365
+AP 57.7 58.5 58.6 60.0 63.5 63.3
+AP50
+AP75 76.2 76.5 76.9 78.9 80.4
+− 63.1 64.4 64.1 66.4 70.2
+−
+APS 33.4 38.5 39.4 42.8 46.1
+−
+APM 52.9 62.6 61.6 62.7
+APL 64.0 73.8 73.2 73.7 66.9 76.9
+−
+− 72 24 36 36 24 + 24 26 + 18 24 + 24 63.9 82.1 70.7 48.2 66.8 76.7
+Table 7: System-level comparisons with the state-of-the-art results on COCO test-dev. All methods adopt the Swin-Large backbone. The
+∗ marks the results with test time augmentation. 6. System-level Results
+We compare our method with other state-of-the-art methods in this section. Table 7 shows results, where all experiments reported in this table utilize a Swin-Large as the backbone. As other works usually apply an encoder to enhance the backbone features, we also stack 12 window-based single-scale transformer layers (with a feature dimen-sion of 256) on top of the backbone for a fair comparison.
+With the 36 training epochs, our model achieves 60.0 AP on the COCO test-dev set, which outperforms DINO-DETR by 1.4 AP. Further introducing the Objects365 [40] as the pre-training dataset, our method reaches 63.9 AP on the test-dev set, which is better than DINO-DETR and DETA by a notable margin. These strong results verify that the plain DETR architecture does not have intrinsic drawbacks to prevent it from achieving high performance. 7.

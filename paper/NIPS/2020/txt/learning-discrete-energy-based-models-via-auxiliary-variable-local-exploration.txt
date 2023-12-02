@@ -1,0 +1,95 @@
+Abstract
+Discrete structures play an important role in applications like program language modeling and software engineering. Current approaches to predicting complex structures typically consider autoregressive models for their tractability, with some sacriﬁce in ﬂexibility. Energy-based models (EBMs) on the other hand offer a more ﬂexible and thus more powerful approach to modeling such distributions, but require partition function estimation. In this paper we propose ALOE, a new algo-rithm for learning conditional and unconditional EBMs for discrete structured data, where parameter gradients are estimated using a learned sampler that mimics local search. We show that the energy function and sampler can be trained efﬁciently via a new variational form of power iteration, achieving a better trade-off between
+ﬂexibility and tractability. Experimentally, we show that learning local search leads to signiﬁcant improvements in challenging application domains. Most no-tably, we present an energy model guided fuzzer for software testing that achieves comparable performance to well engineered fuzzing engines like libfuzzer. 1
+
+Introduction
+Many real-world applications involve prediction of discrete structured data, such as syntax trees for natural language processing [1, 2], sequences of source code tokens for program synthesis [3], and structured test inputs for software testing [4]. A common approach for modeling a distribution over structured data is the autoregressive model. Although any distribution can be factorized in such a way, the parameter sharing used in neural autoregressive models can restrict their ﬂexibility. Intuitively, a standard way to perform inference with autoregressive models has a single pass with a predetermined order, which forces commitment to early decisions that cannot subsequently be rectiﬁed. Energy-based models [5] (EBMs), on the other hand, deﬁne the distribution with an unnormalized energy function, which allows greater ﬂexibility by not committing to any inference order. In principle, this allows more ﬂexible model parameterizations such as bi-directional LSTMs, tree LSTMs [1, 2], and graph neural networks [6, 7] to be used to capture non-local dependencies.
+Unfortunately, the ﬂexibility of EBMs exacerbates the difﬁculties of learning and inference, since the partition function is typically intractable. EBM learning algorithms therefore employ approximate strategies such as contrastive learning, where positive samples are drawn from data and negative sam-ples obtained from an alternative sampler [8]. Contrastive divergence [9–12], pseudo-likelihood [13] and score matching [14] are all examples of such a strategy. However, such approaches use hand-designed negative samplers, which can be overly restrictive in practice, thus [8, 15, 16] consider joint training of a ﬂexible negative sampler along with the energy function, achieving signiﬁcant improve-ments in model quality. These recent techniques are not directly applicable to discrete structured data however, since they exploit gradients over the data space. In addition, the parameter gradient involves an intractable sum, which also poses a well-known challenge for stochastic estimation [17–24].
+In this work, we propose Auxiliary-variable LOcal Exploration (ALOE), a new method for discrete
+EBM training with a learned negative sampler. Inspired by viewing MCMC as a local search in 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+continuous space, we parameterize the learned sampler using local discrete search; that is, the sampler
+ﬁrst generates an initial negative structure using a tractable model, such as an autoregressive model, then repeatedly makes local changes to the structure. This provides a learnable negative sampler that still depends globally on the sequence. As there are no demonstrations for intermediate steps in the local search, we treat it as an auxiliary variable model. To learn this negative sampler, instead of the primal-dual form of MLE [25, 8], we propose a new variational objective that uses ﬁnite-step
+MCMC sampling for the gradient estimator, resulting in an efﬁcient method. The procedure alternates between updating the energy function and improving the dual sampler by power iteration, which can be understood as generalization of persistent contrastive divergence (PCD [10]).
+We experimentally evaluated the approach on both synthetic and real-world tasks. For a program synthesis problem, we observe signiﬁcant accuracy improvements over the baseline methods. More notably, for a software testing task, a fuzz test guided by an EBM achieves comparable performance to a well-engineered fuzzing engine on several open source software projects. 2 Preliminaries
+Energy-based Models: Let x ∈ S be a discrete structured datum in the space S. We are interested in learning an energy function f : S → R that characterizes the distribution on S. Depending on the space, f can be realized as an LSTM [26] for sequence data, a tree LSTM [1] for tree structures, or a graph neural network [6] for graphs. The probability density function is deﬁned as (1) (2) pf (x) = exp (f (x) − log Zf ) ∝ exp (f (x)) , x∈S exp (f (x)) is the partition function. where Zf := (cid:80)
+It is natural to extend the above model for conditional distributions. Let z ∈ Z be an arbitrary datum in the space Z. Then a conditional model is given by the density (cid:88) pf (x|z) =
+, where Zf,z = exp (f (x, z)) . exp (f (x, z))
+Zf,z x∈S
+Typically S is a combinatorial set, which makes the partition function Zf or Zf,z intractable to calculate. This makes both learning and inference difﬁcult.
+Primal-Dual view of MLE: Let D = {xi}|D| over S. We consider maximizing the log likelihood of D under model pf : i=1 be a sample obtained from some unknown distribution max f (cid:96) (f ) := Ex∼D [f (x)] − log Zf . (3)
+Directly maximizing this objective is not feasible due to the intractable log partition term. Previous work [15, 8] reformulates the MLE by exploiting the Fenchel duality of the log-partition function, i.e., log Zf = maxq Ex∼q [f (x)] − H(q), where H(q) = −Eq [log q] is the entropy of q (·), which leads to a primal-dual view of the MLE: (4) min q
+−H(q) max f
+− Ex∼q [f (x)] (cid:124) (cid:125) (cid:123)(cid:122) negative sampling
+¯(cid:96) (f, q) := Ex∼D [f (x)] (cid:125) (cid:123)(cid:122) (cid:124) positive sampling
+Although the primal-dual view introduces an extra dual distribution q (x) for negative sampling, this provides an opportunity to use a trainable deep neural network to capture the intrinsic data manifold, which can lead to a better negative sampler. In [8], a family of ﬂexible negative samplers was introduced, which combines learnable components with dynamics-based MCMC samplers, e.g.,
+Hamiltonian Monte Carlo (HMC) [27] and stochastic gradient Langevin dynamics (SGLD) [28], to obtain signiﬁcant practical improvements in continuous data modeling. However, the success of this approach relied on the differentiability of q and f over a continuous domain, requiring guidance not
+¯(cid:96) (f, q) = only from ∇xf (x), but also from gradient back-propagation through samples, i.e., ∇φ
+−∇φEx∼qφ [∇xf (x) ∇φx] where φ denotes the parameters of the dual distribution. Unfortunately, for discrete data, learning a dual distribution for negative sampling is difﬁcult. Therefore this approach is not directly translatable to discrete EBMs. 3 Auxiliary-variable Local Exploration
+To extend the above approach to discrete domains, we ﬁrst introduce a variational form of power iteration (Section 3.1) combined with local search (Section 3.2). We present the method for an unconditional EBM, but the extension to a conditional EBM is straightforward. 2
+3.1 MLE via Variational Gradient Approximation
+For discrete data, learning the dual sampler in the min-max form of MLE (4) is notoriously difﬁ-cult, usually leading to inefﬁcient gradient estimation [17–24]. Instead we consider an alternative optimization that has the same solution but is computationally preferable: max f,q
+˜(cid:96) (f, q) := max (cid:12) (cid:12) (cid:12) (cid:12) (cid:26) (cid:90) q f
+K := max q∈K
+Ex∼D [f (x)] − Ex∼q [f (x)], (cid:27) q (x) kf (x(cid:48)|x) dx = q (x(cid:48)) , ∀x(cid:48) ∈ S
+, (5) (6) where kf (x(cid:48)|x) is any ergodic MCMC kernel whose stationary distribution is pf .
+Theorem 1 Let (f ∗, q∗) = argmaxf,q distribution pf , then f ∗ = argmax (cid:96) (f ) is the MLE and q∗ = pf ∗ .
+˜(cid:96) (f, q). If the kernel kf (x(cid:48)|x) is ergodic with stationary
+Proof By the ergodicity of kf (x(cid:48)|x), there is unique feasible solution satisifying the constraint (cid:82) q (x) kf (x(cid:48)|x) dx = q (x(cid:48)), which is pf (x). Substituting this into the gradient of ˜(cid:96) yields
+Ex∼D [∇f f (x)] − Ex∼qf [∇f f (x)] = 0, verifying that f is the optimizer of (3).
+Solving the optimization (5) is still nontrivial, as the constraints are in the function space. We therefore propose an alternating update based on the variational form (5): (cid:19) (cid:18)(cid:90)
+• Update q by power iteration: Noticing that the constraint actually seeks an eigenfunction of kf (x(cid:48)|x), we can apply power iteration to ﬁnd the optimal q. Conceptually, this power itera-tion executes qt+1(x(cid:48)) = (cid:82) qt(x)kf (x(cid:48)|x) dx until convergence. However, since the integral is intractable, we instead apply a variational formulation to minimize q
+DKL qt+1 = argmin (cid:12) qt(x)kf (x(cid:48)|x) dx (cid:12) (cid:12) (cid:12) (cid:12) (cid:12)q
+In practice, this only requires a few power iteration steps. Also we do not need to worry about differentiability with respect to x, as (7) needs to be differentiated only with respect to the parameters of q. We will show in the next section that this framework actually allows a much more
+ﬂexible q than autoregressive, such as a local search algorithm.
+Eqt(x)kf (x(cid:48)|x) [log q (x(cid:48))] .
+= argmin (7) q
+• Update f with MLE gradient: Denote q∗ f = argmaxq∈K
+˜(cid:96) (f, q). Then q∗ f converges to pf .
+Recall the unbiased gradient estimator for MLE (cid:96) (f ) w.r.t. f is
+∇f (cid:96) (f ) = Ex∼D [∇f f (x)] − Ex∼q∗ f
+[∇f f (x)] ,
+By alternating these two updates, we obtain the ALOE framework illustrated in Algorithm 1.
+Connection to PCD: When we set the number of power iteration steps to be 1, the variational form of MLE optimization can be understood as a function generalized version of Persistent Contrastive
+Divergence (PCD) [10], where we distill the past MCMC samples into the sampler q [29]. Intuitively, since f is optimized by gradient descent, the energy models between adjacent stochastic gradient iterations should still be close, and the power iteration will converge very fast.
+Connection to wake-sleep algorithm: ALOE is also closely related to the “wake-sleep” algo-rithm [30] introduced for learning Helmholtz machines [31]. The “sleep” phase learns the recognition network with objective DKL(pf ||q), requiring samples from the current model. However it is hard to obtain such samples for general EBMs, so we exploit power iteration in a variational form. 3.2 Negative sampler as local search with auxiliary variables
+Ideally the sampler q∗ should converge to the stationary distribution pf , which requires a sufﬁciently
+ﬂexible distribution. One possible choice for a discrete structure sampler is an autoregressive model, like RobustFill for generating program trees [3] or GGNN for generating graphs [32]. However, these have limited ﬂexibility due to parameters being shared at each decision step, which is needed to handle variable sized structures. Also the “one-pass” inference according to a predeﬁned order makes the initial decisions too important in the entire sampling procedure. 3
+Algorithm 1 Main algorithm of ALOE 1: Input: Observations D = {xi}|D| i=1 2: Initialize score function f , sampler q. 3: for x ∼ D do 4: 5: 6: 7: end for
+Sample (ˆx, ˜x) from q(ˆx)kf (˜x|ˆx)
+Update f with −∇f f (x) + ∇f f (˜x)
+Update q using Algorithm 2
+Algorithm 2 Update sampler q 1: Input: Current model f 2: for i ← 1 to # power iteration steps do 3: 4:
+Sample ˜x from q, and get x from kf (·|˜x).
+Sample trajectories {xj j=1 for x using
+Eq (13) or Eq (14).
+Update q with gradient from Eq (12). 0:tj }N 5: 6: end for
+Figure 1: ALOE for learning unconditional discrete EBMs. Algorithms are similar for conditional case. We demonstrate with a single example, but in practice batched optimization is used.
+Intuitively, humans do not generate structures sequentially, but perform successive reﬁnement. Recent approaches for continuous EBMs have found that using HMC or SGLD provides more effective learning [8, 12] by exploiting gradient information. For discrete data, an analogy to gradient based search is local search. In discrete local search, an initial solution can be obtained using a simple algorithm, then local modiﬁcation can be made to successively improve the structure.
+By parameterizing q as a local search algorithm, we obtain a strictly more ﬂexible sampler than the autoregressive counterpart. Speciﬁcally, we ﬁrst generate an initial sample x0 ∼ q0, where q0 can be an autoregressive distribution with parameter sharing, or even a fully factorized distribution. Next we obtain a new sample using an editor qA(xi|xi−1), where qA(·|·) : S × S (cid:55)→ R deﬁnes a transition probability. We also maintain a stop policy qstop(·) : S (cid:55)→ [0, 1] that decides when to stop editing. The overall local search procedure yields a chain of x0:t := {x0, x1, . . . , xt}, with probability q(x0:t; φ) = q0(x0) t (cid:89) i=1 qA(xi|xi−1) t−1 (cid:89) (1 − qstop(xi))qstop(xt) i=0 where φ denotes the parameters in q0, qA and qstop. The marginal probability of a sample x is: q(x; φ) = (cid:88) q(x0:t; φ)I [xt = x] , where T is a maximum length, (8) (9) t,x0:t:t≤T which we then use as the variational distribution in Eq (7). The variational distribution q can be viewed as a latent-variable model, where x0, . . . , xt−1 are the latent variables. This choice is expressive, but it brings the difﬁculty of optimizing (7) due to the intractability of marginalization. Fortunately, we have the following theorem for an unbiased gradient estimator:
+Theorem 2 Steinhardt and Liang [33]: the gradient with respect to parameters φ has the form
+∇φ log q(x; φ) = Eq(x0:t|xt=x;φ) [∇φ log q([x0:t−1, x]; φ)] (10) where q(x0:t|xt = x; φ) ∝ q(x0:t; φ)I [xt = x].
+In above equation, q(x0:t|xt = x; φ) is the posterior distribution given the ﬁnal state x of the local search trajectory, which is hard to directly sample from. The common strategy of optimizing the variational lower bound of likelihood would require policy gradient [34] and introduce extra samplers.
+Instead, inspired by Steinhardt and Liang [33], we use importance sampling with self-normalization to estimate the gradient in (10). Speciﬁcally, let sx(x0:t−1) be the proposal distribution of the local search trajectory. We then have
+∇φ log q(x; φ) = Esx(x0:t−1) (cid:20) q(x0:t|xt = x; φ) sx(x0:t−1)
+∇φ log q([x0:t−1, x]; φ) (11) (cid:21)
+In practice, we draw N trajectories from the proposal distribution, and approximate the normalization constant in q(x0:t|xt = x; φ) via self-normalization. The Monte Carlo gradient estimator is:
+∇φ log q(x; φ) (cid:39) (cid:39) 1
+N 1
+N
+N (cid:88) j=1
+N (cid:88) j=1 q(xj 0:tj |xtj = x; φ) sx(xj 0:tj −1) q(xj 0:tj −1) (cid:80)N 0:tj ; φ) k=1 q(xk sx(xj 0:tk ; φ)
+∇φ log q([xj 0:tj −1, x]; φ)
+∇φ log qφ([xj 0:tj −1, x]; φ) (12)
+The self-normalization trick above is also equivalent to re-using the same proposal samples from sx(x0:t−1) to estimate the normalization term in the posterior q(x0:t|xt = x; φ). Then, given 4
+a sample x, a good proposal distribution for trajectories needs to guarantee that every proposal trajectory ends exactly at x. Below we propose two designs for such proposal.
+Inverse proposal: Instead of randomly sampling a trajectory and hoping it arrives exactly at x, we can walk backwards from x, sampling xt−1, xt−2, . . . , x0. We call this an inverse proposal. In this case, we ﬁrst sample a trajectory length t. Then for each backward step, we sample xk ∼ A(cid:48)(xk|xk+1).
+For simplicity, we sample t from a truncated geometric distribution, and choose A(cid:48)(·|·) from the same distribution family as the forward editor qA(·|·), except that A(cid:48) is not trained. In this case we have sx(x0:t−1) = Geo(t) t−1 (cid:89) i=0
+A(cid:48)(xi|xi+1) (13)
+Empirically we have found that the learned local search sampler will adapt to the energy model with a different expected number of edits, even though the proposal is not learned.
+Edit distance proposal: In cases when we have a good q0, we design the proposal distribution based on shortest edit distance. Speciﬁcally, we ﬁrst sample x0 ∼ q0. Then, given x0 and the target x, we sample the trajectory x1:t−1 that would transform x0 to x with the minimum number of edits. For the space of discrete data S = {0, 1}d, the number of edits equal the hamming distance between x0 and x; if S corresponds to programs, then this corresponds to the shortest edit distance. Thus sx(x0:t−1) ∝ q0(x0)I [t = ShortestEditDistance(x0, x)] (14)
+Note that such proposal only has support on shortest paths, which would give a biased gradient in learning the local search sampler. In practice, we found such proposal works well. If necessary, this bias can be removed: For learning the EBM, we care only about the distribution over end states, and we have the freedom to design the local search editor, so we could limit it to generate only shortest paths, and the edit distance proposal would give unbiased gradient estimator.
+Parameterization of qA: We restrict the editor qA(·|xi−1) to make local modiﬁcations, since local search has empirically strong performance [35]. Also such transitions resemble Gibbs sampling, which introduces a good inductive bias for optimizing the variational form of power iteration. Two example parameterizations for the local editor are:
+• If x ∈ {0, 1, . . . , K}d, then qA(·|xi−1) = Multi(d) × Multi(K), where the ﬁrst multinomial distribution decides a position to change, and the second one chooses a value for that position.
+• If x is a program, the editor chooses a statement in the program and replaces with a generated statement. The statement selector follows a multinomial with arbitrary dimensionality using the pointer mechanism [36], while the statement generater can be an autoregressive tree generator.
+The learning algorithm for the sampler and the overall learning framework is summarized in Figure 1.
+Please also refer to our open sourced implementation for more details 1. 4

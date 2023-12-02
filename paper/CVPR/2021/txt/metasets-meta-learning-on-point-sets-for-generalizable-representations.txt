@@ -1,0 +1,3479 @@
+Abstract
+Deep learning techniques for point clouds have achieved strong performance on a range of 3D vision tasks. However, it is costly to annotate large-scale point sets, making it criti-cal to learn generalizable representations that can transfer well across different point sets. In this paper, we study a new problem of 3D Domain Generalization (3DDG) with the goal to generalize the model to other unseen domains of point clouds without any access to them in the training process.
+It is a challenging problem due to the substantial geometry shift from simulated to real data, such that most existing 3D models underperform due to overﬁtting the complete geome-tries in the source domain. We propose to tackle this problem via MetaSets, which meta-learns point cloud representations from a group of classiﬁcation tasks on carefully-designed transformed point sets containing speciﬁc geometry priors.
+The learned representations are more generalizable to vari-ous unseen domains of different geometries. We design two benchmarks for Sim-to-Real transfer of 3D point clouds. Ex-perimental results show that MetaSets outperforms existing 3D deep learning methods by large margins. 1.
+
+Introduction
+Understanding and reasoning about 3D objects are cru-cial for AI robots to understand the real world. Recently, with the success of deep learning in 2D vision tasks [8, 25], 3D deep learning techniques have also obtained state-of-the-art classiﬁcation/detection results in both simulated and real-world datasets of point clouds [20, 22, 38, 19]. How-ever, the high performance of 3D deep learning is mostly achieved when the training data and testing data come from the same domain. But in practical applications, the assump-tion is always violated. For example, we can easily use the well-annotated CAD models collected from the Internet as training data [35, 4], but when we directly use the learned deep networks to classify real objects, we ﬁnd that the perfor-mance decreases dramatically. Since scanning real objects
+∗Equal contribution
+Figure 1. The geometric domain shift is the key challenge of 3DDG. Top: Domain misalignment can be easily caused by broken assemblies or missing parts. Bottom: The existing deep networks learned in the complete point sets underperform in the transformed point sets with broken assemblies or missing parts. The X-axis represents the ratio of randomly discarded points for each point set.
+Further details of transformed datasets are included in Section 3.2. using depth cameras or LiDAR sensors are extremely costly, it is worthwhile to study the Sim-to-Real transfer learning problem for 3D point clouds.
+Under these circumstances, in this paper, we present a new problem of 3D Domain Generalization (3DDG), which aims to learn a classiﬁcation model in source point sets that can achieve high performance in target point sets that are not accessible during training. The training and testing data are from different domains with a large domain shift. In the case of 3DDG, it is mainly caused by various geometries of shapes from distant domains, namely the geometry shift. Fig-ure 1 (top) shows an example of geometry shift between the simulated ModelNet dataset [35] and the real ScanObjectNN
+[29] dataset. There exist some misalignments of learned 8863
+features caused by broken assemblies or missing parts of the entire point cloud. Existing point cloud classiﬁcation meth-ods [1, 15, 32, 36, 20, 22] perform sub-optimally under such a domain shift [29]. In an early experiment of this paper, we empirically analyze their performance in target domains with incomplete point clouds. The results of PointNet [20] are shown in Figure 1 (bottom). Note that only by retraining it on the transformed target set with missing parts, can the model perform well on it. By contrast, if we directly evaluate a model trained on a full source dataset, the performance will degrade signiﬁcantly, which can be caused by overﬁtting the geometry of training data.
+To mitigate the geometric domain shift, we propose a meta-learning framework named MetaSets that has two con-tributions to 3DDG. First and foremost, MetaSets improves the previous gradient-based meta-learning algorithms by ap-plying a learned soft-sampling strategy to the meta-tasks.
+It is partly inspired by the idea that the robustness of the model to out-of-distribution test samples can be improved by penalizing pre-deﬁned data groups with weights that are inversely proportional to the sample size of the groups [26].
+Speciﬁcally, we split the source dataset into a meta-training set and a meta-validation set, and perform meta-training and meta-validation on corresponding meta-tasks iteratively. In each meta-training phase, a batch of tasks is sampled with learned probabilities that are decided by the corresponding meta-validation error. This sampling strategy dynamically adjusts the training workload on all tasks and encourages the model to focus more on the difﬁcult ones. In this way, the proposed meta-learning algorithm can effectively balance the importance of different tasks.
+Another contribution of MetaSets is the transformation approaches that are speciﬁcally designed for point cloud and can be used to build different meta-tasks by expanding the source dataset. The transformed point sets simulate the cases of occlusions, missing parts, and the changes in scanning density in real environments. They can best facilitate the
+Sim-to-Real transfer learning by providing various geomet-ric priors, and thus prevent the model from overﬁtting the source dataset. In this way, the proposed algorithm can learn both domain-invariant latent factors that greatly improve the generalization ability of the model, and domain-speciﬁc geometric priors that enhance the discriminability.
+We design two Sim-to-Real benchmarks based on stan-dard point cloud datasets, and observe that the proposed
+MetaSets remarkably outperforms existing approaches for 3DDG. We further validate the effectiveness of the meta-learning framework, the soft-sampling strategy with learned probabilities, as well as each transformed point set. 2. Problem Setup
+This work studies the problem of 3D Domain Gener-alization (3DDG), which has been missing a full study at present. In 3DDG, we have a source domain consisting of point clouds and labels Ds = {(Ps, ys)}, and the goal is to train a highly generalizable model f to achieve low classiﬁ-(P,y)∼Dt [f (P) 6= y] on an unseen target cation errors E = E domain Dt = {(Pt, yt)}. Only the data and labels in the source domain are available during training, while those in the target domain are only used for evaluation. The technical challenge of this problem is the variations of data distribu-tion between Ds and Dt, which usually exist in simulation-to-reality (Sim-to-Real) transfer learning scenarios due to geometry deformation or the change of the point cloud den-sity, and may violate the i.i.d. assumption of the existing deep learning approaches for point cloud classiﬁcation. 3. MetaSets
+In this section, we ﬁrst introduce the overall framework of a new meta-learning approach for 3D domain generalization named MetaSets. Then we describe the speciﬁc meta-tasks in the framework, from which the model can learn meta-level geometric priors and generalize the features to other unseen domains. Figure 2 shows a schematic of our approach. 3.1. The MetaSets Framework
+A possible solution to 3DDG is to mitigate the potential geometry shift of a variety of 3D point sets by learning the do-main invariant geometric structures. To this end, we propose the MetaSets framework, as shown in Alg. 1, which follows the basic idea of Model-Agnostic Meta-Learning (MAML)
+[6], and contributes to ensuring the balance of various meta-tasks in the learning process so that features can be broadly generalizable to other unseen domains. We use MAML be-cause it is a typical gradient-based meta-learning approach, and MetaSets is supposed to be a general framework that can be combined with more advanced meta-learning algorithms.
+Meta-tasks. Since in practice we have only one source domain Ds of point sets that can be used for training, we need to augment Ds with reasonable data transformations to build multiple meta-tasks. Assuming that there has been a set of transformation functions {Fn}N n=1 that we can use off-the-shelf, we may construct n classiﬁcation tasks {Tn}N n=1 for the transformed point sets, and divide each of them into a meta-training set and a meta-validation set. We will discuss the details of Fn in Section 3.2.
+Meta-training. An inductive bias of MetaSets is that ef-fective meta-learners are supposed to perform well on all meta-tasks. For this purpose, in MetaSets, we improve the meta-training process of MAML [6] by explicitly balancing the contributions of all meta-tasks to the meta-learner. As shown in Line 6 in Alg. 1, at each meta-training step, we dynamically sample K transformation functions denoted by
+{F ′ k=1 from the function set, instead of pre-progressing k}K 8864
+Algorithm 1 Training process of MetaSets
+, Dval
+Input: Source dataset Ds = (Dtrain s s ), data minibatch size B, transformation functions {Fn}N n=1, number of sampled functions K, validation error bound ǫ, learning rates η and β n=1 = 1
+N 1: Initialize θ ← θ0 2: {pn}N 3: while Lval repeat 4: n < ǫ for n = 1, . . . , N do 5: 6: 7: 8: 9: 10: 11: 12: 13: 14: 15: 16: 17: 18: n=1; K) w.r.t. {pn}N n=1 s)}B i=1 ∼ Dtrain s, yi s k=1 ∼ multinomial({Fn}N k}K
+{(Pi
+{F ′ for k = 1, . . . , K do i=1 = {F ′ k}B
+{Pi
+Lk ← {fθ(Pi k(Pi s)}B i=1; θ′ k)}B k)}B,K i=1,k=1; θ ← θ − β∇θLcls i=1 k = θ − η∇θLk k (Pi
+Lcls ← {fθ′ until end of Dtrain repeat s s, yi
+{(Pi s)}B i=1 ∼ Dval s for n = 1, . . . , N do
+{Pi n}B n ← {fθ(Pi
+Lval
+{pn}N n=1 ← {softmax({Lval until end of Dval i=1 = {Fn(Pi n)}B i=1 s)}B s i=1 n }N n=1)}N n=1
+⊲ Initialize the task sample probability
+⊲ Meta-training phase
+⊲ Sample K functions
+⊲ Obtain transformed point sets
+⊲ According to Eqn (1)
+⊲ According to Eqn (2)
+⊲ Meta-validation phase
+⊲ Obtain transformed point sets
+⊲ According to Eqn (3)
+⊲ According to Eqn (4) 19: return θ
+Ds in advance. The probabilities of sampling {pn}N n=1 are initialized with a uniform distribution across all the tasks and updated at each meta-validation step (Line 17 in Alg. 1). In other words, MetaSets not only learns to complete the predeﬁned tasks but also learns to balance their impact on the meta-training process. Based on a minibatch of point clouds
+{Pi s}B i=1 randomly sampled from the source meta-training set Dtrain
+, MetaSets maps them to K transformed point sets s
+Dtrain i=1, where k ∈ {1, . . . , K} (Line 8 in
+Alg. 1). On each task, it computes the classiﬁcation loss: k = {(Pi s)}B k, yi
+Lk = 1
+B
+B
+X i=1
+ℓ (cid:0) fθ(Pi k), yi s(cid:1)
+, (1) where N is the minibatch size, ℓ(·) is the cross-entropy loss, and fθ is a point cloud classiﬁcation model, e.g., PointNet
+[20], parameterized by θ. We compute the parameters after one gradient update as θ′ k = θ − η∇θLk, then use the fol-lowing meta-objective to minimize the classiﬁcation error over all sampled tasks with updated parameters θ′ k:
+Lcls =
+K
+X k=1 1
+B
+B
+X i=1
+ℓ (cid:16)fθ′ k (Pi k), yi s(cid:17) . (2)
+Meta-validation. After one training epoch over Dtrain
+,
+MetaSets performs the mata-validation process to evaluate the classiﬁcation loss under parameter θ on Dval for the total of N tasks. Concretely, we ﬁrst sample B point clouds from
+Dval n for all N transformation functions {Fn}N s and transform them into Dval n=1, and then for each task Tn, we have s s n = E
+Lval (P,y)∼Dval n ℓ fθ(P), y
+. (cid:1) (cid:0) (3)
+The validation loss Lval n serves two purposes. First, it can be used as a signal of convergence for the classiﬁcation model. If Lval n is smaller than a small threshold ǫ (i.e., vali-dation error bound) for all tasks n ∈ {1, . . . , N }, the model is considered to be converged.
+Second and more importantly, at the end of each meta-n }N validation process, we use {Lval n=1 to compute the proba-bility of sampling each task for the next meta-training phase, as shown in Figure 2. We propose to increase the probabili-ties of tasks with higher validation losses to be selected in the next meta-training process so that MetaSets can focus more on these challenging tasks. Speciﬁcally, in Line 17 in
+Alg. 1, we update the probability of each task by performing softmax over {Lval n }N n=1:
+Minimizing the meta-objective achieves high perfor-mance on each sampled task, such that we can update the classiﬁcation model by θ ← θ − β∇θLcls. pn = exp(Lval n )
+N n=1 exp(Lval n )
+.
+P (4) 8865
+Meta train
+P
+F 0 1
+…
+F 0
+K
+Sample
+Meta validation
+P
+F1
+…
+FN
+P0 1
+P0
+K
+P1
+PN
+MLM
+…
+MLM
+Sum
+Lcls
+…p1 pn
+Update probability
+PointNet
+…
+PointNet
+Lval 1
+Lval
+N
+Softmax
+P0 k
+PointNet
+Meta learning module (MLM)
+Lk r
+θ0 k
+PointNet
+θ0 k
+`k
+P
+Fi pi
+Source point clouds
+Transformation function
+Task sample probability
+Projection
+Perspective
+Non-uniformly Density
+Randomly Drop
+Projection
+Perspective
+Non-uniformly Density
+Randomly Drop
+Figure 2. A schematic of the meta-learning framework of MetaSets.
+The updated probabilities are then applied to the sam-pling process of the transformation functions and balance the importance of N meta-tasks in the next training epoch.
+In 3DDG scenarios, learning {pn}N n=1 dynamically prevents the classiﬁcation model from overﬁtting the source domain, and encourages it to generalize across a wide range of possi-ble variations of the source point clouds, such as geometric distortion and missing parts. Unlike the MAML algorithm
+[6] that mainly focuses on encoding domain-invariant knowl-edge in the meta-leaner, the proposed MetaSets performs soft-sampling on meta-tasks to further address the imbalance of their impact, and thus enables the model to learn both domain-invariant and domain-speciﬁc knowledge from the expanded source domains.
+For the convergence of MetaSets, since the standard meta-learning paradigm has been proved to be able to converge theoretically [5] and empirically [6] even for diverse tasks with a large number of data points and MetaSets follows a similar training paradigm to standard meta-learning, so
+MetaSets can also converge soundly. For the time cost, the proposed MetaSets only requires an extra meta-validation step compared to standard meta-learning. However, the meta-validation step costs much less time than the meta-training step (about 1 : 30 on average in experiments). So the time cost of MetaSets is comparable to standard meta-learning. In experiments, we show that the convergence speed of MetaSets is similar to standard meta-learning and comparable to standard point cloud classiﬁcation models. 3.2. Transformed Point Sets
+The quality of the meta-tasks is the key to the effective-ness of MetaSets, as is the case in any other MAML variant.
+To improve the generalization ability of the learned model, the tasks are supposed to cover a wide range of possible variations of point clouds from the source domain. As men-tioned above, we expand the source domain by applying a set of transformation functions {Fn}N n=1 to the original point clouds. At the same time, the diversity and representative-ness of the transformed point sets are considered. Due to the work of Wu et al. [33], the common geometry shift for point clouds is mainly caused by occlusions, density changes, and scanning noises. Accordingly, we design the following three transformation approaches, as shown in Figure 2, that can be used to generate a variety of meta-tasks by changing the hyperparameters or using different combinations of them. 8866
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+Q a
+E
+Y
+A j
+/ o i e
+Q
+V
+Y a
+M
+D k d
++
++
+J 5
+H 2 x c 8
+=
+"
+>
+A
+A
+A
+B 9
+H i c b
+V
+D
+L
+S g
+M x
+F
+L 1
+T
+X 7
+W
++ q i 7 d
+B
+I v g q s x
+I
+Q d 0
+V 3 b h w
+U c
+E
++ o
+B 1
+K
+J s 2 0 o
+Z l k
+T
+D
+K
+F
+M v
+Q 7 3
+L h
+Q x
+K 0 f 4 8 6
+/
+M d
+P
+O
+Q l s
+P
+B
+A 7 n 3
+M s 9
+O
+U
+H
+M m
+T a u
++
++ 0
+U 1 t
+Y 3
+N r e
+K 2 6
+W d 3 b 3 9 g
+/
+L h
+U
+U v
+L
+R
+B
+H a
+J
+J
+J
+L 1
+Q m w p p w
+J 2 j
+T
+M c
+N q
+J
+F c
+V
+R w
+G k 7
+G
+N 9 m f n t
+C l
+W
+Z
+S
+P
+J p p
+T
+P 0
+I
+D w
+U
+L
+G c
+H
+G
+S n 4 v w m
+Z
+E
+M
+E
+/ v
+Z
+/ 1 x v 1 x x q
++ 4 c a
+J
+V 4
+O a l
+A j k a
+/
+/
+N
+U b
+S
+J
+J
+E
+V
+B j
+C s d
+Z d z 4 2
+N n 2
+J l
+G
+O
+F 0
+V u o l m s a
+Y j
+P
+G
+Q d i 0
+V
+O
+K
+L a
+T
++ e h
+Z
++ j
+M
+K g
+M
+U
+S m
+W f
+M
+G i u
+/ t 5
+I c a
+T 1
+N
+A r s
+Z
+B
+Z
+S
+L 3 u
+Z
++
+J
+/
+X
+T
+U x 4 5 a d
+M x
+I m h g i w
+O h
+Q l
+H
+R q
+K s
+A
+T
+R g i h
+L
+D p 5
+Z g o p j
+N i s g
+I
+K 0 y
+M 7 a l k
+S
+/
+C
+W v 7 x
+K
+W h d
+V r 1 a 9 f q h
+V 6 j d 5
+H
+U
+U 4 g
+V
+M 4
+B w 8 u o
+Q 5 3 0
+I
+A m
+E
+H i
+C
+Z 3 i
+F
+N 2 f i v
+D j v z s d i t
+O
+D k
+O 8 f w
+B 8 7 n
+D w p w k k w
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+M
+Q
+B 4
+/ o
+D 8
+V
+Y
+A
+/
+U
+E e
+O 5 a
+K
+V v 6
+E
+V
+O 5
+Q
+=
+"
+>
+A
+A
+A
+B 7
+X i c b
+V
+B
+N
+S 8
+N
+A
+E
+J 3
+U r 1 q
+/ q h 6 9
+L
+B b
+B
+U 0 m k o
+N 6
+K
+X j x
+W s
+B
+/
+Q h j
+L
+Z b t q 1 m 0 3
+Y 3
+Q g l 9
+D 9 4 8 a
+C
+I
+V
+/
++
+P
+N
+/
++
+N 2 z
+Y
+H b
+X 0 w 8
+H h v h p l 5
+Q
+S
+K 4
+N q 7 7 7
+R
+T
+W 1 j c 2 t 4 r b p
+Z 3 d v f 2
+D 8 u
+F
+R
+S 8 e p o q x
+J
+Y x
+G r
+T o
+C a
+C
+S 5
+Z 0 3
+A j
+W
+C d
+R
+D
+K
+N
+A s
+H
+Y w v p 3 5 7
+S e m
+N
+I
+/ l g 5 k k z
+I 9 w
+K
+H n
+I
+K
+R o r t
+X o
+S
+A 4
+H 9 c s
+W t u n
+O
+Q
+V e
+L l p
+A
+I 5
+G v 3 y
+V 2 8
+Q 0 z
+R i 0 l
+C
+B
+W n c 9
+N z
+F
++ h s p w
+K t i 0 1
+E s 1
+S 5
+C
+O c c i 6 l k q
+M m
+P a z
++ b
+V
+T c m a
+V
+A
+Q l j
+Z
+U s a
+M l d
+/
+T 2
+Q
+Y a
+T 2
+J
+A t s
+Z o
+R n p
+Z
+W 8 m
+/ u d 1
+U x
+N e
++
+R m
+X
+S
+W q
+Y p
+I t
+F
+Y
+S q
+I i c n s d
+T
+L g i l
+E j
+J p
+Y g
+V d z e
+S u g
+I
+F
+V
+J j
+A y r
+Z
+E
+L z l l 1 d
+J 6 6
+L q 1 a r
+X 9 7
+V
+K
+/
+S a
+P o w g n c
+A r n 4
+M
+E l 1
+O
+E
+O
+G t
+A
+E
+C o
+/ w
+D
+K
+/ w 5 s
+T
+O i
+/
+P u f
+C x a
+C 0 4
++ c w x
+/ 4
+H z
++
+A
+I
+M 8 j x w
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" r
+/ r t i 3 l 4
+Q
+Q 4 f
+Q
+S 4
+Y b
+X
+V e o w 0 r e l
+E
+=
+"
+>
+A
+A
+A
+B 7
+X i c b
+V
+B
+N
+S 8
+N
+A
+E
+J 3
+U r 1 q
+/ q h 6 9
+L
+B b
+B
+U 0 m k o
+N 4
+K
+X v
+R
+W w
+X 5
+A
+G 8 p m
+O 2 n
+X b j
+Z h d y
+O
+U 0
+P
+/ g x
+Y
+M i
+X v 0
+/ 3 v w 3 b t s c t
+P
+X
+B w
+O
+O 9
+G
+W b m
+B
+Y n g 2 r j u t 1
+N
+Y
+W 9
+/
+Y 3
+C p u l 3
+Z 2 9
+/
+Y
+P y o d
+H
+L
+R 2 n i m
+G
+T x
+S
+J
+W n
+Y
+B q
+F
+F x i 0 3
+A j s
+J
+M o p
+F
+E g s
+B 2
+M b 2
+Z
++
++ w m
+V 5 r
+F 8
+M
+J
+M
+E
+/
+Y g
+O
+J
+Q 8 5 o 8
+Z
+K r
+R 4
+K 0
+R
+/ 3 y x
+W 3 6 s 5
+B
+V o m
+X k w r k a
+P
+T
+L
+X 7 1
+B z
+N
+I
+I p
+W
+G
+C a t 3 1 3
+M
+T 4
+G
+V
+W
+G
+M 4
+H
+T
+U i
+/
+V m
+F
+A 2 p k
+P s
+W i p p h
+N r
+P 5 t d
+O y
+Z l
+V
+B i
+S
+M l
+S 1 p y
+F z 9
+P
+Z
+H
+R
+S
+O t
+J
+F
+N j
+O i
+J q
+R
+X v
+Z m 4 n 9 e
+N z
+X h l
+Z 9 x m a
+Q
+G
+J
+V s s
+C l
+N
+B
+T
+E x m r 5
+M
+B
+V 8 i
+M m
+F h
+C m e
+L 2
+V s
+J
+G
+V
+F
+F m b
+E
+A l
+G 4
+K 3
+/
+P
+I q a
+V 1
+U v
+V r 1
++ r 5
+W q d
+/ l c
+R
+T h
+B
+E 7 h
+H
+D y 4 h
+D r c
+Q g
+O a w
+O
+A
+R n u
+E
+V 3 p z
+Y e
+X
+H e n
+Y 9
+F a 8
+H
+J
+Z 4 7 h
+D 5 z
+P
+H 5
+L
+/ j y w
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" 4
+M
+S
+V h 6
+Y
+F
+A f
+A
+Y c
+J
+B
++ h 6 w
+G
+Y
+T 2 w r o
+M
+=
+"
+>
+A
+A
+A
+C 3
+X i c j
+V
+H
+L
+S s
+N
+A
+F
+D 2
+N 7 3 f
+V j e
+A m
+W
+A
+R
+X
+J
+R
+V
+B 3
+Y l u
+X
+I g o 2
+C q 0 t
+U y m 0 z
+Z 0 8 i
+C
+Z i
+F
+L q z p 2 4 9
+Q f c 6 u
++
+I f 6
+B
+/ 4
+Z 0 x g l p
+E
+J y
+Q 5 c
++ 4 9
+Z
++ b e 6 0 b
+S
+S 5
+T j v
+O
+S s o e
+G
+R 0 b
+H x i c m p 6
+Z n
+Z u f z 8
+Q i
+U
+J 0 5 i
+L
+M g 9 l
+G
+J
++ 5
+L
+B
+H
+S
+C 0
+R
+Z e
+U q
+K s y g
+W z
+H e l
+O
+H
+W 7 e z p
++ e i
+H i x
+A u
+D
+E 3
+U
+V i b r
+P 2 o
+H
+X 8 j h
+T
+R
+D
+X y
+S z
+W f q
+Q 5 n s n f
+Q b x y e 1 5
+S 4
+V
+L 0
+L
+J v u
+N f
+M
+E p
+O m b
+Z g 6
+C
+U g
+Q
+K y d
+R
+T m n 1
+F
+D
+E y
+E 4
+U v g
+Q
+C
+K
+A
+I
+S z
+A k 9
+F
+R
+R g o
+O
+I u
+D p 6 x
+M
+W
+E
+P
+B
+M
+X 6
+G
+O
+S t
+C l l
+C c p g x
+H b p 2 6
+Z d
+N
+W
+M
+D 2 m v
+P x
+K g 5 n
+S
+L p j
+U l p
+Y 5
+U 0
+I e
+X
+F h
+P
+V p t o m n x l m z v 3 n 3 j
+K e
++ 2 x
+X 9 3 c z
+L
+J 1 a h
+Q
++ x f u s
+/
+M
+/
++ p 0
+L
+Q o t b
+J k a
+P
+K o p
+M o y u j m c u q e m
+K v r n 9 p
+S p
+F
+D h
+F x
+G j c p
+H h
+P m
+R v n
+Z
+Z 9 t o
+E l
+O 7 7 i 0 z 8
+V e
+T q
+V m 9 5 1 l u i j d 9
+S x p w 6 e c 4
+B 0
+F l v
+V j a
+K
+G 4 f b x
+R 2 d r
+N
+R j 2
+M
+Z
+K 1 i j e
+W 5 i
+B
+/ s 4
+Q p m 8 r
+/
+G
+A
+R z x
+Z
+D e v
+G u r
+X u
+P l
+K t
+X
+K
+Z
+Z x
+L d l 3 b 8
+D
+M o
+C a
+C
+Q
+=
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+K x 4
+D
+T n z 7
+M f 4 i
+T
+G
+N l e 2
+H 2 0 9
+W
+U
+S 4
+Q
+=
+"
+>
+A
+A
+A
+B
++
+H i c b
+V
+B
+N
+S 8
+N
+A
+E
+N 3
+U r 1 o
+/
+G v
+X o
+J
+V g
+E
+T y
+W
+R g n o r e v
+F
+Y w
+X 5
+A
+E 8
+N m
+O 2 m
+X b j 7
+Y n
+Q g 1 9
+J d 4 8 a
+C
+I
+V 3
++
+K
+N
+/
++
+N 2 z
+Y
+H b
+X 0 w 8
+H h v h p l 5
+Q
+S q 4
+Q t v
++
+N k p r 6 x u b
+W
++
+X t y s 7 u 3 n 7
+V
+P
+D j s q
+C
+S
+T
+D
+N o s
+E
+Y n s
+B
+V
+S
+B 4
+D
+G 0 k a
+O
+A
+X i q
+B
+R o
+G
+A b j
+C
++ m f n d
+R 5
+C
+K
+J
+/
+E 9
+T l
+L w
+I j q
+M e c g
+Z
+R
+S 3 5
+Z t
+X
+F
+E
+S
+B 9 c
+F
+P
+J
+I
+/
+D
+H v l m z 6
+/
+Y c 1 i p x
+C l
+I j
+B
+V q
++
++ e
+U
+O
+E p
+Z
+F
+E
+C
+M
+T
+V
+K m
++
+Y 6 f o 5
+V
+Q i
+Z w
+K m
+F
+T d
+T k
+F
+I 2 p k
+P o a x r
+T
+C
+J
+S
+X z w
++ f
+W q d a
+G
+V h h
+I n
+X
+F a
+M 3
+V 3 x
+M 5 j
+Z
+S a
+R
+I
+H u j
+C i
+O 1
+L
+I 3
+E
+/
+/ z
++ h m
+G l 1 7
+O 4 z
+R
+D i
+N l i
+U
+Z g
+J
+C x
+N r l o
+I 1 4
+B
+I
+Y i o k m l
+E m u b 7
+X
+Y i
+E r
+K
+U
+G d
+V 0
+S
+E 4 y y
++ v k s 5 5 3
+W n
+U r
++ 4 a t e
+Z 1
+E
+U e
+Z
+H
+J
+M
+T c k
+Y c c k
+G a 5
+J a 0
+S
+J s w k p
+F n 8 k r e j
+C f j x
+X g 3
+P h a t
+J a
+O
+Y
+O
+S
+J
+/
+Y
+H z
++
+A
+B
+E
+S k 2
+A
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+K x 4
+D
+T n z 7
+M f 4 i
+T
+G
+N l e 2
+H 2 0 9
+W
+U
+S 4
+Q
+=
+"
+>
+A
+A
+A
+B
++
+H i c b
+V
+B
+N
+S 8
+N
+A
+E
+N 3
+U r 1 o
+/
+G v
+X o
+J
+V g
+E
+T y
+W
+R g n o r e v
+F
+Y w
+X 5
+A
+E 8
+N m
+O 2 m
+X b j 7
+Y n
+Q g 1 9
+J d 4 8 a
+C
+I
+V 3
++
+K
+N
+/
++
+N 2 z
+Y
+H b
+X 0 w 8
+H h v h p l 5
+Q
+S q 4
+Q t v
++
+N k p r 6 x u b
+W
++
+X t y s 7 u 3 n 7
+V
+P
+D j s q
+C
+S
+T
+D
+N o s
+E
+Y n s
+B
+V
+S
+B 4
+D
+G 0 k a
+O
+A
+X i q
+B
+R o
+G
+A b j
+C
++ m f n d
+R 5
+C
+K
+J
+/
+E 9
+T l
+L w
+I j q
+M e c g
+Z
+R
+S 3 5
+Z t
+X
+F
+E
+S
+B 9 c
+F
+P
+J
+I
+/
+D
+H v l m z 6
+/
+Y c 1 i p x
+C l
+I j
+B
+V q
++
++ e
+U
+O
+E p
+Z
+F
+E
+C
+M
+T
+V
+K m
++
+Y 6 f o 5
+V
+Q i
+Z w
+K m
+F
+T d
+T k
+F
+I 2 p k
+P o a x r
+T
+C
+J
+S
+X z w
++ f
+W q d a
+G
+V h h
+I n
+X
+F a
+M 3
+V 3 x
+M 5 j
+Z
+S a
+R
+I
+H u j
+C i
+O 1
+L
+I 3
+E
+/
+/ z
++ h m
+G l 1 7
+O 4 z
+R
+D i
+N l i
+U
+Z g
+J
+C x
+N r l o
+I 1 4
+B
+I
+Y i o k m l
+E m u b 7
+X
+Y i
+E r
+K
+U
+G d
+V 0
+S
+E 4 y y
++ v k s 5 5 3
+W n
+U r
++ 4 a t e
+Z 1
+E
+U e
+Z
+H
+J
+M
+T c k
+Y c c k
+G a 5
+J a 0
+S
+J s w k p
+F n 8 k r e j
+C f j x
+X g 3
+P h a t
+J a
+O
+Y
+O
+S
+J
+/
+Y
+H z
++
+A
+B
+E
+S k 2
+A
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+P
+J
+P e 8 h
+/
+N f 4
+V
+E 6
+I
+E u t
+D l
+/ d z p
+X
+W
+P 8
+=
+"
+>
+A
+A
+A
+B 8
+X i c b
+V
+D
+L
+S g
+N
+B
+E
+O y
+N r x h f
+U
+Y 9 e
+F o
+P g
+K e x
+K
+Q
+L 0
+F
+B f
+E
+Y w
+T w w
+W c
+P s p
+J
+M
+M m
+Z l d
+Z m a
+F s
+O
+Q v v
+H h
+Q x
+K t
+/ 4 8 2
+/ c
+Z
+L s
+Q
+R
+M
+L
+G o q q b r q 7 w p g z b
+T z v 2 8 m t r
+K 6 t b
++
+Q 3
+C 1 v b
+O 7 t 7 x f 2
+D h o 4
+S
+R b
+F
+O
+I x 6 p
+V k g 0 c i a x b p j h 2
+I o
+V
+E h
+F y b
+I a j 6 6 n f f
+E
+K l
+W
+S
+T v z
+T j
+G
+Q
+J
+C
+B
+Z
+H 1
+G i b
+H
+S w 8 1 j
+J 1
+Z
+M
+Y
+N f v
+F k t e 2
+Z v
+B
+X
+S
+Z
++
+R k q
+Q o d
+Y t f n
+V 6
+E
+U 0
+E
+S k
+M 5 0 b r t e 7
+E
+J
+U q
+I
+M o x w n h
+U 6 i
+M
+S
+Z 0
+R
+A b
+Y t l
+Q
+S g
+T p
+I
+Z x d
+P 3
+B
+O r 9
+N x
++ p
+G x
+J 4 8 7
+U 3 x
+M p
+E
+V q
+P
+R
+W g 7
+B
+T
+F
+D v e h
+N x f
++ 8 d m
+L 6
+F 0
+H
+K
+Z
+J w
+Y l
+H
+S
++ q
+J 9 w 1 0
+T u 9
+H 2 3 x x
+R
+S w 8 e
+W
+E
+K q
+Y v d
+W l
+Q 6
+I
+I
+N
+T a k g g 3
+B
+X 3 x 5 m
+T
+T
+O y n 6 l f
+H l
+X
+K
+V
+W v s j j y c
+A
+T
+H c
+A o
++ n
+E
+M
+V b q
+E
+G d a
+A g 4
+R l e 4 c 3
+R z o v z 7 n z
+M
+W 3
+N
+O
+N n
+M
+I f
++
+B 8
+/ g
+A j
++ p
+C
+X
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" x c b
+P l h n l n
+N a 1
+D e
+L
+Z 6
+B
+E n
+X f
+I
+/
+J
+Z o
+=
+"
+>
+A
+A
+A
+B 8
+X i c b
+V
+D
+L
+S g
+N
+B
+E
+O y
+N r x h f
+U
+Y 9 e
+B o
+P g
+K e y
+K o
+N 6
+C g g h e
+I p g
+H
+J m u
+Y n f
+Q m
+Q 2
+Z n l 5 l
+Z
+I
+S z 5
+C y 8 e
+F
+P
+H q 3 3 j z b 5 w 8
+D p p
+Y 0
+F
+B
+U d d
+P d
+F
+S
+S
+C a
++
+O 6 3 0 5 u a
+X l l d
+S 2
+/
+X t j
+Y 3
+N r e
+K e 7 u 1
+X
+W c
+K o
+Y 1
+F o t
+Y
+N
+Q
+O q
+U
+X
+C
+J
+N c
+O
+N w
+G a i k
+E a
+B w
+E
+Y w u
+B r 7 j
+S d
+U m s f y 3 g w
+T 9
+C
+P a k z z k j
+B o r
+P
+V w
+/ t h
+P
+F
+I
++ z c d o o l t
++ x
+O
+Q
+B a
+J
+N y
+M l m
+K
+H a
+K
+X 6 1 u z
+F
+L
+I 5
+S
+G
+C a p 1 y 3
+M
+T 4 2 d
+U
+G c 4
+E j g r t
+V
+G
+N
+C 2
+Y
+D 2 s
+G
+W p p
+B
+F q
+P 5 t c
+P
+C
+J
+H
+V u m
+S
+M
+F a 2 p
+C
+E
+T 9 f d
+E
+R i
+O t h 1
+F g
+O y
+N q
++ n r e
+G 4 v
+/ e a 3
+U h
+O d
++ x m
+W
+S
+G p
+R s u i h
+M
+B
+T
+E x
+G b 9
+P u l w h
+M 2
+J o
+C
+W
+W
+K 2 1 s
+J 6 1
+N
+F m b
+E h
+F
+W w
+I 3 v z
+L i 6
+R
++
+U v
+Z
+O y x d 3 p 6
+X
+K 5
+S y
+O
+P
+B z
+A
+I
+R y
+D
+B 2 d
+Q g
+R u o
+Q g 0
+Y
+S
+H i
+G
+V 3 h z t
+P
+P i v
+D s f 0 9 a c
+M 5 v
+Z h z 9 w
+P n 8
+A
+S 2
+K
+Q s
+Q
+=
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+K g
+R
+B d a
+S
+H 2 a
+W h n
+D
++
+D
+K
+F
+/
+H b
+I 7 h h c 0
+=
+"
+>
+A
+A
+A
+B
+/
+H i c b
+V
+D
+L
+S s
+N
+A
+F
+J 3
+U
+V 6 2 v a
+J d u
+B o v g q i
+Q i q
+L u i
+G 8
+F
+N
+B f u
+A
+J o b
+J d
+N
+I
+O n
+Z m
+E m
+Y k
+Q
+Q v 0
+V
+N y 4
+U c e u
+H u
+P
+N v n
+L
+R
+Z a
+O u
+B g c
+M 5 9 3
+L
+P n
+D
+B h
+V
+G n
+H
++ b
+Y q
+K 6 t r 6 x v
+V z d r
+W 9 s 7 u n r 1
+/ 0
+F
+V x
+K j
+H p 4
+J j
+F s h 8 i
+R
+R g
+V p
+K
+O p
+Z q
+S f
+S
+I
+J 4 y
+E g v n
+F w
+X f u
++
+R
+S
+E
+V j c a
++ z h
+P g c j
+Q
+S
+N
+K
+E b a
+S
+I
+F d 9 z j
+S 4 z
+D
+K 2 9
+M
+H
+L 5
+G
+U k
++
+A 2 s
+B t
+O 0 5 k
+B
+L h
+O 3
+J
+A 1
+Q o h 3
+Y
+X 9 4 w x i k n
+Q m
+O
+G l
+B q 4
+T q
+L 9
+H
+E l
+N
+M
+S
+P
+T m p c q k i
+A 8
+Q
+S
+M y
+M
+F
+Q g
+T p
+S f z 8
+J
+P 4 b
+F
+R h j
+C
+K p
+X l
+C w 5 n 6 e y
+N
+H
+X
+K m
+M h 2 a y i
+K o
+W v
+U
+L 8 z x u k
+O r r w c y q
+S
+V
+B
+O
+B 5 4 e i l
+E
+E d w 6
+I
+J
+O
+K
+S
+S
+Y
+M 0 y
+Q x
+C
+W 1
+G
+S
+F e
+I w k w t r 0
+V
+T
+M l u
+I t f
+X i b d 0 6
+Z 7 1 r y 8
+O 2 u 0 r s o 6 q u
+A
+Q
+H
+I
+E
+T 4
+I
+J z 0
+A
+I 3 o
+A 0 6
+A
+I
+M
+M
+P
+I
+N
+X 8
+G
+Y 9
+W
+S
+/
+W u
+/
+U x
+H 6 1
+Y 5
+U 4 d
+/
+I
+H 1
++
+Q
+M
+M l
+J
+U
+M
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+" j
+K
++ x a p
+M e g
+E 0 9
+L o u
+T 0 c s
+R s
+F
+C 3
+A l
+Q
+=
+"
+>
+A
+A
+A
+B
+/
+H i c b
+V
+D
+L
+S s
+N
+A
+F
+J 3
+U
+V 6 2 v a
+J d u
+B o v g q i
+R
+S
+U
+H d
+F
+N y 4 r 2
+A c 0
+M
+U y m k 3 b o z
+C
+T
+M
+T
+I
+Q
+Q 6 q
++ 4 c a
+G
+I
+W z
+/
+E n
+X
+/ j p
+M 1
+C
+W w 8
+M
+H
+M 6 5 l 3 v m h
+A m j
+S j v
+O t 1
+V
+Z
+W 9
+/
+Y 3
+K p u 1 3
+Z 2 9
+/
+Y
+P 7
+M
+O j n o p
+T i
+U k
+X x y y
+W g x
+A p w q g g
+X
+U 0 1
+I 4
+N
+E
+E s
+R
+D
+R v r h 9
+K b w
++ 4 9
+E
+K h q
+L e 5 0 l x
+O d o
+L
+G h
+E
+M d
+J
+G
+C u y 6 x 5
+G e h
+F
+H e m
+T 1 4 i a
+S c
+B
+G 5 g
+N 5 y m
+M w d c
+J
+W 5
+J
+G q
+B
+E
+J 7
+C
+/ v
+F
+G
+M
+U 0 6
+E x g w p
+N
+X
+S d
+R
+P s 5 k p p i
+R m
+Y 1
+L 1
+U k
+Q
+X i
+K x m
+R o q
+E
+C c
+K
+D
++ f h 5
+/
+B
+U 6
+O
+M
+Y
+B
+R
+L 8 4
+S
+G c
+/
+X 3
+R o 6 4
+U h k
+P z
+W
+Q
+R
+V
+S 1 7 h f i f
+N 0 x 1 d
+O n n
+V
+C
+S p
+J g
+I v
+D k
+U p g z q
+G
+R
+R
+N w
+R
+C
+X
+B m m
+W
+G
+I
+C y p y
+Q r x
+B
+E m
+E t e m r
+Z k p w l 7
++ 8
+S n r n
+T b f
+V v
+L p r
+N d r
+X
+Z
+R 1
+V c
+A x
+O w
+B l w w
+Q
+V o g 1 v
+Q
+A
+V 2
+A
+Q
+Q a e w
+S t 4 s 5 6 s
+F
++ v d
++ l i
+M
+V q x y p w 7
++ w
+P r 8
+A e
+U d l
+P
+I
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+V v n g s
+F y
+H c 4 9 6
+H 1
+A p x
+W
+M
+F
+Q f l
+P
+Z
+Y g
+=
+"
+>
+A
+A
+A
+B 8 3 i c b
+V
+D
+L
+S s
+N
+A
+F
+L 2 p r 1 p f
+V
+Z d u
+B o v g q i
+Q i q
+L u i
+G 5 c
+V 7
+A
+O a
+U i b
+T
+S
+T t 0
+M g k z
+N 0
+I
+J
+/
+Q 0 3
+L h
+R x 6 8
++ 4 8 2
++ c t
+F l o 6 4
+G
+B w z n 3 c s
++ c
+I
+J
+H
+C o
+O t
++
+O 6
+W 1 9
+Y 3
+N r f
+J 2
+Z
+W d 3 b
+/
++ g e n j
+U
+N n
+G q
+G
+W
++ x
+W
+M a 6
+G 1
+D
+D p
+V
+C 8 h
+Q
+I l 7 y a a 0 y i
+Q v
+B
+N
+M 7 n
+K
+/ 8 8
+S 1
+E b
+F 6 x
+G n
+C
++ x
+E d
+K
+R
+E
+K
+R t
+F
+K v h 9
+R
+H
+A d h 1 p w
+N v
+E
+G 1 5 t b d
+O c g q 8
+Q p
+S g w
+L
+N
+Q f
+X
+L
+H 8
+Y s j b h
+C
+J q k x
+P c 9
+N s
+J 9
+R j
+Y
+J
+J
+P q v 4 q e
+E
+J
+Z
+R
+M 6 4 j 1
+L
+F
+Y 2 4 6
+W f z z
+D
+N y
+Z p
+U h
+C
+W
+N t n 0
+I y
+V 3 9 v
+Z
+D
+Q y
+Z h o
+F d j
+L
+P a
+J a 9
+X
+P z
+P 6 6
+U
+Y
+X v c z o
+Z
+I
+U u
+W
+K
+L
+Q 2
+E q
+C c
+Y k
+L 4
+A
+M h e
+Y
+M 5 d
+Q
+S y r
+S w
+W
+Q k b
+U 0 0
+Z 2 p o q t g
+R v
++ c u r p
+H 1
+R 9 y 7 r
+N w
++
+X t c
+Z t
+U
+U c
+Z
+T u
+A
+U z s
+G
+D
+K 2 j
+A
+P
+T
+S h
+B
+Q w
+S e
+I
+Z
+X e
+H
+N
+S 5 8
+V 5 d z 4
+W o y
+W n 2
+D m
+G
+P 3
+A
++ f w
+D x
+G
+Z
+G k
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+D
+K
+S 7
+H
+T 3 5 l
+X 3 l 7 z 6
+C v c
+D t z
+V
+B x
+T
+L
+Q
+=
+"
+>
+A
+A
+A
+B 8 3 i c b
+V
+D
+L
+S s
+N
+A
+F
+L 2 p r 1 p f
+V
+Z d u
+B o v g q i
+R
+S
+U
+H d
+F
+N 6 6 k g n 1
+A
+E 8 p k
+O m m
+H
+T i
+Z h
+H k
+I
+J
+/
+Q 0 3
+L h
+R x 6 8
++ 4 8 2
++ c t
+F l o 6 4
+G
+B w z n 3 c s
++ c
+M
+O
+V
+M a d f 9 d k p r 6 x u b
+W
++
+X t y s 7 u 3 v 5
+B 9 f
+C o o x
+I j
+C
+W 2
+T h
+C e y
+F 2
+J
+F
+O
+R
+O 0 r
+Z n m t
+J d
+K i u
+O
+Q 0 2 4 4 u c 3 9 7 h
+O
+V i i
+X i
+U
+U 9
+T
+G s
+R 4
+J
+F j
+E
+C
+N
+Z
+W 8 v 0
+Y 6 3
+E
+Y
+Z a 3
+Z 4
+H 5
+Q r b l 1 d w 6 0
+S r y
+C 1
+K
+B
+A a 1
+D 9 8 o c
+J
+M
+T
+E
+V m n
+C s
+V
+N 9 z
+U x 1 k
+W
+G p
+G
+O
+J 1
+V f
+K
+N o i s k
+E j 2 j f
+U o
+F j q o
+J s n n m
+G z q w y
+R
+F
+E i 7
+R
+M a z d
+X f
+G x m
+O l
+Z r
+G o
+Z 3
+M
+M 6 p l
+L x f
+/ 8
+/ p
+G
+R 1 d
+B x k
+R q
+N
+B
+V k c
+S g y
+H
+O k
+E 5
+Q
+W g
+I
+Z
+O
+U a
+D 6 1
+B
+B
+P
+J b
+F
+Z
+E x l h i o m 1
+N
+F
+V u
+C t
+/ z l
+V d
+K 5 q
+H u
+N
++ v
+V
+D o 9 a 8
+K e o o w w m c w j l 4 c
+A l
+N u
+I
+M
+W t
+I
+F
+A
+C s
+/ w
+C m
++
+O c
+V 6 c d
++ d j
+M
+V p y i p 1 j
++
+A
+P n 8 w c d
+H
+J
+H
+B
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+O
+K
+W q 9 r p
+W
+E
+K
+P o g
+Y c
+K
+P e
+D d
+A b
+S
+C 1 2
+Q
+=
+"
+>
+A
+A
+A
+B 6 n i c b
+V
+D
+L
+S g
+N
+B
+E
+O y
+N r x h f
+U
+Y 9 e
+B o
+P g
+K e x
+K
+Q
+L 0
+F
+B f
+E k
+E c 0
+D k i
+X
+M
+T i b
+J k
+N n
+Z
+Z a
+Z
+X
+C
+E s
++ w
+Y s
+H
+R b z 6
+R d 7 8
+G y f
+J
+H j
+S x o
+K
+G o 6 q a 7
+K 4 i l
+M
+O i 6 3 0 5 u
+Z
+X
+V t f
+S
+O
+/
+W d j a 3 t n d
+K
++ 4 f
+N
+E y
+U a
+M b r
+L
+J
+K
+R b g
+X
+U c
+C k
+U r 6
+N
+A y
+V u x 5 j
+Q
+M
+J
+G 8
+G o
++ u p 3 3 z i 2 o h
+I
+P e
+I 4 5 n 5
+I
+B 0 r 0
+B a
+N o p
+Y e b 7 l 2 3
+W
+H
+L
+L 7 g x k m
+X g
+Z
+K
+U
+G
+G
+W r f 4 1 e l
+F
+L
+A m 5
+Q i a p
+M
+W 3
+P j d
+F
+P q
+U b
+B
+J
+J 8
+U
+O o n h
+M
+W
+U j
+O u
+B t
+S x
+U
+N u f
+H
+T 2 a k
+T c m
+K
+V
+H u l
+H 2 p
+Z
+C
+M l
+N
+/
+T 6
+Q 0
+N
+G
+Y c
+B r
+Y z p
+D g 0 i 9 5
+U
+/
+M 9 r
+J 9 i
+/ 8
+F
+O h 4 g
+S 5
+Y v
+N
+F
+/
+U
+Q
+S j
+M j 0 b 9
+I
+T m j
+O
+U
+Y 0 s o 0 8
+L e
+S t i
+Q a s r
+Q p l
+O w
+I
+X i
+L
+L y
++
+T x l n
+Z q 5
+Q v 7 y u l 6 l
+U
+W
+R x 6
+O 4
+B h
+O w
+Y
+N z q
+M
+I t 1
+K
+A
+O
+D
+A b w
+D
+K
+/ w 5 k j n x
+X l 3
+P u a t
+O
+S e b
+O
+Y
+Q
+/ c
+D 5
+/
+A
+O 9
+J j
+Z c
+=
+<
+/ l a t e x i t
+>
+< l a t e x i t   s h a 1
+_ b a s e 6 4
+=
+"
+I c a t j h v w m
+L
+G s
+I h
+/
+A
+Y
+C 3 n
+K
+V m
+N 1
+O
+U
+=
+"
+>
+A
+A
+A
+B 6 n i c b
+V
+B
+N
+S 8
+N
+A
+E
+J 3
+U r 1 q
+/ q h 6 9
+L
+B b
+B
+U 0 l
+E
+U
+G 9
+F
+Q
+T x
+W t
+B
+/
+Q h r
+L
+Z
+T t q l m 0 3
+Y 3
+Q g l 9
+C d 4 8 a
+C
+I
+V 3
++
+R
+N
+/
++
+N 2 z
+Y
+H b
+X 0 w 8
+H h v h p l 5
+Q
+S
+K 4
+N q 7 7 7
+R
+R
+W
+V t f
+W
+N 4 q b p a 3 t n d 2 9 8 v 5
+B
+U 8 e p
+Y t h g s
+Y h
+V
+O 6
+A a
+B
+Z f
+Y
+M
+N w
+I b
+C c
+K a
+R
+Q
+I b
+A
+W j m 6 n f e k
+K l e
+S w f z
+T h
+B
+P 6
+I
+D y
+U
+P
+O q
+L
+H
+S w 2 3
+P 6 5
+U r b t
+W d g
+S w
+T
+L y c
+V y
+F
+H v l b
++ 6
+/
+Z i l
+E
+U r
+D
+B
+N
+W 6 4 7 m
+J 8
+T
+O q
+D
+G c
+C
+J 6
+V u q j
+G h b
+E
+Q
+H 2
+L
+F
+U 0 g i 1 n 8 1
+O n
+Z
+A
+T q
+/
+R
+J
+G
+C t b 0 p
+C
+Z
++ n s i o 5
+H
+W 4 y i w n
+R
+E 1
+Q 7 3 o
+T c
+X
+/ v
+E 5 q w k s
+/ 4 z
+J
+J
+D
+U o 2
+X x
+S m g p i
+Y
+T
+P 8 m f a 6
+Q
+G
+T
+G 2 h
+D
+L
+F 7 a 2
+E
+D a m i z
+N h 0
+S j
+Y
+E b
+/
+H l
+Z d
+I 8 q 3 r n 1 a v 7 8 0 r t
+O o
++ j
+C
+E d w
+D
+K f g w
+Q
+X
+U 4
+A 7 q 0
+A
+A
+G
+A 3 i
+G
+V 3 h z h
+P
+P i v
+D s f 8 9 a
+C k 8 8 c w h 8 4 n z
+/
+D
+V
+Y 1 6
+<
+/ l a t e x i t
+>
+Non-uniform density (P1, g). When scanning an object with a LiDAR, the closer it is, the denser the point cloud will be. We simulate the non-uniform density by ﬁrstly setting an anchor position P1 outside the point cloud and calculating its distances to each point, where P1 is randomly selected from a unit sphere. We then discard the points with prob-abilities (i.e., dropping rate) proportional to the distances.
+To construct different point sets, we ﬁrst normalize the dis-tance from P1 to every point in the point cloud within the range of [0, 1], which is used as the basic drop rate. Then we multiply the basic drop rate with a multiplier g > 1, which is called the gate parameter and controls the density of the point cloud, where a larger g means more dropping points and thus a sparser point cloud. The point distribution and the density of the transformed point cloud can be controlled by P1 and g respectively.
+Dropping (P2, x%).
+Inspired by the idea of dropout that keeps deep networks from overﬁtting, we propose to ran-domly drop parts of point cloud structures. We randomly select a position P2 in the point cloud and drop the nearest x% points, where P2 and x% are controllable hyperparame-ters. This transformation method has two beneﬁts. First, it produces meta-tasks that can prevent the model from over-ﬁtting the source domain. Second, it simulate the cases of broken assemblies or missing parts in real environments, and thus can best facilitate the Sim-to-Real generalization.
+Self-occlusion (~v, W ). Self-occlusion occurs when the shape is viewed from a certain angle that the back surface of the point clouds is invisible. As shown in Figure 2, we simulate occlude by speciﬁcally designing a parallel projec-tion method for point clouds, and take it as a basic operation to construct the meta-tasks. To be speciﬁc, we ﬁrst choose a plain outside the 3D object and project the points cloud to the plain along its normal vector ~v. All optional planes are supposed to have the same minimum distance to the point cloud. We then divide the plane into grids of equal size. Within each grid, we keep the closest point along the normal vector and remove the others. We can control the grid size of W to obtain different occlusion patterns. As it approaches inﬁnity, it retains only one point, and when it is small enough, the entire point cloud will be preserved and no occlusion occurs. We can also control the projection angle, i.e., the normal vector of the plane. The transformed point sets with self-occlusion can greatly beneﬁt the transfer learn-ing problem of 3D point clouds in Sim-to-Real scenarios as the inner structure of real-world data is not visible.
+In summary, through the different types of transforma-tions introduced above, we can simulate different geometry shifts of self-occlusions, density changes, and missing parts.
+We control the hyperparameters in (P1, g, P2, x%, ~v, W ) to develop a set of functions {Fn}N n=1 at the very beginning of the training process. Each of them can be used to con-struct a transformed point set Dn = {(Fn(P), y)}, where (P, y) ∈ Ds. However, it is worth noting that, the imbalance of the task difﬁculty may make the meta-learning approach less effective for 3DDG. To solve this problem, we intro-duce the soft-sampling technique to dynamically adjust the training workload of the model on each task.
+Another beneﬁt of the above transformation methods is that we design tasks at the input level so that they can be easily combined with existing approaches that have speciﬁc designs in model architectures [23, 24]. Besides, the overall
+MetaSets framework is extendable and can be generalized to other target domains by simply deﬁning new tasks with speciﬁc geometric priors. 4. Experiments
+To evaluate MetaSets in Sim-to-Real scenarios, we build two 3DDG benchmarks upon the synthetic datasets, Model-Net [35] and ShapeNet [4], as well as a real dataset ScanOb-jectNN [29]. See supplementary materials for more details.
+Compared methods. We compare MetaSets with ﬁve state-of-the-art point cloud classiﬁcation models: Point-Net [20], PointNet++ [22], DGCNN [32], ConvPoint [2],
+LDGCNN [37], and PointCNN [15], covering both PointNet-based, CNN-based and Graph-based methods. Besides, we further compare MetaSets with PointDAN [23], a domain adaptation approach for point clouds based on PointNet.It is worth mentioning that PointDAN [23] requires unlabeled target data for training, while for 3DDG, the distribution of target data is not accessible. Thus, compared with PointDAN
+[23], MetaSets tries to tackle a more challenging problem.
+Implementation details. We divide each source domain into a training set and a validation set at a scale of 5 : 1, following the experimental protocol of domain generaliza-tion [7]. Similar to [6], we implement our meta-learning algorithm with ﬁrst-order approximation to achieve high computational efﬁciency. For all the compared methods, we tune hyperparameters by performing cross-validation in the source domain. For MetaSets, we construct three tasks for each transformation method, where the parameters are selected as follows: (1) we monotonically change the param-eters, from preserving all points to deleting all points; When we observe that the shape of the resulting point cloud begins to change, we record the parameters as t1, and when we observe that the shape is almost unrecognizable, we record the parameters as t2. (2) We randomly sample three pa-rameters within the range of (t1, t2) and add them to the task set. At each iteration in the meta-training phase, we sample four tasks from the task set of all transformations.
+Hyperparameters η and β are tuned by cross-validation, as shown in Alg. 1. Please see supplementary materials for their sensitivity analysis. Unless otherwise speciﬁed, we use
+PointNet [20] as the backbone of MetaSets. All experiments 8867
+ModelNet
+ScanObjectNN
+Sink(cid:29)(cid:3)Complete bottom
+Self-occlusion
+Missing bottom
+Conﬁdence
+Chair: Complete backrest
+Dropping
+Broken backrest
+MetaSets:  0.9812
+PointNet:  0.5746
+MetaSets:  0.8612 
+PointNet:  0.6893
+Figure 3. Visualization of point clouds from the source domain (ﬁrst column), the transformed point sets (second column), and the target domain (third column). The geometries of the transformed point clouds match well with those of the target clouds, which enables the proposed MetaSets to alleviate the inﬂuence of geometric domain shift. are conducted using PyTorch [18]. We perform each exper-iment three times and report the average and the standard deviation of the results. 4.1. Geometry Overﬁtting
+We ﬁrst empirically study how our current point cloud classiﬁcation methods are affected by geometry shift. As shown in Figure 1 (please go back to the ﬁrst page), we evaluate PointNet [20] on the ModelNet dataset by randomly dropping some parts of the point cloud. As we can see, the classiﬁcation accuracy becomes lower as more points are deleted. One might argue that this performance degradation is because the remainder of the point cloud does not have sufﬁcient geometric information and is, therefore, less rec-ognizable. Thus, we re-train the PointNet on transformed point clouds and the performance rises back to the model on the original dataset. The results show that the point clouds after transformation are still recognizable, and the reason for the performance degradation is the geometry shift between training and testing, which is a common situation in most
+Sim-to-Real scenarios. The model overﬁts the geometry of the complete point cloud shapes and cannot recognize the geometry of transformed shapes. 4.2. ModelNet to ScanObjectNN
+On this benchmark, we select the 11 categories shared by the ModelNet40 and ScanObjectNN datasets. Models are trained on ModelNet and evaluated on ScanObjectNN. We report the class-wise results in the supplementary materials.
+Visualization of transformed point sets. Figure 3 illus-trates the differences between geometries in the synthetic source domain and those in the real target domain, and how the transformed point sets contribute to learning more gen-eralizable features. Due to self-occlusion or missing parts,
+Method
+PointNet [20]
+PointNet++ [22]
+ConvPoint [2]
+DGCNN [32]
+PointCNN [15]
+LDGCNN [37]
+PointDAN [23] on PointNet
+MetaSets on PointNet
+MetaSets on ConvPoint
+MetaSets on DGCNN
+Object 55.90±1.47 47.30±0.53 57.40±0.44 61.68±1.26 50.32±0.43 62.29±0.22 63.32±0.85 68.28±0.79 65.05±0.56 72.42±0.21
+Object &

@@ -1,0 +1,130 @@
+Abstract
+In this paper, we explore the limits of Microsoft Floating Point (MSFP), a new class of datatypes developed for production cloud-scale inferencing on custom hardware.
+Through the co-evolution of hardware design and algorithms, MSFP16 incurs 3× lower cost compared to Bﬂoat16 and MSFP12 has 4× lower cost compared to INT8 while delivering a comparable or better accuracy. MSFP incurs negligible impact to accuracy (<1%), requires no changes to the model topology, and is integrated with a mature cloud production pipeline. MSFP supports various classes of deep learning models including CNNs, RNNs, and Transformers without modiﬁcation. Finally, we characterize the accuracy and implementation of MSFP and demonstrate its efﬁcacy on a number of production scenarios, including models that power major online scenarios such as web search, question-answering, and image classiﬁcation. 1
+
+Introduction
+Over the past few years, there has been an exponential growth in the size of deep neural networks (DNNs) to further push achievable accuracy [1, 2, 3]. With the diminishing of Moore’s law, the arith-metic density that can ﬁt on computing hardware plays an important role for large-scale inferencing.
+One key to increasing arithmetic density is the use of narrow bit-width datatypes.
+Inferencing DNNs with narrow bit-width at a required service level agreement (i.e., accuracy and latency) requires a careful balance of dynamic range and hardware complexity. For instance, although narrow ﬁxed-point datatypes incur a low hardware overhead, they lack a wide enough dynamic range.
+As such, the use of ﬁxed-point arithmetic at large-scale is typically limited due to noticeable accuracy
+∗Equal contribution. Email correspondence to birouhan@microsoft.com
+†work done while Anna Vinogradsky was an intern at Microsoft. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Figure 1: MSFP signiﬁcantly improves upon previous datatypes in computational efﬁciency at each
+ﬁxed level of accuracy. Left: relative area and energy cost of multiply-accumulate (MAC) using different datatypes on the same silicon. Right: ImageNet accuracy for ResNet-50 plotted versus normalized area cost. The area costs are normalized to Float32. drops (>1%). Fixed-point datatypes also require a manual calibration process for each new benchmark.
+To address these inefﬁciencies, there is a rising interest in custom datatypes speciﬁcally designed for
+DNN workloads. Google deployed a custom datatype called Bﬂoat16 on its TPUs [4, 5] and NVIDIA recently announced a new datatype called TF32 available on its latest generation A100 GPUs [6].
+Both Bﬂoat16 and TF32 represent a wide dynamic range which leads to close to zero accuracy drop when the DNN model is executed with these datatypes. However, while these datatypes have a lower hardware footprint compared to IEEE-compliant Float32, their overhead is still considered to be high for low-cost inference at scale. As a result, the industry seems to be converging to INT8 for inferencing which requires a careful model re-calibration to preserve accuracy. With the current setup, going below 8-bits almost always results in an accuracy drop.
+This paper introduces Microsoft Floating Point (MSFP), a class of new datatypes for robust and low-cost DNN inference at scale. MSFP is a hardware/algorithm co-designed numerical format that enables an efﬁcient realization of dot products (which are the building blocks of DNN workloads) on custom hardware while maintaining a high dynamic range ([2−126, 2127]). Figure 1 corroborates the accuracy-area trade-off of using different datatypes for serving ResNet50-ImageNet. MSFP outperforms existing datatypes in terms of area and energy cost when the model is held to a ﬁxed accuracy. Variants of MSFP together form a new Pareto frontier for computational performance/mm2 compared to a collection of competitive datatypes. In this paper, we quantify the Pareto frontier in terms of arithmetic density, the measure of how many dot products can be ﬁt into 1 mm2 of silicon on 16nm process. MSFP16 can be used as a drop-in replacement for Bﬂoat16 without any accuracy drop or requiring any re-calibration or hyper-parameter tuning. MSFP16 provides 2× memory saving and 2.8× higher arithmetic density compared to Bﬂoat16. We further built a fully automated
+ﬁne-tuning pipeline to enable serving DNNs at even a lower cost while preserving the accuracy. With moderate model ﬁne-tuning, MSFP can provide 4× higher arithmetic density compared to INT8 industry-standard datatype for inference while delivering comparable accuracy.
+MSFP is deployed at large-scale production for industry web services and has been successfully validated on over a dozen proprietary and open-sourced benchmarks. Extensive evaluations of a variety of computer vision and natural language processing models demonstrate the robustness and generality of the MSFP format. In summary, we make the following contributions:
+• We propose Microsoft ﬂoating point, a hardware/algorithm co-designed numerical datatype for DNN workloads that can achieve the same accuracy level of existing datatypes at a fraction of the area and power cost on custom silicon.
+• We build a low-friction production pipeline for serving pre-trained DNN models. MSFP preserves model accuracy at ultra-narrow bit-width with as few as three mantissa bits (i.e.,
+MSFP12) with minimal ﬁne-tuning. All conversions of weights and activations to MSFP format are handled in-situ on custom hardware.
+• We perform extensive evaluations of MSFP on various CNN, RNN, and Transformer models.
+Deploying DNN models using the MSFP datatype leads to a new state-of-the-art Pareto frontier between accuracy and computational cost. 2
+2 Microsoft Floating Point
+MSFP is a hardware/algorithm co-designed numerical format for DNN workloads. Here we build on
+IEEE-compliant formats to introduce the structure of MSFP and elaborate on its functionality.
+IEEE ﬂoating point formats include one sign bit s, a number of exponent bits e, and a number of signiﬁcand or mantissa bits m. Float16, for instance, consists of 1 sign bit, 5 exponent bits, and 11 mantissa bits (10 of which are explicitly stored). The resulting value can be decoded as x = (−1)s ∗ 2e(cid:48)
+∗ m where e(cid:48) is set to e − 15 to adjust for the encoded bias. MSFP has a similar structure with one main difference. Instead of assigning a private exponent to each element of a tensor, MSFP relies on using a shared exponent among some number of values. For instance, for a vector of elements, the ﬂoating point representation is:
+[(−1)s0 2e0 m0 , (−1)s1 2e1 m1 , ... , (−1)sn−1 2en−1 mn−1 ], the MSFP representation is: 2eshared (cid:2)(−1)s0 m(cid:48) 0 , (−1)s1 m(cid:48) 1, . . . , (−1)sn−1 m(cid:48) n−1 (cid:3) .
+The number of elements sharing one exponent is referred to as the bounding-box size. The shared exponent can be any value that is representative of the range of elements in each bounding-box.
+We use the maximum exponent in our setting to best represent the outliers in each bounding-box.
+However, other approaches could be used such as taking an average or percentile value.
+By associating each element in the bounding-box with the max exponent in the box, each mantissa term mi must be adjusted by shifting it to the right by the difference between emax and ei. The term m(cid:48) i is deﬁned as mi (cid:29) (eshared − ei), where (cid:29) is the right-shift operator. As emax − ei increases, the right shift will truncate away more of the least-signiﬁcant bits in the mantissa. Thus, similar to ﬁxed-point, MSFP is affected by extreme outlier values. However, because each bounding box deﬁnes its own dynamic range, an outlier’s effect would be limited to the bounding-box in which it occurs. In MSFP, zero is represented by having all mantissa bits being 0 for a given value (shared exponent can be any value). MSFP mantissas do not have an implicit leading bit and all mantissa bits are explicitly represented.
+The key insight behind MSFP is to strike a compromise between the dynamic range of ﬂoating point and the hardware efﬁciency of ﬁxed-point. Floating point uses an exponent for every element, while
+ﬁxed-point (with scaling) uses one exponent for all elements. In contrast, MSFP uses one exponent for each n elements, and is able to approach the beneﬁts of both formats.
+Computing with the MSFP format. MSFP is selectively applied to performance-critical com-ponents of a model that exhaust computation resources and memory bandwidth. Dot product is one of the core operations involved in DNN inference, being the basic operation underlying both convolutional and fully-connected layers. Suppose we have two n-dimensional row-vectors −→x0 and
+−→x1 in MSFP format with shared exponents 2e0 and 2e1 , respectively. The dot product of these vectors takes the form:
+−→x0.−→x1
+T = 2e0 (cid:2)(−1)s0,0 m(cid:48) 2e1 (cid:2)(−1)s1,0 m(cid:48) 0,0 , (−1)s0,1 m(cid:48) 1,0 , (−1)s1,1 m(cid:48) 0,1, . . . , (−1)s0,n−1 m(cid:48) 1,1, . . . , (−1)s1,n−1 m(cid:48) 0,n−1 1,n−1 (cid:3) . (cid:3)T
+= 2e0+e1 n−1 (cid:88) (cid:18) i=0 (−1)s0,i⊕s1,i m(cid:48) 0,i ∗ m(cid:48) 1,i (cid:19)
+, where ⊕ is XOR operation and T stands for transposition. As shown, the dot product in MSFP format consists of a single ﬁxed-point addition of exponents, n ﬁxed-point multiplications of mantissas, and n − 1 ﬁxed-point additions of mantissa products. Here, n, the length of the dot product, coincides with the bounding-box size. However, this does not always need to hold. A large dot product can be built by summing the results of smaller bounding-box sized dot products. The overhead of MSFP compared to pure ﬁxed-point is precisely the hardware needed to handle the shared exponent, and this overhead is amortized over the bounding-box size. 3
+Figure 2 shows the high level overview of a systolic tensor core architecture (left) which computes long dot products using multiple bounding-box length MSFP dot product units (right). Within MSFP dot product, the multipliers and adders are all ﬁxed-point. Thus for the same number of mantissa bits,
+MSFP has a signiﬁcantly lower circuit footprint compared to IEEE ﬂoating point. By truncating the number of bits assigned to each mantissa, the circuit area can be reduced even further.
+Figure 2: Systolic tensor core architecture containing multiple MSFP dot product units. Because each bounding-box has a single shared exponent, the math per-element can be done in ﬁxed-point and the cost of exponent handling is amortized over n (bounding box size). MSFP provides 3× and 4× higher MAC density compared to industry standard Bﬂoat16 and Int8, respectively.
+Table 1 summarizes the dot product density and memory savings with MSFP format for different numbers of mantissa bits. The bounding-box size here is 16. Throughout the paper, we refer to different MSFP conﬁgurations as MSFPN (e.g., MSFP12). The number listed is the sum of the bit-width assigned to sign, mantissa, and shared exponent. For the rest of the paper, MSFP will follow a sign-magnitude format and has an 8-bit shared exponent. The default bounding-box size is 16 unless explicitly mentioned otherwise. We will show in Section 4 that a bounding-box size of 16 provides a reasonable balance between inference cost and accuracy across various DNN benchmarks. MSFP12’s
+MAC circuit size is smaller even than Int4. MSFP uses a sign-magnitude mantissa format, which costs less area and energy compared to conventional two’s complement integer format (assuming equal mantissa bit-width).
+Table 1: MSFP versus other commonly used numerical formats for DNN inference. Memory and
+MAC density of various formats are normalized to Float32. In this table, MSFP is assumed to have 8-bit exponent and a bounding-box size of 16. The results listed here are based on topographical synthesis results using TSMC 16nm FF+.
+Memory Density
+MAC Density
+Float32 1.0× 1.0×
+Float16 Bﬂoat16 MSFP16 MSFP15 MSFP14 MSFP13 MSFP12 MSFP11 2.0× 1.8× 2.0× 3.1× 3.8× 8.8× 4.3× 10.8× 4.9× 13.9× 5.8× 18.3× 7.1× 31.9× 9.1× 50.9×
+Int8
+Int4 4.0× 8.0× 7.7× 20.9× 3 MSFP conﬁguration
+In this section, we ﬁrst discuss the effects of different conﬁguration settings for the MSFP datatype.
+We conclude the section with the MSFP quantization pipeline for DNN workloads.
+Bounding-box size. The granularity of values which share an exponent (bounding-box size) is an important factor for both model accuracy and hardware cost. Sharing an exponent among fewer values improves the encoding efﬁciency and sharing exponents amongst a larger number of values helps keep hardware costs down. Figure 3 illustrates the Kullback-Leibler (KL) divergence between
+MSFP encoding and Float32 encoding for various bounding-box sizes and mantissa bit-widths in a layer sampled from ResNet-50. KL divergence between two encoding format P and Q is deﬁned as KL(P (cid:107) Q) = (cid:80)
+. Intuitively, a lower KL divergence translates to a lower discrepancy between data distributions before and after quantization; thus resulting in better accuracy.
+As shown in Figure 3, with fewer mantissa bits, smaller bounding-box sizes are required to keep the quantization error under control. In practice, we found a bounding-box size of 16-128 to be effective in preserving the accuracy while incurring a moderate hardware cost. x∈X P (x) log (cid:16) P (x)
+Q(x) (cid:17) 4
+Figure 3: Effect of bounding-box size on the quantization error. (left) Histogram of pre-trained
+Float32 values in a sample layer of ResNet-50 model. (right) KL divergence of MSFP conﬁguration and Float32 counterpart as a function of bounding-box size for different mantissa bit-width. Increasing the bounding-box size can reduce the hardware complexity at a cost a lower encoding efﬁciency.
+Bounding-box shape. The shape of a bounding-box impacts the computing cost and ultimate model accuracy. While clustering similar magnitude values to create pertinent bounding-boxes will reduce quantization error, tracking exponents for arbitrary bounding-box shapes is expensive.
+Figure 4 presents several hardware-friendly options to partition matrices into bounding-boxes. Con-sider a right-hand matrix multiply y = xW , where x is a row-vector and W is a matrix. The simplest approach is to treat the entire matrix W as a single bounding-box. This is a common approach used in prior works [7]. Even though such a coarse-grained approach incurs a low hardware overhead, this can lead to severe accuracy loss due to outliers and needs careful re-calibration per benchmark.
+In a right-hand matrix multiply, dot products are performed between the row vector x and columns of the matrix W . Another natural boundary is to treat each column of the matrix W as a separate bounding-box. By aligning bounding-boxes to the columns of the matrix, all dot products are still be-tween a pair of bounding-boxes which can be calculated using ﬁxed-point arithmetic. Large matrices typically are broken down into small tiles that ﬁt into limited hardware resources of a kernel. Thus, one may more effectively split the computation into ﬁner-grained regions that align with hardware tiles (see the right-most images in Figure 4). We chose to work with tile-based partitioning to obtain a balance between accuracy and hardware cost. A similar strategy is applied to convolution layers by sharing the exponent along the channel depth.
+Figure 4: Hardware-friendly bounding-box shapes for (top row) fully-connected layers and (bottom row) convolution ﬁlters. We use tile-based partitioning (right most conﬁguration) in our experiments.
+All conversions happens in-situ on hardware without requiring the user to perform any pre-processing.
+Encoding efﬁciency. The encoding efﬁciency of MSFP depends on two main factors: bit-width and bounding-box size. Figure 5 demonstrates the expected value of Quantized Noise to Signal Ratio (QNSR) as a function of bit-width for MSFP format. In particular, the expected value of QNSR is deﬁned as E( Q(x)−x
+), where x is a random entry of random tensor X and Q(x) is the corresponding quantized value. To measure MSFP encoding efﬁciency, we considered thousands of random tensors x 5
+sampled from parameters of different neural networks and report the average acquired QNSRs (for output of a dot-product) in Figure 5. The overall variation across different tensors are shown using the error bars. As demonstrated, adding 1 bit to the mantissa decreases QNSR by almost 3.2dB. Figure 5 further illustrates MSFP encoding efﬁciency as a function of bounding-box size. In this experiment, we used 6 bits of mantissa, 1 sign bit, and 8 bits of the shared exponent for conversion to MSFP format (i.e., MSFP15). As shown, doubling the block-size increases the QNSR by approximately 0.52dB. The same trend is observed with other mantissa bit-widths.
+Figure 5: Encoding efﬁciency of MSFP format as a function of (left) number of mantissa bits and (right) bounding-box size. The reported QNSRs are averaged over thousands of random tensors.
+Quantization pipeline and deployment
+In this paper, we focus on efﬁcient inference of pre-trained deep neural networks. Although quantization-aware training of DNNs (e.g., with injected quantization noise) can lead to a better accuracy [8, 9], it would be impractical to force all users of a
+DNN inferencing platform to train their models with quantization from scratch. Instead, pre-trained
+ﬂoating point weights are directly quantized into MSFP, either ofﬂine or online within the hardware accelerator. Activation tensors are converted to MSFP in-situ on the hardware. At ultra-narrow bit-width, we found that a few steps (as low as 1 epoch) of model ﬁne-tuning can help improve the accuracy of the quantized model. To ﬁne-tune the network, we use the conventional training procedure based on stochastic gradient descent. During the forward pass, weights and activations are quantized to MSFP and the loss is calculated with the introduced quantization errors. A straight-through estimator in the back-propagation was to used for the gradients of quantization operators.
+The learning rate should be small during this ﬁne-tuning phase, typically equal to the ﬁnal learning rate used for original Float32 training.
+MSFP was deployed on project Brainwave [10, 11], a datacenter-scale DNN inferencing service using networked FPGAs. Each Brainwave FPGA is a self-contained neural processing unit that has custom tensor-cores. Although the underlying conﬁguration (i.e., bounding-box size and shape) can be re-conﬁgured based on the application requirements, we opt to use a ﬁxed conﬁguration in our experiments for simplicity (see Section 4). We emphasize that all data conversions and computation of shared exponent are handled in-situ on hardware without requiring users to do any pre-processing. 4 Experiments
+To measure accuracy, the impact of MSFP on DNN inference was modeled in both Tensorﬂow and
+Pytorch using a custom library. This MSFP library was validated against our hardware for high ﬁdelity emulation. For image classiﬁcation, the majority of experiments focused on the ImageNet benchmark.
+The models used include ResNet-50 [12], ResNet-101, ResNet-152, Inception-v3 [13], Inception-v4 [14], MobileNet_V1_1.0_224 [15, 16], VGG16 [17], VGG19, and EfﬁcientNet-EdgeTPU (-S,
+-M, and -L) [18, 19]. For transformer-based models, a pre-trained BERT-base [1] was used, and the accuracy of MSFP was evaluated on two downstream tasks: SQuAD (question answering) and MRPC (paraphrase detection). In addition, two proprietary RNN-based models named Production-DS and
+Production-DR were tested. Production-DS is a search relevance model that includes four GRUs with state size 500. Production-DR is a machine reading comprehension model that includes eight
+LSTMs with hidden dimension 100. Conversion to MSFP was applied to computation extensive layers as discussed in Section 2. Element-wise scalar operations such as activation functions were performed in Float16. A bounding box size of 16 was used unless otherwise speciﬁed. CNN models are typically used as backbone feature extractor in accelerated cloud-based applications. As such, 6
+in those benchmarks, MSFP was applied to main backbone convolution layers only and the last fully-connected layer was kept in Float32. The last layer is usually run on commodity hardware and not the custom accelerator.
+Table 2: Normalized accuracy of different benchmarks across a range of bit-widths. The val-ues are normalized with respect to the Float32 model accuracy listed in column 3 in parenthesis.
+Conﬁgurations with the lowest bit-width that stays within 1% of Float32 accuracy are shown in bold.
+Category
+CNNs
+RNNs
+Transformers
+Model
+Resnet-50
+Resnet-101
+Resnet-152
+Inception-v3
+Inception-v4
+MobileNet-V1
+VGG16
+VGG19
+EfﬁcientNet-S
+EfﬁcientNet-M
+EfﬁcientNet-L
+Production-DR
+Production-DS
+BERT-MRPC
+BERT-SQuAD1.1
+BERT-SQuADv2
+Float32 1.000 (75.26) 1.000 (76.21) 1.000 (76.58) 1.000 (77.98) 1.000 (80.18) 1.000 (70.90) 1.000 (70.93) 1.000 (71.02) 1.000 (77.61) 1.000 (78.98) 1.000 (80.47) 1.000 (76.10) 1.000 (73.10) 1.000 (88.39) 1.000 (88.45) 1.000 (77.23)
+MSFP16 MSFP15 MSFP14 MSFP13 MSFP12 0.994 0.998 0.997 1.001 1.000 0.990 1.005 1.001 0.992 0.993 0.993 1.003 1.005 1.002 0.998 0.999 0.989 0.991 0.991 0.990 0.993 0.965 1.003 1.002 0.979 0.980 0.974 1.009 1.022 1.008 0.997 0.993 0.967 0.964 0.968 0.943 0.963 0.863 1.002 1.000 0.949 0.950 0.945 1.000 0.992 1.018 0.990 0.989 1.000 1.000 1.000 1.000 1.000 0.998 1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000 0.999 1.000 1.001 1.005 1.001 0.997 1.004 1.002 0.998 0.998 0.999 1.008 1.012 1.005 0.998 0.999
+Circuitry
+Memory density
+Arithmetic density 1.0× 1.0× 3.8× 8.8× 4.3× 10.8× 4.9× 13.9× 5.8× 18.3× 7.1× 31.9×
+Table 2 shows the normalized accuracy for a variety of different models. The accuracy values are normalized with respect to the Float32 counterpart. For image classiﬁcation models, the metric is top-1 accuracy. Production-DS is evaluated using an area-under-curve (AUC) metric, BERT-MRPC is a classiﬁcation task based on classic accuracy metric, and Production-DR and BERT-SQuAD use F1 score [20]. MSFP16 enables instant quantization while preserving the Float32 accuracy across various benchmarks without any ﬁne-tuning or ad-hoc optimizations such as clipping or calibration. Model
+ﬁne-tuning further enables pushing down the required bit-width for different benchmarks. Note that the quantization ﬁne-tuning step is fairly low overhead (1-10 epochs) without any hyper-parameter tuning. We used the same learning rate as the ﬁnal stage of original Float32 training for ﬁne-tuning.
+As shown in Table 2, CNN-based models typically require higher bit-widths to stay within 1% of the
+ﬂoating point result compared to RNNs and transformers. Note that even for CNN-based models one can drop the bit-width for weights to MSFP12 and still maintain high accuracy with MSFP as long as the activations are computed with MSFP13 or higher. Table 3 shows the results for using different bit-widths for weights and activations for ResNet-50 benchmark. We use a bounding-box size of 128 in this experiment which yields even better arithmetic density compared to default bounding-box size of 16. In general, we’ve observed that using more bits for activations produces higher accuracy than using more bits for weights. This paper focuses on uniform quantization. Mixed precision inference [21] with MSFP is an interesting extension for future work.
+Table 3: Normalized accuracy of MSFP ResNet-50 for different weights and activation bit-widths.
+We use a bounding-box size of 128 in this experiment.
+Weight format
+Activation format
+MSFP15 MSFP14 MSFP13 MSFP12
+MSFP15
+MSFP14
+MSFP13
+MSFP12 0.999 0.996 0.994 0.988 0.994 0.994 0.991 0.983 0.985 0.985 0.983 0.972 0.959 0.959 0.956 0.948
+Figure 6 compares the accuracy versus relative multiplier density for different numerical formats. As shown, MSFP has superior performance while delivering high accuracy across various benchmarks. 7
+We would like to emphasize that no special optimization (such as manual clipping, extensive hyper-parameter tuning, or quantization-aware training from scratch) is applied to boost accuracy. The same recipe is applied to all computer vision and natural language processing benchmarks.
+Figure 6: MSFP Pareto frontier (accuracy versus hardware overhead) compared to standard datatypes such as Float16, Int8, and Int4. 5

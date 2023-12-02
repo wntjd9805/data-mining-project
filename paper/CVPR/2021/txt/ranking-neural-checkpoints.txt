@@ -1,0 +1,185 @@
+Abstract
+This paper is concerned with ranking many pre-trained deep neural networks (DNNs), called checkpoints, for the transfer learning to a downstream task. Thanks to the broad use of DNNs, we may easily collect hundreds of checkpoints from various sources. Which of them transfers the best to our downstream task of interest? Striving to answer this question thoroughly, we establish a neural checkpoint rank-ing benchmark (NeuCRaB) and study some intuitive rank-ing measures. These measures are generic, applying to the checkpoints of different output types without knowing how the checkpoints are pre-trained on which datasets. They also incur low computation cost, being practically mean-ingful. Our results suggest that the linear separability of the features extracted by the checkpoints is a strong indi-cator of transferability. We also arrive at a new ranking measure, N LEEP, which gives rise to the best performance in the experiments. Code will be made publicly available. 1.
+
+Introduction
+There is an increasing number of pre-trained deep neural networks (DNNs), which we call checkpoints. We may pro-duce hundreds of intermediate checkpoints when we sweep through various learning rates, optimizers, and losses to train a DNN. Furthermore, semi-supervised [10, 4, 47, 35, 56, 38, 36, 8] and self-supervised [14, 25, 11, 60, 42] learn-ing make it feasible to harvest DNN checkpoints with scarce or no labels. Fine-tuning [63, 43] has become a de facto standard to adapt the pre-trained checkpoints to target tasks.
+It leads to faster convergence [15, 26, 49] and better perfor-mance [34] on the downstream tasks.
+However, not all checkpoints are equally useful for a tar-get task, and some could even under-perform a randomly initialized checkpoint (cf. Section 2.2). This paper is con-cerned with ranking neural checkpoints, which aims to measure how effectively ﬁne-tuning can transfer knowledge
+*This work was done while the ﬁrst author was an intern at Google. from the pre-trained checkpoints to the target task. The measurement should be generic enough for all the neu-ral checkpoints, meaning that it works without knowing any pre-training details (e.g., pre-training examples, hyper-parameters, losses, early stopping stages, etc.) of the check-points. It also should be lightweight, ideally without train-ing on the downstream task, to make it practically useful.
+We may use the measurement to choose the top few check-points before running ﬁne-tuning, which is computationally more expensive than calculating the measurements.
+Ranking neural checkpoints is crucial. Some domains or applications lack large-scale human-curated data, like med-ical images [46], raising a pressing need for high-quality pre-trained checkpoints as a warm start for ﬁne-tuning. For-tunately, there exist hundreds of thousands of checkpoints of popular neural network architectures.
+For instance, many computer vision models are built upon ResNet [27],
+Inception-ResNet [54], and VGG [50]. As a result, we can construct a candidate pool by collecting the checkpoints re-leased by different groups, for various tasks, and over dis-tinct datasets.
+It is nontrivial to rank the checkpoints for a down-stream task. We explain this point by drawing insights from the related, yet arguably easier, task transferability prob-lem [1, 18, 64, 40], which aims to provide high-level guid-ance about how well a neural network pre-trained in one task might transfer to another. However, not all checkpoints pre-trained in the same source task transfer equally well to the target task [68, 34]. The pre-training strategy also matters. Zhai et al. [66] ﬁnd that combining supervision with self-supervision improves a network’s transfer results on downstream tasks. He et al. [25] also show that self-supervised pre-training beneﬁts object detection more than its supervised counterpart under the same ﬁne-tuning setup.
+We may also appreciate the challenge in ranking neu-ral checkpoints by comparing it with another related line of work: predicting DNNs’ generalization gaps [39, 30, 5].
+Jiang et al. [29] use a linear regressor to predict a DNN’s generalization gap, i.e., the discrepancy between its training and test accuracies, by exploring the training data’s margin 2663
+distributions. Other signals studied in the literature include network complexity and noise stability. Ranking neural checkpoints is more challenging than predicting a DNN’s generalization gap. Unlike the training and test sets that share the same underlying distribution, the downstream task may be arbitrarily distant from the source task over which a checkpoint is pre-trained. Moreover, we do not have ac-cess to the pre-training data at all. Finally, instead of keep-ing the networks static, ﬁne-tuning dramatically changes all weights of the checkpoints.
+We establish a neural checkpoint ranking benchmark (NeuCRaB) to study the problem systematically. Neu-CRaB covers various checkpoints pre-trained on widely used, large-scale datasets by different training strategies and architectures at a range of early stopping stages.
+It also contains diverse downstream tasks, whose training sets are medium-sized, making it practically meaningful to rank and ﬁne-tune existing checkpoints. Pairing up all the checkpoints and downstream tasks, we conduct careful ﬁne-tuning with thorough hyper-parameter sweeping to obtain the best transfer accuracy for each checkpoint-downstream-task pair. Hence, we know the groundtruth ranking of the checkpoints for each downstream task according to the ﬁnal accuracies (over the test/validation sets).
+A functional checkpoint ranking measurement should be highly correlated with the groundtruth ranking and, equally importantly, incurs as low computation cost as possible.
+We study several intuitive methods for ranking the neural checkpoints. One is to freeze the checkpoints as feature ex-tractors and use a linear classiﬁer to evaluate the features’ separability on the target task. Another is to run ﬁne-tuning for only a few epochs (to avoid heavy computation) and then evaluate the resulting networks on the target task’s valida-tion set. We also estimate the mutual information between labels and the features extracted from a checkpoint.
+Finally, we propose a lightweight measure, named
+Gaussian LEEP (N LEEP), to rank checkpoints based on the recently proposed log expected empirical prediction (LEEP) [40]. LEEP was originally designed to measure between-task transferabilities. It cannot handle the check-points pre-trained by unsupervised or self-supervised learn-ing since it requires all checkpoints to have a classiﬁcation head. Its computation cost could blow up when the classiﬁ-cation head corresponds to a large output space. Moreover, it depends on the classiﬁcation head’s probabilistic output, which, unfortunately, is often overly conﬁdent [24].
+To tackle the above problems, we replace the check-points’ output layer with a Gaussian mixture model (GMM). This simple change kills two birds with one stone. On the one hand, GMM’s soft assignment of in-put to clusters seamlessly applies to LEEP, resulting in the lightweight, effective N LEEP measure that works regard-less of the checkpoints’ output types. On the other hand, since we ﬁt GMM to the target task’s data, instead of the pre-training data of a different source task, the cluster as-signment probabilities are likely more calibrated than the classiﬁcation probabilities for the target task, if there exist classiﬁcation heads. 2. The Neural Checkpoint Ranking Bench-mark (NeuCRaB)
+We formalize ranking neural checkpoints as follows.
+Suppose we have m pre-trained neural networks, called checkpoints, C := {θi}m i=1. Denote by T a distribution of tasks. Without loss of generality, we mainly study clas-siﬁcation downstream tasks, each of which, t ∼ T , con-tains a training set and a test set. An evaluation procedure,
+G : C ×T 7→ R, replaces the output layer of a checkpoint θi with a linear classiﬁer for a downstream task t, followed by
+ﬁne-tuning using the task’s training set. It employs hyper-parameter sweeping and returns the best accuracy on the test set. We apply this evaluation procedure to all the check-points for task t and obtain their test accuracies:
+Gt := {G(θi, t)}m which deﬁnes the groundtruth ranking list for task t. i=1 ∈ Rm, (1)
+Denote by R all measures that return a ranking score for any checkpoint-task pair under a computation budget b. A measure R ∈ R gives rise to the following ranking scores for a task t,
+Rt := {R(θi, t; b)}m (2) where we underscore the computation budget b in the mea-sure R(·, ·; b). i=1 ∈ Rm,
+Our objective in ranking neural checkpoints is to ﬁnd the best ranking measure in expectation,
+R∗ ← arg max
+Et∼T M(Rt, Gt)
+R∈R (3) where M is a metric evaluating the ranking scores Rt against the test accuracies Gt. Section 2.3 details the eval-uation methods used in this work. Equipped with such a ranking measure R∗, we can identify the checkpoints that potentially transfer to a downstream task better than the oth-ers without resorting to heavy computation. 2.1. Downstream Tasks T
+Following the design principle of [66], we study di-verse downstream tasks including Caltech101 [21], Flow-ers102 [41], Sun397 [61], and Patch Camelyon [60]. These tasks are representative of general object recognition, ﬁne-grained object recognition, scenery image classiﬁcation, and medical image classiﬁcation, respectively. Table 1 in
+Appendix A.1 provides more details of these tasks. A common theme is that their training sets are all medium-sized, making it especially beneﬁcial to leverage pre-trained checkpoints to avoid overﬁtting. 2664
+Caltech101
+Flowers102
+Camelyon
+Sun397
+Figure 1. Fine-tuning the checkpoints in Group I on four downstream tasks. We keep the best ﬁne-tuning accuracy for each checkpoint-task pair after hyper-parameter sweeping. For better visualization, the values are offset by their mean (cf. Table 4 in Appendix for the absolute values). (Best viewed in color. Red: generative models. Black: From-Scratch. Green: self-supervised models. Blue: semi-supervised models. Yellow, Pink, and Orange: supervised models trained on ImageNet, Inatualist, and Places365, respectively. Cyan: a hybridly-supervised model.) 2.2. Neural Checkpoints C
+Thanks to the broad use of DNNs, one may collect neural checkpoints of various types from multiple sources. To sim-ulate this situation, we construct a rich set of checkpoints and separate them into three groups according to the pre-training strategies and network architectures.
+Group I: Checkpoints of mixed supervision. The ﬁrst group of checkpoints are pre-trained with mixed supervi-sion till convergence, including supervised learning, self-supervised learning, semi-supervised learning, and the dis-criminators or encoders in deep generative models. It con-sists of 16 ResNet-50s [27]. We borrow 14 models pre-trained on ImageNet [13] from [66]. Among them, four are pre-trained by self-supervised learning (Jigsaw [42], Rela-tive Patch Location [14], Exemplar [16], and Rotation [22]), six are the discriminators of generative models (WAE-UKL [48], WAE-GAN, WAE-MMD [57], Cond-BigGAN,
+Uncond-BigGAN [9], and VAE [33]), two are based on semi-supervised learning (Semi-Rotation-10% and Semi-Exemplar-10% [65]), one is by fully supervised learning (Sup-100%-Img [27]), and one is trained with a hybrid supervised loss (Sup-Exemplar-100% [65]). We also add two supervised checkpoints pre-trained on iNaturalist (Sup-100%-Inat) [59] and Places365 (Sup-100%-Pla) [67], re-spectively. Using the evaluation procedure G(θi, t) (cf. equation (1)), we obtain their ﬁnal accuracies on the down-stream tasks described in Section 2.1.
+Figure 1 shows the best ﬁne-tuning accuracies offset by their mean for better visualization, and Table 4 (in Ap-pendix) contains the absolute accuracy values. We in-clude the training from scratch (From-Scratch) for compar-ison. Most of the checkpoints yield signiﬁcantly better ﬁne-tuning results than From-Scratch. Some of the discrimina-tors in generative models, however, under-perform From-Scratch. The highest-performance checkpoints change from one downstream task to another.
+Group II: Checkpoints at different pre-training stages. This group comprises 12 ResNet-50s pre-trained by fully supervised learning on ImageNet, iNaturalist, and
+Places-365. We save a checkpoint right after each learning rate decay, resulting in four checkpoints per dataset. Fig-ure 2 and Table 5 in Appendix show the best ﬁne-tuning accuracies over the four downstream tasks, where Img-90k refers to the checkpoint trained on ImageNet for 90k iter-ations. Interestingly, the downstream tasks favor different pre-training sources, indicating the necessity of studying between-task transferabilities [66, 64]. However, the source task information may be not known for all checkpoints.
+Moreover, the converged model over a source task does not always transfer the best to a downstream task (cf. Img-270k vs. Img-300k on Camelyon, Inat-270k vs. Inet-300k on Flowers102, etc.). We hence construct this NeuCRaB for studying the ranking of neural checkpoints without access-ing how one pre-trained the checkpoints over which dataset.
+Group III: Checkpoints of heterogeneous architec-tures. Kornblith et al. [34] show that better network ar-2665
+chitectures can learn better features that can be transferred across vision-based tasks. Therefore, we construct the third group of checkpoints by using different neural architec-tures. Four of them belong to the Inception family [55], one is Inception-ResNet-v2 [54], six come from the MobileNet family [28], and two are from the ResNet-v1 family [27].
+We train them on ImageNet till convergence. Figure 3 and
+Table 6 in Appendix visualize their ﬁne-tuning accuracies on the four downstream tasks. 2.3. Evaluation Metrics M
+We use multiple metrics (cf. M in eq. (3)) to evaluate the checkpoint ranking measures.
+Recall@k: A practitioner may have resources to test up to k checkpoints for their task of interest. We consider it a success if a measure ranks the highest-performance checkpoint into the top k. A measure’s Recall@k is the ratio between the number of downstream tasks on which it succeeds and the total number of tasks. We employ k = 1 and k = 3 in the experiments.
+Top-k relative accuracy (Rel@k): Given a task, a ranking measure returns an ordered list of the checkpoints. If the measure selects a high-performing checkpoint to the top k despite that it misses the highest-performance one, we do not want to overly penalize it. This Rel@k is the ratio between the best ﬁne-tuning accuracy on the downstream task with the top k checkpoints and the the best ﬁne-tuning accuracy with all the checkpoints.
+Pearson correlation: We incorporate Pearson’s r [44] to compute the linear correlation between a measure’ ranking scores Rt and the evaluation procedure’s ﬁnal accuracies Gt.
+Kendall ranking correlation: We also include Kendall’s
+τ [31] to measure the ordinal association between a ranking measure R and the evaluation procedure G for each task. After all, what matter is the order of the checkpoints rather than the precise ranking scores. 3. Checkpoint Ranking Methods
+In this section, we describe some intuitive neural check-point ranking methods. These methods strive to achieve high correlation with the checkpoint evaluation procedure
+G at low computation cost. 3.1. Fine tuning with Early Stopping
+If there is no constraint over computing, the evalua-tion procedure G itself becomes the gold ranking mea-sure. Hence, a natural ranking method is the ﬁne-tuning with early stopping, by which the model is far from con-vergence. The premature models’ test accuracies are the ranking scores. Experiments reveal that it is hard to fore-cast from the premature models. 3.2. Linear Classiﬁers
+We derive the second ranking method also from the eval-uation procedure G, which replaces a checkpoint’s output layer by a linear classiﬁer tailored for the downstream task.
+We train the linear classiﬁer while freezing the other layers.
+The ranking score equals the classiﬁer’s test accuracy. It is worth mentioning that self-supervised learning [11, 25, 23] often adopts this practice as well to evaluate the learned fea-ture representations. We shall see that the linear separability of the features extracted from a checkpoint is a strong indi-cator of the performance of ﬁne-tuning the full checkpoint. 3.3. Mutual Information
+Suppose the extracted features’ quality well correlates with a checkpoint’s ﬁnal accuracy on a downstream task.
+Besides the linear separability above, we can rank the checkpoints by their mutual information between the high-dimensional features and discrete labels of the downstream task. We employ the state-of-the-art Iα mutual informa-tion estimator [45], where α controls the trade-off between variance and bias. It is a variational lower bound parameter-ized by a neural network. Belghazi et al. [6] report that the neural estimators generally outperform prior mutual infor-mation estimations, especially when the variables are high-dimensional. We use the code released by the authors to calculate Iα [45]. 3.4. LEEP for the Checkpoints with Classiﬁcation
+Heads
+To rank the checkpoints pre-trained over classiﬁcation source tasks, the recently proposed LEEP [40] measure is directly applicable despite that it was originally designed for between-task transfer. Denote by Z the classiﬁcation space of a checkpoint θ. We can interpret θ(x)z, the z-th (softmax) output element, as the probability of classifying the input x into the class z ∈ Z. Given a downstream task t ∼ T and its test set {(xj, yj)}n j=1, the LEEP ranking score for the checkpoint θ is calculated by
+RLEEP(θ, t) := 1 n n
+X j=1 log P (yj|xj, θ, t)
+P (y|x, θ, t) := X z∈Z
+ˆP (y|z)θ(x)z (4) where ˆP (y|z) is the empirical conditional distribution of the downstream task’s label y given the source label z ∈ Z, and
+P (y|x, θ, t) is a “dummy” classiﬁer, which ﬁrstly draws a label z from the checkpoint θ(x) and then draws a class y from the conditional distribution ˆP (y|z).
+Denote by {xj, yj}˜n j=1, y ∈ Y, the downstream task’s training set. LEEP computes the conditional distribution
+ˆP (y|z) by “counting”. The joint distribution ˆP (y, z) due to 2666
+the checkpoint θ is
+ˆP (y, z) = 1
+˜n X j:yj =y
+θ(xj)z, (5)
+ˆP (y, z). which gives rise to the conditional distribution ˆP (y|z) =
+ˆP (y, z)/ ˆP (z) = ˆP (y, z)/Py∈Y
+In the experiments, LEEP and the linear classiﬁer are the second best ranking methods for the checkpoints pre-trained for classiﬁcation. However, LEEP’s computation cost is high when a checkpoint’s classiﬁcation output is high-dimensional (e.g., iNaturalist contains more than 8000 classes). Besides, its softmax estimation of the classiﬁca-tion probability θ(x)z is often poorly calibrated [24]. Fi-nally, it does not apply to the checkpoints with no classiﬁ-cation heads. 3.5. N LEEP
+We propose a variation to LEEP that applies to all types of checkpoints including those obtained from unsupervised learning and self-supervised learning. It can also avoids the overly conﬁdent softmax.
+Feeding the training data of a downstream task into a checkpoint, we obtain their feature representations. The representations are thousands of dimensions, depending on the checkpoint’s neural architecture. We reduce their di-mension by using the principal component analysis (PCA).
+Denote by s the resultant low-dimensional representation of the input x.
+We then ﬁt a Gaussian mixture model (GMM), P (s) =
+Pv∈V πvN (s|µv, Σv), to the training set {sj}˜n j=1, where V is a collection of all the Gaussian components, and πv, v ∈
+V, are the mixture weights. It is convenient to compute the posterior distribution:
+P (v|x) = P (v|s) ∝ πvN (s|µv, Σv), (6) which is arguably more reliable than the class assignment probability θ(x)z output by the softmax classiﬁer because we ﬁt GMM to the downstream task’s training data, whereas the softmax classiﬁer is learned from a different source task.
+Hence, we arrive at an improved ranking measure, named N LEEP, by replacing θ(x)z, the probability of clas-sifying an input x to the class z, in equations (4–5) by the posterior distribution P (v|x). 4. Experiments on NeuCRaB
+There are free parameters in each of the ranking meth-ods. Before presenting the main results, we study how the free parameters in N LEEP affect its checkpoint rank-ing performance. Figure 2 illustrates N LEEP’s Kendall’s τ values over Groups I and II with different PCA feature di-mensions and the numbers of Gaussian components. Each
+Kendall’s τ is averaged across all the downstream tasks; the higher, the better. Along the vertical axes, we change the feature dimensions by keeping different percentages of the PCA energies; PCA50 means the percentage is 50%.
+Along the horizontal axes, we adopt different numbers of
+Gaussian components in GMM; 2× means the number is twice the class number of the downstream task. Notably, the Kendall’s τ values remain relatively stable. In the re-maining experiments with N LEEP, we ﬁx the PCA energy to 80% and the number of Gaussian components ﬁve times the class number of a downstream task. 4.1. Comparison Results
+Tables 1, 2, and 3 show the checkpoint ranking methods’ performance on Groups I (checkpoints of mixed supervi-sion), II (different pre-training stages), and III (heteroge-neous architectures), respectively. We also union the three groups and present the corresponding ranking performance in Table 2 in Appendix. The numbers in the tables are the average over all downstream tasks. In addition to the eval-uation metrics detailed in Section 2.3, the GFLOPS column measures the ranking methods’ computing performance; the lower, the better.
+We report multiple variations of the ranking methods in the tables. Fine-tuning is computationally expensive, so we stop it after one or ﬁve epochs. The linear classiﬁers are less so as we save the feature representations of downstream tasks’ after one forward pass to the checkpoints. We report the linear classiﬁers’ ranking results after training them for one epoch, ﬁve epochs, and convergence. We test α = 0.01 and α = 0.50 in the Iα mutual information estimator. Ad-ditionally, we experiment with Iα after reducing the feature dimensions by using PCA. 4.2. Main Findings
+In each column of Tables 1, 2, 3, and Table 2 in Ap-pendix, we highlight the best and second best by the bold font and underscore, respectively.
+The mutual information fails to rank high-performing checkpoints to the top and even produces negative Pear-son and Kendall correlations, probably because of the fea-tures’ high dimensions. Reducing the feature dimensions by
+PCA signiﬁcantly improves the mutual information’s rank-ing performance; MI w/ PCA (α=0.01) leads to the sec-ond best Rel@1, Recall@3 and Rel@3 among the rank-ing methods in Group III, the checkpoints of heterogeneous neural architectures. Varying α in the Iα mutual informa-tion estimator [45] can control the trade-off between vari-ance and bias. MI w/ and w/o PCA (α=0.01) perform better than MI w/ and w/o PCA (α=0.50), respectively. It indi-cates that neural checkpoint ranking requires low-bias MI estimator since smaller α means low-bias but high-variance estimation. 2667
+Group I
+Group II
+Figure 2. N LEEP’ checkpoint ranking performance, evaluated by Kendall’s τ , on Groups I and II in NeuCRaB. We vary the PCA feature dimension and the number of Gaussian components in GMM.
+Fine-tuning up to some epochs turns out the worst rank-ing methods because it leads to low correlation with the groundtruth ranking and yet incurs heavy computation.
+Similarly, training the linear classiﬁer up to one or ﬁve epochs does not perform well except in Group II. These re-sults indicate that it is difﬁcult to forecast the checkpoints’
+ﬁnal performance from premature models. Fine-tuning (5 epochs) and Linear (5 epochs) perform better than Fine-tuning (1 epoch) and Linear (1 epoch) in terms of Person and Kendall correlation, respectively. However, they all fail to select the top checkpoint in Group I and Group III since they produce lower Recall@1 and Recall@3 than oth-ers. One possible reason is that the evaluation accuracies of checkpoints in the early stage tend to have large variance.
+Feature qualities before ﬁne-tuning the checkpoints. If we train the linear classiﬁers till convergence, they become the best in Group II, and the second best checkpoint rank-ing method in Groups I and III in terms of Pearson and
+Kendall correlations. It can also produce better Recall@1 and Recall@3 than Linear (1 epoch) and Linear (5 epoch) in Groups I, II and III since the evaluation accuracies of converged models are more stable than models in the early training stage. Note that the linear classiﬁers’ accuracies, i.e., the ranking scores, imply the linear separability of the features extracted by the checkpoints. Recall that the mu-tual information with PCA feature dimension reduction is among the second best (Rel@1, Recall@3 and Rel@3) in
+Group III. Since both methods measure the feature repre-sentations’ quality by the downstream tasks’ labels, we con-jecture that the quality of the features is a strong indicator of the checkpoints’ ﬁnal ﬁne-tuning performance on the down-stream tasks. It would be interesting to study other feature quality measures beyond the linear separability and mutual information in future work.
+N LEEP performs consistently well in all the groups of checkpoints over all the evaluation metrics with the low-est computation cost . In contrast, the original LEEP mea-sure is not applicable to Group I, the checkpoints of mixed supervision, because it requires that the checkpoints have a classiﬁcation output layer. Overall, LEEP is the second best over all evaluation metrics among the ranking methods in Groups II and III, whose checkpoints all have a classi-ﬁcation output layer. Speciﬁcally, LEEP can produce the second best Recall@1, Recall@3 and Rel@3 in Group II, and the best Recall@3, the best Rel@3 and the second best
+Kendall correlation in Group III. It is a more consistent indi-cator than ﬁne-tuning, linear classiﬁer, or MI based ranking methods. However, LEEP can not produce better results than N LEEP, and it requires slightly larger GFLOPS due to the extra computation cost from the classiﬁcation head.
+We conjecture that N LEEP outperforms LEEP mainly because GMMs calibrate the posterior probabilities better than the checkpoints’ softmax classiﬁers. The checkpoint ranking quality of LEEP score hinges on the performance of the ‘dummy classiﬁer’ – P (y|x, θ, t), and θ(x)z is the key element to calculate it. However, θ(x) can be poorly calibrated [40] and it can not represent a true probability. In contrast, P (v|x) used in N LEEP is indeed the probability that the sample belongs to one cluster from a mixture of
+Gaussian distributions and it can remedy the poor-calibrated problem in LEEP.
+Computational costs. Moreover, we highlight the
+GFLOPS column in the tables. N LEEP and LEEP exhibit a clear advantage over the other checkpoint ranking methods in terms of computing. The main reason is that N LEEP and
+LEEP can avoid intensive computation from neural network training, and they only require one forward pass through the training data. 2668
+Table 1. Checkpoint ranking results on Group I, the checkpoints of mixed supervision (GFLOPS excludes a forward pass on training data, which takes 3.04E5 GFLOPS shared by all methods)
+Method
+Linear (1 epoch)
+Linear (5 epoch)
+Linear (converged)
+Fine-tune (1 epoch)
+Fine-tune (5 epoch)
+MI (α=0.01) [45]
+MI (α=0.50)
+MI w/ PCA (α=0.01)
+MI w/ PCA (α=0.50)
+LEEP [40]
+N LEEP
+Recall@1 Rel@1 Recall@3 Rel@3 98.79 98.94 99.65 97.66 98.61 87.96 90.31 99.27 94.28 – 99.65 96.97 98.79 99.63 97.45 91.09 64.67 66.71 89.45 86.49 – 99.65 0.00 25.00 50.00 25.00 0.00 0.00 0.00 0.00 0.00 – 75.00 25.00 50.00 75.00 25.00 25.00 0.00 25.00 50.00 25.00 – 75.00
+Pearson Kendall GFLOPS 4.95E4 18.44 23.56 4.97E4 32.33 49.77 5.33E4 53.43 68.97 6.51E5 22.15 30.25 4.28E6 36.78 48.19 1.62E5
+-0.31 2.39 1.62E5
+-13.05
+-4.91 5.58E4 20.67 16.16 5.58E4
+-16.06
+-24.72 – – – 12.85 76.00 84.30
+Table 2. Checkpoint ranking results on Group II, the checkpoints at different pre-training stages (GFLOPS excludes a forward pass on training data, which takes 3.04E5 GFLOPS shared by all)
+Method
+Linear (1 epoch)
+Linear (5 epochs)
+Linear (converged)
+Fine-tune (1 epoch)
+Fine-tune (5 epochs)
+MI (α=0.01) [45]
+MI (α=0.50)
+MI w/ PCA (α=0.01)
+MI w/ PCA (α=0.50)
+LEEP [40]
+N LEEP
+Recall@1 Rel@1 Recall@3 Rel@3 98.79 100.00 100.00 99.47 100.00 97.43 97.03 99.85 99.52 99.90 100.00 0.00 50.00 75.00 25.00 25.00 0.00 0.00 50.00 0.00 75.00 100.00 96.46 99.57 99.95 99.05 99.55 94.84 96.66 99.60 96.68 99.44 100.00 25.00 100.00 100.00 25.00 100.00 25.00 0.00 75.00 50.00 75.00 100.00
+Pearson Kendall GFLOPS 4.95E4 24.24 27.01 4.97E4 51.28 55.07 68.60 79.30 5.33E4 6.51E5 15.52 19.61 4.28E6 58.33 68.47 1.62E5
+-17.81
+-29.41 1.62E5
+-10.21
+-11.36 5.58E4 51.34 52.14 5.58E4 17.09 23.73 378.31 55.49 50.36 12.95 67.49 72.84
+Table 3. Checkpoint ranking results on Group III, the checkpoints of heterogeneous architectures (GFLOPS excludes a forward pass on training data, which takes 2.73E5 GFLOPS shared by all)
+Method
+Linear (1 epoch)
+Linear (5 epoch)
+Linear (converged)
+Fine-tune (1 epoch)
+Fine-tune (5 epoch)
+MI (α=0.01) [45]
+MI (α=0.50)
+MI w/ PCA (α=0.01)
+MI w/ PCA (α=0.50)
+LEEP [40]
+N LEEP
+Recall@1 Rel@1 Recall@3 Rel@3 99.35 99.63 99.72 99.80 99.68 99.34 99.37 99.82 98.47 99.90 99.70 25.00 25.00 25.00 0.00 25.00 25.00 25.00 0.00 0.00 25.00 25.00 25.00 25.00 25.00 25.00 25.00 25.00 25.00 50.00 0.00 75.00 25.00 98.17 98.98 99.66 98.28 98.62 98.29 98.36 99.18 96.34 97.36 99.66
+Pearson Kendall GFLOPS 3.37E4 13.80 30.14 3.38E4 18.95 33.45 3.62E4 36.91 63.55 4.43E5 11.59 17.61 2.91E6 15.72 25.72 1.30E5 2.94 4.42 1.30E5
+-6.81
+-9.79 5.56E4 38.83 61.94 5.56E4 21.26 33.17 247.56 45.06 42.99 12.68 51.14 66.94
+Comparing different groups of the checkpoints. Check-point ranking on different groups of checkpoints varies in degrees of difﬁculty. The most challenging group is Group
+III, the checkpoints of heterogeneous neural architectures.
+All the ranking methods produce lower correlations with the groundtruth ranking, and they can barely select the top checkpoints in this group. The main reason is that the neu-ral architectures matter for transfer learning [34]. Besides, heterogeneous neural architectures can demonstrate various performance even if we train them from scratch on down-stream tasks. Ranking neural checkpoints by the feature representations of the last layer is not sufﬁcient for those checkpoints. We may explore more advanced ranking meth-ods considering the structures of the deep neural networks in the future.
+Checkpoint ranking on Group II is easier than on Group
+I since all the ranking methods can achieve relatively bet-ter results over all evaluation metrics in Group II. The re-2669
+sults indicate that checkpoints with various training strate-gies (Group I) can bring more complex knowledge from source domains, comparing with checkpoints with different early stopping stages (Group II). In addition, ﬁne-tuning the entire models and training linear classiﬁers up to one or ﬁve epochs perform signiﬁcantly better on Group II since those ranking methods are based on early stopping as well.
+Additional experiments in the supplementary materials.
+To simulate a sufﬁciently large pool of checkpoints in the real applications, we ﬁnally combine the checkpoints in
+Group I, II, and III into one large group and conduct check-point ranking experiments on it. We also add one more group of checkpoints with ResNet-101s [27] to evaluate the checkpoint ranking on deeper models. Please see more de-tails in Appendix A.3 and A.4. We also take object detection and instance segmentation as downstream tasks and conduct preliminary experiments on VOC [20] and Cityscapes [12].
+Please refer to Appendix A.6 to see detailed discussions.
+Although the benchmark can be easily extended to many downstream tasks in other modalities, e.g., voice, text, and cross-modal modalities, we steer our attention into compar-ing several intuitive ranking measures on the variants of checkpoints, covering different training strategies, source domains, and architectures at a range of early stopping stages. We formalize the checkpoint ranking idea, demon-strate the existence of an effective yet lightweight measure,
+N LEEP, and hope it can shed light on more efﬁcient rank-ing methods and practical applications. are lightweight in computing and requires no access to the source tasks.
+Recent works demonstrated that using pre-trained check-points that have similar feature representations as the tar-get task’s representations can improve transfer learning [17, 52, 53]. Song et al. [52, 53] employed attribution maps to compare two models and then quantiﬁed transferabilities by the similarity of two models. Those approaches all require a converged model on target datasets, incurring intensive computation. However, we want to design a lightweight method for ranking checkpoints, ideally without any train-ing procedures.
+Predicting neural networks’ generation gap. The differ-ence between a model’s performance on the training data versus its performance on test data is known as the general-ization gap. It is practically useful and theoretically impact-ful to predict a neural network’s generalization gap. Most recent work does so by ﬁnding a set of features that is pre-dictive of the generalization, e.g., by estimating data mar-gins [5, 19, 51]. Jiang et al. [29] and Yak et al. [62] demon-strate how the margin signatures of a neural network can predict the generalization gap with small errors. Besides, the network complexity and noise stability are also useful cues [39, 30, 5, 3]. Our problem substantially differs from predicting the neural networks’ generalization gap, which is concerned with the training and test data sets that share the same underlying distribution. We instead care about the results after ﬁne-tuning a network’s checkpoint. 5.

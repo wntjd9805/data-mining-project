@@ -1,0 +1,110 @@
+Abstract
+Meta learning approaches to few-shot classiﬁcation are computationally efﬁcient at test time, requiring just a few optimization steps or single forward pass to learn a new task, but they remain highly memory-intensive to train. This limitation arises because a task’s entire support set, which can contain up to 1000 images, must be processed before an optimization step can be taken. Harnessing the performance gains offered by large images thus requires either parallelizing the meta-learner across multiple GPUs, which may not be available, or trade-offs between task and image size when memory constraints apply. We improve on both options by proposing LITE, a general and memory efﬁcient episodic training scheme that enables meta-training on large tasks composed of large images on a single GPU.
+We achieve this by observing that the gradients for a task can be decomposed into a sum of gradients over the task’s training images. This enables us to perform a forward pass on a task’s entire training set but realize signiﬁcant memory savings by back-propagating only a random subset of these images which we show is an unbiased approximation of the full gradient. We use LITE to train meta-learners and demonstrate new state-of-the-art accuracy on the real-world ORBIT benchmark and 3 of the 4 parts of the challenging VTAB+MD benchmark relative to leading meta-learners. LITE also enables meta-learners to be competitive with transfer learning approaches but at a fraction of the test time computational cost, thus serving as a counterpoint to the recent narrative that transfer learning is all you need for few-shot classiﬁcation. 1
+
+Introduction
+Meta-learning approaches to few-shot classiﬁcation are very computationally efﬁcient. Once meta-trained, they can learn a new task at test time with as few as 1-5 optimization steps [1, 2] or a single forward pass through the model [3–5] and with minimal or no hyper-parameter tuning. In contrast, transfer learning approaches based on ﬁne-tuning typically rely on a large pre-trained feature extractor, and instead take 100s-1000s of optimization steps at test time in order to learn a task [6], thus incurring a high computational cost for each new task encountered. This makes meta-learned solutions attractive in compute-constrained deployments, or scenarios where the model must learn multiple different tasks or update on-the-ﬂy (e.g. in continual and online learning settings [7–10]).
+However, a crucial barrier to progress is that meta-learning approaches are memory-intensive to train and thus cannot easily leverage large images for a performance boost, as recent ﬁne-tuning approaches have done. This limitation arises because a meta-learner must back-propagate through all
+∗Authors contributed equally 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: LITE enables meta-learners to be trained on large images with one GPU thereby signiﬁcantly improv-ing performance while retaining their test time computational efﬁciency. The schematic shows test time efﬁciency (the number of steps and number of Multiply-Accumulate operations (MACs) needed to learn a new task at test time) and whether the method can be trained on large images (required for good performance). Exist-ing meta-learners are cheap to adapt but trained on small images (multiple GPUs are required for large images), transfer learning methods are expensive to adapt but trainable on large images. Meta-learners with LITE get the best of both worlds. Note: SC + LITE is Simple
+CNAPS [5] trained with LITE. the examples in a task’s support set (i.e. the task’s training set) that contribute to a prediction on a query example. In some cases, this can be as many as 1000 images [11]. As a result, the amount of memory required for the computational graph grows linearly with the number of support images, and quadratically with their dimension. In contrast, transfer learning approaches can employ standard batch processing techniques to scale to larger images when under memory constraints — a feature which has contributed signiﬁcantly to their recent success on few-shot benchmarks [11].
+Current solutions for training meta-learners on large images include 1) parallelizing the model across multiple GPUs, which may not be available or convenient, 2) considering tasks with fewer support images, and 3) employing gradient/activation checkpointing methods [12] which incur longer training times and still fall short of the task sizes required in key benchmarks. Instead, most existing work [1, 3, 2, 13, 4, 14] has opted for training on large tasks but small images which translates poorly into real-world applications and limits competitiveness on few-shot benchmarks.
+In this work, we improve on these alternatives by proposing LITE, a Large Image and Task Episodic training scheme for meta-learning models that enables training with large images and large tasks, on a single GPU. We achieve this through the simple observation that meta-learners typically aggregate a task’s support examples using a permutation invariant sum operation. This structure ensures invariance to the ordering of the support set. Consequently, the gradients for a task can be decomposed as a sum of gradient contributions from the task’s support examples. This enables us to perform a forward pass on a task’s entire support set, but realize signiﬁcant savings in memory by back-propagating only a random subset of these images which we show is an unbiased approximation of the true gradient.
+Fig. 1 illustrates the key trade-offs, with LITE enabling meta-learners to beneﬁt from large images for improved classiﬁcation accuracy but still remain computationally efﬁcient at test time.
+We use LITE to train key meta-learning methods and show that our best performing instantiation – Simple CNAPs [5] with LITE – achieves state-of-the-art results relative to all meta-learners on two challenging few-shot benchmarks: VTAB+MD [11], an extensive suite of both meta-learning and transfer learning tasks, and ORBIT [14], an object recognition benchmark of high-variation real-world videos. Our results showcase the unique advantage of meta-learning methods – that when properly trained they can be competitive with transfer learning approaches in terms of accuracy for a fraction of the computational cost at test time — and they serve as a counterpoint to the recent narrative that transfer learning is all you need for few-shot classiﬁcation.
+Our contributions 1. LITE, a general and memory-efﬁcient episodic training scheme which enables meta-learning models to be trained on large images and large tasks on a single GPU. 2. A mathematical justiﬁcation for approximating the true gradient with a random subset of a task’s support examples which applies to common classes of meta-learning methods. 3. Instantiations of LITE on key classes of meta-learners to demonstrate its versatility. 2
+4. State-of-the-art performance using Simple CNAPs with LITE compared to other leading meta-learners on two challenging few-shot benchmarks, VTAB+MD and ORBIT 2 2 Why Meta-Learning with Large Images and Tasks is Difﬁcult
+Meta-learning preliminaries
+In few-shot image classiﬁcation, the goal is to recognize new classes when given only a few training (or support) images of each class. Meta-learners typically achieve this n)}Nτ through episodic training [15]. Here, an episode or task τ contains a support set Dτ n=1 and a query set Dτ m=1, where (x, y) is an image-label pair, Nτ is the number of (labeled) support elements given to learn the new classes, and Mτ is the number of query elements requiring predictions. Note that in a given task, elements in Dτ
+Q are drawn from the same set of classes as the elements in Dτ
+S. For brevity we may use the shorthand DS = {x, y} and DQ = {x∗, y∗}.
+Q = {(xτ ∗
+S = {(xτ m )}Mτ m , yτ ∗ n, yτ
+During meta-training, a meta-learner is exposed to a large number of training tasks {τ }. For each task
+τ , the meta-learner takes as input the support set DS and outputs the parameters of a classiﬁer that has been adapted to the current task θτ = θφ(DS). The classiﬁer can now make task-speciﬁc probabilistic predictions f (x∗, θτ = θφ(DS)) for any query input x∗ (see Fig. 2). A function L(y∗, f (x∗, θτ )) computes the loss between the adapted classiﬁer’s predictions for the query input and the true label y∗ which is observed during meta-training. Assuming that L, f , and θφ(DS) are differentiable, the meta-learner can then be trained with stochastic gradient descent by back-propagating the loss and updating the parameters φ.
+At meta-test time, the trained meta-learner is given a set of unseen test tasks, which typically contain classes that have not been seen during meta-training. For each task, the meta-learner is given its support set DS, and is then evaluated on its predictions for all the query inputs x∗ (Fig. 2, left).
+Figure 2: Left: Canonical meta-learner. Right: Meta-learner with LITE. The red dotted line shows the back-propagated gradients. Refer to Algorithm 1 for nomenclature.
+Large memory requirements for meta-training The primary bottleneck to using large images (i.e. ≥ 224 × 224 pixels) in meta-learning approaches is the large amount of (GPU) memory required to process a task’s support set DS during meta-training. Speciﬁcally, the meta-learner θφ(DS) must perform a forward pass with a task’s entire support set before it can back-propagate the loss for query elements (x∗, y) ∈ DQ (and release the computation graph), thus preventing the use of conventional batch processing. The amount of memory required scales linearly with the number of support images
+N τ and quadratically with their dimensions. If N τ is large (e.g. the recent VTAB+MD benchmark
+[11] requires a task’s support set to be as large as 1000 images), memory on a single GPU is thus quickly exceeded for large images.
+Note, the number of query elements in the task M τ is not a bottleneck when using large images as the loss decomposes over elements of the query set DQ and is therefore amenable to mini-batching. By contrast, as the classiﬁer itself is a non-linear function of the support set, the loss does not decompose and so it is not obvious how to apply similar ideas to allow scaling of DS in a principled way.
+Current ad hoc solutions to this problem are: (i) parallelize the meta-learner across multiple GPUs which may not be convenient or available and can involve signiﬁcant engineering effort; (ii) train on tasks with smaller (or sub-sampled) support sets which may adversely affect performance on test tasks with more classes and/or large numbers of samples per class; (iii) train on tasks with smaller images (e.g. 84 × 84 pixels in miniImageNet [16]) which limits performance and translates poorly to many real-world applications; or (iv) trade memory usage for additional computation [12] by 2Source code for ORBIT experiments is available at https://github.com/microsoft/ORBIT-Dataset and for the VTAB+MD experiments at https://github.com/cambridge-mlg/LITE. 3
+Algorithm 1 LITE for a meta-training task τ
+Require: DS: task support set; DQ: task query set; N : number of support examples in DS; H: number of elements in DS to back-propagate; M : number of query examples in DQ; Mb: batch size for DQ; backward() ≡ function to back-propagate a loss; step() ≡ function to update parameters with a gradient step. m, y∗ 1: B ← ceil(M/Mb) 2: for all b ∈ 1, . . . , B do m}Mb
+DQb ← {x∗ 3: m=1 h=1 where {nh}H
+H ← {(xnh, ynh )}H 4:
+H ← DS ∩ H 5:
+DSb ← H ∪ H 6:
+θτ ← θ(DSb ) 7:
+ΣMb
+Lb ← 1 8:
+Mb backward(Lb) 9: 10: end for 11: φ ← step(φ, N/H) m=1L(y∗ m, f (x∗ m, θτ )) h=1 ∼ U(1, N ) (cid:46) number of query batches (cid:46) get query batch from DQ (cid:46) H to back-propagate (cid:46) H to not back-propagate (cid:46) get loss of query batch (cid:46) back-propagate loss on query batch (cid:46) update φ using weighting factor N/H employing activation/gradient checkpointing (i.e. during training store only a subset of intermediate activations in a network needed for backpropagation and recompute the rest with additional forward computations when needed) which allows for training on larger tasks at the expense of training time, but still falls well short of the memory needed to accommodate the task sizes required for key benchmarks (e.g. VTAB+MD).
+Although training meta-learners has large memory requirements, meta-testing is generally memory efﬁcient, requiring only a small number of gradient operations, or none at all, compared to transfer learning approaches that would perform large numbers of gradient-based updates at test time. 3 Large Image and Task Episodic (LITE) training
+In this section, we introduce our general and memory-efﬁcient solution for training meta-learners episodically on tasks with large support sets and large images. We call our approach Large Image and Task Episodic training or LITE. In Section 3.1, we describe how LITE can be applied to key classes of meta-learners.
+Approach The fundamental idea underlying LITE is to perform a forward pass using the entire support set DS, but to compute the gradient contribution on only a small random subset of the examples in the support set. By doing this, we realize large savings in memory that includes gradients, activations, and the computation graph for the elements of DS that are not back-propagated. This is an approximation of the true gradient that would result if back-propagation was performed on all of the examples in DS. In the following section, we show that this approximation is an unbiased estimate of the true gradient. The approach for a general meta-learner is detailed in Algorithm 1 and shown diagrammatically in Fig. 2.
+Mathematical justiﬁcation The parameters of the meta-learner φ are found by minimizing the expected loss over all tasks. argmin
+φ
+T (cid:88)
+Mτ(cid:88)
+τ =1 m=1
+L (yτ ∗ m , f (xτ ∗ m , θφ(Dτ
+S))) . (1)
+In most meta-learning approaches, the support set enters into the loss through a sum over the N individual contributions from each data point it contains. This structure enables the meta-learners to be invariant to the ordering of the support set and allows all members of the support set to contribute to the adapted parameters (unlike alternative permutation invariant operators like max or min). Below we show in blue how this sum arises in popular brands of meta-learners.
+In amortization methods (e.g. CNAPS [4] and VERSA [17]), the aggregation of support set points is built in directly via a deep set encoder eφ1(·). This encodes the support set into an embedding vector 4
+which is mapped to the classiﬁer parameters by a hyper-network tφ0(·).
+θφ(DS) = tφ0 (cid:32) N (cid:88) (cid:33) eφ1(xn, yn)
+. (2) n=1
+In gradient-based methods (e.g. MAML [1]), the classiﬁer parameters are adapted from an initial value φ0 using a sum of derivatives of an inner-loop loss computed for each data point in the support set. The derivatives play the role of the deep set encoder in amortization methods.
+θφ(DS) = φ0 + φ1
+N (cid:88) n=1 d dφ
+Linner(yn, f (xn, φ)) (cid:12) (cid:12) (cid:12)φ=φ0 (3)
+Metric-based methods (e.g. ProtoNets [3]) comprise a body formed of a feature extractor and a head formed from a distance-based classiﬁer. The classiﬁer’s body parameters are not adapted in a task speciﬁc way θ(body) (DS) = φ0. The classiﬁer’s head is adapted by averaging the activations for each class in the support set to form prototypes. Letting kc denote the number of support examples of class c, the adapted head parameters are given by
+φ,c
+θ(head)
+φ,c (DS) = 1 kc kc(cid:88) i=1 f (x(c) i
+, φ0) = 1 kc
+N (cid:88) n=1 1(yn = c)f (xn, φ0). (4)
+Query points can then be classiﬁed using their distance from these prototypes d(f (x∗ n, φ0), θ(head)
+We have established that in many meta-learners, each support set affects the classiﬁer parameters and therefore the loss through a sum of contributions from each of its elements. We now focus on the consequences of this structure on the gradients of the loss with respect to the meta-learner’s parameters. To reduce clutter, we consider the contribution from just a single query point from a single task and suppress the dependence of the loss on the classiﬁer and the query data point, writing
+φ,c
+).
+L (y∗, f (x∗, θφ(DS))) = L (eφ(DS)) where eφ(DS) =
+N (cid:88) n=1 eφ(xn, yn) =
+N (cid:88) n=1 e(n)
+φ . (5)
+As a consequence of the summation, the derivative of the loss is given by d dφ
+L(eφ(DS)) = L(cid:48)(eφ(DS)) × (cid:32) N (cid:88) n=1 (cid:33) de(n)
+φ dφ where L(cid:48)(eφ(DS)) = dL(e)) de (cid:12) (cid:12) (cid:12)e=eφ(DS ) (6) which is a product of the sensitivity of the loss to the encoding of the data points and the sensitivity of the contribution to the encoding from each data point w.r.t. the meta-learner’s parameters. This second term is the source of the memory overhead when training meta-learners, but importantly, it can be rewritten as an expectation w.r.t. a uniform distribution over the support set data-point indices, d dφ
+L(eφ(DS)) = N L(cid:48)(eφ(DS)) En∼U (1,N ) (cid:34) de(n)
+φ dφ (cid:35)
+. (7)
+We can now deﬁne the LITE estimator of the loss-derivative by approximating the expectation by
+Monte Carlo sampling H times, d dφ
+L(eφ(DS)) ≈
+N
+H
+L(cid:48)(eφ(DS))
+H (cid:88) h=1 de(nh)
+φ dφ
+= d dφ
+ˆL(eφ(DS)) where {nh}H h=1 ∼ U(1, N ). (8)
+This estimator is unbiased, converging to the true gradient as H → ∞. The estimator does not simply involve subsampling of the support set – parts of it depend on all the support set data points DS – and this is essential for it to be unbiased. The expectation and variance of this estimator are
+E{nh}∼U (1,N ) (cid:34) (cid:35) d ˆL dφ
+= dL dφ and V{nh}∼U (1,N ) (cid:34) (cid:35) d ˆL dφ
+=
+N 2
+H (L(cid:48))2 V{nh}∼U (1,N ) (cid:34) de(nh)
+φ dφ (cid:35)
+.
+In Section 5.3, we empirically show that the LITE gradient estimate is unbiased and that its standard deviation is smaller than that of the naive estimator formed by sub-sampling the full support set.
+LITE provides memory savings by subsampling H examples from the support set, with H < N , and back-propagating only them. Crucially, a forward pass is still performed with the complementary set of points, with cardinality N − H, but these are not back-propagated. 5
+3.1 Applying LITE to key meta-learning approaches
+To demonstrate its versatility, we now describe how to apply LITE to models within some of the main classes of meta-learners: CNAPS [4] and Simple CNAPS [5] for amortization-based methods and ProtoNets [3] for metric-based methods. Note, these are a few possible instantiations. LITE can be applied to other meta-learning methods in a straightforward manner.
+In the descriptions below, we consider just one query batch DQb (i.e. one iteration of the for-loop in Algorithm 1). Note, in practice, whenever H is passed through a module, back-propagation is enabled, while for H, back-propagation is disabled.3 Furthermore, since typically |H| (cid:28) |H|, we can forward H in a single batch, however, we need to split H into smaller batches. Since H does not require gradients to be computed, this can be done without a signiﬁcant impact on memory.
+CNAPS [4], Simple CNAPS [5] + LITE (Appendix A.1) CNAPS variants are amortization-based methods whose hyper-networks take a task’s support set as input and generate FiLM layer [18] parameters which modulate a ﬁxed feature extractor. The classiﬁer head can also be generated (CNAPS [4]) or adopt a metric-based approach (Simple CNAPS [5]), thus both variants can be adapted with just a single forward pass of the support set at test time. Meta-training them with
+LITE involves passing H and then H through their set-encoder eφ1, and then averaging all the low-dimensional embeddings to get an embedding for the task. The task embedding is then input into a set of MLPs which generate FiLM layer parameters. H is passed through this conﬁgured feature extractor, followed by H, to get the task-adapted features for all support examples in DSb .
+For CNAPS, the task-adapted features of H and H are pooled by class and fed into a second MLP which generates the parameters of the fully-connected classiﬁcation layer. For Simple CNAPS, the task-adapted features of H and H are instead used to compute class-wise distributions (i.e. class mean and covariance matrices). With back-propagation enabled, the query batch DQb is then passed through the task-conﬁgured feature extractor and classiﬁed with the task-conﬁgured classiﬁer (for
+CNAPS), or with the Mahalanobis distance [19] to the class-wise distributions (for Simple CNAPS).
+The query batch loss is computed, and only back-propagated for H. Note that the feature extractor is pre-trained and frozen, and only the parameters of the set-encoder and generator MLPs are learned.
+ProtoNets [3] + LITE (Appendix A.2) ProtoNets [3] is a metric-based approach which computes a set of class prototypes from the support set and then classiﬁes query examples by their (e.g.
+Euclidean) distance to these prototypes. Like CNAPS variants, it requires only a single forward pass to learn a new task. Meta-training ProtoNets with LITE involves passing H through the feature extractor with back-propagation enabled, followed by H with back-propagation disabled, to obtain features for all support examples DSb . These features are averaged by class to compute the prototypes such that (with back-propagation enabled) the query batch DSb can be passed through the feature extractor and classiﬁed based on the Euclidean distance. The loss of the query batch is computed and only back-propagated for H. Note that here all the parameters of the feature extractor are learned. 4

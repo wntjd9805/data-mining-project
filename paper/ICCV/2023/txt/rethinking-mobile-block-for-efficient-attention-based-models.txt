@@ -1,0 +1,470 @@
+Abstract
+This paper focuses on developing modern, efficient, lightweight models for dense predictions while trading off parameters, FLOPs, and performance. Inverted Residual
+Block (IRB) serves as the infrastructure for lightweight
+CNNs, but no counterpart has been recognized by attention-based studies. This work rethinks lightweight infrastructure from efficient IRB and effective components of Transformer from a unified perspective, extending CNN-based IRB to attention-based models and abstracting a one-residual Meta
+Mobile Block (MMB) for lightweight model design. Follow-ing simple but effective design criterion, we deduce a modern
+Inverted Residual Mobile Block (iRMB) and build a ResNet-like Efficient MOdel (EMO) with only iRMB for down-stream tasks. Extensive experiments on ImageNet-1K, COCO2017, and ADE20K benchmarks demonstrate the superiority of our
+EMO over state-of-the-art methods, e.g., EMO-1M/2M/5M achieve 71.5, 75.1, and 78.4 Top-1 that surpass equal-order
+CNN-/Attention-based models, while trading-off the parame-ter, efficiency, and accuracy well: running 2.8-4.0× ↑ faster than EdgeNeXt on iPhone14. 1.
+
+Introduction
+With a recent increasing demand for storage/computing restricted applications, mobile models with fewer parame-ters and low FLOPs have attracted significant attention from developers and researchers. The earliest attempt to design an efficient model dates back to the Inceptionv3 [58] era, which uses asymmetric convolutions to replace standard convolu-tion. Then, MobileNet [20] proposes depth-wise separable convolution to significantly decrease the amount of computa-tion and parameters, which is viewed as a fundamental CNN-based component for subsequent works [82, 46, 51, 15]. Re-markably, MobileNetv2 [54] proposes an efficient Inverted
+Residual Block (IRB) based on Depth-Wise Convolution (DW-Conv) that is recognized as the infrastructure of ef-*Corresponding authors.
+Figure 1: Performance vs. FLOPs with concurrent methods. ficient models [61] until now. Inevitably, limited by the natural induction bias of static CNN, the accuracy of CNN-pure models still maintains a low level of accuracy that needs further improvements. In summary, one extreme core is to advance a stronger fundamental block going beyond IRB.
+On the other hand, stared from vision transformer (ViTs) [13], many follow-ups [64, 68, 69, 42, 41, 80, 79, 33] have achieved significant improvements over CNN. This is due to its ability to model dynamically and learn from the extensive dataset, and how to migrate this capability to lightweight CNN is worth our explorations. However, lim-ited by the quadratic amount of computations for Multi-Head
+Self-Attention (MHSA), the attention-based model requires massive resource consumption, especially when the channel and resolution of the feature map are large. Some works attempt to tackle the above problems by designing variants with linear complexity [29, 7], decreasing the spatial resolu-tion of features [71, 68, 31], rearranging channel [48], using local window attention [42] etc. However, these methods still cannot be deployed on devices.
+Recently, researchers have aimed to design efficient hy-brid models with lightweight CNNs, and they obtain better performances than CNN-based models with trading off ac-curacy, parameters, and FLOPs. However, current methods
+introduce complex structures [49, 50, 67, 6, 47] or multiple hybrid modules [47, 52], which is very detrimental to opti-mize for applications. So far, little work has been done to explore attention-based counterparts as IRB, and this inspires us to think: Can we build a lightweight IRB-like infrastruc-ture for attention-based models with only basic operators?
+Based on the above motivation, we rethink efficient In-verted Residual Block in MobileNetv2 [54] and effective
+MHSA/FFN modules in Transformer [66] from a unified perspective, expecting to integrate both advantages at the infrastructure design level. As shown in Fig. 2-Left, while working to bring one-residual IRB with inductive bias into the attention model, we observe two underlying submodules (i.e., FFN and MHSA) in two-residual Transformer share the similar structure to IRB. Thus, we inductively abstract a one-residual Meta Mobile Block (MMB, c.f ., Sec. 2.2) that takes parametric arguments expansion ratio λ and effi-cient operator F to instantiate different modules, i.e., IRB,
+MHSA, and FFN. We argue that MMB can reveal the con-sistent essence expression of the above three modules, and it can be regarded as an improved lightweight concentrated aggregate of Transformer. Furthermore, a simple yet effec-tive Inverted Residual Mobile Block (iRMB) is deduced that only contains fundamental Depth-Wise Convolution and our improved EW-MHSA (c.f ., Sec. 2.3) and we build a ResNet-like 4-phase Efficient MOdel (EMO) with only iRMBs (c.f .,
+Sec. 2.4). Surprisingly, our method performs better over the
+SoTA lightweight attention-based models even without com-plex structures, as shown in Fig. 1. In summary, this work follows simple design criteria while gradually producing an efficient attention-based lightweight model.
+Our contributions are four folds: 1) We extend CNN-based IRB to the two-residual transformer and abstract a one-residual Meta Mobile Block (MMB) for lightweight model design. This meta paradigm could describe the cur-rent efficient modules and is expected to have the guiding significance in concreting novel efficient modules. 2) Based on inductive MMB, we deduce a simple yet effective modern
+Inverted Residual Mobile Block (iRMB) and build a ResNet-like Efficient MOdel (EMO) with only iRMB for down-stream applications. In detail, iRMB only consists of naive
+DW-Conv and the improved EW-MHSA to model short-/long-distance dependency, respectively. 3) We provide de-tailed studies of our method and give some experimental find-ings on building attention-based lightweight models, hoping our study will inspire the research community to design pow-erful and efficient models. 4) Even without introducing com-plex structures, our method still achieves very competitive results than concurrent attention-based methods on several benchmarks, e.g., our EMO-1M/2M/5M reach 71.5, 75.1, and 78.4 Top-1 over current SoTA CNN-/Transformer-based models. Besides, EMO-1M/2M/5M armed SSDLite obtain 22.0/25.2/27.9 mAP with only 2.3M/3.3M/6.0M parameters and 0.6G/0.9G/1.8G FLOPs, which exceeds recent Mobile-ViTv2 [50] by +0.8↑/+0.6↑/+0.1↑ with decreased FLOPs by
+-33%↓/-50%↓/-62%↓; EMO-1M/2M/5M armed DeepLabv3 obtain 33.5/35.3/37.98 mIoU with only 5.6M/6.9M/10.3M parameters and 2.4G/3.5G/5.8G FLOPs, surpassing Mobile-ViTv2 by +1.6↑/+0.6↑/+0.8↑ with much lower FLOPs. 2. Methodology: Induction and Deduction 2.1. Criteria for General Efficient Model
+When designing efficient visual models for mobile appli-cations, we advocate the following criteria subjectively and empirically that an efficient model should satisfy as much as possible: ➀ Usability. Simple implementation that does not use complex operators and is easy to optimize for applica-tions. ➁ Uniformity. As few core modules as possible to reduce model complexity and accelerated deployment. ➂ Ef-fectiveness. Good performance for classification and dense prediction. ➃ Efficiency. Fewer parameters and calculations with accuracy trade-off. We make a summary of current efficient models in Tab. 1: 1) Performance of MobileNet series [20, 54, 67] is now seen to be slightly lower, and its parameters are slightly higher than counterparts. 2) Recent
+MobileViT series [49, 50, 67] achieve notable performances, but they suffer from higher FLOPs and slightly complex modules. 3) EdgeNeXt [47] and EdgeViT [52] obtain pretty results, but their basic blocks also consist of elaborate mod-ules. Comparably, the design principle of our EMO follows the above criteria without introducing complicated opera-tions (c.f ., Sec. 2.4), but it still obtains impressive results on multiple vision tasks (c.f ., Sec. 3).
+Table 1: Criterion comparison for current efficient mod-els. ➀: Usability; ➁: Uniformity; ➂: Effectiveness; ➃: Effi-ciency. ✔: Satisfied. ✚: Partially satisfied. ✘: Unsatisfied.
+Method vs. Criterion
+MobileNet Series [20, 54, 67]
+MobileViT Series [49, 50, 67]
+EdgeNeXt [47]
+EdgeViT [52]
+EMO (Ours)
+➀
+✔
+✚
+✚
+✔
+✔
+➁
+✔
+✚
+✘
+✚
+✔
+➂
+✚
+✔
+✔
+✔
+✔
+➃
+✚
+✚
+✔
+✚
+✔ 2.2. Meta Mobile Block
+Motivation. 1) Recent Transformer-based works [74, 42, 12, 56, 39, 62, 63] are dedicated to improving spatial token mixing under the MetaFormer [75] for high-performance network. CNN-based Inverted Residual Block [54] (IRB) is recognized as the infrastructure of efficient models [54, 61], but little work has been done to explore attention-based counterpart. This inspires us to build a lightweight IRB-like infrastructure for attention-based models. 2) While working to bring one-residual IRB with inductive bias into the atten-Figure 2: Left: Abstracted unified Meta-Mobile Block from Multi-Head Self-Attention / Feed-Forward Network [66] and
+Inverted Residual Block [54] (c.f . Sec 2.2). The inductive block can be deduced into specific modules using different expansion ratio λ and efficient operator F . Right: ResNet-like EMO composed of only deduced iRMB (c.f . Sec 2.3). tion model, we stumble upon two underlying sub-modules (i.e., FFN and MHSA) in two-residual Transformer that hap-pen to share a similar structure to IRB.
+Induction. We rethink Inverted Residual Block in Mo-bileNetv2 [54] with core MHSA and FFN modules in Trans-former [66], and inductively abstract a general Meta Mobile
+Block (MMB) in Fig. 2, which takes parametric arguments expansion ratio λ and efficient operator F to instantiate different modules. We argue that the MMB can reveal the consistent essence expression of the above three modules, and MMB can be regarded as an improved lightweight con-centrated aggregate of Transformer. Also, this is the basic motivation for our elegant and easy-to-use EMO, which only contains one deduced iRMB absorbing advantages of lightweight CNN and Transformer. Take image input
+X(∈ RC×H×W ) as an example, MMB firstly use a expan-sion MLPe with output/input ratio equaling λ to expand channel dimension:
+Xe = MLPe(X)(∈ RλC×H×W ). (1)
+Then, intermediate operator F enhance image features fur-ther, e.g., identity operator, static convolution, dynamic
+MHSA, etc. Considering that MMB is suitable for efficient network design, we present F as the concept of efficient operator, formulated as:
+Xf = F (Xe)(∈ RλC×H×W ). (2)
+Finally, a shrinkage MLPs with inverted input/output ratio equaling λ to shrink channel dimension:
+Xs = MLPs(Xf )(∈ RC×H×W ), (3) where a residual connection is used to get the final output
+Y = X + Xs(∈ RC×H×W ). Notice that normalization and activation functions are omitted for clarity. discuss the between
+Figure 3: Paradigm illustra-tion with MetaFormer.
+Relation to MetaFormer. dif-We ferences our
+Meta Mobile Block and
+MetaFormer [75] in Fig. 3. 1) From the structure, two-residual MetaFormer contains two sub-modules with two skip connections, while our Meta Mobile
+Block contains only one sub-module that covers one-residual IRB in the field of lightweight CNN. Also, shallower depths require less memory access and save costs [46] that is more general and hardware friendly. 2) From the motivation, MetaFormer is the induction of high-performance Transformer/MLP-like models, while our Meta Mobile Block is the induction of efficient IRB in MobileNetv2 [54] and effective MHSA/FFN in Transformer [66, 13] for designing efficient infrastructure. 3) To a certain extent, the inductive one-residual Meta
+Mobile Block can be regarded as a conceptual extension of two-residual MetaFormer in the lightweight field. We hope our work inspires more future research dedicated to lightweight model design domain based on attention.
+Table 2: Complexity and Maximum Path Length analysis of modules. Input/output feature maps are in RC×W ×W ,
+L = W 2, l = w2, W and w are feature map size and window size, while k and G are kernel size and group number.
+#Params
+Module
+MHSA 4(C + 1)C
+W-MHSA 4(C + 1)C
+FLOPs
+MPL 8C 2L+4CL2 +3L2 O(1) 8C 2L + 4CLl + 3Ll O(Inf )
+Conv
+DW-Conv (Ck2/G+1)C (2Ck2/G)LC (k2 + 1)C (2k2)LC
+O(2W/(k−1))
+O(2W/(k−1))
+2.3. Micro Design: Inverted Residual Mobile Block
+Table 3: A toy experiment for assessing iRMB.
+Figure 4: Paradigm of iRMB.
+Based on the inductive Meta
+Mobile Block, we instantiate an effective yet efficient modern In-verted Residual Mobile Block (iRMB) from a microscopic view in Fig. 4.
+Design Principle. Following cri-teria in Sec. 2.1, F in iRMB is modeled as cascaded MHSA and
+Convolution operations, formu-lated as F (·) = Conv(MHSA(·)).
+This design absorbs CNN-like effi-ciency to model local features and
+Transformer-like dynamic mod-elling capability to learn long-distance interactions. How-ever, naive implementation can lead to unaffordable expenses for two main reasons: 1) λ is generally greater than one that the intermediate dimen-sion would be multiple to input dimension, causing quadratic
+λ increasing of parameters and computations. Therefore, components of F should be independent or linearly depen-dent on the number of channels. 2) FLOPs of MHSA is proportional to the quadratic of total image pixels, so the cost of a naive Transformer is unafford-able. The specific influences can be seen in Tab. 2.
+Deduction. We employ efficient Window-MHSA (W-MHSA) and Depth-Wise Convolution (DW-Conv) with a skip connection to trade-off model cost and accuracy.
+Improved EW-MHSA. Parameters and FLOPs for obtain-ing Q,K in W-MHSA is quadratic of the channel, so we employ unexpanded X to calculate the attention matrix more efficiently, i.e., Q=K=X (∈ RC×H×W ), while the expanded value Xe as V (∈ RλC×H×W ). This improve-ment is termed as Expanded Window MHSA (EW-MHSA) that is more applicative, formulated as:
+F (·) = (DW-Conv, Skip)(EW-MHSA(·)). (4)
+Also, this cascading manner can increase the expansion speed of the receptive field and reduce the maximum path length of the model to O(2W/(k − 1 + 2w)), which has been experimentally verified with consistency in Sec. 3.3.
+Flexibility. Empirically, current transformer-based meth-ods [47, 32, 73] reach a consensus that inductive CNN in shallow layers while global Transformer in deep layers com-position could benefit the performance. Unlike recent Ed-geNeXt that employs different blocks for different depths, our iRMB satisfies the above design principle using only two switches to control whether two modules are used (Code level is also concise in #Supp).
+Efficient Equivalent Implementation. MHSA is usually used in channel-consistent projection (λ=1), meaning that
+Model
+DeiT-Tiny [64]
+DeiT-Tiny w/iRMB
+PVT-Tiny [68]
+PVT-Tiny w/iRMB
+#Params ↓ 5.7M 4.9M -14% ↓ 13.2M 11.7M -11% ↓
+FLOPs ↓ 1258 1102 -156M ↓ 1943 1845 -98M ↓
+Top-1 ↑ 72.2 74.3 +2.1% ↑ 75.1 75.4 +0.3% ↑ the FLOPs of multiplying attention matrix times expended
+Xe (λ>1) will increase by λ - 1. Fortunately, the informa-tion flow from X to expended V (Xe) involves only linear operations, i.e., MLPe(·), so we can derive an equivalent proposition:"When the groups of MLPe equals to the head number of W-MHSA, the multiplication result of exchang-ing order remains unchanged." To reduce FLOPs, matrix multiplication before MLPe is used by default.
+Choice of Efficient Operators. We also replace the compo-nent of F with group convolution, asymmetric [58] convo-lution, and performer [7], but they make no further improve-ments with much higher parameters and FLOPs at the same magnitude for our approach.
+Boosting Naive Transformer. To assess iRMB performance, we set λ to 4 and replace standard Transformer structure in columnar DeiT [64] and pyramid-like PVT [68]. As shown in Tab. 3, we surprisingly found that iRMB can improve performance with fewer parameters and computations in the same training setting, especially for the columnar ViT. This proves that the one-residual iRMB has obvious advantages over the two-residual Transformer in the lightweight model.
+Parallel Design of F . We also implement the parallel struc-ture of DW-Conv and EW-MHSA with half the number of channels in each component, and some configuration de-tails are adaptively modified to ensure the same magnitude.
+Comparably, this parallel model gets 78.1 (-0.3↓) Top-1 in ImageNet-1k dataset with 5.1M parameters and 964M
+FLOPs (+63M↑ than EMO-5M), but its throughput will slow down by about -7%↓. This phenomenon is also discussed in the work [46] that: "Network fragmentation reduces the degree of parallelism". 2.4. Macro Design of EMO for Dense Prediction
+Based on the above criteria, we design a ResNet-like 4-phase Efficient MOdel (EMO) based on a series of iRMBs for dense applications, as shown in Fig. 2-Right. 1) For the overall framework, EMO consists of only iRMBs without diversified modules➁, which is a departure from re-cent efficient methods [49, 47] in terms of designing idea. 2) For the specific module, iRMB consists of only standard convolution and multi-head self-attention without other com-plex operators➀. Also, benefitted by DW-Conv, iRMB can adapt to down-sampling operation through the stride and does not require any position embeddings for introducing inductive bias to MHSA➁. 3) For variant settings, we employ gradually increasing ex-Table 4: Core configurations of EMO variants.
+Items
+Depth
+Emb. Dim.
+Exp. Ratio
+EMO-1M
+[ 2, 2, 8, 3 ]
+[ 32, 48, 80, 168 ]
+[ 2.0, 2.5, 3.0, 3.5 ]
+EMO-2M
+[ 3, 3, 9, 3 ]
+[ 32, 48, 120, 200 ]
+[ 2.0, 2.5, 3.0, 3.5 ]
+EMO-5M
+[ 3, 3, 9, 3 ]
+[ 48, 72, 160, 288 ]
+[ 2.0, 3.0, 4.0, 4.0 ] pansion rates and channel numbers, and detailed configura-tions are shown in Tab. 4. Results for basic classification and multiple downstream tasks in Sec. 3 demonstrate the superiority of our EMO over SoTA lightweight methods on magnitudes of 1M, 2M, and 5M➂➃.
+Details. Since MHSA is better suited for modelling semantic features for deeper layers, we only turn it on at stage-3/4 following previous works [47, 32, 73]. Note that this never violates the uniformity criterion, as the shutdown of MHSA was a special case of iRMB structure. To further increase the stability of EMO, BN [26]+SiLU [18] are bound to DW-Conv while LN [2]+GeLU [18] are bound to EW-MHSA.
+Also, iRMB is competent for down-sampling operations.
+Relation to MetaFormer. 1) From the structure,
+MetaFormer extended dense prediction model employs an extra patch embedding layer for down-sampling, while our
+EMO only consists of iRMB. 2) From the result, our in-stantiated EMO-5M (w/ 5.1M #Params and 903M FLOPs) exceeds instantiated PoolFormer-S12 (w/ 11.9M #Params and 1,823M FLOPs) by +1.2↑, illustrating that a stronger efficient operator makes a advantage. 3) We further replace
+Token Mixer in MetaFormer with F in iRMB and build a 5.3M model vs. our EMO-5M. It only achieves 77.5 Top-1 on ImageNet-1k, i.e., -0.9↓ than our model, meaning that our proposed Meta Mobile Block has a better advantage for con-structing lightweight models than two-residual MetaFormer.
+Importance of In-Table 5: Ablation study on com-stantiated Efficient ponents in iRMB.
+Operator. Our de-fined efficient opera-tor F contains two i.e., core modules,
+EW-MHSA and DW-Conv. In Tab. 5, we conduct an ablation experiment to study the effect of both modules. The first row means that neither EW-MHSA nor
+DW-Conv is used, i.e., the model is almost composed of
+MLP layers with several DW-Conv for down-sampling, and
+F degenerates to Identity operation. Surprisingly, this model still produces a respectable result, i.e., 73.5 Top-1. Com-paratively, results of the second and third rows demonstrate that each component contributes to the performance, e.g.,
++3.1↑ and +4.1↑ when adding DW-Conv and EW-MHSA, respectively. Our model achieves the best result, i.e., 78.4
+Top-1, when both components are used. Besides, this exper-iment illustrates that the specific instantiation of iRMB is very important to model performance. 73.5 76.6 +3.1 ↑ 77.6 +4.1 ↑ 78.4 +4.9 ↑
+EW-MHSA DW-Conv
+✘
+✘
+✔
+✔
+✘
+✔
+✘
+✔
+Top-1
+Order of Operators. Based on EMO-5M, we switch the order of DW-Conv/EW-MHSA and find a slight drop in per-formance (-0.6↓), so EW-MHSA performs first by default. 3. Experiments 3.1. Image Classification
+Setting. Due to various training recipes of SoTA meth-ods [19, 13, 64, 49, 50, 45, 47] that could lead to potentially unfair comparisons (summarized in Tab. 6), we employ a weaker training recipe to increase model persuasion and open the source code for subsequent fair comparisons in
+#Supp. All experiments are conducted on ImageNet-1K dataset [11] without extra datasets and pre-trained models.
+Each model is trained for standard 300 epochs from scratch at 224×224, and AdamW [44] optimizer is employed with betas (0.9, 0.999), weight decay 5e−2, learning rate 6e−3, and batch size 2,048. We use Cosine scheduler [43] with 20 warmup epochs, Label Smoothing 0.1 [59], stochastic depth [22], and RandAugment [10] during training, while
+LayerScale [65], Dropout [57], MixUp [78], CutMix [77],
+Random Erasing [84], Position Embeddings [13], Token
+Labeling [28], and Multi-Scale training [49] are disabled.
+EMO is implemented by PyTorch [53], based on TIMM [70], and trained with 8×V100 GPUs.
+Results. EMO is evaluated with SoTAs on three small scales, and quantitative results are shown in Tab. 7. Surprisingly, our method obtains the current best results without using com-plex modules and MobileViTv2-like strong training recipe.
+For example, the smallest EMO-1M obtains SoTA 71.5 Top-1 that surpasses CNN-based MobileNetv3-L-0.50 [19] by
++2.7↑ with nearly half parameters and Transformer-based
+MobileViTv2-0.5 [50] by +1.3↑ with only 56% FLOPs.
+Larger EMO-2M achieves SoTA 75.1 Top-1 with only 439M
+FLOPs, nearly half of MobileVit-XS [49]. Comparatively, the latest EdgeViT-XXX [52] obtains a worse 74.4 Top-1 while requiring +78%↑ parameters and +27%↑ FLOPs. Con-sistently, EMO-5M obtains a superior trade-off between
+#Params (5.1M) / #FLOPs (903M) and accuracy (78.4), which is more efficient than contemporary counterparts. Sur-prisingly, after increasing the channel of the fourth stage of
+EMO-5M from 288 to 320, the new EMO-6M reaches 79.0
+Top-1 with only 961M FLOPs.
+Training Recipes Matters. We evaluate EMO with different training recipes:
+MNetv3
+NaN
+DeiT 78.1
+EdgeNeXt 78.3
+EMO 78.4
+We find that the simple training recipe (Ours) is enough to get good results for our lightweight EMO, while existing stronger recipes (especially in EdgeNeXt [47]) will not im-prove the model further. NaN indicates the model did not train well for the possibly unadapted hyper-parameters.
+Table 6: Comparison of training recipes among contem-porary methods and we employ the same setting in all experiments. Please zoom in for clearer comparisons. Ab-breviated MNet and MViT: MobileNet and MobileViT.
+Super-Params.
+Epochs
+Batch size
+Optimizer
+Learning rate
+Learning rate decay
+Warmup epochs
+Label smoothing
+Drop out rate
+Drop path rate
+RandAugment
+Mixup alpha
+Cutmix alpha
+Erasing probability
+Position embedding
+Multi-scale sampler
+MNetv3 [19]
+ICCV’19 300 512
+RMSprop 6.4e−2 1e−5 3 0.1
+✘ 0.2 9/0.5
+✘
+✘ 0.2
+✘
+✘
+ViT [13]
+ICLR’21 300 4096
+DeiT [64]
+ICML’21 300 1024
+AdamW AdamW 3e−3 3e−1 3.4
+✘ 0.1
+✘
+✘
+✘
+✘
+✘
+✔
+✘ 1e−3 5e−2 5 0.1
+✘ 0.1 9/0.5 0.8 1.0 0.25
+✔
+✘
+MViTv1 [49]
+ICLR’22 300 1024
+AdamW 2e−3 1e−2 2.4 0.1 0.1
+✘
+✘
+✘
+✘
+✘
+✘
+✔
+MViTv2 [50] arXiv’22 300 1024
+AdamW 2e−3 5e−2 16 0.1
+✘
+✘ 9/0.5 0.8 1.0 0.25
+✘
+✘
+EdgeNeXt [47] arXiv’22 300 4096
+EMO
+Ours 300 2048
+AdamW AdamW 6e−3 5e−2 20 0.1
+✘ 0.1 9/0.5
+✘
+✘
+✘
+✔
+✔ 6e−3 5e−2 20 0.1
+✘ 0.1 9/0.5
+✘
+✘
+✘
+✘
+✘
+Table 7: Classification performance on ImageNet-1K dataset.
+White, yellow, and blue backgrounds indicate CNN-based,
+Transformer-based, and our EMO, respectively. This kind of display continues for all subsequent experiments. Unit: (M).
+Abbreviated MNet and MViT: MobileNet and MobileViT.
+Model
+MNetv3-L-0.50 [19]
+MViTv1-XXS [49]
+MViTv2-0.5 [50]
+EdgeNeXt-XXS [47]
+EMO-1M
+MNetv2-1.40 [54]
+MNetv3-L-0.75 [19]
+MoCoViT-1.0 [45]
+PVTv2-B0 [69]
+MViTv1-XS [49]
+MFormer-96M [6]
+EdgeNeXt-XS [47]
+EdgeViT-XXS [52] tiny-MOAT-0 [73]
+EMO-2M
+MNetv3-L-1.25 [19]
+EfficientNet-B0 [61]
+DeiT-Ti [64]
+XCiT-T12 [1]
+LightViT-T [23]
+MViTv1-S [49]
+MViTv2-1.0 [50]
+EdgeNeXt-S [47]
+PoolFormer-S12 [75]
+MFormer-294M [6]
+MPViT-T [30]
+EdgeViT-XS [52] tiny-MOAT-1 [73]
+EMO-5M
+EMO-6M
+#Params ↓ 2.6 1.3 1.4 1.3 1.3 6.9 4.0 5.3 3.7 2.3 4.6 2.3 4.1 3.4 2.3 7.5 5.3 5.7 6.7 9.4 5.6 4.9 5.6 11.9 11.4 5.8 6.7 5.1 5.1 6.1 3.2. Downstream Tasks
+FLOPs ↓ Reso. Top-1 68.8 69.0 70.2 71.2 71.5 74.7 73.3 74.5 70.5 74.8 72.8 75.0 74.4 75.5 75.1 76.6 77.1 72.2 77.1 78.7 78.4 78.1 78.8 77.2 77.9 78.2 77.5 78.3 78.4 79.0 69 364 466 261 261 585 155 147 572 986 96 538 557 800 439 356 399 1258 1254 700 2009 1851 965 1823 294 1654 1136 1200 903 961 2242 2562 2562 2562 2242 2242 2242 2242 2242 2562 2242 2562 2562 2242 2242 2242 2242 2242 2242 2242 2562 2562 2242 2242 2242 2242 2562 2242 2242 2242
+#Pub
+ICCV’19
+ICLR’22 arXiv’22
+ECCVW’22
+ICCV’23
+CVPR’18
+ICCV’19 arXiv’22
+CVM’22
+ICLR’22
+CVPR’22
+ECCVW’22
+ECCV’22
+ICLR’23
+ICCV’23
+ICCV’19
+ICML’19
+ICML’21
+NIPS’21 arXiv’22
+ICLR’22 arXiv’22
+ECCVW’22
+CVPR’22
+CVPR’22
+CVPR’22
+ECCV’22
+ICLR’23
+ICCV’23
+ICCV’23
+Object detection. ImageNet-1K pre-trained EMO is inte-grated with light SSDLite [19] and heavy RetinaNet [37] to evaluate its performance on MS-COCO 2017 [38] dataset at 320×320 resolution. Considering fairness and friendli-ness for the community, we employ standard MMDetection library [4] for experiments and replace the optimizer with
+AdamW [44] without tuning other parameters.
+Table 8: Object detection performance by SSDLite on MS-COCO. Abbreviated MNet/MViT: MobileNet/MobileViT.
+Backbone
+MNetv1 [20]
+MNetv2 [54]
+MNetv3 [19]
+MViTv1-XXS [49]
+MViTv2-0.5 [50]
+EMO-1M
+MViTv2-0.75 [50]
+EMO-2M
+ResNet50 [17]
+MViTv1-S [49]
+MViTv2-1.25 [50]
+EdgeNeXt-S [47]
+EMO-5M
+#Params ↓ 5.1 4.3 5.0 1.7 2.0 2.3 3.6 3.3 26.6 5.7 8.2 6.2 6.0
+FLOPs ↓ 1.3G 0.8G 0.6G 0.9G 0.9G 0.6G 1.8G 0.9G 8.8G 3.4G 4.7G 2.1G 1.8G mAP 22.2 22.1 22.0 19.9 21.2 22.0 24.6 25.2 25.2 27.7 27.8 27.9 27.9
+Table 9: Object detection results by RetinaNet on MS-COCO.
+Backbone
+ResNet-50 [17]
+PVTv1-Tiny [68]
+PVTv2-B0 [69]
+EMO-5M
+#Params AP AP50 AP75 APS APM APL 48.8 50.0 49.7 51.7 37.7 23.0 13.0 14.4 36.3 36.7 37.2 38.9 19.3 22.6 23.1 23.8 40.0 38.8 40.4 42.2 55.3 56.9 57.2 59.8 38.6 38.9 39.5 41.0
+For SSDLite, comparison results with SoTA methods are shown in Tab. 8, and our EMO surpasses corresponding counterparts by apparent advantages. For example, SSDLite equipped with EMO-1M achieves 22.0 mAP with only 0.6G
+FLOPs and 2.3M parameters, which boosts +2.1↑ compared with SoTA MobileViT [49] with only 66% FLOPs. Consis-tently, our EMO-5M obtains the highest 27.9 mAP so far with much fewer FLOPs, e.g., 53% (1.8G) of MobileViT-S [49] (3.4G) and 0.3G less than EdgeNeXt-S (2.1G). For
+RetinaNet, data in Tab. 9 come from official EdgeViT [52], and our EMO consistently obtains better results over coun-terparts, e.g., +2.6↑ AP than CNN-based ResNet-50 and
++1.7↑ AP than Transformer-based PVTv2-B0. In addition, we report EMO-5M-based RetinaNet with 178.11 GFLOPs for the follow-up comparison.
+Qualitative detection visualizations compared with Mo-bileViTv2 by SSDLite are shown in Fig. 5-(a), and results indicate the superiority of our EMO for capturing adequate and accurate information on different scenes.
+Semantic segmentation. ImageNet-1K pre-trained EMO is integrated with DeepLabv3 [5] and PSPNet
+[83] to adequately evaluate its performance on challenging
+ADE20K [85] dataset at 512×512 resolution. Also, we employ standard MMSegmentation library [9] for experi-ments and replace the optimizer with AdamW [44] without tuning other parameters. Details can be viewed in the code.
+Comparison results with SoTA methods are shown in Tab. 10, and our EMO is apparently superior over
+SoTA Transformer-based MobileViTv2 [50] at various
+Table 11: Comparisons of throughput on CPU/GPU and running speed on mobile iPhone14 (ms).
+Method
+EdgeNeXt-XXS
+EMO-1M
+EdgeNeXt-XS
+EMO-2M
+EdgeNeXt-S
+EMO-5M
+CPU
+FLOPs 73.1 261M 261M 158.4 538M 69.1 439M 126.6 965M 54.2 903M 106.5 4.5 2.8× ↑
+GPU iPhone14 2860.6 12.6 3414.6 1855.2 20.2 2509.8 1622.5 27.7 1731.7 6.8 4.0× ↑ 5.1 3.9× ↑
+Table 12: Performance vs. depth configurations.
+Depth
+[ 2, 2, 10, 3 ]
+[ 2, 2, 12, 2 ]
+[ 4, 4, 8, 3 ]
+[ 3, 3, 9, 3 ]
+#Params 5.3M 5.0M 4.9M 5.1M
+FLOPs 901M 970M 905M 903M
+Top-1 78.0 77.8 78.1 78.4 over the same FLOPs. This gap is further widened on mo-bile devices (following official classification project [25] by iPhone14), i.e., 2.8× ↑, 3.9× ↑, and 4.80× ↑ faster than
+SoAT EdgeNeXt [47]. This derives from our simple and device-friendly iRMB with no other complex structures, e.g.,
+Res2Net module [14], transposed channel attention [1], etc.
+Depth Configuration. We assess another three models with different depths on the order of 5M in Tab. 12. The selected depth configuration produces relatively better performance.
+Comparison with EfficientNet/EfficientFormer. The man-ually designed EMO trade-offs #Params, FLOPs, and per-formance, and #Params lies in 1M/2M/5M scales, thus
+NAS-assisted EfficientNet-B1 (ENet-B1) [61] with 7.8M and EfficientFormer-L1 (EFormer-L1) [36] with 12.3M are not included in Tab. 7. Comparatively, our EMO-6M ob-tains a competitive 79.0 Top-1 with much less #Params over them, arguing that EMO achieves a better trade-off among
+#Params, FLOPs, and performance. Also, our roughly manu-ally designed model is promising for further performance im-provements with more rational configurations in future work.
+Benefit from EW-MHSA, EMO offers clear advantages for high-resolution downstream tasks, e.g., compared with more powerful EfficientNet-B2 (ENet-B2) and EfficientFormer-L1 with higher #Params/FLOPs, EMO-5M achieves better performance as belows:
+Backbone
+ENet-B1
+ENet-B2
+EFormer-L1
+EMO-5M mAP
+SSDLite 27.3 27.5
+-27.9
+APbox
+Mask RCNN 38.0 38.5 37.9 39.3
+APmask
+Mask RCNN 35.2 35.6 35.4 36.4 mIoU
+DeepLabv3 36.6 37.0
+-37.8 mIoU
+Semantic FPN 38.5 39.1 38.9 40.3
+Normalization Type in Different Stages. BN and LN of the same dimension have the same parameters and similar
+FLOPs, but LN has a tremendous negative impact on the speed of vision models limited by the underlying optimiza-tion of GPU structure. Fig. 6A shows the throughput of
+EMO-5M with the LN layer applying to different stages, and
+LN is used to stage-3/4 (S-34) by default. As more stages
+Figure 5: Qualitative comparisons with MobileNetv2 on two main downstream tasks. Zoom in for more details.
+Table 10: Semantic segmentation performance on ADE20K dataset. Abbreviated MNet/MViT: MobileNet/MobileViT.
+Backbone
+MViTv2-0.5 [50]
+EMO-1M
+MNetv2 [54]
+MViTv2-0.75 [50]
+EMO-2M
+MViTv2-1.0 [50]
+EMO-5M
+DeepLabv3 [5]
+PSPNet [83]
+#Params FLOPs mIoU #Params FLOPs mIoU 31.8 33.2 29.7 35.2 34.5 36.5 38.2 15.4 2.1 53.1 26.6 3.1 40.3 5.3 3.6 4.3 13.7 6.2 5.5 9.4 8.5 26.1 2.4 75.4 40.0 3.5 56.4 5.8 31.9 33.5 34.1 34.7 35.3 37.0 37.8 6.3 5.6 18.7 9.6 6.9 13.4 10.3 scales when integrating into segmentation frameworks.
+For example, EMO-1M/2M/5M armed DeepLabv3 obtains 33.5/35.3/37.8 mIoU, surpassing MobileViTv2 counterparts by +1.6↑/+0.6↑/+0.6↑, while owning fewer parameters and
+FLOPs benefitted from efficient iRMB. Also, consistent conclusions can be reached when applying EMO as the back-bone network of PSPNet. More qualitative results in #Supp.
+Qualitative segmentation results compared with Mobile-ViTv2 by DeepLabv3 are shown in Fig. 5-(b), and EMO-based model can obtain more accurate and stable results than the comparison approach, e.g., more consistent bathtub, sand, and baseball field segmentation results. 3.3. Extra Ablation and Explanatory Analysis
+Throughput Comparison. In Tab. 11, we present through-put evaluation results compared with SoTA EdgeNeXt [47].
+The test platforms are AMD EPYC 7K62 CPU and V100
+GPU with a resolution of 224×224 and a batch size of 256. Results indicate that our EMO has an faster speed on both platforms, even though both methods have similar
+FLOPs. For example, EMO-1M achieves speed boosts of
++20%↑ for GPU and +116%↑ for CPU than EdgeNeXt-XXS
+Figure 6: Ablation studies on ImageNet-1K with EMO-5M. replace BN with LN, i.e., S-1234, throughput decreases sig-nificantly (1,693 → 952) while the benefit is modest (+0.2↑).
+We found that the model is prone to unstable NaNs when
+LN is not used; thus, we argue that LN is necessary but used in a few stages is enough for Attention-based EMO.
+MHSA in Different Stages. Fig. 6B illustrates the changes in model accuracy when applying MHSA to different stages based on EMO-5M, and we further detail that as follows:
+✘
+✔
+S2
+✘
+S1
+✘
+S3
+✘
+✔
+✔
+✔
+S4
+✔
+✔
+✔
+✔
+EMO-5M
+✔
+✔
+CPU 205.7 106.5 98.0 52.3
+Top-1 78.0 78.4 78.5 78.8
+GPU 2111.4 1731.7 1492.2 886.8
+#Params 4.697 5.109 5.130 5.139 iPhone14 4.9 6.8 7.5 9.5
+FLOPs 797 903 931 992
+Results indicate that MHSA always positively affects model accuracy no matter what stage inserted. Our efficient model obtains the best result when applying MHSA to every stage, but this would take an extra 10%↑ more FLOPs, i.e., from 903M to 992M. Therefore, only using MHSA in the last two stages is used by default, which trades off the accuracy and efficiency of the model.
+Effect of Drop Path Rate. Fig. 6C explores the effect of drop path rate for training EMO-5M. Results show that the proposed model is robust to this training parameter in the range [0, 0.1] that fluctuates accuracy within 0.2, and 0.05 can obtain a slightly better result.
+Effect of Batch Size. Fig. 6D explores the effect of batch size for training EMO. Small batch size (≤ 512) will bring performance degradation, while high batch size will suffer from performance saturation, and it will also put higher requirements on the hardware. Therefore, 1,024 or 2,048 is enough to meet the training requirement.
+Attention Visualizations by Grad-CAM. To better illus-trate the effectiveness of our approach, Grad-CAM [55] is used to highlight concerning regions of different models.
+As shown in Fig. 7, CNN-based ResNet tends to focus on specific objects, and Transformer-based MPViT pays more attention to global features. Comparatively, our EMO could focus more accurately on salient objects while keeping the
+Figure 7: Visualizations by Grad-CAM among CNN-based
+ResNet, Transformer-based MPViT, and our EMO.
+Figure 9: Diagonal similarity with different components.
+Figure 8: #Params and FLOPs distri-butions of EMO-5M in terms of core modules in iRMB. MLP represents the expansion/shrinkage operations outside DW-Conv and MHSA. capability of perceiving global regions. This potentially explains why EMO gets better results in various tasks.
+Distributions of and
+#Params
+FLOPs. iRMB mainly consists of DW-Conv and
+EW-MHSA mod-ules, and Fig. 8 displays further of distributions and
+#Params
+FLOPs.
+In gen-eral, DW-Conv and MHSA account for a low proportion of #Params and
+FLOPs, i.e., 4.6%/4.1% and 13.8%/14.6%, respectively.
+Also, we found that #Params is consistent with the proportion of FLOPs for our method, meaning that EMO is a relatively balanced model.
+Feature Similarity Visualizations. As mentioned in
+Sec. 2.3, cascaded Convolution and MHSA operations can increase the expansion speed of the receptive field. To verify the validation of this design, we visualize the similarity of diagonal pixels in Stage-3 with different compositions, i.e., only DW-Conv, only EW-MHSA, and both modules. As shown in Fig. 9, results show that features tend to have short-distance correlations when only DW-Conv is used, while
+EW-MHSA brings more long-distance correlations. Compar-atively, iRMB takes advantage of both modules with a larger receptive field, i.e., distant locations have high similarities. 4.

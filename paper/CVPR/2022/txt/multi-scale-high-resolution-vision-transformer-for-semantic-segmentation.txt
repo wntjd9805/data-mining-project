@@ -1,0 +1,239 @@
+Abstract
+Vision Transformers (ViTs) have emerged with superior performance on computer vision tasks compared to the con-volutional neural network (CNN)-based models. However,
+ViTs mainly designed for image classification will generate single-scale low-resolution representations, which makes dense prediction tasks such as semantic segmentation chal-lenging for ViTs. Therefore, we propose HRViT, which en-hances ViTs to learn semantically-rich and spatially-precise multi-scale representations by integrating high-resolution multi-branch architectures with ViTs. We balance the model performance and efficiency of HRViT by various branch-block co-optimization techniques. Specifically, we explore heterogeneous branch designs, reduce the redundancy in linear layers, and augment the attention block with en-hanced expressiveness. Those approaches enabled HRViT to push the Pareto frontier of performance and efficiency on semantic segmentation to a new level, as our evalu-ation results on ADE20K and Cityscapes show. HRViT achieves 50.20% mIoU on ADE20K and 83.16% mIoU on Cityscapes, surpassing state-of-the-art MiT and CSWin backbones with an average of +1.78 mIoU improvement, 28% parameter saving, and 21% FLOPs reduction, demon-strating the potential of HRViT as a strong vision backbone for semantic segmentation. Our code is publicly available 1. 1.
+
+Introduction
+Dense prediction tasks such as semantic segmentation are important computer vision workloads on emerging in-telligent computing platforms, e.g., AR/VR devices. Con-volutional neural networks (CNNs) have rapidly evolved with significant performance improvement in semantic seg-mentation [1, 4, 19, 21, 25, 29]. Beyond classical CNNs, vision Transformers (ViTs) have emerged with competi-tive performance in computer vision tasks [2, 3, 6, 12, 13,
+*Work done during an internship at Meta Platforms Inc. 1https://github.com/facebookresearch/HRViT 18, 20, 28, 31, 32, 35, 36, 39, 43]. Benefiting from the self-attention operations, ViTs embrace strong expressivity with long-distance information interaction and dynamic feature aggregation. However, ViT [13] produces single-scale and low-resolution representations, which are not friendly to se-mantic segmentation that requires high position sensitivity and fine-grained image details.
+To cope with the challenge, various ViT backbones that yield multi-scale representations were proposed for seman-tic segmentation [6, 12, 20, 30, 31, 35, 38]. However, they still follow a classification-like network topology with a se-quential or series architecture. Based on complexity con-sideration, they gradually downsample the feature maps to extract higher-level low-resolution (LR) representations and directly feed each stage’s output to the downstream segmen-tation head. Such sequential structures lack enough cross-scale interaction thus cannot produce high-quality high-resolution (HR) representations.
+HRNet [29] was proposed to solve the problem outside of ViT context, which enhances the cross-resolution inter-action with a multi-branch architecture maintaining all res-olutions throughout the network. HRNet extracts multi-resolution features in parallel and fuses them repeatedly to generate high-quality HR representations with rich seman-tic information. Such a design concept has achieved great success in various dense prediction tasks. Nevertheless, its expressivity is limited by small receptive fields and strong inductive bias from cascaded convolution operations. To deal with the challenge, some HRNet variants such as Lite-HRNet [37] and HR-NAS [11] are proposed. However, those improved HRNet designs are still mainly based on the convolutional building blocks, and their demonstrated per-formance on semantic segmentation is still far behind the state-of-the-art (SoTA) scores of ViT counterparts.
+Therefore, synergistically integrating HRNet with ViTs is an approach to be explored for further performance im-provement. By combining those two approaches, ViTs can obtain rich multi-scale representability from the HR ar-chitecture, while HRNet can gain a larger receptive field
+from the attention operations. However, migrating the suc-cess of HRNet to ViT backbones is non-trivial. Given the high complexity of multi-branch HR architectures and self-attention operations, simply replacing all convolutional residual blocks in HRNet with Transformer blocks will en-counter severe scalability issues. The inherited high rep-resentation power from multi-scale can be overwhelmed by the prohibitive latency and energy cost on hardware without careful architecture-block co-optimization.
+Therefore, we propose HRViT, an efficient multi-scale high-resolution vision Transformer backbone specifically
+HRViT enables optimized for semantic segmentation. multi-scale representation learning in ViTs and improves the efficiency based on the following approaches: (1)
+HRViT’s multi-branch HR architecture extracts multi-scale features in parallel with cross-resolution fusion to enhance the multi-scale representability of ViTs; (2) HRViT’s aug-mented local self-attention removes redundant keys and val-ues for better efficiency and enhances the model expressiv-ity with extra parallel convolution paths, additional non-linearity units, and auxiliary shortcuts for feature diver-sity enhancement; (3) HRViT adopts mixed-scale convolu-tional feedforward networks to fortify the multi-scale fea-ture extraction; (4) HRViT’s HR convolutional stem and efficient patch embedding layers maintain more low-level fine-grained features with reduced hardware cost. Also, distinguished from the HRNet-family, HRViT follows a unique heterogeneous branch design to balance efficiency and performance, which is not simply an improved HRNet or a direct ensemble of HRNet and self-attention but a new topology of pure ViTs mainly constructed by self-attention with careful branch-block co-optimization.
+Based on the approaches in HRViT, we make the follow-ing contributions:
+• We deeply investigate the multi-scale representation learning in vision Transformers and propose HRViT that integrates multi-branch high-resolution architec-tures with vision Transformers.
+• To enhance the efficiency of HRViT for scalable HR-ViT integration, we propose a set of approaches as fol-lows: exploiting the redundancy in Transformer blocks, developing performance-efficiency co-optimized build-ing blocks, and adopting heterogeneous branch designs.
+• We evaluate HRViT on ADE20K and Cityscapes and present results that push the Pareto frontier of perfor-HRViT mance and efficiency forward as follows: achieves 50.20% mIoU on ADE20K val and 83.16% mIoU on Cityscapes val for semantic segmentation tasks, outperforming SoTA MiT and CSWin backbones with 1.78 higher mIoU, 28% fewer parameters, and 21% lower FLOPs, on average. 2. Proposed HRViT Architecture
+Recent advances in vision Transformer backbone de-signs mainly focus on attention operator innovations. A new topology design can create another dimension to unleash the potential of ViTs with even stronger vision expressivity. Ex-tending the sequential topology of ViTs to the multi-branch structure, inspired by HRNet, is a promising approach for performance improvement. An important question that re-mains to be answered is whether the success of HRNet can be efficiently migrated to ViT backbones to consolidate their leading position in dense prediction tasks such as semantic segmentation.
+In this section, we delve into the multi-scale representa-tion learning in ViTs and introduce an efficient integration of the HR architecture and Transformer. 2.1. Architecture overview
+As illustrated in Figure 1, the first part of HRViT con-sists of a convolutional stem to reduce spatial dimensions while extracting low-level features. After the convolutional stem, HRViT deploys four progressive Transformer stages where the n-th stage contains n parallel multi-scale Trans-former branches. Each stage can have one or more mod-ules. Each module starts with a lightweight dense fusion layer to achieve cross-resolution interaction and an effi-cient patch embedding block for local feature extraction, followed by repeated augmented local self-attention blocks (HRViTAttn) and mixed-scale convolutional feedforward networks (MixCFN). Unlike sequential ViT backbones that progressively reduce the spatial dimension to generate pyra-mid features, we maintain the HR features throughout the network to strengthen the quality of HR representations via cross-resolution fusion. 2.2. Efficient HRViT component design
+A straightforward choice to fuse HRNet and ViTs is to replace convolutions in HRNet with self-attentions. How-ever, given the high complexity of multi-branch HRNet and self-attentions, this brute-force combining can cause an ex-plosion in memory footprint, parameter size, and computa-tional cost. In this section, we will discuss how to design
+HRViT blocks with balanced efficiency and performance.
+Augmented cross-shaped local self-attention. To achieve high performance with improved efficiency, a hardware-efficient self-attention operator is necessary. We adopt one of the SoTA efficient attention designs, cross-shaped self-attention [12], as our baseline attention operator. Based on that, we design our augmented cross-shaped local self-attention HRViTAttn illustrated in Figure 2, which pro-(1) Fine-grained attention: vides the following benefits:
+Compared to globally-downsampled attentions [30,35], this one has fine-grained feature aggregation that preserves de-tailed information. (2) Approximate global view: By using
+Figure 1. The overall architecture of our proposed HRViT. It progressively expands to 4 branches. Each stage has multiple modules. Each module contains multiple Transformer blocks. two parallel orthogonal local attentions, this attention can (3) Scalable complexity: one collect global information. dimension of the window is fixed, which avoids quadratic complexity to image sizes.
+To balance the performance and efficiency, we introduce our augmented version, denoted as HRViTAttn, with sev-eral key optimizations. In Figure 2a, we follow the cross-shaped window partitioning approach in CSWin that sepa-rates the input x ∈ RH×W ×C into two parts {xH , xV ∈
+RH×W ×C/2}. xH is partitioned into disjoint horizontal windows, and the other half xV is chunked into vertical win-dows. The window is set to s × W or H × s. Within each window, the patch is chunked into K dk-dimensional heads, then a local self-attention is applied,
+HRViTAttn(x) = BN(cid:0)σ(W O[y1, · · ·, yk, · · ·, yK ])(cid:1) yk = zk + DWConv(cid:0)σ(W V (cid:40) H-Attnk(x), k x)(cid:1) 1 ≤ k < K/2
+V-Attnk(x), K/2 ≤ k ≤ K k xm) k = MHSA(W Q zm k xm, W V k ] = zk = k, · · · , zM
+[z1 k xm, W K xm ∈ R(H/s)×W ×C ,
+[x1, · · ·, xm, · · ·, xM ] = x, (1) k , W V k , W K where W Q k ∈ Rdk×C are projection matrices to generate query Qk, key Kk, and value Vk tensors for the k-th head, W O ∈ RC×C is the output projection matrix, and σ is Hardswish activation. If the image sizes are not a multiple of window size, e.g., s⌈H/s⌉ > H, we apply zero-padding to inputs xH or xV to allow a complete K-th window, shown in Figure 2b. Then the padded attentions are masked to 0 to avoid incoherent semantic correlation.
+The original QKV linear layers are quite costly in com-putation and parameters. We share the linear projections for key and value tensors in HRViTAttn to save computation and parameters as follows, (a) (b)
+Figure 2. (a) HRViTAttn: augmented cross-shaped self-attention with a parallel CONV path and an efficient diversity-enhanced shortcut. (b) Window zero-padding with attention map masking.
+In addition, we introduce an auxiliary path with parallel depth-wise convolution to inject inductive bias to facilitate training. Unlike the local positional encoding in CSWin, our parallel path is nonlinear and applied on the entire 4-D feature map W V x without window-partitioning. This path can be treated as an inverted residual module sharing point-wise convolutions with the linear projection layers in self-attention. This shared path can effectively inject inductive bias and reinforce local feature aggregation with marginal hardware overhead.
+MHSA(W Q k xm, W V k xm, W V k xm) = softmax (cid:16) Qm k (V m k )T
+√ dk (cid:17)
+V m k , (2)
+As a performance compensation for the above key-value sharing, we introduce an extra Hardswish function to im-prove the nonlinearity. We also append a BatchNorm (BN)
+Figure 3. MixCFN with multiple depth-wise convolution paths to extract multi-scale local information. layer initialized to an identity projection to stabilize the dis-tribution for better trainability. Motivated by recent stud-ies on the importance of shortcuts in ViTs [24], we add a channel-wise projector as a diversity-enhanced shortcut (DES). Unlike the augmented shortcut [27], our shortcut has higher nonlinearity and does not depend on hardware-unfriendly Fourier transforms. The projection matrix in our DES P C×C is approximated by Kronecker decompo-√
+C to minimize parameter
+C× sition P = A cost. Then we fold x as ˜x ∈ RHW ×
+C and convert (A ⊗ B)x into (A˜xBT ) to save computations. We further insert Hardswish after the B projection to increase the nonlinearity,
+C ⊗ B
+C×
+C×
+√
+√
+√
+√
+√
+DES(x) = A · Hardswish(˜xBT ). (3)
+Mixed-scale convolutional feedforward network.
+In-spired by the MixFFN in MiT [35] and multi-branch in-verted residual blocks in HR-NAS [11], we design a mixed-scale convolutional FFN (MixCFN) by inserting two multi-scale depth-wise convolution paths between two linear lay-ers, shown in Figure 3. After LayerNorm, we expand the channel by a ratio of r, then split it into two branches. The 3×3 and 5×5 depth-wise convolutions (DWConvs) are used to increase the multi-scale local information extraction of
+HRViT. For efficiency consideration, we exploit the chan-nel redundancy by reducing the MixCFN expansion ratio r from 4 [20, 35] to 2 or 3 with marginal performance loss on medium to large models.
+Downsampling stem. In semantic segmentation tasks, im-ages are high resolution, e.g., 1024×1024. Self-attention operators are expensive as their complexity is quadratic to image sizes. To address the scalability issue when pro-cessing large images, we down-sample the inputs by 4× before feeding into the main body of HRViT. We do not use attention operations in the stem since early convolu-tions are more effective to extract low-level features than self-attentions [15, 34]. As early convolutions, we fol-low the design in HRNet and use two stride-2 CONV-BN-ReLU blocks as a stronger downsampling stem to extract
+C-channel features with more information maintained, un-like prior ViTs [6, 20, 35] that used a stride-4 convolution.
+Efficient patch embedding. Before Transformer blocks
+Figure 4. Cross-resolution fusion layers with channel matching, up-scaling, and down-sampling. in each module, we add a patch embedding block (CONV-LayerNorm) on each branch, which is used to match chan-nels and extract patch information with enhanced inter-patch communication. However, the patch embedding lay-ers have a non-trivial hardware cost in the HR architecture since each module at stage-n will have n embedding blocks.
+Therefore, we simplify the patch embedding to be a point-wise CONV followed by a depth-wise CONV [16],
+EffPatchEmbed(x) = LN(cid:0)DWConv(PWConv(x))(cid:1). (4)
+Cross-resolution fusion layer. The cross-resolution fusion layer is critical for HRViT to learn high-quality HR repre-sentations, shown in Figure 4. To enhance cross-resolution interaction, we insert repeated cross-resolution fusion lay-ers at the beginning of each module following the approach in HRNet [29, 37].
+To help LR features maintain more image details and precise position information, we merge them with down-sampled HR features.
+Instead of using a progressive convolution-based downsampling path to match tensor shapes [29, 37], we employ a direct down-sampling path to minimize hardware overhead. In the down-sampling path between the i-th input and j-th output (j > i), we use a depth-wise separable convolution with a stride of 2j−i to shrink the spatial dimension and match the output channels.
+The kernel size used in the DWConv is (2j−i+1) to create patch overlaps. Those HR paths inject more image infor-mation into the LR path to mitigate information loss and fortify gradient flows during backpropagation to facilitate the training of deep LR branches.
+On the other hand, the receptive field is usually limited in the HR blocks as we minimize the window size and branch depth on HR paths. Hence, we merge LR representations into HR paths to help them obtain higher-level features with a larger receptive field. Specifically, in the up-scaling path (j < i), we first increase the number of channels with a point-wise convolution and up-scale the spatial dimension via a nearest neighbor interpolation with a rate of 2i−j.
+When i=j, we directly pass the features to the output as a skip connection. Note that in HR-NAS [11], the dense
+Feature/Arch.
+Memory cost
+Computation
+#Params
+Eff. on class.
+Feat. granularity
+Receptive field 8 ×)
+HR ( 1 4 ×, 1
+High
+Heavy
+Small
+Not quite useful
+Fine
+Local
+MR ( 1 16 ×)
+Medium
+Moderate
+Medium
+Important
+Medium
+Region
+LR ( 1 32 ×)
+Low
+Light
+Large
+Important
+Coarse
+Global
+Window size
+Depth
+Narrow (s=1,2) Wide (s=7)
+Shallow (∼5-6) Deep (20-30)
+Wide (s=7)
+Shallow (∼4)
+Table 1. Qualitative cost and functionality analysis. Window sizes and depth are given for each branch. Eff. on class. and Feat. granularity are short for effectiveness on image-level classification and feature granularity. fusion is simplified by a sparse fusion module where only neighboring resolutions are merged. This technique is not considered in HRViT since it saves marginal hardware cost but leads to a noticeable accuracy drop, which will be dis-cussed in subsection 3.2. 2.3. Heterogeneous HRViT branch design
+Given the efficient HRViT components we introduced above, the second challenge is how to integrate them in a scalable and efficient way. In this section, we provide a so-lution by introducing a heterogeneous multi-branch archi-tecture to further push the efficiency boundary.
+Heterogeneous branch configuration.
+For the branch architecture in HRViT, we need to determine the number of Transformer blocks assigned for each branch. Simply assigning the same number of blocks with the same local self-attention window size on each module will result in in-tractably high computational costs. Therefore, we analyze the functionality and cost of each branch in Table 1, and we propose a simple design heuristic based on the analysis.
+We analyze (1) the number of parameters and (2) the number of floating-point operations in
+HRViTAttn and MixCFN blocks on the i-th branch (i = 1, 2, 3, 4) as follows: (FLOPs)
+ParamsHRViTAttn,i = O(4i−1C 2 + 2i−1C),
+ParamsMixCFN,i = O(4i−1C 2ri + 2i−1Cri), (cid:16)
+FLOPsHRViTAttn,i = O
+HW C 2 +
+FLOPsMixCFN,i = O (cid:16) riHW C 2 + (cid:17)
+, (5)
+CHW (H +W )si 4i−1 riHW C 2i−1 (cid:17)
+.
+We use Equation 5 to compare the memory cost, the computation, the number of parameters, and computation in Table 1.
+Based on the complexity analysis, we observe that the first and second HR branches (i = 1, 2) involve a high mem-ory and computational cost. Hence, those HR branches typically can not afford a large enough receptive field for image-level classification. On the other hand, they are parameter-efficient and able to provide fine-grained detail calibration in segmentation tasks. Thus, we use a narrow attention window size and use a minimum number of blocks on two HR paths.
+We observe that the most important branch is the third one with a medium resolution (MR). Given its medium hardware cost, we can afford a deep branch with a large window size on the MR path to provide large receptive fields and well-extracted high-level features.
+The lowest resolution (LR) branch contains most param-eters and is very useful to provide high-level features with a global receptive field to generate coarse segmentation maps.
+However, its small spatial sizes result in too much loss of image details. Therefore, we only deploy a few blocks with a large window size on the LR branch to improve high-level feature quality under parameter budgets.
+Nearly-even block assignment. A unique problem in
+HRViT is to determine how to assign blocks to each module
+In HRViT, we need to assign 20 blocks to 4 modules on the 3rd path. To maximize the average depth of the network en-semble and help input/gradient flow through the deep Trans-former branch, we employ a nearly-even partitioning, e.g., 6-6-6-2, and exclude an extremely unbalanced assignment, e.g., 17-1-1-1. Different block assignment strategies are compared in Appendix. B.1. 2.4. Architectural variants
+As shown in Table 2 with three design variants of
+HRViT, variants of HRViT scale in both network depth and width. We follow the aforementioned design guidance and evenly assign 5-6 Transformer blocks to HR branches, 20-24 blocks to the MR branch, and 4-6 blocks to the LR branch. Window sizes are set to (1,2,7,7) for 4 branches.
+We use relatively large MixCFN expansion ratios in small variants for higher performance and reduce the ratio to 2 on larger variants for better efficiency. We gradually follow the scaling rule from CSWin [12] to increase the basic channel
+C for the highest resolution branch from 32 to 64. #Blocks and #channels can be flexibly tuned for the 3rd/4th branch to match a specific hardware cost. 3. Experiments
+We pretrain all models on ImageNet-1K [10] and con-duct experiments on ADE20K [45] and Cityscapes [8] for semantic segmentation. We compare the performance and efficiency of our HRViT with SoTA ViT backbones, i.e.,
+Swin [20], Twins [6], MiT [35], and CSWin [12]. 3.1. Semantic segmentation on Cityscapes and
+ADE20K
+On semantic segmentation, HRViT achieves the best performance-efficiency Pareto front, surpassing the SoTA
+Variant
+Architecture design
+Window s MixCFN ratio r Channel C Head dim dk
+HRViT-b1
+HRViT-b2
+HRViT-b3 1 2 7 7 1 2 7 7 1 2 7 7 4 4 4 4 2 3 3 3 2 2 2 2 32 64 128 256 48 96 240 384 64 128 256 512 16 32 32 32 24 24 24 24 32 32 32 32
+Table 2. Architecture variants of HRViT. The number of Transformer blocks is marked in each module, followed by per branch settings.
+Variant
+Image Size
+#Params (M)
+GFLOPs
+IMNet-1K top-1 acc.
+HRViT-b1
+HRViT-b2
+HRViT-b3 224 224 224 19.7 32.5 37.9 2.7 5.1 5.7 80.5 82.3 82.8
+Table 3. ImageNet-1K pre-training results of HRViT. FLOPs are measured on an image size of 224×224. #Params includes the classification head as used in HRNetV2 [29].
+MiT and CSWin backbones. HRViT (b1-b3) outperform the previous SoTA SegFormer-MiT (B1-B3) [35] with
++3.68, +2.26, and +0.80 higher mIoU on ADE20K val, and +3.13, +1.81, +1.46 higher mIoU on Cityscapes val.
+All HRViT variants are
+ImageNet-1K pre-training. pre-trained on ImageNet-1K, shown in Table 3. We fol-low the same pre-training settings as DeiT [28] and other
+ViTs [12, 20, 35]. We adopt stochastic depth [17] for all
+HRViT variants with the max drop rate of 0.1. The drop rate is gradually increased on the deepest 3rd branch, and other shallow branches follow the rate of the 3rd branch within the same module. We use the HRNetV2 [29] classification head in HRViT on ImageNet-1K pre-training. More details can be found in Appendix A.1.
+Settings. We evaluate HRViT for semantic segmentation on the Cityscapes and ADE20K datasets. We employ a lightweight SegFormer [35] head based on the mmsegmen-tation framework [7]. We follow the training settings of prior work [12, 35]. The training image size for ADE20K and Cityscapes are 512×512 and 1024×1024, respectively.
+The test image size for ADE20K and Cityscapes is set to 512×2048 and 1024×2048, respectively. We do infer-ence on Cityscapes with sliding window test by cropping 1024×1024 patches. More details are in Appendix A.2.
+Results on ADE20K. We evaluate different ViT back-bones in single-scale mean intersection-over-union (mIoU),
+#Params, and GFLOPs. Figure 5 plots the Pareto curves in the #Params and FLOPs space. On ADE20K val, HRViT outperforms other ViTs with better performance and effi-ciency trade-off. For example, with the SegFormer head,
+HRViT-b1 outperforms MiT-B1 with 3.68% higher mIoU, 40% fewer parameters, and 8% less computation. Our
+HRViT-b3 achieves a higher mIoU than the best CSWin-S but saves 23% parameters and 13% FLOPs. Compared with
+HRNetV2+OCR, our HRViT shows considerable perfor-mance and efficiency advantages. We also evaluate HRViT with UperNet [33] head in Appendix B.2.
+Results on Cityscapes. We summarize the results on
+Cityscapes in Table 4. Our small model HRViT-b1 outper-forms MiT-B1 and CSWin-Ti by +3.13 and +2.47 higher mIoU. The key insight is that the HR architecture can in-crease the effective width of models with narrow channels, leading to higher modeling capacity. Hence, the parallel multi-branch topology is especially beneficial for small net-works. When training HRViT-b3 on Cityscapes, we set the window sizes to 1-2-9-9. HRViT-b3 outperforms the MiT-b4 with +0.86 higher mIoU, 55.4% fewer parameters, and 30.7% fewer FLOPs. Compared with two SoTA ViT back-bones, i.e., MiT and CSWin, HRViT achieves an average of +2.16 higher mIoU with 30.7% fewer parameters and 23.1% less computation. 3.2. Ablation studies
+In Table 5, we first compare with a baseline where all block optimization techniques are removed. Our proposed key techniques can synergistically improve the ImageNet accuracy by 0.73% and the Cityscapes mIoU by +1.18 with 20% fewer parameters and 13% less computation. Then we independently remove each technique from HRViT to
+Figure 5. HRViT achieves the best performance-efficiency trade-off among all models on ADE20K val. The table on the right shows
+ADE20K val mIoUs of MiT, CSWin, and HRViT with the SegFormer [35] head.
+Backbone
+MiT-B0 [35]
+MiT-B1 [35]
+CSWin-Ti [12]
+HRViT-b1
+MiT-B2 [35]
+CSWin-T [12]
+HRViT-b2
+MiT-B3 [35]
+MiT-B4 [35]
+CSWin-S [12]
+HRViT-b3
+Avg improv.
+SegFormer Head [35]
+#Param. (M)↓ GFLOPs↓ mIoU (%)↑ 3.8 13.7 5.9 8.1 27.5 22.4 20.8 47.3 64.1 37.3 28.6
+-30.7% 8.4 15.9 11.4 14.1 62.4 28.3 27.4 79.0 95.7 78.1 66.8
+-23.1% 76.20 78.50 79.16 81.63 81.00 81.56 82.81 81.70 82.30 82.58 83.16
++2.16
+Table 4. Comparison on the Cityscapes val segmentation dataset.
+We reduce the channels (64→32) of CSWin-T and name it
+CSWin-Ti. FLOPs are based on the image size of 512×512. validate their individual contribution.
+Sharing key-value. When removing key-value sharing, i.e., using independent keys and values, HRViT-b1 shows the same ImageNet-1K accuracy but at the cost of lower
+Cityscapes segmentation mIoU, 9% more parameters, and 4% more computations.
+Patch embedding. Changing our EffPathEmbed to the
+CONV-based counterpart [35] leads to 22% more parame-ters and 17% more FLOPs without accuracy/mIoU benefits.
+MixCFN. Replacing the MixCFN block with the origi-nal FFNs [13] directly leads to ∼0.66% ImageNet accu-racy drop and 0.11 Cityscapes mIoU loss with marginal efficiency improvement. By adding multi-scale local fea-ture extraction in feedforward networks, MixCFN can in-deed boost the performance of HRViT.
+Parallel convolution path. The embedded inverted resid-ual path in the HRViTAttn block is very lightweight and
+Variants
+HRViT-b1
+− Key-value sharing
+− Eff. patch embed
+− MixCFN
+− Parallel CONV path
+− Nonlinearity/BN
+− Dense fusion
+− DES
+− All block opt.
+#Params (M)
+FLOPs (G)
+IMNet top-1 acc. 8.1 8.8 9.9 7.9 8.1 8.1 8.0 8.1 10.1 14.1 14.7 16.5 13.6 14.0 14.1 14.0 14.0 16.3 80.52 80.52 80.19 79.86 80.06 80.37 79.95 80.36 79.79
+City mIoU 81.63 81.00 81.18 80.52 80.82 81.12 81.26 81.38 80.45
+Table 5. Ablation on proposed techniques. Each entry removes one technique independently. The last one removes all techniques. contributes 0.46% higher ImageNet accuracy as well as 0.81 higher mIoU on Cityscapes.
+Additional nonlinearity/BN. The extra Hardswish and BN introduce negligible overhead but boost expressivity and trainability, bringing 0.15% higher ImageNet-1K accuracy 0.51 higher mIoU on Cityscapes val.
+Dense vs. sparse fusion layers. The sparse fusion layer proposed in HR-NAS [11] is not very effective in HRViT as it saves tiny hardware cost (<1%) but leads to 0.57% accuracy drop and 0.37 mIoU loss.
+Diversity-enhanced shortcut. As an auxiliary path, the proposed shortcut (DES) helps enhance the feature diver-sity and effectively boosts the performance to a higher level both on classification and segmentation tasks. The hard-ware overhead is negligible due to the high efficiency of the
+Kronecker decomposition-based projector.
+Vanilla HRNet-ViT baselines vs. HRViT.
+In Table 6, we directly replace residual blocks in HRNetV2 with MiT/C-SWin Transformer blocks, which we refer to as a vanilla baseline. When comparing HRNet-MiT with the sequential
+MiT, we notice the HR variants have comparable mIoUs while significantly saving hardware cost. This shows that
+Backbone
+HRNet18-MiT
+HRNet18-CSWin
+HRViT-b1
+HRNet32-MiT
+HRNet32-CSWin
+HRViT-b2
+HRNet40-MiT
+HRNet40-CSWin
+HRViT-b3
+Avg Improv.
+#Params (M)
+FLOPs (G)
+IMNet top-1 acc. 8.4 8.1 8.1 24.4 23.9 20.8 40.1 39.5 28.6 29.3 22.3 14.1 52.4 42.2 27.4 108.0 96.3 66.8
+-14.4% -38.2% 79.3 79.5 80.5 81.5 81.1 82.3 82.3 82.4 82.8
++0.92
+City mIoU 80.30 80.95 81.63 82.05 82.11 82.81 82.10 82.38 83.16
++0.89
+Table 6. Compare vanilla HRNet-ViT baselines with HRViT on
+ImageNet-1K and Cityscapes val. With heterogeneous branch designs and optimized blocks, HRViT is more efficient than the vanilla HRNet-MiT and HRNet-CSWin. window size s 7 9 11 13 15
+GFLOPs
+Cityscapes mIoU (%) 66.28 82.82 66.78 83.16 67.09 83.15 68.07 82.88 69.22 82.90
+Table 7. Evaluate HRViT-b3 on Cityscapes val with different window sizes on the MR and LR paths. the multi-branch architecture is indeed helpful to boost the multi-scale representability. However, the vanilla HRNet-ViT baseline overlooks the expensive cost of Transformers and is not efficient as the hardware cost quickly outweighs its performance gain. In contrast, HRViT benefits from het-erogeneous branches and optimized components with less computation, fewer parameters, and enhanced model rep-resentability than the vanilla HRNet-ViT baselines.
+In Table 7, we evaluate HRViT-Different window sizes. b3 on Cityscapes with different window sizes on the 3rd (MR) and 4th (LR) paths.
+In general, different window sizes give similar mIoUs, while window sizes of 7 and 9 show the best performance-efficiency trade-off. Increasing the window size from 7 to 9 helps HRViT-b3 achieve +0.34 mIoU improvement with only 0.8% more FLOPs. How-ever, overly-large window sizes bring no performance ben-efits with unnecessary computation overhead. For example, further enlarging the window size from 9 to 15 causes a 0.26 mIoU drop and 3.7% more FLOPs. 4.

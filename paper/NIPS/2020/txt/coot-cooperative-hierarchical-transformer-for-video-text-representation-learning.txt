@@ -1,0 +1,153 @@
+Abstract
+Many real-world video-text tasks involve different levels of granularity, such as frames and words, clip and sentences or videos and paragraphs, each with distinct semantics. In this paper, we propose a Cooperative hierarchical Transformer (COOT) to leverage this hierarchy information and model the interactions between different levels of granularity and different modalities. The method consists of three major components: an attention-aware feature aggregation layer, which leverages the local temporal context (intra-level, e.g., within a clip), a contextual transformer to learn the interactions between low-level and high-level semantics (inter-level, e.g. clip-video, sentence-paragraph), and a cross-modal cycle-consistency loss to connect video and text. The resulting method compares favorably to the state of the art on several benchmarks while having few parameters. All code is available open-source at https://github.com/gingsi/coot-videotext 1
+
+Introduction
+Representation learning based on both vision and language has many potential beneﬁts: visual grounding[1, 2, 3, 4]; visual learning with a more natural, almost self-supervised annotation process; and direct applicability to cross-modal tasks, such as video retrieval by text[5, 6, 7, 8, 9], video summarization [10], and automated indexing. This research direction has recently boomed [11, 12, 13, 14, 15, 8, 16, 17] also due to the success of self-attention in text analysis [18, 19] with its almost immediate applicability in the cross-modal context. Many different research foci are currently developing in this area, where some are concerned with large-scale pretraining to leverage the abundant data available [17, 8, 16, 11] to learn a joint embedding space, and others to bring in more explicit structure [20, 21, 22] or new losses [17, 23] into the learning process.
+In this paper, we focus on long-range temporal dependencies and propose a hierarchical model that can exploit long-range temporal context both in videos and text when learning the joint cross-modal embedding. For instance, the action of “making tea” involves boiling water, pouring it into a cup, and then adding a tea bag. This action can take a long time and may have lots of details that distinguish a particular style of making tea from other styles. To capture the whole temporal context, we leverage the idea of a hierarchical model with losses that enforce the interaction within and between different hierarchy levels. The idea of such a hierarchy is generic and has been explored by several works [21, 24, 22] in the context of video-text learning. In addition, we use alignment losses from Zhang et al. [21] and extend our baseline model with a new feature aggregation method for the intra-level interactions between features and a new transformer-based module for inter-level interactions (between local and global semantics). We consider three different levels of hierarchy: frame/word, clip/sentence and video/paragraph, visualized by the three blocks in Figure 1.
+*Equal contribution 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Figure 1: Overview of COOT model (best viewed in color). The model consist of two branches: one for video input (top) and one for text input (bottom). Given a video and a corresponding text, we encode them to frame-level/word-level features. Features belonging to each segment (clip/sentence) are fed to a standard temporal transformer (T-Transformer) followed by the proposed feature aggregation module (Attention-FA) to obtain clip/sentence-level features. Finally, a new contextual transformer produces the ﬁnal video/paragraph embedding based on interactions between local context (clip/sentence features) and global context (all frames/words features). (cid:96)L align, (cid:96)g align and (cid:96)CM C enforce the model to align the representations at different levels. align, (cid:96)H
+To model intra-level cooperation, we introduce an attention-aware feature aggregation layer to focus on temporal interactions between low-level entities (Figure 1-Attention-FA).
+This component replaces traditional sequence representation aggregation methods in transformers such as using a [CLS] token [19, 11, 14, 15] or mean pooling [25] with an attention-aware fu-sion. It leverages temporal context to encourage important entities to contribute more to the ﬁnal representation of a sequence of frames or words.
+For the inter-level cooperation, we introduce a contextual attention module, which enforces the network to highlight semantics relevant to the general context of the video and to suppress the irrelevant semantics. This is done by modeling the interaction between low-level (clips-sentences) and high-level entities (global contexts), as shown in Figure 1-green region.
+In addition to this architectural contributions, we introduce a new cross-modal cycle-consistency loss to enforce interaction between modalities and encourage the semantic alignment between them in the learned common space. We show that enforcing two domains to produce consistent representations leads to substantially improved semantic alignment.
+In summary, this paper contributes:
+• a hierarchical transformer architecture with a new attention-aware feature aggregation layer and a new contextual attention module;
+• a cross-modal cycle-consistency loss that encourages semantic alignment between vision and text features in the joint embedding space;
+• state-of-the-art results on video-text retrieval. 2 Cooperative Hierarchical Transformer
+Videos and text descriptions naturally involve different levels of granularity. Every paragraph contains multiple sentences, and each sentence is composed of several words. Similarly, videos have a hierarchical semantic structure, even if it is not as exactly deﬁned as for text. Figure 1 illustrates the overview of the COOT model which consists of three levels: 1) A temporal transformer that captures the relationships between frame/word features, 2) attention-aware feature aggregation to produce clip/sentence features (Sec. 2.2), and 3) a contextual transformer to produce ﬁnal video and text embeddings (Sec. 2.3). We use alignment losses from Zhang et al. [21] to align representations at different granularity levels. In addition, we introduce a new cross-model cycle-consistency loss to connect video and text (Sec. 3). In this section, we brieﬂy summarize the alignment losses from
+Zhang et al. [21] and the standard transformer. 2
+2.1 Preliminaries
+Semantic Alignment Losses. For the video-text alignment, Zhang et al. [21] leverage a contrastive loss to enforce the positive samples to stay in a close neighborhood and negative samples far apart [26, 27, 28, 29]. Assuming the positive pair P = (x, y), two negative pairs (x, y(cid:48)) and (x(cid:48), y) expressed as N = {(x, y(cid:48)), (x(cid:48), y)}, and a margin α, they deﬁne the following loss:
+L(P, N , α) = max(0, α + D(x, y) − D(x(cid:48), y)) + max(0, α + D(x, y) − D(x, y(cid:48))) (1) where D(x, y) = 1 − x(cid:124)y/((cid:107)x(cid:107)(cid:107)y(cid:107)) is the cosine distance of two vectors.
+To align representations at clip-sentence (ϑk gp) levels, Zhang et al. [21] use the following losses: i , δk i ), video-paragraph (ϑk, δk) and global context (gv, (cid:96)L align = (cid:88) k∈D,i,k(cid:48)(cid:54)=k,i(cid:48)(cid:54)=i
+L((ϑk i , δk i ), {(ϑk i , δk(cid:48) i(cid:48) ), (ϑk(cid:48) i(cid:48) , δk i )}, β) (cid:96)H align = (cid:88)
+L((ϑk, δk), {(ϑk, δk(cid:48)
+), (ϑk(cid:48)
+, δk)}, α) (cid:96)g align = k∈D,k(cid:48)(cid:54)=k (cid:88)
+L((gk v , gk p ), {(gk v , gk(cid:48) p ), (gk(cid:48) v , gk p )}, αg) (2) k∈D,k(cid:48)(cid:54)=k i denotes the embedding for the i-th clip of the k-th video and similarly δk
+Here, ϑk i is the embedding of the i-th sentence of the k-th paragraph. α, αg and β are constant margins, and D is a dataset of videos with corresponding text descriptions. Zhang et al. [21] employed an additional loss to model the clustering of low-level and high-level semantics in the joint embedding space: (cid:96)cluster = (cid:88) k∈D,i,k(cid:48)(cid:54)=k,i(cid:48)(cid:54)=i
+L((1, 1), {(ϑk i , ϑk(cid:48) i(cid:48) ), (δk(cid:48) i(cid:48) , δk i )}, γ)
+L((1, 1), {(ϑk, ϑk(cid:48)
+), (δk(cid:48)
+, δk)}, η) (3) (cid:88)
++ k∈D,k(cid:48)(cid:54)=k where γ and η both are constant margins. The (1, 1) pairs denote that positive samples are not changed. In short, the goal of this loss is to push apart embeddings for negative samples.
+Note. Due to the symmetrical design of the video and text branches in our model, from now on, we explain only the video branch. For simplicity, we assume a single head in transformer formulations.
+All transformers use residual connections.
+Temporal Transformer We use standard attention-blocks [18] to learn frame and word represen-tations, as shown in Fig 1-Right. We learn two temporal transformers (T-Transformer); one for the video branch and another one for the text branch. Both have the same architecture. All T-Transformers in each branch share their weights. This module draws the relationship between temporal features and yields improved representations as output. Given a video vk, we ﬁrst encode all its frames to obtain the frame-level features {f k i,:}n i,: are all frame-level features of the i-th clip for video vk (orange parts in Figure 1). We also consider all frame features (f k
+: ) of a video as extra input for the global context computation (green parts in Figure 1). This yields { ˆf k i=1, where f k i,:}n i=1 and ˆf k
+: . 2.2
+Intra-Level Cooperation
+Standard feature fusion methods consider each feature independently by average pooling or max pooling. Hence, they miss the relationship between features to highlight the relevant features. Recent transformers use a [CLS] token [11, 19, 14, 15] or average pooling [25] to obtain the aggregated features. For example, when a person is cooking, objects on the table are more relevant than objects on the wall or in the background. Therefore, we need to attend to speciﬁc features depending on the context. There have been some attempts in other domains to design a context-aware feature fusion method [30, 31, 32, 33]. However, we introduce an attention-aware feature aggregation module (Attention-FA in Fig. 1) for video-text transformers. 3
+Figure 2: Contextual Transformer (CoT). This module (right) encourages the model to optimize the representations with respect to interactions between local and global context. In the third sentence, to know the type of dough (cookie) the model should have information about the general context of the video (making chocolate cookies). Likewise, in the second sentence, to know that she is the
+"same woman", the model must be aware of the person’s identity throughout the video.
+Suppose we have a sequence with T feature vectors, denoted by X = {x1, . . . , xT } (e.g. ˆf k
+{ ˆf k together with two biases b1 and b2. The attention matrix A is computed as: i,: = i,T }). We set key K = X and utilize two learnable transformation weights W2 and W1 i,1, . . . , ˆf k
+Q = GELU (W1K T + b1), K = X
+A = softmax(W2Q + b2)T ,
+We compute the ﬁnal feature as ˆx = (cid:80)T i=1 ai (cid:12) xi, where (cid:12) denotes element-wise multiplication and ai is the i-th attention vector of A for the i-th feature. This module differs from attention [18] in two aspects: (1) we use only two learnable weights for query (Q) and key (K) and then aggregate the values based on calculated scores; (2) the query equals to transformed keys (K) and then we apply the activation function GELU [34, 35]. We feed { ˆf k to this component and obtain the clip-level ({ϑk i=1) features and the global context for the video (gν). i=1 and ˆf k i,:}n i }n (4)
+: 2.3
+Inter-Level Cooperation
+By modeling the interactions between local and global context, the network learns to highlight semantics relevant to the general context of the video and to suppress the irrelevant ones: interactions between clip embeddings and the general context of the video; interactions between sentence embeddings and the general context of the text. As shown in Figure 2-Left, without knowing the global context, just from observing the frame in the third clip, there is no information about what type of "dough" is involved. Also the "same woman" in the second clip could not be related to the woman seen in the ﬁrst clip.
+Thus, we propose a Contextual Transformer (CoT) in Figure 2-Right to model the interactions between low-level and high-level semantics. More formally, we build the Contextual Transformer with two modules FLocal and FGlobal. We append the positional embedding to the inputs of FLocal.
+The goal of FLocal is to model the short-term interactions between low-level semantics ({ϑk i=1), whereas FGlobal models the interactions between local and global context (gν) to highlight the important semantics. i=1 ∈ Rn×d, where n is the number of clips and d indicates the
+Given local representations {ϑk feature dimension, FLocal applies multi-head attention followed by a feed-forward layer and a normalization layer on top of both layers and produces embeddings {hi}n
+We compute key (K)-value(V) pairs based on these embeddings {hi}n based on the global context gv. FGlobal produces the attention output as follows, i=1. i=1 ∈ Rn×d and query(Q) i }n i }n
+Hattn = softmax(
+QKT
+√ d
+)V,
+Q = Wqgv, K = Wk{hi}n i=1, V = Wv{hi}n i=1 (5) where Wq, Wk, and Wv are the embedding weights. Hattn is a weighted sum of values (local semantics), where the weight of each value is calculated based on its interaction with the global context query Q. Hattn is further encoded by a feed-forward layer to produce the contextual embedding
+Hcontext. We calculate the mean of {hi}n i=1 and concatenate it with Hcontext to obtain the ﬁnal video embedding ϑk = concat(mean({hi}n i=1), Hcontext); see Figure 2. 4
+3 Cross-Modal Cycle Consistency
+We introduce a cross-modal cycle-consistency loss to enforce the semantic alignment between clips and sentences, as illustrated in Figure 3. It replaces the cross-modal attention units used in [14, 8]. A pair of clip and sentence will be identiﬁed as semantically aligned if they are nearest neighbors in the learned common spaces. Consider as input a sequence of clip embeddings {ϑi}n i=1 =
+{ϑ1, . . . , ϑn} and sentence embeddings {δi}m i=1 = {δ1, . . . , δm}. As the sentences of a paragraph have a temporal order, given a sentence embedding δi on this sequence, we ﬁrst ﬁnd its soft nearest neighbor [36, 37, 38]
+¯ϑδi = n (cid:88) j=1
+αjϑj where αj = exp(−(cid:107)δi − ϑj(cid:107)2) k=1 exp(−(cid:107)δi − ϑk(cid:107)2) (cid:80)n (6) in the clip sequence {ϑi}n from ¯ϑδi to the sentence sequence {δi}m i=1. αj is the similarity score of clip ϑj to sentence δi. We then cycle back i=1 and calculate the soft location exp(−(cid:107) ¯ϑ − δj(cid:107)2) k=1 exp(−(cid:107) ¯ϑ − δk(cid:107)2) (cid:80)m
+βjj where βj =
+µ = m (cid:88) j=1
+. (7)
+The sentence embedding δi is semantically cycle consistent if and only if it cycles back to the original location, i.e., i = µ. We penalize deviations from cycle-consistency for sampled sets of clips and sentences, which encourages the model to learn semantically consistent representations. (8)
+Our objective is the distance between the source location i and the soft destination location µ. (cid:96)CM C = (cid:107)i − µ(cid:107)2
+Computing nearest neighbors as soft nearest neighbors makes the loss differentiable [36, 37, 38]. We can use this loss in both supervised and self-supervised scenarios. In the self-supervised case, we split each video uniformly into several clips and each paragraph into sentences. Beside the cycle-consistency from text to video, we also calculate (cid:96)CM C from video to text. Therefore, the ﬁnal (cid:96)CM C loss includes both cycles.
+The ﬁnal training loss for the overall model is:
+Figure 3: Cross-Modality Cycle-Consistency.
+Starting from a sentence si, we ﬁnd its nearest neighbor in the clip sequence and again its neigh-bor in the sentence sequence. Deviations from the start index are penalized as alignment error. (cid:96)f inal = (cid:96)L align + (cid:96)H align + (cid:96)g align + (cid:96)cluster + λ(cid:96)CM C (9) 4 Experimental Setup
+Datasets. We evaluate our method on the datasets ActivityNet-captions [39] and Youcook2 [40].
+ActivityNet-captions consists of 20k YouTube videos with an average length of 2 minutes, with 72k clip-sentence pairs. There are ∼10k, ∼5k and ∼5k videos in train, val1 and val2, respectively.
+Youcook2 contains 2000 videos with a total number of 14k clips. This dataset is collected from
+YouTube and covers 89 types of recipes. There are ∼9.6k clips for training and ∼3.2k clips for validation. For each clip there is a manually annotated textual description.
+Evaluation Metrics. We measure the performance on the retrieval task with standard retrieval metrics, i.e., recall at K (R@K e.g. R@1, R@5, R@10) and Median Rank (MR).
+Text encoding. We feed paragraphs consisting of several sentences into a pretrained "BERT-Base,
+Uncased" model [19] and use the per-token outputs of the last 2 layers, resulting in 1536-d features.
+Video encoding. For Activitynet-Captions, we use the 2048-d features provided by Zhang et al. [21] (at 3.8 FPS). For Youcook2, we test two approaches: (A) We follow Miech et al., 2019 [16] and concatenate 2D (Resnet-152 pretrained on ImageNet [41]) and 3D (ResNext-101 model [42] pretrained on Kinetics [43]) outputs to obtain 4096-d features at 6.2 FPS; (B) We use the video embedding network provided by Miech et al., 2020 [17] pretrained on video-text learning on the
+Howto100m dataset to obtain 512-d features at 0.9 FPS. 5
+Table 1: Ablation study on ActivityNet-captions (val1). We quantify the individual contributions of the attention-aware feature aggregation (AF), the Contextual Transformer (CoT), and the cross-modal cycle-consistency loss (CMC). HSE results are reproduced by us. Disabling CoT means removing the cross-attention layer between local and global context.
+Model
+Pooling
+Lowlvl
+Max
+HSE
+HSE
+Max
+COOT CLS
+COOT AVG
+COOT Max
+COOT AFA
+COOT Max
+COOT AFA
+COOT AFA
+COOT AFA
+CMC CoT
+Paragraph =⇒ Video
+Video =⇒ Paragraph
+Param (M) (cid:55) (cid:51) (cid:55) (cid:55) (cid:55) (cid:55) (cid:51) (cid:55) (cid:51) (cid:51)
+R@1
+R@5 45.6±0.3 76.1±0.7 46.6±0.4 78.1±0.3 49.4±1.4 77.7±1.3 52.6±0.6 80.6±0.4 58.2±0.5 84.9±0.2 59.0±0.5 85.4±0.2 59.4±0.9 86.1±0.6 59.8±1.1 86.3±0.3 59.5±0.5 85.5±0.4 60.8±0.6 86.6±0.4
+R@5
+R@50
+R@1 96.0±0.3 44.9±0.5 75.8±1.2 97.3±0.1 46.4±0.3 77.6±0.3 95.7±0.2 49.7±1.9 77.8±0.9 97.0±0.2 52.1±0.4 80.8±0.2 98.1±0.1 58.7±0.5 86.0±0.2 98.2±0.0 59.8±0.6 85.8±0.8 98.3±0.0 60.5±0.1 87.1±0.2 98.5±0.1 60.1±0.1 87.1±0.4 98.1±0.0 60.5±0.7 86.2±0.5 98.6±0.1 60.9±0.3 87.4±0.5
+R@50 95.8±0.4 97.1±0.3 95.8±0.3 97.0±0.2 98.2±0.1 98.2±0.1 98.5±0.1 98.5±0.1 98.2±0.1 98.6±0.0 (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:55) (cid:51) (cid:51) (cid:55) (cid:51) 26.1 26.1 4.9 4.9 4.9 5.8 6.7 7.6 5.8 7.6
+For each clip as well as for the entire video, we sample up to 80 frame features. If needed, we split the frames into 80 equal length intervals and uniformly sample a frame from each interval during training or take the center frame during validation.
+Training. Similar to [21] we set all margins α = αg = β = γ = µ = 0.2. We use a mini-batch size of 64 video/paragraph pairs and sample all corresponding clips and sentences. All possible combinations of embeddings with non-matching indices in a batch are used as negative samples for the contrastive loss. To apply the cycle-consistency loss, we found that sampling 1 clip per video and 1 sentence per paragraph works best. The optimal loss weight λ depends on architecture and dataset.
+As activation function, we found GELU [34] to perform best. We set the hidden size to 384 and use a pointwise linear layer to reduce the input feature dimension. We use one self-attention layer for the
+T-Transformer and one self-attention and one cross-attention layer for CoT. For further details on optimization and hyperparameters we refer the interested reader to the supplementary material.
+Video-Language Retrieval. For video-text retrieval, the query is a paragraph and the task is to ﬁnd the most relevant video from a database. Alternatively, the query can be a video and the task is to retrieve the most relevant paragraph. We follow the experimental protocol from Zhang et al. [21] to evaluate the models. We use the ﬁnal embedding output of our model (ϑk, δk) to do the retrieval.
+Clip-sentence retrieval. For Youcook2, we also evaluate the quality of our model when retrieving a short video clip given a single sentence. For this experiment, we use the intermediate low-level embeddings produced by our model (ϑk i ) to do the retrieval. i , δk 5 Results
+Inﬂuence of each component. We show results of a model ablation study in Table 1. First, to validate the general effectiveness of the proposed cross-modal cycle consistency loss (CMC), we apply it to the HSE architecture [21]. The (cid:96)CM C loss provides a signiﬁcant boost in performance for both HSE and COOT, which indicates that it will be beneﬁcial if plugged into other video-text representation learning methods. Second, the Attention-FA module shows better performance (7.2% average improvement on R@1 for paragraph =⇒ video and video =⇒ paragraph tasks) than common average pooling. Third, we observe that integrating the Contextual Transformer into the overall model improves the performance. This conﬁrms that interactions between local and global context help the model to highlight the relevant semantics (more in supp. material).
+Comparison to the state of the art Table 2 summarizes the results of paragraph to video and video to paragraph retrieval tasks on the ActivityNet-captions dataset. For a fair comparison, our model utilizes the same video features as HSE [21]. Our method signiﬁcantly outperforms all previ-ous methods across different evaluation metrics. COOT obtains on average 16.6% better R@1 in comparison to HSE [21] while having fewer parameters. We believe the major gain comes from our attention-aware feature aggregation component and the (cid:96)CM C loss. 6
+Table 2: Video-paragraph retrieval results on AcitvityNet-captions dataset (val1).
+Paragraph =⇒ Video
+Video =⇒ Paragraph
+Method
+LSTM-YT [52]
+No Context [53]
+DENSE [39]
+VSE [54]( [5])
+FSE [21]
+HSE [21]
+COOT
+R@1 0.0 5.0 14.0 11.7 18.2 44.4±0.5 60.8±0.6
+R@5 4.0 14.0 32.0 34.7 44.8 76.7±0.3 86.6±0.4
+R@50 24.0 32.0 65.0 85.7 89.1 97.1±0.1 98.6±0.1
+MR 102.0 78.0 34.0 10 7 2 1
+R@1 0.0 7.0 18.0
+-16.7 44.2±0.6 60.9±0.3
+R@5 7.0 18.0 36.0
+-43.1 76.7±0.3 87.4±0.5
+R@50 38.0 45.0 74.0
+-88.4 97.0±0.3 98.6±0.0
+MR 98.0 56.0 32.0
+-7 2 1
+We further provide retrieval results on the Youcook2 [40] dataset in Table 3. We compare our model under two settings: (1) with features pretrained on classiﬁcation (2) with features from a pretrained
+SOTA video-text model.
+Without HowTo100M pretrained features. We use features (A) explained in Section 4 and train the COOT model on the YouCook2 dataset. Using the same training set, COOT outperforms Miech et al. [16] and HGLMM [44] on both paragraph-to-video and sentence-to-clip tasks. This supports our rationale that modeling interactions between different hierarchy levels is crucial for capturing long-term semantics.
+With HowTo100M pretrained features. In Table 3, we compare our method with the recently pro-posed SOTA methods MIL-NCE [17], ActBERT [8], and Miech et al. [16], which utilize pretraining on the huge HowTo100M dataset. We use features (B) (Sec. 4) and train the model on the YouCook2 dataset. Note that the paragraph to video results of other methods are computed by us. Training our model with features of a model pretrained on the HowTo100M dataset clearly improves over training with features of a model pretrained on classiﬁcation and over the state-of-the-art. We can see that our model outperforms MIL-NCE [17] 16.4% on R@1 score for paragraph-to-video task, which veriﬁes COOT beneﬁts from hierarchy interactions. This shows that the contributions of this paper are complementary to works that focus on large-scale pretraining.
+Time complexity and number of parameters. The COOT model has 10.6M, parameters which is 60% less than the HSE method (Table 1). Training is fast and takes less than 3 hours on two
+GTX1080Ti GPUs (without data I/O). 5.1 Video Captioning
+To show that the learned representations contain meaningful information for other tasks than re-trieval, we use the learned representations for video captioning building upon the captioning model
+MART [45]. The original method uses appearance (RGB) and optical ﬂow features extracted from
+ResNet-200 [41] and BN-Inception [46], respectively. i ) and optionally the video (ϑk) representation generated with our COOT model.
+We use the clip (ϑk
+In comparison to MART, we input about 100 times less features per video into the captioning model.
+We use the standard language evaluation metrics BLEU@3/4 [47], RougeL [48], METEOR [49],
+CIDEr-D [50] and R@4 [51] which measures the degree of n-gram repetition. Our results in Table 4 and Table 5 show that the MART method using our representations improves over using appearance and optical ﬂow video features. Generated captions in Table 6 show that our video representations encapsulate richer information about the video while being more compact. 6

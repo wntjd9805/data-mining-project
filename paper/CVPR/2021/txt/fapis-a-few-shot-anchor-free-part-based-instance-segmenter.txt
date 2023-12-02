@@ -1,0 +1,100 @@
+Abstract
+This paper is about few-shot instance segmentation, where training and test image sets do not share the same object classes. We specify and evaluate a new few-shot anchor-free part-based instance segmenter (FAPIS). Our key novelty is in explicit modeling of latent object parts shared across training object classes, which is expected to facilitate our few-shot learning on new classes in testing.
+We specify a new anchor-free object detector aimed at scor-ing and regressing locations of foreground bounding boxes, as well as estimating relative importance of latent parts within each box. Also, we specify a new network for delin-eating and weighting latent parts for the ﬁnal instance seg-mentation within every detected bounding box. Our eval-uation on the benchmark COCO-20i dataset demonstrates that we signiﬁcantly outperform the state of the art. 1.
+
+Introduction
+This paper addresses the problem of few-shot instance segmentation. In training, we are given many pairs of sup-port and query images showing instances of a target object class, and the goal is to produce a correct instance segmen-tation of the query given access to the ground-truth instance segmentation masks of the supports. In testing, we are given only one or a very few support images with their ground-truth instance segmentation masks, and a query image in which we are supposed to segment all instances of the tar-get class. Importantly, the training and test image sets do not share the same object classes. Few-shot instance seg-mentation is a basic vision problem.
+It appears in many applications where providing manual segmentations of all object instances is prohibitively expensive. The key chal-lenge is how to conduct a reliable training on small data.
+Fig. 1 illustrates a common framework for few-shot in-stance segmentation that typically leverages Mask-RCNN
+[12, 43, 29]. First, the support and query images are in-put to a backbone CNN and feature pyramid network (FPN)
+[23] for computing the support’s and query’s feature maps.
+Feature Extraction
+Query multi-level  feature maps
+Support multi-level  feature maps
+𝑃& o o o
+𝑃%
+𝑃& o o o
+𝑃%
+Backbone + FPN
+For each 𝑃$, 𝑖 = 3 … 7
+Channel-wise  multiplication
+Query feature map 𝐹!
+*
+Conditional 
+# feature map 𝐹!
+Replaced by  our method
+Mask R-CNN
+Support  feature map 𝐹"
+Masked  avg. pool
+Support feature  vector 𝑓"
+Query mask 𝑚!
+Query image 𝑥!
+Support image 𝑥"
+Support mask 𝑚"
+Figure 1. A common framework of prior work. The query and support image(s) are input to a backbone CNN with feature pyra-mid network (FPN) to extract the feature maps. The support’s features modulate the query’s features by channel-wise multipli-cation, resulting in the conditional query features, which are then input to Mask-RCNN for instance segmentation of the query. Our approach replaces Mask-RCNN with two new modules for anchor-free object detection, and part-based instance segmentation.
+Second, for every feature map and every support’s seg-mentation mask, the masked average pooling computes the support’s feature vector. Third, the support’s feature vec-tor is used to modulate the query’s feature maps through a channel-wise multiplication, resulting in the conditional query feature maps. Finally, the conditional query features are forwarded to the remaining modules of Mask-RCNN to produce instance segmentation of the query.
+This framework has limitations. First, Mask-RCNN is anchor-based, and hence might overﬁt to particular sizes and aspect ratios of training objects, which do not character-ize new classes in testing. Second, the Mask-RCNN learns feature prototypes [12] which are correlated with the fea-ture map from the backbone in order to produce object seg-mentation. However, the prototypes typically capture global outlines of objects seen in training [12], and hence may not be suitable for segmenting new object classes with entirely 11099
+Support feature  vector 𝑓)
+Anchor-Free object 
+Detector (AFD)
+SimNet
+Dense FG classification 
+𝐶 = {𝑐&,( } (𝐻×𝑊×1)
+Support mask 𝑚)
+Support image 𝑥)
+Feature 
+Extraction (see Fig. 1) 
+𝑃*
+𝑃,
+𝑃+
+𝑃-𝑃.
+Head
+Head
+Head
+Head
+Head
+Query image 𝑥!
+Conditional query  feature maps
+NMS
+Dense prediction of bboxes
+T = {𝑡&,(} (𝐻×𝑊×4)
+Dense prediction of  importance of latent parts
+Π = 𝜋&,( (𝐻×𝑊×𝐽)
+Top selected  bboxes  𝑏$
+Part-based Instance 
+Segmenter (PIS)
+For each  bbox 𝑏$
+Part importance  
+𝜋$ (1×1×𝐽)
+Sigmoid
+𝑛"# instance mask 𝑚$ (𝐻%×𝑊%×1)
+Convolutional layers
+ROI-align pooling
+PartNet
+Part 1
+Part 2
+…
+Part 𝐽
+*
+Part 1
+…
+Part 𝐽
+ReLU +
+MaxNorm
+Part map 𝑃 (𝐻×𝑊×𝐽)
+ROI pooled part map 𝑃$ (𝐻%×W%×𝐽)
+Inner product
+Part Assembling
+Module (PAM)
+Query mask 𝑚!
+Figure 2. Our FAPIS uses the same feature maps as in Fig. 1, and extends prior work with two new modules: anchor-free object detector (AFD) and part-based instance segmentor (PIS). The AFD produces three types of dense predictions for every location (x, y) in the feature map: (a) Figure-ground (FG) classiﬁcation score; (b) Location of the closest bounding box to (x, y); (c) Relative importance of the latent parts for segmentation of the bounding box closest to (x, y). The PIS consists of the PartNet and Part Assembling Module (PAM). The
+PartNet predicts activation maps of the latent parts. After NMS selects the top scoring bounding boxes, for every box n, the PAM fuses the part-activation maps according to the predicted part importance for the box n, resulting in the instance segmentation mn. different shapes in testing.
+To address these limitations, we propose FAPIS – a new few-shot anchor-free part-based instance segmenter, illus-trated in Fig. 2. In a given query, FAPIS ﬁrst detects bound-ing boxes of the target object class deﬁned by the support image and its segmentation mask, and then segments each bounding box by localizing a universal set of latent object parts shared across all object classes seen in training.
+Our key novelty is in explicit modeling of latent ob-ject parts, which are smaller object components but may not be meaningful (as there is no ground truth for parts).
+Unlike the prototypes of [12], our latent parts capture cer-tain smaller components of objects estimated as important for segmentation. As parts may be shared by distinct ob-jects, including new object classes of testing, we expect that accounting for parts will lead to a more reliable few-shot learning than the aforementioned common framework. We are not aware of prior work that learns latent parts for few-shot instance segmentation.
+We make two contributions. First, we specify a new anchor-free object detector (AFD) that does not use a set of candidate bounding boxes with pre-deﬁned sizes and as-pect ratios, called anchors, and, as shown in [39], in this way mitigates over-ﬁtting to a particular choice of anchors.
+The AFD (the orange box in Fig. 2) is aimed at three tasks at every location of the query’s feature map: dense scoring and regressing locations of foreground bounding boxes, as well as dense estimation of a relative importance of the la-tent parts for segmentation. While all of the latent parts are learned to be relevant for object segmentation, differences in sizes and shapes across instances will render some latent parts more important than some others for segmentation of each instance. Thus, the third head in the AFD estimates the part importance which varies across the predicted bounding boxes in the image, as desired. The AFD’s output is passed to the standard non-maximum suppression (NMS) for se-lecting top scoring bounding boxes.
+Second, we specify a new Part-based instance segmenter (PIS). The PIS (the yellow box in Fig. 2) is aimed at local-izing and integrating latent object parts to produce the ﬁnal instance segmentation within every NMS-selected bound-ing box. The PIS consists of the PartNet and part assem-bling module (PAM). The PartNet predicts activation maps of the latent parts, called part maps, where large activations 11100
+strongly indicate the presence of the corresponding part in the image. Importantly, high activations of a certain latent part at image location (x, y) may not be important for seg-mentation of the object instance at (x, y) (e.g., when several latent parts overlap but do not “cover” the full spatial extent of the instance). Therefore, for every NMS-selected bound-ing box, these part maps are then integrated by the PAM so as to account for the predicted relative importance of the parts for that box. Finally, all instance segmentations form the output query segmentation mask.
+Our evaluation on the COCO-20i dataset [29] demon-strates that we signiﬁcantly outperform the state of the art.
+In the following, Sec. 2 reviews prior work; Sec. 3 spec-iﬁes our deep architecture; Sec. 4 presents our implementa-tion details and experimental results; and Sec. 5 describes our concluding remarks. 2.

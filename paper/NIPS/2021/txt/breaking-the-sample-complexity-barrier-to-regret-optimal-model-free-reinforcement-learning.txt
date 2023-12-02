@@ -1,0 +1,102 @@
+Abstract
+√
+Achieving sample efﬁciency in online episodic reinforcement learning (RL) re-quires optimally balancing exploration and exploitation. When it comes to a
+ﬁnite-horizon episodic Markov decision process with S states, A actions and horizon length H, substantial progress has been achieved towards characterizing
+H 2SAT (modulo the minimax-optimal regret, which scales on the order of log factors) with T the total number of samples. While several competing solu-tion paradigms have been proposed to minimize regret, they are either memory-inefﬁcient, or fall short of optimality unless the sample size exceeds an enormous threshold (e.g., S6A4 poly(H) for existing model-free methods).
+To overcome such a large sample size barrier to efﬁcient RL, we design a novel model-free algorithm, with space complexity O(SAH), that achieves near-optimal regret as soon as the sample size exceeds the order of SA poly(H). In terms of this sample size requirement (also referred to the initial burn-in cost), our method improves — by at least a factor of S5A3 — upon any prior memory-efﬁcient algorithm that is asymptotically regret-optimal. Leveraging the recently introduced variance reduction strategy (also called reference-advantage decomposition), the proposed algorithm employs an early-settled reference update rule, with the aid of two Q-learning sequences with upper and lower conﬁdence bounds. The design principle of our early-settled variance reduction method might be of independent interest to other RL settings that involve intricate exploration-exploitation trade-offs. 1
+
+Introduction
+Contemporary reinforcement learning (RL) has to deal with unknown environments with unprece-dentedly large dimensionality. How to make the best use of samples in the face of high-dimensional state/action space lies at the core of modern RL practice. An ideal RL algorithm would learn to act favorably even when the number of available data samples scales sub-linearly in the ambient dimension of the model, i.e., the number of parameters needed to describe the transition dynamics of the environment. The challenge is further compounded when this task needs to be accomplished with limited memory.
+Simultaneously achieving the desired sample and memory efﬁciency is particularly challenging when it comes to online episodic RL scenarios. In contrast to the simulator setting that permits sampling of any state-action pair, an agent in online episodic RL is only allowed to draw sample trajectories by executing a policy in the unknown Markov decision process (MDP), where the initial states are pre-assigned and might even be chosen by an adversary. Careful deliberation needs to be undertaken when deciding what policies to use to allow for effective interaction with the unknown environment,
+∗Department of Electrical and Computer Engineering, Princeton University, Princeton, NJ 08544, USA.
+†Department of Electrical and Computer Engineering, Carnegie Mellon University, Pittsburgh, PA 15213,
+USA.
+‡Department of Electronic Engineering, Tsinghua University, Beijing 100084, China. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+how to optimally balance exploitation and exploration, and how to process and store the collected information intelligently without causing redundancy. 1.1 Regret-optimal model-free RL? A sample size barrier
+In order to evaluate and compare the effectiveness of RL algorithms in high dimension, a recent body of works sought to develop a ﬁnite-sample theoretical framework to analyze the algorithms of interest, with the aim of delineating the dependency of algorithm performance on all salient problem parameters in a non-asymptotic fashion (Dann et al., 2017; Kakade, 2003). Such ﬁnite-sample guarantees are brought to bear towards understanding and tackling the challenges in the sample-starved regime commonly encountered in practice. To facilitate discussion, let us take a moment to summarize the state-of-the-art theory for episodic ﬁnite-horizon MDPs with non-stationary transition kernels, focusing on minimizing cumulative regret — a metric that quantiﬁes the performance difference between the learned policy and the true optimal policy — with the fewest number of samples. Here and throughout, we denote by S, A, and H the size of the state space, the size of the action space, and the horizon length of the MDP, respectively, and let T represent the sample size. In addition, the immediate reward gained at each time step is assumed to lie between 0 and 1.
+Fundamental regret lower bound. Following the arguments in Jaksch et al. (2010); Auer et al. (2002), the recent works Jin et al. (2018); Domingues et al. (2021) developed a fundamental lower bound on the expected total regret for this setting. Speciﬁcally, this lower bound claims that: no matter what algorithm to use, one can ﬁnd an MDP such that the accumulated regret incurred by the algorithm necessarily exceeds the order of (lower bound)
+H 2SAT , (1)
+√ as long as T ≥ H 2SA.4 This sublinear regret lower bound in turn imposes a sampling limit if one wants to achieve ε average regret.
+Model-based RL. Moving beyond the lower bound, let us examine the effectiveness of model-based
+RL — an approach that can be decoupled into a model estimation stage (i.e., estimating the transition kernel using available data) and a subsequent stage of planning using the learned model (Jaksch et al., 2010; Azar et al., 2017; Efroni et al., 2019; Agrawal and Jia, 2017; Pacchiano et al., 2020). In order to ensure a sufﬁcient degree of exploration, Zhang et al. (2020b) came up with an algorithm called MVP that blends model-based learning and the optimism principle, which achieves a regret bound5 (cid:101)O(cid:0)√
+H 2SAT (cid:1) that nearly attains the lower bound (1) as T tends to inﬁnity. Caution needs to be exercised, however, that existing theory does not guarantee the near optimality of this algorithm unless the sample size T surpasses
+T ≥ S3AH 4, a threshold that is signiﬁcantly larger than the dimension of the underlying model. This threshold can also be understood as the initial burn-in cost of the algorithm, namely, a sampling burden needed for the algorithm to exhibit the desired performance. In addition, model-based algorithms typically require storing the estimated probability transition kernel, resulting in a space complexity that could be as high as O(S2AH) (Azar et al., 2017; Zhang et al., 2020b).
+Model-free RL. Another competing solution paradigm is the model-free approach, which circumvents the model estimation stage and attempts to learn the optimal values directly (Strehl et al., 2006; Jin et al., 2018; Bai et al., 2019; Yang et al., 2021). In comparison to the model-based counterpart, the model-free approach holds the promise of low space complexity, as it eliminates the need of storing a full description of the model. In fact, in a number of previous works (e.g., Strehl et al. (2006); Jin et al. (2018)), an algorithm is declared to be model-free only if its space complexity is o(S2AH) regardless of the sample size T .
+• Memory-efﬁcient model-free methods. Jin et al. (2018) proposed the ﬁrst memory-efﬁcient model-free algorithm — which is an optimistic variant of classical Q-learning — that achieves a regret
+T with a space complexity O(SAH). Compared to the lower bound (1), bound proportional to
+H and hence suboptimal for however, the regret bound in Jin et al. (2018) is off by a factor of
+√
+√ 4Given that a trivial upper bound on the regret is T , one needs to impose a lower bound T ≥ H 2SA in order for (1) to be meaningful. 5Here and throughout, we use the standard notation f (n) = O(g(n)) to indicate that f (n)/g(n) is bounded above by a constant as n grows. The notation (cid:101)O(·) resembles O(·) except that it hides any logarithmic scaling.
+The notation f (n) = o(g(n)) means that limn→∞ f (n)/g(n) = 0. 2
+Algorithm
+Regret
+Range of sample sizes T that attain optimal regret
+Space complexity
+UCB-VI (Azar et al., 2017)
+MVP (Zhang et al., 2020b)
+UCB-Q-Hoeffding (Jin et al., 2018)
+UCB-Q-Bernstein (Jin et al., 2018)
+UCB2-Q-Bernstein (Bai et al., 2019)
+UCB-Q-Advantage (Zhang et al., 2020c)
+UCB-M-Q (Menard et al., 2021)
+Q-EarlySettled-Advantage (this work)
+Lower bound (Domingues et al., 2021)
+√
+H 2SAT + H 4S2A
+[S3AH 6, ∞)
+√
+H 2SAT + H 3S2A
+[S3AH 4, ∞)
+√
+H 4SAT
+√
+√
+H 3SAT +
+H 3SAT +
+√
+√
+H 9S3A3
+H 9S3A3
+√
+H 2SAT + H 8S2A 3 2 T 1 4 never never never
+[S6A4H 28, ∞)
+S2AH
+S2AH
+SAH
+SAH
+SAH
+SAH
+√
+√
+H 2SAT + H 4SA
+[SAH 6, ∞)
+S2AH
+H 2SAT + H 6SA
+[SAH 10, ∞)
+√
+H 2SAT n/a
+SAH n/a
+Table 1: Comparisons between prior art and our results for non-stationary episodic MDPs when
+T ≥ H 2SA. The table includes the order of the regret bound, the range of sample sizes that achieve
+H 2SAT ), and the memory complexity, with all logarithmic factors omitted the optimal regret (cid:101)O( for simplicity of presentation. The red text highlights the suboptimal part of the respective algorithms.
+√ problems with long horizon. This drawback has recently been overcome in Zhang et al. (2020c) by leveraging the idea of variance reduction (or the so-called “reference-advantage decomposition”) for large enough T . While the resulting regret matches the information-theoretic limit asymptotically, its optimality in the non-asymptotic regime is not guaranteed unless the sample size T exceeds (see
+Zhang et al. (2020c, Lemma 7)) (cid:101)O(cid:0)√
+T ≥ S6A4H 28, a requirement that is even far more stringent than the burn-in cost imposed by Azar et al. (2017).
+• A memory-inefﬁcient “model-free” variant. The recent work Menard et al. (2021) put forward a novel sample-efﬁcient variant of Q-learning called UCB-M-Q, which relies on a carefully chosen momentum term for bias reduction. This algorithm is guaranteed to yield near-optimal regret
+H 2SAT (cid:1) as soon as the sample size exceeds T ≥ SApoly(H), which is a remarkable improvement vis-à-vis previous regret-optimal methods (Azar et al., 2017; Zhang et al., 2020c).
+Nevertheless, akin to the model-based approach, it comes at a price in terms of the space and computation complexities, as the space required to store all bias-value function is O(S2AH) and the computation required is O(ST ), both of which are larger by a factor of S than other model-free algorithms like Zhang et al. (2020c). In view of this memory inefﬁciency, UCB-M-Q falls short of fulﬁlling the deﬁnition of model-free algorithms in Strehl et al. (2006); Jin et al. (2018). See
+Menard et al. (2021, Section 3.3) for more detailed discussions.
+A more complete summary of prior results can be found in Table 1. 1.2 A glimpse of our contributions
+In brief, while it is encouraging to see that both model-based and model-free approaches allow for near-minimal regret as T tends to inﬁnity, they are either memory-inefﬁcient, or require the sample size to exceed a threshold substantially larger than the model dimensionality. In fact, no prior algorithms have been shown to be simultaneously regret-optimal and memory-efﬁcient unless
+T ≥ S6A4 poly(H), 3
+which constitutes a stringent sample size barrier constraining their utility in the sample-starved and memory-limited regime. The presence of this sample complexity barrier motivates one to pose a natural question:
+Is it possible to design an algorithm that accommodates a signiﬁcantly broader sample size range without compromising regret optimality and memory efﬁciency?
+In this paper, we answer this question afﬁrmatively, by designing a new model-free algorithm, dubbed as Q-EarlySettled-Advantage, that enjoys the following performance guarantee.
+Theorem 1 (informal). The proposed Q-EarlySettled-Advantage algorithm, which has a space complexity O(SAH), achieves near-optimal regret (cid:101)O(cid:0)√
+H 2SAT (cid:1) as soon as the sample size exceeds
+T ≥ SA poly(H).
+The proof of this theorem can be found in the full version Li et al. (2021c). As can be seen from
+Table 1, the space complexity of the proposed algorithm is O(SAH), which is far more memory-efﬁcient than both the model-based approach in Azar et al. (2017) and the UCB-M-Q algorithm in
+Menard et al. (2021) (both of these prior algorithms require S2AH units of space). In addition, the sample size requirement T ≥ SA poly(H) of our algorithm improves — by a factor of at least S5A3
+— upon that of any prior algorithm that is simultaneously regret-optimal and memory-efﬁcient. In fact, this requirement is nearly sharp in terms of the dependency on both S and A, and was previously achieved only by the UCB-M-Q algorithm at a price of a much higher storage burden.
+Let us also brieﬂy highlight the key ideas of our algorithm. As an optimistic variant of variance-reduced Q-learning, Q-EarlySettled-Advantage leverages the recently-introduced reference-advantage decompositions for variance reduction (Zhang et al., 2020c). As a distinguishing feature from prior algorithms, we employ an early-stopped reference update rule, with the assistance of two Q-learning sequences that incorporate upper and lower conﬁdence bounds, respectively. The design of our early-stopped variance reduction scheme, as well as its analysis framework, might be of independent interest to other settings that involve managing intricate exploration-exploitation trade-offs. 1.3

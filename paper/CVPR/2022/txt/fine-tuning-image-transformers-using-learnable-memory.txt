@@ -1,0 +1,75 @@
+Abstract
+In this paper we propose augmenting Vision Transformer models with learnable memory tokens. Our approach al-lows the model to adapt to new tasks, using few parameters, while optionally preserving its capabilities on previously learned tasks. At each layer we introduce a set of learn-able embedding vectors that provide contextual informa-tion useful for specific datasets. We call these “memory to-kens”. We show that augmenting a model with just a hand-ful of such tokens per layer significantly improves accuracy when compared to conventional head-only fine-tuning, and performs only slightly below the significantly more expen-sive full fine-tuning. We then propose an attention-masking approach that enables extension to new downstream tasks, with a computation reuse. In this setup in addition to being parameters efficient, models can execute both old and new tasks as a part of single inference at a small incremental cost. 1.
+
+Introduction
+Transformers [38], originally introduced for sequence problems, such as NLP and speech recognition, have been in advancing state-of-the-art for vision very successful tasks. “Vision transformers” most commonly have been trained on large amounts of data, either in supervised [21] or self-supervised [7] modes. The resulting model is then
+“fine-tuned” on a downstream task, either in whole or in part. This fine-tuning has been shown to help achieve high performance on a variety of downstream tasks, from classi-cal tasks like image super-resolution [6] and object detec-tion [3] to novel ones, such as Ising model simulations [19].
+It has been observed that in order to reach the highest ac-curacy it is best to fine-tune the entire model on the target task [7,21]. However, this is often problematic, since Trans-former models can have hundreds of millions or billions of parameters, making maintaining, transmitting and storing a full size model for each new task an expensive proposition.
+Additionally, full fine-tuning is often sensitive to the choice
+Figure 1. Structure of an encoder with learned memory. The input to each encoder layer is augmented with learned memory, which is used as an optional source of attention by the embeddings that propagate from previous layers. Memory tokens do not attend to other tokens. For detailed design of individual layer see Fig. 2. of the learning rate [30]. In this paper we propose a method where we augment a pre-trained model with learnable to-kens that are appended at each layer of the transformer block. These extra tokens can be intuitively thought of as a permanent memory that are used as a contextual reference to improve the final prediction. Another point of analogy is that these tokens can represent concepts at varying levels of abstractions: starting from tokens that run alongside pixel-based patches, and all the way to the tokens representing final concepts.
+Our approach allows significant improvements to down-stream task accuracy compared to head-only fine-tuning.
+Further, we believe that our particular architecture design is of independent interest as it provides a novel way of ex-tending a trained model to perform new tasks while retain-Figure 2. Detailed design of encoder layer with memory. The designs on the right are the alternative options that we explore in Sec. 4.
+The rightmost one is similar to the MemTransformer design in [5]. Here we use rounded boxes to indicate functions and square boxes to indicate input/output to highlight data propagation. ing the ability of performing old tasks with only incremen-tal compute cost. This is important in many applications, as the training data for different task often not available at the same time. Naively, by adding more memory one can eas-ily extend a model to new tasks, however, if we try to run such model on an old task we would commonly observe 20%-40% percentage drop in accuracy. We show that with proper attention masking, additional cells can be introduced in a way that doesn’t degrade the accuracy of the previous tasks in the presence of new memories,which is crucial for applications in life-long and continual learning. We show that the models can be both extended, where new function-ality is added on top of existing ones, as well as concate-nated, where the two (or more) independently trained mod-els can be combined into a single network performing all tasks, with only incremental cost per task.
+The paper is organized as follows.
+In Sec. 2 we de-scribe the method of our memory model. Then in Sec. 2.2 we introduce our attention masking technique that inde-pendent sequential task training, without accuracy degra-dation. Then in Sec. 3 we provide an overview of related approaches to memory and fine-tuning approaches. Sec. 4 contains our experiments and ablation studies. The last
+Sec. 5 draws some early conclusions and identifies future areas of interest. 2. Memory model
+To introduce memory, we build upon the Vision Trans-former (ViT) encoder model [21], where an image x ∈
+Rh×w×c is split into a grid of N patches, each of size
+P × P × c, which are flattened and fed through the multiple layers of the transformer encoder. For this paper, we only consider classification models, and do not use a decoder.
+Following [21] we use learnable 1D position embeddings that are added to the input of the first layer. The input to the standard image transformer is defined as: zvit 0
+:= [xcls, Ex1, . . . , ExN ] + Epos where E is a learnable linear transformation into the en-coder embedding space and Epos is a position embedding.
+Here xcls is a special learnable token that is shared for all inputs and the corresponding output value is used as an embedding for the final classification as shown in Fig. 1. x1 . . . xN are flattened image patches. The basic structure of the encoder layer is shown in Fig. 2. We refer to [21] for the detailed definition of each component.
+Now, to add memory, we concatenate m learnable em-beddings Emem ∈ Rm×D, where D is the dimensionality of the input tokens, as an input to the layer: zmem 0
+:= [zvit 0 ; E0 mem]
+Thus our transformer receives N + 1 + m tokens in total as an input. This input is then passed through a sequence of encoder-layers as in [21, 38]. The architecture of the in-dividual layers exactly matches that of ViT, with a notable exception that we do not propagate updated memory: that is, the output of the self attention module is truncated to the first N + 1 tokens. Thus the output of the layer l, which we denote as yl, has only N + 1 tokens. See the left part of Fig. 2 for a comparison between a standard layer block and our augmented version.
+K
+Q
+INP
+CLS
+C1
+C2
+Ck
+INP
+CLS C1 C2
+Ck M1 M2
+Mk
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+--✓
+★
+. . .
+★
+---✓
+★
+. . .
+----✓
+--✓
+★
+. . .
+★
+---✓
+★
+. . .
+----✓
+Table 1. Attention mask for model extension and concatenation.
+Here ✓ indicates that corresponding token type Q (query) at-tends to token type K (key), indicates that attention is used for model extension, but not for concatenation. For brevity, we denoted CLS-K as Ck and MEM-K as Mk and omitted memory rows since they do not attend to other tokens. See Sec. 2.2 for details. that it does not attend, and ★
+-All consequent layers receive input that follows the same pattern: zmem l
+= [yl−1; El mem] where yl−1 is the truncated output of the previous layer.
+In our experiments we explored several different vari-ants of memory models, including ones where memory it-self actively attends and propagates to the next layer, how-ever we found that such modifications generally hurt per-formance. We report some of those results in the ablation study in Sec. 4.3. 2.1. Fine-tuning with full attention
+The main use of memory that we explore in this paper, is applying it to fine-tuning existing models. To do this we introduce randomly-initialized memory tokens as described above and perform gradient descent to learn the memory to-ken, the classifier head, and the class token xcls. While this method gives excellent results, the resulting model can no longer be used to solve its original task, due to change in hidden activations. In the next section we introduce Atten-tion Masking that allows to lift this constraint. 2.2. Attention masking for computation reuse
+After fine-tuning the class token of a transformer model on a new dataset, or adding memory, the network perfor-mance on the original task generally degrades. This might not be a problem if we are only interested in solving the new task. However it is often desirable to be able to execute both original and new tasks as part of the same inference, with only incremental cost per each new task. A common way to approach this is via multi-task learning where all datasets are present at training time and we learn a univer-sal model with a shared backbone and per-task head solves all tasks. However, it is not always possible, as in prac-tice data is often owned by different entities, and can not be learned within the same environment or at the same time.
+In this section we describe an extension of our model where
+Figure 3. Concatenating multiple models together. The class to-kens are concatenated at the input level, while individual models’ memory are concatenated at each layer. we introduce memory a new dataset class token xnew cls and a per-task head in such a way that the model output for the original dataset token xcls is preserved, i.e., identical to the output obtained for this dataset token in the original model.
+As a result, we can solve multiple tasks for the same input, effectively reusing both parameters and computation. We achieve this by using an attention mask that prevents the original xcls and input patches from attending to the mem-ory tokens and xnew cls that we introduce for the new dataset.
+A head for each task is attached to the corresponding dataset token. (see Tab. 1).
+Model concatenation vs. model extension. Attention masking can be used to extend memory as more and more tasks are added. For model extension each new dataset
+Dk is trained by fine-tuning its individual memory and the dataset class token x(k) cls and the attention is constrained to explicitly prevent older datasets from attending to tokens added by following tasks (see Tab. 1). Alternatively, if we have two independently trained subtasks1, we can concate-nate these models into one as shown in Fig. 3. In this case the attention mask for the class token x(k) cls in the concate-nated model will be chosen to only attend to xcls and input patches, and not to other task tokens or memory, thus allow-ing us to concatenate memory and tokens for models trained independently. Interestingly, as we discuss in Sec. 4.4 we did not see much improvement when extending a model, despite it theoretically being more powerful, as opposed to concatenating them. However we believe this remains an interesting direction to explore in future work. 1trained with attention masking preventing xcls and input patches from attending to xnew cls
+3.

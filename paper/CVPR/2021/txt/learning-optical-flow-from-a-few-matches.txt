@@ -1,0 +1,218 @@
+Abstract
+State-of-the-art neural network models for optical ﬂow estimation require a dense correlation volume at high reso-lutions for representing per-pixel displacement. Although the dense correlation volume is informative for accurate estimation, its heavy computation and memory usage hin-ders the efﬁcient training and deployment of the models. In this paper, we show that the dense correlation volume rep-resentation is redundant and accurate ﬂow estimation can be achieved with only a fraction of elements in it. Based on this observation, we propose an alternative displacement representation, named Sparse Correlation Volume, which is constructed directly by computing the k closest matches in one feature map for each feature vector in the other fea-ture map and stored in a sparse data structure. Experi-ments show that our method can reduce computational cost and memory use signiﬁcantly, while maintaining high accu-racy compared to previous approaches with dense correla-tion volumes. 1.
+
+Introduction
+Optical ﬂow estimation is a classic problem in computer vision [11]. It aims at ﬁnding pixelwise correspondences between two images. Traditionally it has been formulated as an optimization problem solved by continuous [4, 11, 32] or discrete [22, 7, 31] optimization. Since the development of deep learning, optical ﬂow estimation has been formulated as a learning problem where direct regression from a neural network becomes a common approach [9, 16].
+One popular representation in dense correspondence problems is the correlation (cost) volume, ﬁrst introduced by Hosni et al. [12]. Correlation volumes give an explicit representation of per-pixel displacements and have demon-strated their wide use in learning problems of stereo match-ing [18] and optical ﬂow [9, 27]. Contrary to stereo match-ing problems, where the search space is along a scanline, optical ﬂow problems have a 2D search space, which leads to two challenges: large memory consumption and high computational cost when directly processing a 4D volume. (a) First image (b) Second image 8 6 4 2 0
+−2
+−4 0 20 40 60 80 010203040 8 6 4 2 0
+−2
+−4 0 20 40 60 80 010203040 (c) Dense correlation volume (d) Sparse correlation volume (e) Optical ﬂow (RAFT [29]) (f) Optical ﬂow (ours)
+Figure 1: Optical ﬂow estimation with dense correlation volume and sparse correlation volume. (c) and (d) illus-trate the correlation volumes for a single pixel (yellow dot) in the
+ﬁrst image. The white crosses in (b) indicate the top-k matches.
+We show accurate optical ﬂow can be estimated given only a few matching correlations.
+To reduce the memory and computational cost, existing approaches [27, 34, 33, 13, 36] ﬁrst build a feature pyra-mid and compute correlation volumes at coarse resolutions, then gradually warp upper-level feature maps based on up-sampled ﬂow and construct a local correlation volume over a limited search range. One notable problem observed in previous work [4, 32, 20], was that coarse-to-ﬁne frame-works fail to address the case when the ﬂow displacement is larger than the ﬂow structure, i.e. the famous small ob-jects moving fast problem.
+Recent approaches, Devon and RAFT [20, 29] proposed using direct search in the second image to remove the need for warping. RAFT especially demonstrated the beneﬁt of 16592
+F1
+F2
+F1
+F2 (a) A dense correlation volume requires saving all pairs of matches. (b) A sparse correlation volume requires saving only top-k matches.
+Figure 2: Comparison between dense correlation volume and top-k sparse correlation volume. In a sparse correlation volume, only the top-k matches are stored and the rest are discarded.
+ﬁrst constructing an all-pairs correlation volume and di-rectly processing it at a single resolution rather than in a coarse-to-ﬁne manner. However, the all-pairs correlation volume requires pair-wise dot product between the two fea-ture maps. Hence, both the time and the space complexity are O(N 2), where N is the number of pixels of an image. A small N is required to reduce the memory consumption and therefore RAFT can only use 1/8 resolution feature maps.
+A low-resolution feature map cannot fully represent the ﬁne details of an image. We wonder if there is a way to con-struct a correlation volume with the all-pairs search range but without exceeding the maximum GPU memory. We thus question the necessity of storing all pairwise correla-tions and hypothesize that only storing the top-k correla-tions for each pixel might be sufﬁcient.
+Our intuition is that a feature vector in one image has only a few feature vectors in the other image with high cor-relation to match. Hence, there could be large redundancy in the dense correlation volume where the small correla-tions do not contribute to the prediction. Figure 1 illustrates the comparison between a dense correlation volume and a sparse correlation volume.
+We propose a Sparse Correlation Volume representation, where only the top-k correlations for each pixel are stored in a sparse data structure deﬁned by a {value, coordinates} pair. In this paper, we demonstrate how a sparse correlation volume representation can be used to solve the optical ﬂow problem. We propose an approach to construct and process such a sparse correlation volume in an optical ﬂow learning framework. We demonstrate that even if only a small frac-tion of elements are stored, our results are still comparable to previous work [29] which employs a dense correlation volume. We ﬁnally demonstrate that the sparse approach allows the construction of a high-resolution correlation vol-ume, which can predict the motions of ﬁne structures more accurately than previous approaches. 2. Method
+Let I1, I2 : Z2 → R3 be two RGB images. The problem is to estimate a dense ﬂow ﬁeld f : Z2 → R2 that maps each pixel coordinate x to a displacement vector f (x).
+In modern deep learning optical ﬂow approaches, a fea-ture extraction network is ﬁrst applied to extract feature maps from the image pair, F1, F2 : Z2 → Rc, where c is the number of channels. The correlation volume C : Z4 → R is formed by computing inner products between pairwise feature vectors,
+C(x, d) = F1(x) · F2(x + d). (1)
+The output is a four-dimensional tensor which can be rep-resented as a set
+C = {C(x, d) | x ∈ X , d ∈ D}. (2)
+Here, X = [0, h) × [0, w) ∩ Z2 is the domain of the fea-ture map F1 and |X | = hw, where h and w represent the height and width of F1 respectively. The displacement set D is deﬁned as D = [−d, d]2 ∩ Z2 where d represents the maximum displacement along the x or y direction and
+|D| = (2d + 1)2. Therefore, the correlation volume C con-tains hw(2d + 1)2 elements.
+To reduce the size of the correlation volume, previous approaches use coarse-to-ﬁne and warping methods to con-strain the size of d [27, 13, 33]. To handle large displace-ments accurately, RAFT [29] constructs an all-pairs correla-tion volume where the displacement range contains the en-tire feature map. Excluding out-of-range matches, RAFT’s all-pairs correlation volume contains N 2 elements where
+N = hw. Therefore, lower-resolution feature maps are required to constrain N .
+In this work, we show that the all-pairs correlation volume can in fact be a sparse tensor, where only a small fraction of the values are stored and pro-cessed. We show that we can effectively reduce the spatial complexity from O(N 2) to O(N k) with only a minor drop of performance, where k gives the number of matches we want to keep. The main idea is demonstrated in Figure 2. 2.1. Sparse Correlation Volume
+For each x ∈ X , we deﬁne a set
+S(k) x = arg max
+S⊂D,|S|=k
+X d∈S
+C(x, d) (3) 16593
+F1
+KNN
+Gradient
+No Gradient d0 ∈ S(k) x di − ∆fi
+Recurrent Decoder
+Fc, fi, hi
+F2
+Dot Product
+C(x, d)
+Sparse
+Correlation
+Volume
+Multi-scale
+Displacement
+Encoder
+Dense Motion
+Tensor
+GRU Update
+Block hi+1, ∆fi+1
+Figure 3: Network architecture and residual ﬂow prediction for a single iteration. (1) F1 and F2 are feature maps extracted by a feature extraction network. We form the 4D sparse correlation volume by ﬁrst computing a set of displacements d0 ∈ eK with top-k correlations with KNN. We then take the dot product for each feature vector in F1 with its k corresponding feature vectors in F2. The dashed arrows denote paths that have no gradient ﬂow while the solid arrows denote paths that do. (2) In each iteration, the displacement vectors are updated by subtracting the residual ﬂow di − ∆fi to update the 4D correlation volume. A multi-scale displacement encoder is applied to encode the 4D sparse correlation volume to a 2D dense motion tensor. (3) A GRU update block is applied to predict the residual ﬂow ∆fi+1 for the next iteration. The GRU block also takes input of hi, Fc, fi which represents the hidden state vector of current iteration, feature map extracted by the context network and current estimation of optical ﬂow, and outputs the hidden state vector for the next iteration as well the residual ﬂow. containing the k displacements that give the maximum cor-relations. The correlation volume can now be represented as a four-dimensional sparse tensor
+C = {C(x, d) | d ∈ S(k) e x , x ∈ X }. (4)
+This sparse correlation volume contains hwk elements as opposed to the original dense correlation volume with h2w2 elements. The constant k is typically a small number (e.g. k = 8).
+We now show how to construct the sparse correlation volume and estimate optical ﬂow from it. Our network ar-chitecture is shown in Figure 3. 2.2. k Nearest Neighbours
+We ﬁrst use two weight-sharing feature extraction net-works to extract 1/4 resolution feature maps from the in-put images. Our feature extraction networks consist of six residual blocks and the number of feature channels is 256.
+To construct the sparse correlation volume, we use a k-nearest neighbours (kNN) module [17] to compute a set of indices with the k largest correlation scores for each feature vector in F1. The sparse correlation volume is computed by taking the dot product between each feature vector in
+F1 with the top k feature vectors given by the indices in
+F2. During back-propagation, the gradients are only propa-gated to the k feature vectors that are selected by the kNN module. 2.3. Displacements Update
+We adopt an overall iterative residual reﬁnement ap-proach. As shown by previous work [15, 29], estimating residual ﬂows can effectively reduce the search space and predict better results than direct regression [16, 9]. Rather than directly predicting optical ﬂow f , a residual ﬂow ∆fi+1 is predicted at each step and used to update the current ﬂow estimation fi+1 = fi + ∆fi+1.
+At each step, a pixel x in F1 is mapped to xi in F2 ac-cording to the current estimate of ﬂow xi = x + fi. Our
+C described in Section 2.1 can be sparse correlation volume e regarded as an initial estimation f0 = 0 at i = 0. When the coordinate xi is updated to xi+1 = xi + ∆fi, the relative displacements in
+C should be updated accordingly as well. e
+To do so, we shift the coordinates of the sparse correlation tensor by subtracting k-nearest neighbouring ∆fi from di in each step, Ci(x, di) = Ci+1(x, di − ∆fi), as depicted in Figure 4a. Note here we allow di − ∆fi to be ﬂoating-point. It is also important to note that the inner products are computed only once at the start since in each step, only the correlation coordinates change while the correlation values remain the same. 2.4. Multi scale Displacement Encoder
+One question that is often raised with any sparse ap-proach is how to process a sparse tensor, since the regularity of a normal dense h × w × c tensor is lost. Sparse convo-lutions [8] may be used, however, we will present a simpler and more efﬁcient approach here.
+A dense all-pairs correlation volume has dimension h × w × h × w and we have reduced it to a sparse tensor with h × w × k elements where only the top-k correlations for each pixel are saved. We can see that the ﬁrst two dimen-sions are still dense and what has become sparse are the third and fourth dimensions. The goal here is to encode the k elements for each pixel and form a dense h×w ×c tensor, which can later be used to predict ∆fi+1.
+Following previous work [29], we propose creating 16594
+x fi
+F1 xi+1
+∆fi xi di − ∆fi xi + di di
+F2 (a) Displacements update. As a pixel’s coordinates are updated by adding ∆fi, the relative displacements are diminished by ∆fi.
+Bilinear
+Splatting
+Densify &
+Reshape (b) Multi-scale displacement encoder. We ﬁrst form a multi-level sparse correlation pyramid by scaling the coordinates by differ-ent constants. We then bilinearly splat the correlations onto the integer grids and extract correlation values within a local win-dow. The extracted windows are converted to dense tensors and are reshaped and concatenated to form a single h × w × c tensor.
+Figure 4: Illustration of how to process a sparse correla-tion volume in an iterative fashion. multi-scale sparse tensors and sampling displacements lo-cally with a ﬁxed radius at different resolutions. Coarser resolutions give larger context while ﬁner resolutions give more accurate displacements. We then convert the sparse tensors at each level to dense tensors and concatenate them to form a single 2D tensor. This is illustrated in Figure 4b.
+At each iteration i, for each pixel x, we start with a set of the top k correlation positions S(k) x . So, the set x } records the top k correlation
+{(cid:0) values for pixel x and their locations, obtained using a kNN algorithm. d, C(x, d)(cid:1) | d ∈ S(k)
+We construct a ﬁve-level sparse correlation volume pyra-mid by dividing the coordinates by (1, 2, 4, 8, 16) and de-note the scaled displacements at level l, updated with the current ∆fi by dl = (di − ∆fi) / 2l−1.
+In addition, we denote the correlation values at level l by
+C l(x, dl) = C(x, d) for d ∈ S(k) x . At each level, we con-strain the displacements by a constant radius r and deﬁne the windowed set of correlation values at level l, (cid:8)(cid:0) dl, C l(x, dl)(cid:1) (cid:12) (cid:12) kdlk∞ ≤ r, d ∈ S(k) x (cid:9) . (5)
+Since the coordinates dl are not necessarily integers, we need to resample to integer coordinates in order to densify the sparse tensor of correlations. We propose an approach which we call “bilinear splatting”. The correlation values are bilinearly splatted to the four nearest integer grids. For instance, the correlation C l(x, dl) at location dl is propa-gated to each of four neighbouring integer points, denoted by [dl] = (dx, dy), according to
+C l(x, [dl]) = (cid:0)1 − |dl x − dx|(cid:1) (cid:0)1 − |dl y − dy|(cid:1) C l(x, dl).
+These values are then summed for the set of correlations (5) and the sparse tensors of each level are converted to dense tensors, reshaped and concatenated to form a single 2D dense tensor of dimension 5(2r + 1)2, where 5 is the number of pyramid levels.
+The approach we introduce here does not require learn-It is merely a conversion between sparse and dense ing. tensors hence is simpler than sparse convolutions. 2.5. GRU Update Block
+Each vector in this 2D dense tensor encodes position in-formation as well as the correlation values of the k matches.
+We concatenate the 2D motion tensor with the context fea-tures and current estimate of ﬂow and pass it through a gated recurrent units (GRU) update block. The GRU update block estimates the residual ﬂow ∆fi+1 which is used to shift the correlation volume coordinates in the next step. 3. Experiments 3.1. Implementation details
+Network details We ﬁrst extract quarter-resolution fea-ture maps with 256 channels. Our feature extraction net-work contains six residual blocks. When passing the feature maps to the kNN, we set k = 8. Namely, for each feature vector, return the indices of the the top-8 feature vectors that give the maximum inner products. The GRU update block takes the current estimate of optical ﬂow as well as the context feature map as input. The context feature map is extracted by a separate network with 128 channels. The
+GRU update block also updates a 128-dimensional hidden-state feature vector. During training time, the GRU iterates 8 times as opposed to 12 times in RAFT [29]. 16595
+Training Data Method
+Sintel (train)
+KITTI-15 (train)
+Sintel (test)
+KITTI-15 (test)
+Clean
+Final
+EPE
+F1-all
+Clean
+Final
+F1-all
+C + T
+C+T+S/K(+H)
+LiteFlowNet2[14]
+VCN[33]
+MaskFlowNet[36]
+FlowNet2[16]
+DICL[30]
+RAFT[29]
+Ours
+FlowNet2 [16]
+PWC-Net+[28]
+LiteFlowNet2 [14]
+HD3 [34]
+IRR-PWC [15]
+VCN [33]
+MaskFlowNet[36]
+ScopeFlow[1]
+DICL[30]
+RAFT[29] (warm-start)
+RAFT[29] (2-view)
+Ours (warm-start)
+Ours (2-view) 2.24 2.21 2.25 2.02 1.94 1.43 1.29 (1.45) (1.71) (1.30) (1.87) (1.92) (1.66)
+--(1.11) (0.77) (0.76) (0.86) (0.79) 3.78 3.68 3.61 3.54 3.77 2.71 2.95 (2.01) (2.34) (1.62) (1.17) (2.51) (2.24)
+--(1.60) (1.27) (1.22) (1.75) (1.70) 8.97 8.36
+-10.08 8.70 5.04 6.80 (2.30) (1.50) (1.47) (1.31) (1.63) (1.16)
+--(1.02)
+-(0.63)
+-(0.75) 25.9 25.1 23.1 30.0 23.6 17.4 19.3 (6.8) (5.3) (4.8) (4.1) (5.3) (4.1)
+--(3.6)
+-(1.5)
+-(2.1)
+---3.96
+---4.16 3.45 3.48 4.79 3.84 2.81 2.52 3.59 2.12 1.61 1.94 1.77 1.72
+---6.02
+---5.74 4.60 4.69 4.67 4.58 4.40 4.17 4.10 3.44 2.86 3.18 3.88 3.60
+-------11.48 7.72 7.74 6.55 7.65 6.30 6.10 6.82 6.31
+-5.10
+-6.17
+Table 1: Quantitative results on Sintel and KITTI 2015 datasets. EPE refers to the average endpoint error and F1-all refers to the percentage of optical ﬂow outliers over all pixels. “C + T” refers to results that are pre-trained on Chairs and Things datasets.
+“S/K(+H)” refers to methods that are ﬁne-tuned on Sintel, KITTI and some on HD1K datasets. Paratheses refer to the training results and the best results are in bold font.
+Training schedule Following previous work, we ﬁrst pre-train our model on FlyingChairs [9] for 120k iterations with batch size 6 and then on FlyingThings [21] for another 120k iterations with batch size 4. We then ﬁne-tune on a combi-nation of Things, Sintel [6], KITTI 2015 [23] and HD1K
+[19] for 120k iterations for Sintel evaluation and 50k on
+KITTI 2015 [23] for KITTI evaluation. We use a batch size of 4 for ﬁne-tuning. We train our model on two 2080Ti
+GPUs. The ablation experiments are conducted on a sin-gle Tesla P100 GPU. We implemented with the PyTorch library [24].
+Loss function Similar to RAFT [29], we employ a re-current network architecture where a sequence of residual
+ﬂows ∆fi are predicted. The optical ﬂow prediction in each step can be represented as fi+1 = fi + ∆fi+1 and the initial values are f0 = 0, ∆f0 = 0.
+We apply the loss function on the sequence of optical
+ﬂow predictions. Given the ground-truth optical ﬂow fgt and predicted optical ﬂow at each step fi, the loss function is deﬁned as
+N
+γN −ikfi − fgtk1.
+L =
+X i=1
+The weight γ is set to 0.8 for pre-training on Chairs and
+Things and 0.85 for ﬁne-tuning on Sintel and KITTI. The total number of steps N is set to 8. kNN We use the faiss library [17] to run kNN on gpu. Currently we are applying the brute-force exact search method given our problem size is still considered small. The faiss library provides optimized k-selection routines to speed up the computation and for more details we refer the readers to the original article [17]. 3.2. Results
+We show quantitative comparison with existing works in
+Table 1. We have achieved state-of-the-art results on the
+Sintel clean dataset in the two-view case, obtaining 11.3% improvement (1.94 → 1.72) over RAFT[29]. We also tested the “warm-start” strategy in RAFT [29], which uses optical ﬂow estimated in the previous frames to initialize current optical ﬂow estimation. We found that it did not help our performance hence our result is still behind RAFT’s
+“warm-start” results. On the Sintel ﬁnal dataset our result is comparable to state-of-the-art results, currently behind
+RAFT [29] and DICL [30] while better than all the other 16596
+Input image 1
+Ground-truth
+RAFT [29]
+Ours
+Figure 5: Qualitative results on Sintel. We compare the results of the pre-training models (trained on Chairs + Things) on the
+Sintel training dataset. The results are compared against RAFT. We demonstrate cases where the quarter resolution correlation volume outperforms the eighth resolution correlation volume. Two noticable examples are the ﬁrst two rows, where the motion of a thin bamboo cannot be captured by the eighth resolution correlation volume due to the large downsampling. Nevertheless, it can be accurately predicted by our method. Best viewed on screen when zooming in. methods. On the KITTI-15 dataset, our result is behind
+RAFT [29] and MaskFlowNet [36] and supersedes other approaches. We tested the generalization ability of our ap-proach by evaluating the pre-trained model (C+T) on Sintel and KITTI-15. We have achieved the best results on Sin-tel clean and are second to RAFT [29] on Sintel ﬁnal and
+KITTI-15.
+The improvements on Sintel clean can be attributed to the larger correlation volume (1/4 resolution vs 1/8 reso-lution). We provide qualitative results in Figure 5, which clearly demonstrates the advantage of building the correla-tion volume and predicting optical ﬂow in high resolutions.
+It can be seen that the motion of ﬁne structures fails to be captured by RAFT but can be accurately predicted by our approach, with the use of a 1/4 resolution correlation vol-ume. With Sintel ﬁnal and KITTI-15, there exists signiﬁ-cantly more motion blur and featureless regions. Therefore, setting k = 8 might be too small to reach the same per-formance as a dense correlation volume. We analyse the effect of k in Section 3.3 via ablation experiments. We want to emphasize that even though we do not outperform
+RAFT[29] in all datasets, it is surprising to see that a sparse approach can do almost as well given the few storage of cor-relation values. For each pixel, we store and process only k = 8 correlations whereas RAFT requires to store h × w correlations, limiting its ability to scale up to higher resolu-tions.
+Resolution
+Ours
+Sparsity⋆
+RAFT
+Sparsity
+[29]
+Method
+Eighth
+Quarter k = 1 k = 4 k = 8 k = 1 k = 8 k = 32 k = 128
+ReLU
+Dense
+Chairs (val)
+Sintel (train)
+KITTI-15 (train)
+Clean
+Final
+EPE
+F1-all 0.95 0.71 1.14 0.98 0.95 1.20 0.93 0.87 0.84 0.91 0.88 1.55 1.29 1.97 1.72 1.55 3.13 1.64 1.50 1.50 1.44 1.44 3.07 2.95 3.44 3.07 3.07 4.26 2.97 2.82 2.75 2.75 2.73 5.74 6.80 7.56 6.32 5.74 14.4 7.18 5.77 5.61 5.09 5.10 20.2 19.3 25.6 21.8 20.2 39.3 22.8 19.5 19.0 16.7 17.5
+Table 2: Ablation experiment results. Settings used in our
+ﬁnal model are underlined. The details are in Section 3.3. We also give results run on RAFT’s original code but with varying sparsity levels of the correlation volume. ⋆We ran these experiments on 1/8 resolution. 3.3. Ablation Study
+We conducted ablation experiments to validate our hy-pothesis that top-k correlations are sufﬁcient to give a good representation of the full correlation volume. The main set-ting here is how large should k be. We show results on our model with different choices of k on 1/8 resolutions. It can be clearly seen that larger k gives better performance. Even 16597
+Sparsity
+Dense k = 8 k = 32 k = 128 1/4 Resolution 1/8 Resolution
+Size
+Memory
+Size
+Memory 7.8 × 108 2.2 × 105 8.9 × 105 3.6 × 106 4.8 × 107 3.1 GB 5.5 × 104 0.9 MB 2.2 × 105 3.6 MB 14.3 MB 8.8 × 105 191 MB 0.2 MB 0.9 MB 3.5 MB (a) Size and memory of a correlation volume based on a pair of images of size 436 × 1024. Size refers to the number of elements and the correlation volumes are stored in 32-bit ﬂoats.
+Method batch = 1 batch = 2
+RAFT [29]
+Ours 10.6 GB 6.1 GB 20.0 GB 9.3 GB (b) Actual memory consumption when training on the Sintel dataset. The correlation volumes are built from 1/4 resolution feature maps. We use a random crop of 400 × 720. The batch size is set to 1 and 2.
+Table 3: Results for memory consumption. when k = 1, the results are still reasonable and do not com-pletely fail.
+We also compare 1/4 resolution correlation volume with 1/8 resolution correlation volume and we can see that 1/4 resolution correlation volume gives better results in all datasets except the EPE in KITTI-15. Since large correla-tion volumes are constructed from higher-resolution feature maps, we believe that larger correlation volumes are more descriptive of the image details and the results agree with our hypothesis.
+An additional experiment we conducted is with RAFT’s original implementation. We keep the top-k elements in the correlation volume and set the rest to be zero. We vary k to be {1, 8, 32, 128}.
+In Table 2, ReLU refers to setting all negative values to be zero and only keeping the positive correlations. We also trained with the original code which is denoted as “Dense”. We can see that larger k gives better results and k = {32, 128} almost reach the same perfor-mance as the dense method. ReLU even outperforms the dense method on KITT-15. This again validates our hy-pothesis that there exists signiﬁcant redundancy in the cur-rent dense approach and a sparse correlation volume with a large enough k could do just as well. 3.4. Memory Consumption
+Our method of processing the sparse correlation volume does not introduce new learning parameters. The number of parameters in our network is 5.3 MB, which is the same as RAFT. Given an image pair of size 436 × 1024, the size and memory of sparse correlation volumes and dense cor-relation volumes in 1/4 and 1/8 resolutions are listed in
+Table 3a.
+When correlation volumes are built from 1/8 resolution feature maps, our approach does not lead to a signiﬁcant memory saving. This is due to the constant 2 GB memory overhead of the kNN search library and also the correlation volume is not a memory bottleneck (191 MB when batch size = 1) when resolutions are small.
+However, our approach demonstrates a clear advantage when correlation volumes are built from 1/4 resolution fea-ture maps for images of size 436 × 1024. When training at 1/4 resolution, with a random crop of 400 × 720 of the original image and batch size = 1 and 2, our approach con-sumes around 50% of total memory compared to RAFT.
+The results are demonstrated in Table 3b. This showcases the effectiveness of our approach in saving memory when correlation volumes are scaled to higher resolutions. 3.5. Limitations
+Increasing the resolution to 1/4, we have observed con-sistent improvements on ﬁne-structure motions (e.g. the bamboo sequence in Sintel). However, the commonly used metric for overall evaluation, mean EPE, is deﬁned to be bi-ased towards large motions on large regions. One particular weakness of our approach is the handling of featureless or blurry regions. Such features typically have a large number of matches due to the ambiguity, top-k might not be sufﬁ-cient to cover the correct match and could give misguided motion prediction. An example failure case is shown in Fig-ure 6. One can see that the red hair contains signiﬁcant mo-tion blur, where our top-k correlations do not contain the correct matches hence lead to incorrect prediction. 4.

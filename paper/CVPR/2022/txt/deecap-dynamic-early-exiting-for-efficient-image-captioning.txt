@@ -1,0 +1,181 @@
+Abstract
+Both accuracy and efficiency are crucial for image cap-tioning in real-world scenarios. Although Transformer-based models have gained significant improved captioning performance, their computational cost is very high. A fea-sible way to reduce the time complexity is to exit the predic-tion early in internal decoding layers without passing the entire model. However, it is not straightforward to devise early exiting into image captioning due to the following is-sues. On one hand, the representation in shallow layers lacks high-level semantic and sufficient cross-modal fusion information for accurate prediction. On the other hand, the exiting decisions made by internal classifiers are unreli-able sometimes. To solve these issues, we propose DeeCap framework for efficient image captioning, which dynami-cally selects proper-sized decoding layers from a global perspective to exit early. The key to successful early exiting lies in the specially designed imitation learning mechanism, which predicts the deep layer activation with shallow layer features. By deliberately merging the imitation learning into the whole image captioning architecture, the imitated deep layer representation can mitigate the loss brought by the missing of actual deep layers when early exiting is un-dertaken, resulting in significant reduction in calculation cost with small sacrifice of accuracy. Experiments on the
+MS COCO and Flickr30k datasets demonstrate the DeeCap can achieve competitive performances with 4× speed-up.
+Code is available at: https://github.com/feizc/DeeCap. 1.
+
+Introduction
+Image captioning aims to generate a textual description for a given image. It requires not only to identify what vi-sual objects the image contains but also to explain their re-lationship [4]. Recently, encoder-decoder framework has
+*Intern at Meituan.
+†The corresponding author.
+Figure 1. Conceptual workflow of early exiting in image caption-ing system, which adjusts the number of passed decoder layers, allowing for reduction of computational costs yet facing a perfor-mance bottleneck. Yellow circles are internal classification, and red arrows denote tokens exiting early at different decoder layers. achieved great progress [2, 6, 8, 14, 22, 50, 55, 56, 60, 61], which generates sentence through modeling the next word conditioned on both the image and generated sub-sentence.
+Moreover, Transformer architecture [48] is introduced to implicitly relate semantic information through dot-product attention and achieves state-of-the-art performances [10,28, 33,36,37,62]. Although these models achieve more promis-ing results, the low inference speed hinders their application to many real-time applications [20].
+A growing number of studies emerged recently focus-ing on improving its efficiency.
+Inspired by the paral-lelism of Transformer [19], one straight forward strategy is the non-autoregressive decoding [12, 58], which pre-dicts the entire sentence in one shot. Numerous works follow this line, e.g., iterative refinement [13, 16, 23], la-tent variables [13], multi-agent optimization [20], and semi-autoregressive [15, 57, 64]. Such model-level optimization usually lacks dependencies among words and struggles to produce descriptions with good quality. Another method is proposed for instance-level speed-up, called early exit-ing [17, 46, 54], which emits output with internal classifiers when the predictions are confident enough. However, its applicability to multimodal context is still largely under-explored. In this paper, we focus on performing early ex-iting for image captioning, as illustrated in Figure 1.
+We first conduct probing experiments to investigate the direct transfer of original early exiting [11, 54] in image captioning, and find that the resulting poor performance lies in: (i) The local shallow representations of caption de-coder lack high-level semantic and cross-modal fusion in-formation, it is insufficient to predict accurate tokens. As
+Transformer-based structure exhibits a hierarchy of repre-sentations, e.g., shallow layers extract low-level features like syntactic information while deep layers capture se-mantic fusion relations [10, 35], we believe that the high-level information usage is usually required even for easy instances. (ii) The internal classifiers in the early exiting cannot provide reliable exiting decisions. In practice, we design an evaluation metric, referred to as false confidence score, to examine the ability and quality of image caption-ing models to distinguish difficult contexts from easy ones.
+We discover that the predictions of internal classifiers, i.e., confidence score, cannot truly reflect the difficulty at some-times, resulting in wrongly generated results and thus hin-dering the application of early exiting.
+Following this premise, we investigate the design of dy-namic early exiting method for image captioning and incor-porates two key novelties with respect to all previous algo-rithms: (i) similar to mesh connection [10], all the low-level hidden states are connected for adequate historical informa-tion, instead of only one hidden state. (ii) the high-level representation in the uncomputed deep layers is estimated with imitation learning-based [43] lightweight network that only inputs the low-level features. The resulting prediction is also employed for exiting prediction, which in return can compromise the performance degradation brought by the lack of high-level features. By combining both shallow and imitated deep hidden representations, our DeeCap model ef-ficiently generates high-quality sequences with early exit-ing. Experiments on the MS COCO and Flickr30k bench-marks demonstrate that the proposed dynamic early stop-ping approach in image captioning can obtain a much bet-ter description performance. More importantly, the trained model can be adjusted in real-time without re-training from scratch like previous methods [12, 16, 20]. Further analysis also shows that incorporation of imitated deep layer repre-sentation can calibrate the caption generation and proves the effectiveness and generalizability.
+Figure 2. Performance comparison for different models with the same number of computation layers on the MS COCO dataset.
+Complete image captioning model capable of extracting semantic information clearly outperforms vanilla early exiting model which overlooks the high-level representations. 2. Investigations on Early Exiting
+Early exiting strategy accelerates the model inference by stopping forward propagation based on the results of inter-nal classifiers [44]. Specifically, if the internal classifier’s prediction based on the current layer of hidden representa-tion is confident enough, then the generation is terminated without passing through the residual layers. However, in image captioning, it is still remain unexplored that whether the local hidden representations could provide sufficient in-formation for word generation and whether the intermediate classifiers are reliable for making exiting decision. Accord-ingly, we try to in-depth analyze the working mechanism of early exiting in the conventional image captioning model by answering these two questions. 2.1. Are Shallow Representations Sufficient?
+It is believed that the Transformer-based model learns a hierarchy of visual and semantic representations [9,10]. We highlight that high-level fusion features are essential even for easy tokens generation, and the predictions only based on shallow representations are prone to be inaccurate. To examine it, we evaluate the performance of the outputs of different decoder layers, as the representation containing adequate information is necessary for decent task perfor-mance. Specifically, we design the following Transformer-based (TF) models:
+• TF-EE, which is a baseline of early exiting methods.
+The internal classifiers are appended after each caption decoder layer in the vanilla Transformer image cap-tioning model for exiting generation early.
+• TF-kL, which only utilizes the fixed first k decoder
+layers for sentence generation. A classifier is added directly after the k-th layer. This model could be seen as a static early exiting variant.
+• TF-Complete, which is a standard Transformer-based model with a classifier after the last decoder layer.
+The representations of this classifier contain sufficient high-level semantic and cross-modal fusion informa-tion, which is complete than the above two models.
+We report the evaluation results with a different num-ber of caption decoder layers on the MS COCO dataset [7].
+The performance for TF-EE is sentence-level averaged and divided into bins. According to Figure 2, we can find that: (i) The TF-EE performs poorly, especially when the genera-tions are made based on shallow representation. It indicates that the high-level semantic and cross-modal fusion infor-mation is important for the image describing. (ii) TF-kL outperforms TF-EE. We attribute it to that the latter sev-eral layers can learn more task-specific and comprehensive representation during optimizing. However, since the in-ternal layer representation in TF-EE are restricted in the whole model learning, this fine-tuning effect cannot be fully exploited, resulting in a degrading performance in shal-low layers. These findings verify the assumption that the high-level representation are necessary, motivating us to ex-ploit alternative deep information in the uncomputed layers.
+What’s more, the poor results of TF-EE on the generated tokens when it decides to stop early, also forces us further analysis on the quality of exiting decisions. 2.2. Are Internal Classifiers Reliable?
+We further analyze whether the early exiting decisions made by internal classifiers in image captioning are reliable by first introducing two concepts referring [29, 39]:
+• Token Difficulty d(yi), which denotes whether a token yi can be generated easily by a learned image caption-ing model, under current context Ci including given image x and previous generated sub-sentence y<i. We define instances that model cannot generate correctly as difficult tokens, i.e., d(yi) = 1, and those can be mastered well as easy ones, i.e., d(yi) = 0.
+• Prediction Confidence c(yi), which indicates how con-fident and determinate the image captioning model is about its prediction for a specific token yi under cur-rent context Ci. Here, we utilize the corresponding probability of yi in the output vocabulary distribution as the prediction confidence score.
+To utilize the prediction confidence as reference for dy-namic early exiting decisions, a difficult token under the current context should be predicted with less confidence score than that of an easy one. However, there exists an
+Figure 3. Heat map of evaluated FCS from different models on the
+MS COCO dataset. FCS of internal classifiers in the TF-EE shal-low layers is lower than that of TF-kL and TF-Complete, which leads to more incorrect tokens being generated. The exiting deci-sions of TF-EE are unreliable sometimes. over-confident problem [5, 52] where the prediction con-fidence is inconsistent with the token instance difficulty sometimes. To measure the seriousness of consistency phe-nomenon, we introduce the False Confidence Score (FCS).
+In detail, we first define a false confidence function for the token instance pair (yi, yj) to measure the inconsistency de-gree between prediction confidence and token difficulty as:
+FC(yi, yj) = (cid:40) 0 if d(yi) > d(yj) and c(yi) < c(yj) 1 otherwise
+. (1)
+We then sort the context-token pairs according to their con-fidence scores in an ascending order, i.e., c(yi) < c(yj) for any i < j. Finally, the dataset-level normalized sum of all false confidence pair can be computed as:
+FCS = 1 − 1
+Q
+L (cid:88) i−1 (cid:88) i=2 j=1
+FC(yi, yj), (2) where L is the total number of context-token instance pairs in the evaluation dataset and Q is a normalizing factor cal-culated as a half of L(L − 1) to restrict the FCS value from 0 to 1. Following the above definition, the FCS metric es-timates the ratio of context-token pairs that are correctly prioritized from the internal classifier.
+Intuitively, classi-fiers with higher FCS achieve better consistency between the prediction confidence and tokens difficulty, and making more reliable exiting decisions. Therefore, the FCS can be served as an effective approximate for evaluating the quality of early exiting decisions.
+Experimentally, we compute the FCS on the MS COCO test set for different baselines discussed in the preceding section, and the results are illustrated in Figure 3. We can
+the deep states are inaccessible until feed forward the corre-sponding layers, which is not what we want. To bridge this gap, we introduce a method to approximate the uncomputed hidden states in deep layers referring to imitation learn-ing [3, 42]. That is, we equip each decoder layer with a lightweight imitation network, which is encouraged to pre-dict the representation of the real state of that layer based on the computed low-level representation. Through a layer-wise imitation process, we can get the deep hidden states with minimum cost. The workflow of the deep representa-tion imitation is shown in Figure 4.
+Formally, we denote the output hidden state of the m-th layer as hm. To get the k-th layer’s imitated deep repre-sentation when the feed forward propagation is executed at the m-th layer for any k > m, the k-th imitation network equipped to the k-th layer inputs the truly hidden state hm and outputs an approximation ˆhm k of the real deep represen-tation hk as ˆhm k = MLPk(hm), where MLPk(·) is a sim-ple Multi-Layer Perceptron (MLP) network. We argue that, despite being limited in learning capacity, the MLP is suffi-cient for estimating deep representations. Then learning tar-get hk guides the k-th imitation network in a quick manner.
+In between, we utilize the cosine similarity as prediction performance measurement between the real deep represen-tation hk and the generated representation ˆhm k as:
+Cos-Sim(hk, ˆhm k ) = 1 −
+ˆhm k · hk
+∥ˆhm k ∥ · ∥hk∥
+, (3) predicted the L2 norm. between (cid:80)N k=m+1 Cos-Sim(hk, ˆhm where ∥·∥ denotes
+Accordingly, the similarity differ-we can compute the sum of hidden as representations ence 1 k ) when the feed for-N −m ward propagation executes at the m-th layer. Considering that the layer m can be any number between 2 and N , we enumerate all possible layer numbers m, resulting in the overall loss of imitation network as:
+Limit = 1
+N − 1 1
+N − m
+N (cid:88)
+N (cid:88) m=2 k=m+1
+Cos-Sim(hk, ˆhm k ). (4)
+The feed forward propagation is computed in all layers, and all imitation networks are encouraged to generate represen-tations close to the real deep representations. Note that we pass through the entire N -layer image captioning model, but we simulate the situation that the feed forward propaga-tion ends up at the m-th layer for any m < N . 3.2. Multi-Level Representations Fusion
+After obtaining the real low-level and imitated high-level representation, we investigate how to aggregate all the hid-den states into one, respectively. Formally, when the feed forward propagation proceeds to the m-th layer, all the pre-viously generated shallow hidden states is {h1, . . . , hm},
+Figure 4.
+Illustration of high-level deep feature modeling with imitation learning. Early exiting at the m-th layer and the dashed line denotes the uncomputed layers at inference stage. see that: (i) The FCS of TF-EE model in shallow layers are significantly lower than TF-kL and TF-Complete models.
+This demonstrates that the exiting decisions in the shallow layers of TF-EE are unreliable, and captioning performance can be accordingly worse when most tokens are predicted incorrectly in early layers. (ii) The capacity of determin-ing the difficult contexts from easy ones is improved as the number of decoder layer increases. An important reason is that the deep representations holds sufficient semantic and cross-modal information, and it is possible for classifiers equipped with deep information to provide more effective exiting decisions. Our analysis demonstrates that directly transferring current early exiting method in image caption-ing for different decoder layers are not reliable, which in-spires us to explore the modeling of deep information and sufficient representation fusion for more robust decisions. 3. Methodology
+To remedy the drawbacks of directly executing the early exiting method in image captioning, we improve this idea from the perspective of making a comprehensive early-exit decision, which combines the both shallow and approxi-mated deep representations with a gate mechanism. 3.1. Deep Representations Imitation
+Early exiting method aims to stop generation at a shallow
+Transformer layer and ignore the deep representations cap-tured in the deep layers. However, pilot analysis for image captioning in section 2 highlights that even the prediction of simple tokens relies on not only the surface low-level fea-tures but also high-level semantic information. It is actually infeasible to only consider low-level representations, which motivates us to exploit the high-level information. How-ever, directly using deep representation is intractable since
+the subsequent imitation networks take the m-th real state as input to generate the approximations of deep repre-sentations from the (m+1)-th layer to the N -th layer as
+{ˆhm
+N }. Hence, the fusion of multi-level of shall and deep representation can be computed as: m+1, . . . , ˆhm hshallow = g({h1, . . . , hm}), hdeep = g({ˆhm m+1, . . . , ˆhm
+N }), (5) (6) where g(·) refers to the feature fusion strategy.
+For the fusion of a variable number of multi-level fea-ture, we explore the following four strategies to aggregate multi-level representations into one as:
+• Average. The average strategy sums and averages all hidden representations in different layers directly.
+• Concatenation. All the hidden representations are concatenated in the sequence dimension and then fed into a linear transformation layer to obtain a final com-pressed representation.
+• Attention-pooling. The attention-pooling strategy uti-lizes the weighted projection of all hidden represen-tation as the integrated information. The attention weights are computed with the last hidden representa-tion as the query and hold certain robustness to noise.
+• Sequential Network. All multi-level representations are sequentially fed into a LSTM network, and the out-put hidden state of the last time-step is regarded as the fusion representation. 3.3. Gate Decision Mechanism
+We finally explore how to merge the shallow and deep hidden representation for early exiting decision. Intuitively, the shallow representation hshallow and the deep represen-tation hdeep are of different confidence since the truly gen-erated low-level representations are more reliable than pre-dicted deep representations. In addition, different token dif-ficulty requires high-level representation differently. There-fore, it is necessary to develop a decision mechanism to combine the low-level and high-level representation dynam-ically. In practice, we design a gate network to incorporate the both representation into decision. When comes to the i-th layer, we compute the fusion of different level repre-sentation, and the merged inputting is a trade-off between these two as:
+Under the DeeCap framework, each decoder layer can produce imitated deep representations and a final merged representation zm which is used for early exiting decision.
+Then the entire model will be updated with the layer-wise cross-entropy loss following the provided ground-truth to-ken yi. The gate decision mechanism dynamically learns to adjust the balance of low-level and high-level information under the supervision signal from ground-truth tokens and the corresponding loss can be formalized as: pm = softmax(zm),
+Lce = −
+N (cid:88) (cid:88) m=1 yi∈V
+[yilog(pm(yi))]. (9) (10)
+The final training objective can be combined as:
+L = λLce + (1 − λ)Limit, (11) where λ denotes a balancing factor to adjust the impact of imitation networks and internal classifiers learning. 3.4. Training and Inference
+We train the model according to the loss in Equation 11 with the following two-fold improvements: (1) The shal-low decoder layers will be updated more frequently as they receive more updating signals with the original layer-equal objectives. Therefore, we heuristically re-weight the cross-entropy loss of each decoder layer depending on its depth m as: wm = m k=1 k . (2) Directly updating all parameters (cid:80)N of image captioning model at each step may damage the well-trained features learned in the preceding stage. There-fore, we try to balance the requirements of maintaining pre-vious learned parameters and adapting to new domain at fine-tuning gradually. To be specific, the parameters of a layer may be frozen with a probability p, and the probabil-ity p linearly decreases from the first decoder layer to the last decoder layer in a range of 1 to 0.
+During inference, we model the prediction confidence e of current token with the calculated entropy H of the output distribution pm of the m-th layer as e(pm) = H(pm). The inference stops once the confidence e(pm) is lower than a predefined threshold τ . The hyper-parameter τ can be ad-justed according to the required speed-up ratios. Note that if the exiting condition is never reached, our model degrades into the conventional case of inference that the complete computation in decoding layers is executed.
+α = σ(MLP([hshallow, hdeep])), zm = αhshallow + (1 − α)hdeep, (7) (8) 4. Experiments 4.1. Experimental Preparation where zm represents the merged information for the input of internal classifier and MLP is a multi-layer perceptron network for the merging gate.
+Dataset. MS COCO [7] and Flickr30k [40] image cap-tioning datasets are used for evaluation. They contain 123,287 images and 31,783 images, respectively. There are
+BLEU-1
+BLEU-4
+-79.8 80.2 80.8 80.2
+Models
+Autoregressive Image Captioning models 32.1
+NIC-v2 [50]
+Up-Down [2] 36.3 38.9
+AoANet [22] 39.1
+M2-T [10]
+TF-Complete 38.8
+Non-Autoregressive Image Captioning models 75.4
+MNIC [16]
+-FNIC [12]
+MIR [23]
+-80.3
+CMAL [20]
+IBM [13] 77.2
+SAIC [57] 80.3
+Early Exiting-based Image Captioning models 79.8
+TF-EE 80.1
+DeeCap 30.9 36.2 32.5 37.3 36.6 38.4 37.2 38.7
+METEOR
+ROUGE
+CIDEr
+SPICE
+SpeedUp 25.7 27.7 29.2 29.2 29.0 27.5 27.1 27.2 28.1 27.8 29.0 28.2 29.1
+-56.9 58.8 58.6 58.3 55.6 55.3 55.4 58.0 56.2 58.1 57.7 58.1 99.8 120.1 129.8 131.2 129.5 108.1 115.7 109.5 124.0 113.2 127.1 126.3 129.0
+-21.4 22.4 22.6 22.7 21.0 20.2 20.6 21.8 20.9 21.9 21.8 22.5
+----1.00× 2.80× 8.15× 1.56× 13.90× 3.06× 3.42× 4.54× 4.35×
+Table 1. Performance comparison of different captioning models using different evaluation metrics on the MS COCO Karpathy test set.
+All values except SpeedUp are reported as a percentage (%).
+Models
+Up-Down∗ [2]
+AoANet∗ [22]
+M2-T∗ [10]
+CMAL [20]
+DeeCap
+BLEU-1 c5 80.2 81.0 81.6 79.8 80.5 c40 95.2 95.0 96.0 94.3 95.1
+BLEU-2 c5 64.1 65.8 66.4 63.8 65.2 c40 88.8 89.6 90.8 87.2 89.1
+BLEU-3 c5 49.1 51.4 51.8 48.8 50.3 c40 79.4 81.3 82.7 77.2 80.0
+BLEU-4 c5 36.9 39.4 39.7 36.8 38.1 c40 68.5 71.2 72.8 66.1 69.5
+METEOR c40 c5 36.7 27.6 38.5 29.1 39.0 29.4 36.4 27.9 37.0 28.0
+ROUGE-L c40 c5 72.4 57.1 74.5 58.9 74.8 59.2 72.0 57.6 73.5 58.4
+CIDEr c5 117.9 126.9 129.3 119.3 121.4 c40 120.5 129.6 132.1 121.2 124.4
+Table 2. Leaderboard of different image captioning models on the online MS COCO test server. ∗ denotes the ensemble model. 5 human-annotated descriptions per image. To be consistent with previous works [10,22], we convert all the descriptions to lower case and omit words which occur less than 5 times.
+Image features are pre-extracted following [2].
+Evaluation Metrics. For performance evaluation, five metrics are utilized: BLEU@N [38], METEOR [26],
+ROUGE-L [32], CIDEr-D [49], SPICE [1]. For efficiency estimation, as the measurement of runtime might not be sta-ble [54], we manually adjust the exiting threshold τ and calculate the speed-up ratio by comparing the actually exe-cuted layers in forward propagation with the complete lay-ers. For an N -layer model, the SpeedUp ratio is calculated m=1 N ×wm m=1 m×wm , where wm is the number of words that as: exit at the m-th layer of caption decoder. (cid:80)N (cid:80)N
+Implementation Details. The proposed DeeCap model closely follows the same network architecture and hyper-[48]. parameters settings as Transformer basic model
+Specifically, the number of stacked blocks for the visual en-coder is 6, and for caption decoder is 6, hidden size is 512, and feed-forward network size is 2048. We train the model for 25 epochs with an initial learning rate of 3e-5, and it de-cays by 0.9 every five epochs [41]. Adam [25] optimizer is employed. We perform a grid search for frozen layer num-ber during fine-tuning over {0, 1, 2, 3}. We find that small models need more time to converge. The best model is se-lected based on the validation performance. The decoding time is measured on a single NVIDIA GeForce GTX 1080
+Ti as prior works reported [13,20]. All speeds are measured by running three times and reporting the average value. 4.2. Overall Results
+Comparison with State-of-the-Arts. For a fair com-parison, we adopt the Karpathy split [24] for the MS
+COCO dataset, for which ground-truth annotations are not publicly available. The performance comparison with vanilla early exiting methods and other top-performing non-autoregressive accelerating models in MS COCO offline test set is presented in Table 1.
+In addition, the evalua-tion results for Flickr30k are provided in the appendix. We can find that early exiting-based methods can achieve more than 4x acceleration.
+In terms of performance, DeeCap
+Methods
+DeeCap (× 2)
+-w/o Deep Info.
+DeeCap (× 4)
+-w/o Deep Info.
+FCS (↑) 80.12 78.67 82.40 79.55
+B-4 38.9 38.5 38.7 38.2
+C 129.5 128.3 129.0 127.8
+Table 3. Effect of the incorporation of approximated deep repre-sentation under various speed-up ratios.
+Methods
+Average
+Concatenation
+Attention-Pooling
+SeqNN
+B-4 M 28.8 38.3 29.1 38.7 29.0 38.6 29.0 38.5
+R 57.7 58.1 57.9 58.0
+C 127.3 129.0 128.7 129.0
+S 21.9 22.5 22.3 22.3
+Table 4. Performance comparison of different fusion strategies for multi-level hidden representations.
+MS COCO offline test set. The results shown in Table 3 demonstrate the impact of deep information incorporation.
+We can observe that the global fusion mechanism brings improvement on most metrics for both 2× speed-up ratio and 4× speed-up ratio, which confirms that the approxima-tions of deep representations help enhance the model abil-ity in prediction. Beyond that, the deep representation can be especially advantageous for the models with a higher speed-up ratio. Recall that approximations of deep repre-sentation complement the high-level information, and the exiting at shallow layers loses more semantic representa-tion compared with the exiting at deep layers. Therefore, the benefit of deep information is more significant for the exiting at shallow layers, which is validated by the larger improvement gap with a 4× speed-up ratio.
+Effects of Representation Fusion Strategies. The re-sults of different shallow representation incorporation strategies on the MS COCO offline test set are shown in Table 4. The naive average strategies perform poorly, which reflects that focusing on local strategy does not per-form well. On the contrary, three simple yet effective global strategies designed to combine all of the past hid-den states bring significant improvement compared to base-lines. Within them, we empirically find that the concatena-tion strategy works best from an overall point of view. We assume that such a strategy allows interaction among differ-ent states, yielding a better captioning performance.
+Figure 5. Performance and efficiency trade-off line for early exiting models. Our method outperforms original early exiting method by a large margin especially with high speed-up ratio. outperforms all the fast baselines, especially in BLEU@4 and CIDEr. Even compared with the basic autoregressive baselines without considering the acceleration, it has com-petitive performances. This phenomenon demonstrates that
+DeeCap can break the performance bottleneck with a high speed-up ratio by utilizing early exiting and comprehensive representations from both high-level and low-level informa-tion. Moreover, DeeCap outperforms TF-EE in all perfor-mance metrics, validating the effectiveness of our proposal.
+We also report the performance of our DeeCap on the on-line MS COCO test server. Results are reported in Table 2.
+It can be seen that, compared with the ensemble model, our approach has little performance loss when accelerating gen-eration and achieves an advancement of 2.1 CIDEr points with respect to the best accelerating performer CMAL [20].
+Performance and Efficiency Trade-off. To verify the ro-bustness and efficiency of our proposed DeeCap, we visual-ize the performance and efficiency trade-off curves in Fig-ure 5 on the MS COCO test set. The competitive baseline is the original early exiting method TF-EE. As can be seen, the performance of early exiting model drops dramatically when the speed-up ratio increases. This reflects the short-comings of TF-EE, unstable performance can not meet the needs of real-time applications, while our DeeCap demon-strates more tolerance of speed-up ratio. At the same speed-up ratio, the performance loss of DeeCap is less than one-third compared with TF-EE, indicating that early exiting with multi-level feature fusion is effective. In addition, the model adjusts the speed-up ratio on this curve without re-training, which is suitable for engineering applications. 4.3. Model Analysis 4.4. Case Study
+Effects of Deep Information Imitation. To assess whether and how imitated deep representation from deep layers contributes to the current word decision, we first eval-uate the performance changes of our DeeCap method on the
+For more intuitive understanding, we present several ex-amples of generated image captions from vanilla early ex-iting (TF-EE) and the proposed DeeCap models, which hold the same model architecture, coupled with human-works attempt to accelerate generation by using a non-autoregressive framework [19, 51], which produces the en-tire sentences simultaneously. Fei et al. [12] reorders words detected in the image to form better latent variables before decoding. Cho et al. [23] and Gao et al. [16] introduce an iterative mask refinement strategy to learn the position matching information. Lu et al. [20] addresses the incon-sistency problem with a multi-agent learning paradigm. The biggest difference lies that our DeeCap adopts sample-level speed-up acceleration for inference via adapting the compu-tation according to the sample complexity while all previous methods focus on model structure adjustment.
+Early Exiting Strategy. A representative acceleration framework for sample difficulty [18] is early exiting [54].
+Prior works have mainly been used for image classification.
+Deeply-supervised nets [27] and BranchyNet [47] propose architectures that are composed of a cascade of intermedi-ate classifiers. This allows simpler examples to exit early via an intermediate classifier while more difficult samples proceed deeper in the network for more accurate predic-tions. Multi-scale dense networks [21] and adaptive res-olution networks [59] focus on spatial redundancy of input samples and use a multi-scale dense connection architecture for stopping. Early exiting has also been verified in natu-ral language understanding [31, 34, 44, 63], sequence label-ing [30], text classification [29], question answering [45], and document ranking [53]. Following these, we study an working mechanism of early exiting in image captioning, and try to deal with the performance bottleneck with multi-level representation fusion.
+Figure 6. Case studies of original early exiting (TF-EE) and the proposed DeeCap model, coupled with the corresponding ground-truth sentences (GT) for image caption generation. annotated ground-truth sentences (GT) in Figure 6. As we can be seen, in general, both models hold the capabil-ity to reflect the content of the image accurately. Mean-time, some semantic problems, including repeated words and incomplete content, is severe in the sentence generated by pure early exiting, while it can be effectively alleviated by DeeCap, i.e., two “in” terms in the second sample with nothing behind. This confirms our approach can guide the model to reduce word prediction errors effectively. 4.5. Human Evaluation 6. Conclusion
+Following previous works [22,60], we also conduct a hu-man evaluation test to compare DeeCap model against the original early exiting method. To be specific, we randomly selected 300 samples from the MS COCO testing set and re-cruited eight workers to evaluate model performances. Each time, we show only one sentence paired with a correspond-ing image generated by different models or human annota-tion and ask: can you determine whether the given sentence has been generated by a system or a person? We then calcu-late the captions that pass the Turing test. The results of Hu-man, DeeCap, and original early exiting are 91.7%, 82.0%, and 61.3%, separately.
+It demonstrates the superiority of
+DeeCap fused with high-level and low-level information in providing human-like captions.
+In this paper, we point out that applying vanilla early exiting strategy in image captioning faces the performance bottleneck, due to insufficient cross-modal representations and poor decisions of the internal classifiers. To alleviate this problem, We propose a dynamic early exiting method for efficient image captioning from a multi-level perspec-tive. Unlike previous works only utilizing local hidden rep-resentation, DeeCap model employs a novel approach to ap-proximate and engage the multi-level representation from different layers, which are originally inaccessible for pre-diction. Experiments illustrate that our approach achieves significant improvement over the original early stopping baseline with a high speed-up ratio, suggesting the supe-riority in application prospects. 5.

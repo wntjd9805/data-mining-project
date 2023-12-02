@@ -1,0 +1,155 @@
+Abstract
+Recent research has seen several advances relevant to black-box variational infer-ence (VI), but the current state of automatic posterior inference is unclear. One such advance is the use of normalizing ﬂows to deﬁne ﬂexible posterior densities for deep latent variable models. Another direction is the integration of Monte-Carlo methods to serve two purposes; ﬁrst, to obtain tighter variational objectives for optimization, and second, to deﬁne enriched variational families through sam-pling. However, both ﬂows and variational Monte-Carlo methods remain relatively unexplored for black-box VI. Moreover, on a pragmatic front, there are several optimization considerations like step-size scheme, parameter initialization, and choice of gradient estimators, for which there is no clear guidance in the literature.
+In this paper, we postulate that black-box VI is best addressed through a careful combination of numerous algorithmic components. We evaluate components relat-ing to optimization, ﬂows, and Monte-Carlo methods on a benchmark of 30 models from the Stan model library. The combination of these algorithmic components signiﬁcantly advances the state-of-the-art "out of the box" variational inference. 1
+
+Introduction
+We consider the problem of automatic posterior inference. A scientist or expert creates a model p(z, x) for latent variables z and observed variables x. For example, z might be population-level preferences for a political candidate in each district in a country, while x is an observed set of polls.
+Then, we wish to approximate the posterior p(z|x), i.e., determine what the observed data say about the latent variables under the speciﬁed model. The ultimate aim of automatic inference is that a domain expert can create a model and get answers without manually tinkering with inference details.
+In practice, one often resorts to approximate inference. Markov chain Monte Carlo (MCMC) methods are widely applicable and are asymptotically exact, but sometimes slow. Variational inference (VI) approximates the posterior within a tractable family. This can be much faster but is not asymptotically exact. Recent developments led to “black-box VI” methods that, like MCMC, apply to a broad class of models [30, 15, 2].
+However, to date, black-box VI is not widely adopted for posterior inference. Moreover, there have been several advances that are relevant to black-box VI, but have been little evaluated in that context.
+One such advance is normalizing ﬂows, which deﬁne ﬂexible densities through a composition of invertible transformations [31, 26]. Surprisingly, normalizing ﬂows have seen almost no investigation for black-box VI; instead, they have been used either to directly learn a density [8, 9, 27, 19] or to bound the likelihood of a deep latent variable model pθ(x) = (cid:82) pθ(z, x)dz [31, 20, 13]. In both cases, there is no mechanistic model and little or no focus on posterior queries. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Figure 1: (Left) Path study: Empirical complementary-CDF for performance improvement over ADVI. (Right) Relationship of methods: Solid lines show modiﬁcations that improve performance (included on the left) dotted lines show modiﬁcations with unclear beneﬁts (not shown on the left).
+Another major direction is the development of tighter variational objectives that integrate Monte
+Carlo techniques such as importance weighting [3, 25, 23]. These were also initially designed to support learning of deep latent variable models. However, further developments have shown that they can also be viewed as enriching the variational family [1, 7, 10, 11]. Still, little is known about the practical performance of these techniques on real models. Further, importance weighting can be used in two ways. First, importance weighted sampling can be used at inference time to obtain better approximate samples, regardless of how the approximate distribution was created. Second, importance weighting training can be used during optimization to tighten an objective reﬂecting how well such a sampling scheme will work. There is little evidence in the literature about these.
+It is essential for many users that black-box VI be fully automatic. This brings up numerous practical issues, such as initialization, step-size schedules, and the choice of gradient estimator. There have been few attempts to address this [21] and several basic questions remain unanswered: Do recent techniques to enrich variational families such as normalizing ﬂows and variational Monte
+Carlo methods improve accuracy on mechanistic models? Which of these is more important? Can optimization be made robust enough to work with these techniques “out of the box” on real models?
+The basic hypothesis of this paper is that automatic black-box VI can be best achieved through a thoughtful integration of many different algorithmic components. We carefully measure the impact of these components on 30 real models from the Stan model library [35, 36]. Our primary ﬁnding is that a combination of techniques to improve optimization robustness and enrich variational families collectively yield remarkable improvements in the accuracy of black-box VI. More concretely, we make the following observations.
+• A prior step-size scheme often leads to suboptimal results. Using a comprehensive search over step-sizes is far more reliable (Figure 2).
+• When using a Gaussian variational distribution, it is consistently helpful to use the sticking the landing" (STL) gradient estimator [33] that drops the “score term” from the evidence lower bound (ELBO) (Figure 3).
+• Importance-weighted sampling can be used as a post hoc method to improve the posterior found by any inference method. This consistently improves results at minimal cost (Figures 4 and 8)
+• Importance-weighted training introduces a trade-off between computational complexity and quality. The beneﬁts are not consistent in our experiments (Figures 5 and 9).
+• Real-NVP [9] (evaluated for the ﬁrst time for black-box VI) gives excellent performance. Due to high nonlinearity, one might expect that fully-automatic optimization would be a challenge.
+However, when combined with our step-size scheme, it consistently delivers strong results without user-intervention (Figures 6 to 8). 2
+• When using a normalizing ﬂow variational distribution, the STL estimator is again helpful (Fig-ure 7). However, this uses an inverse transform, which is not efﬁcient with all ﬂows (Section 4.3).
+• The doubly-reparameterized estimator [37] consistently improves convergence when applied to importance weighted training (Figure 13 in appendix). However, as above, the overall value of importance-weighted training is unclear.
+Our ﬁnal method combines importance sampling, normalizing ﬂows, a highly robust step-size scheme and the STL gradient estimator, to improve the performance by one nat or more on at least 60% of the models when compared to Automatic Differentiation Variational Inference (ADVI) (see performance of Method (4c) in Figure 1). We believe this strategy represents the state-of-the-art for fully-automatic black-box VI for posterior inference. 2 Problem Setup
+Directly computing the posterior is typically intractable; VI searches for the closest approximation of p(z|x) within a parameterized family qφ(z) by maximizing the ELBO [34]
+L(φ) = Eqφ(z) [log p(z, x) − log qφ(z)] = log p(x) − KL[qφ(z)(cid:107)p(z|x)]. (1)
+Since KL-divergence is non-negative, L(φ) lower-bounds log p(x) for all φ. Moreover, when p is
+ﬁxed, optimizing L(φ) is equivalent to minimizing the KL-divergence between qφ(z) and p(z|x).
+Exploiting the observations above, there are two basic uses of VI. The ﬁrst is to learn the parameters
+θ of a model pθ(z, x) from examples of x. In this case, VI is used to provide a tractable objective that lower-bounds the exact likelihood. This is the basis of variational auto-encoders [18, 32] and their relatives. The second use of VI is to infer the posterior p(z|x) of a ﬁxed model. This is the setting of black-box VI [30], the focus of this paper. 2.1 Rules of engagement
+This paper studies many black-box VI methods. Each method is optimized using its own objective to produce an approximate posterior qφ(z). During optimization, all methods have the same compu-tational budget, measured as 100 "oracle evaluations" of the log p per iteration, and are optimized for 30, 000 iterations. Then, 10,000 fresh samples are drawn from qφ to evaluate either the ELBO in
+Equation (1) or the importance-weighted ELBO in Equation (4), depending on the method. In either case, this gives a lower-bound on log p(x) (or equivalently an upper-bound on the KL-divergence
+[10]). Applying importance-weighting can be seen as an algorithmic component, not just a "metric" since it gives a different approximation of the posterior [11].
+We evaluate each method using a benchmark of 30 models from the Stan Model library [35, 36]. To remove any ambiguity, a standalone description of each method compared is given in Appendix A.
+Visualizing results across many models and inference schemes is a challenge. Simple ideas like scatterplots fail because there are many inference schemes and huge differences in log p(x) across models. Instead, we study results using "empirical complementary CDF plots". Two inference methods are compared by computing, for each model i ∈ {1, · · · , 30}, the difference ∆i between the lower-bounds produced by the two methods. The idea is to plot, for each value of ∆, the fraction of values ∆i that are ∆ or higher. This shows how often a given inference method improves on another by a given magnitude ∆.
+We start from a simple ADVI baseline model and consider changes in a single algorithmic component one by one in Figures 2 to 9. Next, we compare the full "path" of beneﬁcial components to ADVI in
+Figure 1. Finally, we perform an ablation study removing individual algorithmic components from the ﬁnal best system in Figure 10. We conduct three independent trials for all of our experiments.
+For space, the path and ablation study show only a single trial in the main text, with others in the supplement. We also conduct additional experiments in Appendix B including comparisons between diagonal and full-rank Gaussian VI and more comparisons of different gradient estimators. 3
+3 Optimization in BBVI
+Most uses of black-box VI make optimization choices on a model-speciﬁc basis. A notable exception to this is the ADVI [21], which we use as our baseline. ADVI is integrated into Stan, a state-of-the-art probabilistic programming framework for deﬁning statistical models with latent variables [4]. This makes ADVI one of the most widely available black-box VI algorithms. There are four key ideas: (1) to automatically transform the support of constrained random variables to an unconstrained space (2) to approximate the resulting unconstrained posterior with a Gaussian variational distribution, (3) to estimate the gradient of the ELBO using the reparameterization trick and (4) to do stochastic optimization with a fully-automated step-size procedure.
+In all cases, we use the idea of transformation to unconstrained domain unchanged (1). In the rest of this section, we consider modiﬁcations to optimization ideas (3,4). In the next section, we consider generalization beyond Gaussians (2). 3.1 ADVI step size search
+ADVI uses a novel decreasing step-size scheme based on a base step-size η (we review this in
+Appendix D). In short, for each η ∈ {0.01, 0.1, 1, 10, 100}, optimization is run for a small number of iterations, and the value that provides the highest ﬁnal ELBO value when estimated on a fresh batch of samples is used. We use a batch of fresh 500 samples after 200 iterations. It is not clear to what degree results after a small number of iterations can give a realistic picture of how optimization will look after a large number of iterations. To test this, we propose a straightforward alternative that simply runs different steps more exhaustively. 3.2 Comprehensive step search
+¸
+We perform optimization using Adam [17], and we com-prehensively search for the Adam step-size η in the range 0.1
+D [1, B−1, B−2, B−3, B−4], where D is the number of la-tent dimensions of the model and B is a decay constant; we use B = 4. For each step size in this range, we optimize for a ﬁxed number of iterations while keeping the step size constant. The number of iterations is constrained only by the sampling/computational budget of a user; we use 30,000 itera-tions for each step-size choice. Finally, we select the parameters from the step size that led to the best average-objective, aver-aged over the entire optimization trace. We found this to be a more robust indicator of performance than estimating the ﬁnal
+ELBO using a smaller batch of fresh samples (see Appendix F for discussion).
+Figure 2 shows that the comprehensive search provides a signif-icant improvement of 10 nats or more on a small fraction of the models (both schemes in the ﬁgure use the closed-form entropy estimator from Equation (2)). 3.3 Gradient Estimation
+Figure 2: Using comprehensive step-size search provides signiﬁcant gain of 1 nat on almost 20% of the models (high variability is due to ADVI).
+Most black-box VI methods are based on the reparameterization trick. Suppose that q(cid:15) is a ﬁxed distribution and zφ((cid:15)) a function such that if (cid:15) ∼ q(cid:15) then zφ((cid:15)) ∼ qφ. Then, if H(φ) is the entropy of qφ, the gradient of Equation (1) can be written as
+∇φL(φ) = E q(cid:15)((cid:15))
+[∇φ log p(zφ((cid:15)), x)] + ∇φH(φ). (2)
+The gradient can be estimated by drawing a single (cid:15) (or a minibatch). In some cases (e.g., Gaussians)
+H is computed in closed form, so the above equation can be used unchanged; this is estimator used in ADVI. Alternatively, ∇H can also be estimated using the reparameterization trick, using either of 4
+∇φH(φ) = E q(cid:15)((cid:15))
+∇φ log qφ(zφ((cid:15))) (cid:123)(cid:122) (cid:125) (cid:124)
+"Full" estimator
+= E q(cid:15)((cid:15)) (∇φ log qθ(zφ((cid:15))))θ=φ (cid:124) (cid:123)(cid:122) (cid:125)
+"STL" estimator
+. (3)
+The second option, known as STL estimator [33], "holds φ constant" under the gradient. This is valid since Eqφ(z) ∇φ log qφ(z) = 0.
+Figure 3 compares the results of the STL estimator to a closed-form entropy. The STL estimator is usually preferred. We give a more comprehensive comparison of estimators in Figure 12 (supplement). 3.4
+Intialization
+Initialization can have a major inﬂuence on convergence. ADVI initializes to a standard Gaussian. A natural alternative for Gaus-sian or Elliptical variational distributions is to use Laplace’s method to initialize parameters [10, 11]. This method uses black-box optimization to ﬁnd ˆz to maximize log p(z, x), com-putes the hessian of log p at ˆz and then sets qφ(z) to be the
+Gaussian whose log-density matches the local curvature of log p(ˆz, x). While Laplace’s method is intuitive, it could con-ceivably be harmful, e.g. by providing an initialization that leads to a worse local optima.
+Figure 3: Adding STL to Gaussian VI is consistently helpful across the mod-els and hurts only in minority of cases.
+To the best of our knowledge, there are no existing studies of these initialization schemes. Figure 14 (supplement) uses the previous comprehensive step search and compares the results of adding
+Laplace’s initialization (LI). A similar fraction of models are helped and harmed by the change. 4 Enriched Variational Families 4.1 Monte Carlo Objectives
+VI tries to approximate p(z|x) with qφ(z). If the approximation is inexact, Monte Carlo meth-ods can often improve it. Burda et al. [3] introduced the "importance-weighted" ELBO (IW-ELBO) to use in place of the conventional ELBO when training a latent-variable model. This is
+LM (φ) =
+E qφ(z1)···qφ(zM ) (cid:34) log 1
+M
+M (cid:88) m=1 p(x, zm) qφ(zm) (cid:35)
+≤ log p(x). (4)
+Here, z1 . . . zM are iid samples from qφ(z). This reduces to the standard ELBO when M = 1. The IW-ELBO increases with
+M and approaches log p(x) asymptotically.
+The IW-ELBO is a measure of the accuracy of self-normalized importance sampling on p using qφ as a proposal distribution.
+Deﬁne qM,φ to be the distribution that results from drawing M samples from qφ and then selecting one in proportion to the self-normalized importance weights p(zm, x)/q(zm). Then, LM is a relaxation of the ELBO deﬁned between qM,φ and the target p
+[1, 7, 25]. Alternatively, LM can be seen as a traditional ELBO between distributions that augment qM,φ and p [10].
+For posterior approximation, importance weighting can be ap-plied in two ways.
+Figure 4: proves the results of Gaussian VI.
+IW-sampling greatly im-1. Importance-weighted sampling. For any distribution, importance-weighting can be applied at test time to improve the quality of the posterior approximation. We know this because
+LM (φ) ≥ L(φ) and thus KL[qM,φ(z)(cid:107)p(z|x)] ≤ KL[qφ(z)(cid:107)p(z|x)] [10]. This should not be seen as a metric for evaluating φ. Rather, it is an algorithmic component of inference, since it yields different samples that are actually closer to the posterior [11]. 5
+2. Importance-weighted training. To ﬁnd the parameters φ, one can optimize the IW-ELBO. The idea is that if one intends to perform importance-weighted sampling, this directly optimizes for parameters φ that will perform well at this task. That is, optimizing the IW-ELBO implicitly makes qM,φ(z) close to p(z|x).
+Figure 4 shows the results of adding importance-weighted sampling to the previous model, with
+M = 10. This produces a signiﬁcant beneﬁt of 1 nat or more on 30% of models and never hurts. This also comes at a minimal computational cost since there is no modiﬁcation of the training procedure.
+Considerations in importance-weighted training are a bit subtle and discussed next. 4.2
+Importance-weighted training
+Optimizing Equation (4) requires a gradient estimator. The most obvious estimator is
+∇LM (φ) =
+E q(cid:15)((cid:15)1)···q(cid:15)((cid:15)M )
+M (cid:88) m=1
+ˆwm
+∇φ log p(zφ((cid:15)m), x)) qφ(zφ((cid:15)m))
+, (5) l=1 wl for wm = p(x,zφ((cid:15)m)) where ˆwm = wm qφ(zφ((cid:15)m)) . However, Rain-(cid:80)M forth et al. [28] point out that the signal-to-noise-ratio of this gradient estimator scales as 1/
+M , suggesting optimization will struggle when M is large. To circumvent this problem,
+Tucker et al. [37] introduced the "doubly reparameterized gra-dient estimator" (DReG), which does not suffer from the same issue. This is based on the representation of
+√
+∇LM (φ) =
+E q(cid:15)((cid:15)1)···q(cid:15)((cid:15)M )
+M (cid:88) ( ˆwm)2 m=1
+∇φ log p(zφ((cid:15)m), x)) qθ(zφ((cid:15)m)) (cid:12) (cid:12) (cid:12) (cid:12) (cid:12)θ=φ
+. (6)
+Figure 5: Adding IW-training to IW-sampling offers no clear advantage with
+Gaussians.
+Intuitively, the idea is that since θ is φ "held constant" under differentiation, the variance is reduced.
+The difference of the above two estimators is analogous to the difference of the two estimators of the entropy gradient in Equation (3).
+We found the DReG out-performed the estimator from Equation (5); using it added 1 nat of im-provement to almost 30% of the models (see Figure 13, supplement). However, the beneﬁts are not consistent when compared to IW-sampling alone. Figure 5 shows the performance decays on around 20% of models. Thus, when keeping evaluations of log p ﬁxed at our budget, better performance results from training the regular ELBO with the STL estimator and then using IW-sampling only. 4.3 Normalizing Flows
+Normalizing ﬂows construct a ﬂexible class of densities by applying a sequence of invertible transformations to a simple base density. Rezende and Mohamed [31] ﬁrst introduced normalizing ﬂows in the speciﬁc context of approximating distributions for VI; they have since been studied in a much more general context (e.g., for density estimation [9, 19, 13]).
+The main idea is to transform a base density q(cid:15)((cid:15)) using a dif-feomorphism Tφ. The variable z = Tφ((cid:15)) has the distribution qφ(z) = q(cid:15)((cid:15))| det ∇Tφ((cid:15))|−1
+= q(cid:15)(T −1
+φ (z))| det ∇T −1
+φ (z)|. (7) (8)
+Typically, T is chosen as a sequence of transforms, each of which is parameterized by a neural network. These trans-forms are designed so that the determinant of the Jacobian
+| det ∇Tφ((cid:15))| can be computed efﬁciently.
+Figure 6: Substituting ﬂows for Gaus-sians improves half of the models by 1 nat or more. 6
+We use real-NVP–a coupling-based ﬂow [9] with 10 successive transformations, each determined by a fully-connected network with 2 hidden layers each with 32 hidden units (see Appendix E for full details). Figure 6 shows the results of using normalizing ﬂows instead of Gaussians on the benchmark. Since there is no closed-form entropy, these results estimate it using the middle estimator from Equation (3). This yields a signiﬁcant improvement of 1 nat or more on around half of models.
+Depending on the gradient estimator used, the inverse of Tφ may or may not be needed. This issue is somewhat subtle. In general, to evaluate the density qφ at an arbitrary point requires computing the inverse T −1
+φ which may be inefﬁcient [16, 6].
+While the ELBO in Equation (1) requires evaluating the density log qφ it is only done on a point sampled from qφ. This means this can be done using only Tφ–by ﬁrst sampling (cid:15) and then transforming to z there is no need to explicitly compute an in-verse. Similarly, if one is to estimate the gradient of the entropy using the "full" estimator (middle equation in Equation (3)), only Tφ is needed. However, the estimator that drops the score term (right equation in Equation (3)) is typically lower variance.
+The natural way to do this is to ﬁrst sample from qφ, and then, in a second independent step, evaluate the sample at parame-ters θ = φ that are held constant under differentiation. In this second step, the sample is treated as an arbitrary point so that derivatives will only ﬂow to the sampling part of the algorithm.
+This requires the inverse T −1
+φ .
+Figure 7: Using the STL estimator for
+ﬂows (instead of the “full” estimator) is typically helpful and gives huge im-provements on a minority of models.
+With real-NVP ﬂows, both the forward and reverse transform are efﬁcient, so the second estimator from Equation (3) can be used. Figure 7 compares the results of substituting this estimator instead. In many cases, the results are much the same. However, in a signiﬁcant minority of models, the new estimator yields enormous improvements. 4.4
+Importance Weighting with Normalizing Flows
+Importance weighting and normalizing ﬂows can be applied together. The ideas in Section 4.1 are not speciﬁc to Gaussian densities. In the ﬁrst experiment, we take the same optimization scheme used above, and apply importance weighted sampling only (with no change to the optimization procedure). As shown in Figure 8, this change never hurts, provides small improv-ments for most models, and provides large improvements on a minority of models. Since this again comes at a minimal cost (extra work is only needed in the sampling stage) it is very worthwhile.
+One can also explicitly optimize the IW-ELBO. Figure 9 demon-strates that adding IW-training provides large beneﬁts on a few models but hurts performance by 1 nat or more for almost 10% of the cases. These observations mirror the effect observed for
+Gaussians in Figure 5.
+We now arrive at our best method: train normalizing ﬂows with a regular ELBO objective using the lower-variance STL gradient and then add importance sampling only during inference. This is easily the go-to black-box
+VI strategy when we ﬁx a budget for log p evaluations.
+Figure 8: Adding IW-sampling to normalizing ﬂows can signiﬁcantly im-prove some of the models and never hurts. 5 Experiments
+Using Stan with auto-diff packages: Our experiments are based on a set of models (described in Table 1 in supplement) from the Stan Model library [36, 35]. In order to test our VI variants, we designed a simple interface to use Stan models with VI algorithms implemented in Autograd, a
+Python automatic differentiation library [22] (refer to Appendix C for more details) 7
+Architectures: For normalizing ﬂow methods, we use real-NVP ﬂow with 10 coupling layers with a ﬁxed base architecture for all models. Complete details are present in Appendix E.
+For experiments that use a full-rank Gaussian variational family, we parameterize the mean µ and the
+Cholesky factor L of the covariance matrix Σ, such that Σ = LL(cid:62). Parameters are initialized to a standard normal when LI is not used.
+Laplace’s Initialization: We use SciPy’s BFGS optimize routine to maximize log p(z, x) over z to get ˆz; we optimize for 2000 iterations (with default settings for other hyper-parameters) [38]. At ˆz, we compute the Hessian matrix H using two-point ﬁnite differences with (cid:15) = 10−6. To use LI, we set µ = ˆz, and set L such that LL(cid:62) = (−H)−1.
+Training procedure: To maintain a fair “oracle complexity" in terms of evaluations of log p, each gradient estimate averages over a batch of independent gradient estimates, such that there are always 100 total evaluations of log p in each iteration. To use Figure 9 as an example, IW-training method averages 10 different copies of the DReG estimator at each iteration (M = 10), and IW-sampling method averages 100 different copies of
+STL estimator (can be viewed as M = 1). For all experiments, we use the comprehensive step-size search scheme mentioned in Section 3. Wherever importance weighting is used (sampling or training), M = 10
+Replicating ADVI: For a fair comparison, we re-implement
+ADVI optimization in our own framework (refer to Appendix D for more details). In our preliminary experiments found that the performance matched the PyStan version for the same hyper-parameter settings.
+Figure 9: Adding IW-training to IW-sampling offers little advantage with
+ﬂows.
+Metric: To compare the performances, we use a fresh batch of 10,000 samples. Again, to maintain a fair “oracle complexity”, we use 10,000 samples irrespective of the M used for importance weighting.
+To use Figure 10 as an example, when we ablate IW-sampling, we average 10,000 copies of ELBO estimate whereas the “Best model” uses the 1,000 copies of the IW-ELBO estimate (M=10).
+Results: We provide the complete tables of results with ﬁnal-metric values from the independent trails in Appendix H in the supplement. 5.1 Path Study
+We summarize the useful algorithmic changes in a path-study by comparing against the common ADVI baseline. Figure 1 presents results from independent trial (see Figure 15 in supple-ment for full results). Across the trials, we see that with each step in the path performance improves, and the ﬁnal strategy provides signiﬁcant improvement of 1 nat or more on at least 50% of the models. 5.2 Ablation Study
+¸
+We analyze the performance of the “best” variational approach by taking away each of it’s components individually. Figure 10 presents the ablation study for an independent trial (see Fig-ure 16 in supplement for full results). Across the trials, each component is complementary–they add to the other and the combination performs the best.
+Figure 10: Ablation Study: Remov-ing ﬂows has a strong impact; removing
+STL or IW-sampling has a lesser impact on the performance. 8
+6 Discussion

@@ -1,0 +1,160 @@
+Abstract 1.
+
+Introduction
+The Controllable Variational Autoencoder (ControlVAE) combines automatic control theory with the basic VAE model to manipulate the KL-divergence for overcoming posterior collapse and learning disentangled representa-tions. It has shown success in a variety of applications, such as image generation, disentangled representation learning, and language modeling. However, when it comes to disen-tangled representation learning, ControlVAE does not delve into the rationale behind it. The goal of this paper is to de-velop a deeper understanding of ControlVAE in learning disentangled representations, including the choice of a de-sired KL-divergence (i.e, set point), and its stability during training. We first fundamentally explain its ability to disen-tangle latent variables from an information bottleneck per-spective. We show that KL-divergence is an upper bound of the variational information bottleneck. By controlling the KL-divergence gradually from a small value to a target value, ControlVAE can disentangle the latent factors one by one. Based on this finding, we propose a new DynamicVAE that leverages a modified incremental PI (proportional-integral) controller, a variant of the proportional-integral-derivative (PID) algorithm, and employs a moving average as well as a hybrid annealing method to evolve the value of KL-divergence smoothly in a tightly controlled fashion.
+In addition, we analytically derive a lower bound of the set point for disentangling. We then theoretically prove the stability of the proposed approach. Evaluation results on multiple benchmark datasets demonstrate that Dynam-icVAE achieves a good trade-off between the disentangle-ment and reconstruction quality. We also discover that it can separate disentangled representation learning and re-construction via manipulating the desired KL-divergence.
+*Corresponding author: Huajie Shao
+†Authors contribute equally
+Variational Autoencoders (VAEs) have been widely used in various applications, such as language modeling, im-In particu-age generation, and representation learning. lar, many variants of VAEs, such as β-VAE [11], Factor-VAE [17] and β-TCVAE [6], have been recently proposed to learn the disentangled representations from the observa-tions. Disentangled representation learning aims to encode input data into a low-dimensional space that preserves infor-mation about the salient factors of variation, so that each di-mension of the representation corresponds to a distinct and explanatory factor in the data [3, 26, 45, 46]. Learning dis-entangled representations benefits a variety of downstream tasks [8, 11, 21, 24, 27, 28], including abstract visual reason-ing [45], zero-shot transfer learning [5] and image genera-tion [30, 48].
+One major challenge of disentanglement learning is that there exists a trade-off between reconstruction qual-ity of the input signal and the degree of disentanglement in the latent representations. To address this issue, re-searchers have developed a controllable variational antoen-coder (ControlVAE) [39, 40] that combines control theory and the basic VAE to control the output KL via dynami-cally tuning the weight on the KL term in the VAE objec-tive. While ControlVAE shows its good ability to disentan-gle latent variables, it still remains to explain the rationale behind it. The question is, why does it perform well on dis-entanglement learning via controlling the KL-divergence?
+In addition, the core component of ControlVAE is the designed non-linear PI controller, a variant of the proportional-integral-derivative (PID) algorithm [1, 43].
+The PI controller is able to stabilize the output KL-divergence to a specified value via dynamically adjusting the weight on the KL term. It thus can achieve a good trade-off between disentanglement and reconstruction. Since deep VAE model is complicated, its training may become unstable after incorporating the PI controller. In automatic control, tuning the hyperparameters of a PI/PID controller is regarded as the most challenging task [31]. Hence, ob-taining a feasible region of the hyperparameters to ensure
+the stability of ControlVAE remains a challenging question.
+Moreover, ControlVAE does not explicitly provide the target KL-divergence C (i.e., set point) that can disentan-gle all the latent factors from observations. Namely, it is hard for us to tune the target KL-divergence for different datasets. Another question is, how to choose the set point of the target KL-divergence for different datasets? Is it pos-sible to tune them in an unsupervised manner?
+Our Contributions: This paper seeks to rethink Con-trolVAE in order to address the unanswered questions above for better understanding it. We attempt to offer an explana-tion of its good performance on disentangled representation learning via controlling the KL-divergence, analyze the set point of the target KL-divergence C, and discuss parameter tuning of the PI controller to ensure its stability. The main contributions of this paper are summarized as follows.
+• We fundamentally explain why controlling the value of
+KL-divergence can learn disentangled representations from an information bottleneck perspective. We show that KL-divergence is an upper bound of the mutual information between inputs and their encodings.
+• We propose a new model, DynamicVAE, that lever-ages an incremental PI controller, hybrid annealing and moving average to smoothly evolve the desired KL-divergence along a trajectory that can achieve high-quality disentanglement and low reconstruction error.
+• We analytically derive a lower bound of the set point for the target KL-divergence of DynamicVAE and
+ControlVAE.
+• We provide theoretical conditions on parameters of the
+PI controller to guarantee stability of DynamicVAE.
+• Extensive experiments on benchmark datasets demon-strate that DynamicVAE achieves higher reconstruc-tion quality and disentanglement than ControlVAE and the other baselines. Importantly, we discover that the proposed method can separate disentangled represen-tation learning and reconstruction optimization. 2. Preliminaries 2.1. Variational Autoencoders (VAEs)
+A Variational Autoencoder (VAE) [19, 36] is comprised of an encoder and a decoder. The encoder maps the ob-served data x into a low-dimensional latent space z while the decoder attempts to reconstruct the observations by sam-pling the data from the latent space. However, due to the intractable posterior inference, the basic VAE model is trained by optimizing the following variational lower bound (ELBO):
+Lvae = Eqϕ(z|x)[log pθ(x|z)] − DKL(qϕ(z|x)||p(z)), (1)
+Figure 1. Diagram of the PI controller of ControlVAE. where pθ(x|z) is the reconstruction of the observed data x given the latent variable z; qϕ(z|x) is a posterior distribu-tion of latent variable z given x; and p(z) is a prior, such as the standard Gaussian. 2.2. ControlVAE
+ControlVAE [40] is a new framework of VAE that com-bines control theory with the basic VAE to stabilize the KL-divergence to a desired value (i.e., set point), as illustrated in Fig. 1. It designs a PI controller to dynamically tune the weight β in the following β-VAE [12] objective to balance the disentanglement learning and reconstruction.
+Lc = Eqϕ(z|x)[log pθ(x|z)] − βDKL(qϕ(z|x) ∥ p(z)). (2)
+Different from β-VAE that assigns a fixed weight to the KL term, ControlVAE adopts a positional PI controller to com-pute the weight β using the actual KL-divergence as feed-back during training as follows:
+β(t) = Kpσ(−e(t)) − Ki t (cid:88) j=0 e(j) + βmin, (3) where e(t) = C − DKL(qϕ(z|x)∥p(z))(t), which is the difference between desired KL-divergence C and the actual one at training step t; σ(.) is a sigmoid function; βmin is an application-specific constant, such as 0; Kp and Ki are positive coefficients for the P term and I term respectively.
+Next, we will describe the basic idea of a PI controller. 2.3. PID Control Algorithm
+The PID is a simple yet effective control algorithm that can stabilize system output to a desired value via feed-back control [1, 43]. The PID algorithm calculates an er-ror, e(t), between a set point (in this case, the desired KL-divergence) and the current value of the controlled variable (in this case, the actual KL-divergence), then applies a cor-rection in a direction that reduces that error. The correction is the weighted sum of three terms, one proportional to the error (called P), one that is the integral of error (called I), and one that is the derivative of error (called D); thus, the term PID. The derivative term is not recommended for noisy systems, such as ours, reducing the algorithm to PI control.
+The canonical form of a PI controller (applied to control
+β(t)) is the following: 4. The DynamicVAE Model
+β(t) = Kpe(t) + Ki t (cid:88) j=0 e(j), (4) where β(t) is the output of a controller, which (in our case) is the used β during training at time t; e(t) is the error between the output value and the desired value at time t;
+Kp, Ki denote the coefficients for the P term and I term, re-spectively. Eq. (4) may be rewritten in incremental form, as follows:
+β(t) = ∆β(t) + β(t − 1), (5) where β(0) can be set as needed (as we show later), and:
+∆β(t) = Kp[e(t) − e(t − 1)] + Kie(t). (6)
+Different from ControlVAE with positional PI controller, this paper adopts a nonlinear incremental form of the PI controller, as described later in Section 4. 3. Explanation of ControlVAE’s Ability to Dis-entanglement Learning
+In this section, we offer an explanation about the good ability of ControlVAE to disentangle the latent variables from the observations. ControlVAE leverages annealing method with step function to gradually change the KL-divergence from a small value to a large target value C.
+While it shows excellent performance for the learning of disentangled representations, the main reason remains un-clear. The following proposition can help us better under-stand its good performance through mutual information.
+Proposition 3.1. The KL-divergence in the objective of
+ControlVAE, DKL(qϕ(z|x)∥p(z)), is an upper bound of the mutual information (MI) between the observed data x and the latent variables z, denoted by I(x, z). Namely,
+I(x, z) ≤ Ep(x) [DKL(qϕ(z|x)∥p(z))].
+Please refer to the proof in Appendix A
+According to Proposition 3.1, we can find that control-ling the desired KL-divergence is equivalent to controlling the variational information bottleneck (VIB) [33] for infor-mation transmission. As the capacity of VIB is increased gradually, the simple and common latent factors in the ob-served data will transmit the latent channels for reconstruc-tion. After all the latent factors are disentangled, Con-trolVAE tends to optimize the reconstruction as the target
+KL-divergence is gradually increased to some extend. That is why ControlVAE can balance disentanglement learning and reconstruction optimization via dynamically control-Inspired by this, below, we try ling the KL-divergence. to improve the ControlVAE to smoothly increase the KL-divergence along a trajectory for disentanglement learning.
+Motivated by Section 3, we propose a new DynamicVAE model that controls the output KL-divergence from a small value to a target value smoothly.
+We first review the objective of ControlVAE for disen-tangled representation learning. The basic idea is to max-imize the log likelihood and simultaneously stabilize the
+KL-divergence to a target value C.
+It can be formulated as the following constrained optimization problem: max
+ϕ,θ
+Eqϕ(z|x)[log pθ(x|z)] s.t. DKL(qϕ(z|x) ∥ p(z)) = C (7)
+The prior work [43] has illustrated PI controller outper-forms the Lagrange Multiplier (LM) for solving the con-strained optimization problem, since LM may suffer from oscillation and constraint violations [34]. Hence, Con-trolVAE designs a PI controller to dynamically adjust
+β(t) in the VAE objective in Eq. (2) to stabilize the KL-divergence to the desired value C:
+While ControlVAE can disentangle latent representa-tions via controlling KL-divergence, sometimes the output of KL divergence is not very stable during model training, as shown in Fig. 7 (a). In order to evolve the KL-divergence smoothly along a good trajectory in a tightly controlled fashion, we propose a novel DynamicVAE model based on control theory that can achieve a good trade-off between disentanglement and reconstruction. To reach this goal, we need to address the following two challenges: 1. KL-divergence should be increased smoothly from a small value to a large one. To this end, β(t) should dynamically change from a large value to small one during model optimization. Specifically, at the begin-ning of training, β(t) should be large enough to control the information bottleneck for disentangling the latent factors. After that, β(t) is required to gradually drop to a small value to optimize the reconstruction. 2. β(t) should not change too fast or oscillates too fre-quently. There is an interplay between the output KL-divergence and β(t). β(t) is computed from the feed-back of the output KL-divergence while β(t) influ-ences the output KL-divergence during optimization.
+When β(t) drops too fast or oscillates, it may cause
+KL-divergence to grow with a large value. Conse-quently, some latent factors may emerge earlier so that they can potentially be entangled with each other.
+In this paper, we propose methods to deal with these two challenges, summarized below.
+A non-linear incremental PI controller: As mentioned earlier, we need a large β(t) in the beginning to change the
+KL-divergence smoothly from a small value to a large tar-get value so that the information can be transmitted through
+the latent channels per data sample. Accordingly, we adopt an incremental form of the PI controller in Eq. (3), and ini-tialize it to a large value:
+Algorithm 1 Incremental PI Control algorithm. 1: Input: desired KL C, coefficients Kp, Ki, βmin, iterations
+N , window T
+β(t) = ∆β(t) + β(t − 1), (8) where
+∆β(t) = Kp[σ(−e(t)) − σ(−e(t − 1))] − Kie(t). (9) and β(0) is a large initial value. When the PI controller is initialized to a large value β(0), it can quickly produce a (small) KL-divergence during initial model training, pre-venting emergence of entangled factors.
+Moving average: Since our model is trained with mini-batch data, it often contains noise that causes β(t) to os-cillate. In particular, when β(t) plunges during training, it would cause KL-divergence to rise too quickly. This may lead to multiple latent factors coming out together to be en-tangled. To mitigate this issue, we adopt moving average method to smooth the output KL-divergence as the feed-back of PI controller below. y(t) = t (cid:88) i=t−T
+αiyKL(i), (10) where αi denotes weight and T denotes the window size of past training steps.
+Hybrid annealing: Control systems with step (input) func-tion (i.e., those where the set point can change abruptly) often suffer from an overshoot problem [38]. An over-shoot is temporary overcompensation, where the controlled
+In our case, it variable oscillates around the set point. means that the actual KL-divergence may significantly (al-beit temporarily) exceed the desired value, when set point is abruptly changed. This effect would cause some latent fac-tors to come out earlier than expected, and be entangled, thereby producing poor-quality disentanglement. To ad-dress this problem, we develop a hybrid annealing method that changes the set point more gradually, as illustrated in
+Fig. 7(b) in Appendix. It combines step function with ramp function to smoothly increase the target KL-divergence in order to prevent overshoot and thus better disentangle latent factors one by one.
+The combination of the above three methods allows Dy-namicVAE to evolve β(t) along a favorable trajectory to separate disentanglement learning and reconstruction opti-mization. We summarize the proposed incremental PI algo-rithm in Algorithm 1. 4.1. Set Point Guidelines
+In this section, we fundamentally analyze how to choose a set point for the target KL-divergence C of Dynamic-VAE (same to ControlVAE). In DynamicVAE, latent fac-tors transmit through the information bottleneck for the re-construction of input data. In information theory, one bit, t−T αiyKL(i)
+Sample KL-divergence, yKL(t) y(t) = (cid:80)t e(t) ← C − y(t) dP (t) ← Kp[σ(e(t)) − σ(e(t − 1))] dI(t) ← Kie(t) if β(t − 1) < βmin then dI(t) ← 0 // wind up 2: Output: weight β(t) at training step t 3: Initialization: β(0) = 150 (100), yKL(0) = 0 4: for t = 1 to N do 5: 6: 7: 8: 9: 10: 11: 12: 13: 14: 15: 16: 17: 18: 19: end for end if dβ(t) ← dP (t) + dI(t)
+β(t) ← dβ(t) + β(t − 1) if β(t) < βmin then
+β(t) ← βmin end if
+Return β(t) also called the information entropy of a binary random vari-able, is often used to encode data or transmit information.
+Hence, we adopt one bit theory to analyze the mutual in-formation I(x, z) between the input data x and the latent variable z, which can be used as a lower bound of the de-sired KL-divergence for DynamicVAE.
+Let M denote the capacity of variational information bottleneck for the complete reconstruction of Nx data sam-ples. Then we have 2M ≥ Nx =⇒ M ≥ log2 Nx (11)
+Therefore, we can derive a lower bound of a set point for the target KL-divergence C, satisfying
+C ≥ M ≥ log2 Nx (12)
+We will further verify this result empirically by conducting a set of experiments in Section 6.3. 5. Stability Analysis of DynamicVAE
+We further theoretically analyze the stability of the pro-posed DynamicVAE with PI controller. This work is the first to offer the necessary and sufficient conditions that con-trol hyperparameters should satisfy in order to guarantee the stability of KL-divergence, when β is manipulated dynami-cally during the training process of a (variant of) β-VAE.
+To this end, our first step is to build the state space model for our control system. Throughout the paper, the state vari-able at training step t is defined as x(t) = β(t).
+Accordingly, the model of incremental PI controller can be written as: x(t+1)−x(t) = Kp[σ(−e(t))−σ(−e(t−1))]−Kie(t), (13)
+where error e(t), as shown in Fig. 1(a), is given by e(t) =
+C − y(t − 1). Here y(t) is a dynamic model about the time response of the output KL divergence, yKL(t). According to [23], stochastic gradient descent (SGD) for optimizing an objective function can be described by a first-order dy-namic model. Our experiment, as illustrated in Fig. 1(b), also shows that the response y(t) in the open loop system approximately meets a negative exponential function, which further verifies that our system is a first-order dynamic sys-tem. We hence use the first-order dynamic model to de-scribe it below. dy dt
++ ay = ag(x), (14) where a is a positive hyperparameter to describe the dy-namic property, and g(x) is a mapping function between the actual KL-divergence and β(t). Since DynamicVAE is a discrete control system with sampling period Ts = 1, the above first-order dynamic model can be reformulated as y(t) − y(t − 1) + ay(t) = ag(x(t)) =⇒ y(t) = 1 1 + a y(t − 1) + a 1 + a g(x(t)). (15)
+Now let x1(t) = x(t), x2(t) = y(t − 1), x3(t) = y(t − 2), then Eqs. (13) and (15) can be rewritten as the following state space equations. x1(t + 1) = x1(t) − Ki[C − x2(t)] + Kp[σ(x2(t) − C)
+− σ(x3(t) − C)] ≜ f1(x1(t), x2(t), x3(t)) 1 1 + a x2(t + 1) = a 1 + a
+≜ f2(x1(t), x2(t), x3(t)) g(x1(t)) + x2(t) x3(t + 1) = x2(t) ≜ f3(x1(t), x2(t), x3(t))
+In order to analyze the stability of the above non-linear state space model, one commonly used method is to lin-earize it at an equilibrium point [14]. In this paper, we use the following equilibrium point: x∗ = (x∗ 1, x∗ 2, x∗ 3) = (g−1(C), C, C), (17) 2 = x∗ where g−1(·) denotes the inverse function and x∗ 3.
+Next, we apply the first-order Taylor expansion to the above
+Eq. (16), yielding
+X(t + 1) = AX(t), where
+X(t) = [x1(t) − x∗ 1, x2(t) − x∗ 2, x3(t) − x∗ 3]T , (18) (19) and A is the Jacobian matrix at equilibrium point x∗, as defined in Eq. (22) in Appendix C. After this linearization, we can prove the stability of the proposed method as the modulus of eigenvalue λ of A is smaller than 1, as described in the following theorem.
+Theorem 5.1. Let a > 0 and assume g′(x) < 0, ∀x > 0.
+Then DynamicVAE is stable at the equilibrium point C if and only if the parameters of the PI controller, Ki and Kp, satisfy the following conditions 4(1 + a) ag′(x∗ 1)
+
+
+Kp + Ki < − p ag′(x∗ 0.5K2
+
+Ki > 0, Kp > 0 1)2 + 2[Kp − 8Ki(1 + a)]g′(x∗ 1) − 8(1 + a) < 0 (20)
+We provide the detailed proof in Appendix C.
+Remark 5.1. The assumption of g′(x) < 0, ∀x basically asks that the KL term in the objective to be a monotonously decreasing function of the coefficient β(t), and we also fur-ther empirically corroborate its validity on two benchmark datasets as shown in Appendix C.1. In addition, we choose
+Kp and Ki that meet the above conditions (20) to verify the stability of DynamicVAE in Appendix C.1. 6. Experiments
+We evaluate the performance of DynamicVAE and compare it against existing baselines, including Con-trolVAE [40], β-VAEH [12], β-VAEB [5], FactorVAE [17],
+Lagrange Multiplier (LM) [37], and VAE [19]. We conduct experiments on multiple benchmark datasets: dSprites [5],
+MNIST [7], smallNORB [20], and 3D Chairs [2]. The de-tailed model configurations and hyperparameter settings are presented in Appendix D.
+Dsprites Dataset: We first evaluate the performance of
+DynamicVAE on learning disentangled representations us-ing dSprites. Fig. 2 (a) and (b) illustrate the comparison of reconstruction error and the hyperparameter β(t) (using 5 random seeds) for different approaches. We can observe from Fig. 2 (a) that DynamicVAE (KL=20) has much lower reconstruction error (about 11.8) than β-VAE and Factor-VAE, and is comparable to the basic VAE, LM, and Con-trolVAE. This is because DynamicVAE dynamically adjusts the weight, β(t), to balance the disentanglement and recon-struction. Specifically, DynamicVAE automatically assigns a large β(t) at the beginning of training in order to obtain good disentanglement, and then its weight gradually drops to about 1 at the end of optimization, as shown in Fig. 2 (b).
+In contrast, β-VAE and FactorVAE have a large and fixed weight in the objective so that their optimization algorithms tend to optimize the KL-divergence term (total correlation term for FactorVAE), leading to higher reconstruction er-ror. For ControlVAE, it can also dynamically tune β(t) to control the value of KL-divergence, but its disentanglement performance is worse than DynamicVAE as illustrated in (16) 6.1. Results and Analysis
+(a) Reconstruction loss. (b) β(t).
+Figure 2. (a) shows the comparison of reconstruction error on dSprites using 5 random seeds. DynamicVAE (KL=20) has comparable reconstruction errors to the basic VAE. (b) shows that DynamicVAE turns the weight of β-VAE into a small value less than 1. (c) shows an example of DynamicVAE on disentangling factors as the total KL-divergence increases. (c) KL-divergence.
+Table 1. RMIG for different methods averaged over 5 random seeds. The higher the better. Note that we dismiss that FactorVAE suffers from total correlation (TC) collapse [17].
+Models/Metric pos. x pos. y
+Shape
+Scale
+Orientation RMIG MIG
+BetaVAE Score
+VAE
+ControlVAE (KL=20)
+FactorVAE (γ = 10)
+β-VAEB (γ = 100)
+β-VAEH (β = 4)
+Lagrange Multiplier (LM)
+DynamicVAE (KL=20) 0.0359 0.6802 0.7482 0.5666 0.1635 0.6234 0.7166 0.0243 0.6597 0.7276 0.5763 0.1047 0.6177 0.7179 0.0116 0.0956 0.1383 0.4353 0.1391 0.0831 0.2004 0.1507 0.6040 0.6262 0.3814 0.3958 0.5850 0.6530 0.0039 0.1081 0.1412 0.0631 0.0127 0.0365 0.1024 0.0452 0.4295 0.4763 0.4045 0.1632 0.3891 0.4781 0.0539 0.5233 0.5479 0.4001 0.1687 0.4706 0.5578 0.8636 0.9608 0.9801 0.9940 0.8831 0.9977 0.9981
+Table 1. Fig. 2(c) illustrates an example of per-factor KL-divergence in the latent code as the total information capac-ity (KL-divergence) increases from 0.5 to 20. We can see that DynamicVAE disentangles all the five data generative factors, starting from position (x and y) to scale, followed by orientation and shape.
+Next, we use three disentanglement metrics, robust mutual information gap (RMIG) [9], MIG and BetaVAE
+Score [25], to evaluate the disentanglement of different methods. We can observe from Table 1 that DynamicVAE has slightly better RMIG, MIG and BetaVAE Score than the
+FactorVAE, but it has much lower reconstruction error as il-lustrated in Fig. 2. However, FactorVAE may suffer from total correlation collapse [17] which is dismissed in our re-sults. Moreover, DynamicVAE has higher RMIG, MIG and
+BetaVAE Score than β-VAE and the Lagrange Multiplier (LM). This is because LM does not inherently ensure con-vergence as it may suffer from oscillations and constraint violations [34, 43], as shown in training step around 370K in Fig. 2 (b). Our method also achieves much better dis-entanglement than ControlVAE for comparable reconstruc-tion accuracy. Hence, DynamicVAE is able to improve the reconstruction quality yet obtain good disentanglement.
+Qualitatively, we also visualize the disentanglement re-sults of different models in Fig. 3. We can observe that
+DynamicVAE disentangles all the five generative factors on dSprites. However, ControlVAE is not very effective to dis-entangle all the factors when its KL-divergence is set to a large value, such as 20. Furthermore, β-VAEB (γ = 100) disentangles four generative factors and mistakenly com-bines the scale and shape factors together (in the third row).
+The other methods do not perform well for disentanglement. 3D Chairs and Other Datasets We also evaluate the proposed DynamicVAE on the other datasets: 3D Chairs,
+MNIST, and smallNORB. Fig. 4 illustrates the disentangled factors for DynamicVAE on 3D Chairs. We can observe from it that it disentangles six different latent factors, such as wheels, leg height, and azimuth. The proposed method can also disentangle diferent latent factors on smallNORB dataset as shown in Fig. 10 in Appendix E. Besides, we demonstrate that DynamicVAE can uncover many different latent factors on MNIST dataset, as illustrated in Fig. 11 in Appendix E. We can observe that our method achieves better disentanglement compared to the other approaches. 6.2. Separating Reconstruction and Disentangle-ment Learning
+Additionally, we show that the proposed DynamicVAE is able to separate the reconstruction and disentanglement learning into two phases, mitigating the issue of balancing the trade-off between reconstruction and disentanglement.
+Fig. 5 illustrates the RMIG score and reconstruction loss with the increase of training steps after all the factors are
+Figure 3. Rows: latent traversals ordered by the value of KL-divergence in a descending order. We initialize the latent representation from a seed image, and then traverse a single latent code in a range of [−3, 3], while keeping the remaining latent code fixed. disentangled (after 800, 000).
+It can be seen that RMIG score of our method remains stable as the reconstruction loss drops. Therefore, the proposed method barely intro-duces a conflict between reconstruction optimization and disentangled representation learning.
+Figure 4. Sample traversals for the six latent factors on 3D Chairs. 6.3. Lower Bound of Set Point
+Next, we conduct extensive experiments on benchmark datasets to verify the lower bound of the set point for the tar-get value C in Section 4.1. In our experiments, we set the target KL-divergence C to 20 (using loge), and then mea-sure the mutual information (MI) between input data x and latent variable z, I(x, z). Fig. 6 shows the mutual informa-tion (using log2) for different benchmark datasets with dif-ferent number of samples. We can observe from it that when the proposed model is trained on dSprites with 737, 280 and 3000 data samples, the corresponding MI is about 19.33 and 14.82 respectively. They are very close to the correspond-ing ground truth: 19.49 and 14.87. We also conduct ex-periments on dSprites, 3DChairs and MNIST with different latent factors using same 30, 000 data samples. The results show their mutual information is about 14.74, 14.70, and 14.95, which are very close to the theoretical ground truth: 14.87. Thus, we can choose the target value C based on the lower bound in Eq. (12).
+Figure 5. Averaged RMIG score and reconstruction loss vary with training steps.
+Figure 6. Mutual information I(x, z) for benchmark datasets.
+Table 2. RMIG for different methods averaged over 5 random seeds. The higher is better.
+Models/Metric pos. x pos. y
+Shape
+Scale
+Orientation RMIG
+DynamicVAE
+DynamicVAE-P
+DynamicVAE-step
+DynamicVAE-t 0.7166 0.7376 0.7209 0.7152 0.7179 0.7317 0.7143 0.7110 0.2004 0.0992 0.0664 0.0997 0.6530 0.6400 0.6218 0.6267 0.1024 0.1120 0.1543 0.1322 0.4781 ± 0.0172 0.4641 ± 0.0240 0.4555 ± 0.0355 0.4570 ± 0.0182 6.4. Ablation Studies
+To compare the performance of DynamicVAE and its variants, we perform following ablation studies:
+• DynamicVAE-P: it uses positional PI controller with no initialization to a large β(0), instead of the incremental
+PI initialized to a large β(0), to tune the weight on KL term in the VAE objective.
+• DynamicVAE-step: it solely adopts step function with-out ramp function for our annealing method.
+• DynamicVAE-t: this model directly uses the output KL-divergence at time t as a feedback of PI controller with-out using moving average to smooth it.
+Table 2 shows the comparison of RMIG score for Dy-namicVAE and its variants. It can be observed that Dynam-icVAE outperforms the other methods in terms of overall
+RMIG score. We also find that DynamicVAE-step does not perform well because the ramp function is removed from our annealing method, leading to overshoot of PI controller.
+As a result, it makes the other factors come out earlier and entangled to each other. Thus, we can conclude the impor-tance of adding ramp function for our annealing method. In addition, we can see that the proposed moving average and incremental PI control algorithm also play a critical role to improve the disentanglement. 7.

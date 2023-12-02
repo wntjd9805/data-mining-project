@@ -1,0 +1,62 @@
+Abstract
+We use neural radiance ﬁelds (NeRFs) to build interac-tive 3D environments from large-scale visual captures span-ning buildings or even multiple city blocks collected pri-marily from drones. In contrast to single object scenes (on which NeRFs are traditionally evaluated), our scale poses multiple challenges including (1) the need to model thou-sands of images with varying lighting conditions, each of which capture only a small subset of the scene, (2) pro-hibitively large model capacities that make it infeasible to train on a single GPU, and (3) signiﬁcant challenges for fast rendering that would enable interactive ﬂy-throughs.
+To address these challenges, we begin by analyzing visi-bility statistics for large-scale scenes, motivating a sparse network structure where parameters are specialized to dif-ferent regions of the scene. We introduce a simple geomet-ric clustering algorithm for data parallelism that partitions training images (or rather pixels) into different NeRF sub-modules that can be trained in parallel. We evaluate our ap-proach on existing datasets (Quad 6k and UrbanScene3D) as well as against our own drone footage, improving train-ing speed by 3x and PSNR by 12%. We also evaluate re-cent NeRF fast renderers on top of Mega-NeRF and intro-duce a novel method that exploits temporal coherence. Our technique achieves a 40x speedup over conventional NeRF rendering while remaining within 0.8 db in PSNR quality, exceeding the ﬁdelity of existing fast renderers. 1.
+
+Introduction
+Recent advances in neural rendering techniques have lead to signiﬁcant progress towards photo-realistic novel view synthesis, a prerequisite towards many VR and
+In particular, Neural Radiance Fields
+AR applications. (NeRFs) [24] have attracted signiﬁcant attention, spawning a wide range of follow-up works that improve upon various aspects of the original methodology.
+Scale. Simply put, our work explores the scalability of NeRFs. The vast majority of existing methods explore single-object scenes, often captured indoors or from syn-thetic data. To our knowledge, Tanks and Temples [17] is
+?
+A
+D
+G
+B
+E
+H
+C
+F 1
+I 3
+Training: Data Partitioning 2
+Inference: View Synthesis
+Figure 1. We scale neural reconstructions to massive urban scenes 1000x larger than prior work. To do so, Mega-NeRF decomposes a scene into a set of spatial cells (left), learning a separate NeRF sub-module for each. We train each submodule with geometry-aware pixel-data partitioning, making use of only those pixels whose rays intersect that spatial cell (top right). For example, pixels from im-age 2 are added to the trainset of cells A, B, and F, reducing the size of each trainset by 10x. To generate new views for virtual ﬂy-throughs, we make use of standard raycasting and point sampling, but query the encompassing submodule for each sampled point (bottom right). To ensure view generation is near-interactive, we make use of temporal coherence by caching occupancy and color values from nearby previous views (Fig. 4). the largest dataset used in NeRF evaluation, spanning 463 m2 on average. In this work, we scale NeRFs to capture and interactively visualize urban-scale environments from drone footage that is orders of magnitude larger than any dataset to date, from 150,000 to over 1,300,000 m2 per scene.
+Search and Rescue. As a motivating use case, consider search-and-rescue, where drones provide an inexpensive means of quickly surveying an area and prioritizing lim-ited ﬁrst responder resources (e.g., for ground team deploy-ment). Because battery life and bandwidth limits the ability to capture sufﬁciently detailed footage in real-time [6], col-lected footage is typically reconstructed into 2D “birds-eye-view” maps that support post-hoc analysis [42]. We imagine a future in which neural rendering lifts this analysis into 3D, enabling response teams to inspect the ﬁeld as if they were
+ﬂying a drone in real-time at a level of detail far beyond the
+Synthetic NeRF - Chair
+Synthetic NeRF - Drums
+Synthetic NeRF - Ficus
+Synthetic NeRF - Hotdog
+Synthetic NeRF - Lego
+Synthetic NeRF - Materials
+Synthetic NeRF - Mic
+Synthetic NeRF - Ship
+T&T - Barn
+T&T - Caterpillar
+T&T - Family
+T&T - Ignatius
+T&T - Truck
+Mill 19 - Building
+Mill 19 - Rubble
+Quad 6k
+UrbanScene3D - Residence
+UrbanScene3D - Sci-Art
+UrbanScene3D - Campus
+Resolution 400 x 400 400 x 400 400 x 400 400 x 400 400 x 400 400 x 400 400 x 400 400 x 400 1920 x 1080 1920 x 1080 1920 x 1080 1920 x 1080 1920 x 1080 4608 x 3456 4608 x 3456 1708 x 1329 5472 x 3648 4864 x 3648 5472 x 3648
+# Images 400 400 400 400 400 400 400 400 384 368 152 263 250
+# Pixels/Rays 256,000,000 256,000,000 256,000,000 256,000,000 256,000,000 256,000,000 256,000,000 256,000,000 796,262,400 763,084,800 315,187,200 545,356,800 518,400,000
+Scene Captured
+/ Image 0.271 0.302 0.582 0.375 0.205 0.379 0.518 0.483 0.135 0.216 0.284 0.476 0.225 1940 1678 5147 2582 3019 5871 30,894,981,120 26,722,566,144 11,574,265,679 51,541,512,192 53,568,749,568 117,196,056,576 0.062 0.050 0.010 0.059 0.088 0.028
+Table 1. Scene properties from the commonly used Synthetic
+NeRF and Tanks and Temples datasets (T&T) compared to our target datasets (below). Our targets contain an order-of-magnitude more pixels (and hence rays) than prior work. Moreoever, each im-age captures signiﬁcantly less of the scene, motivating a modular approach where spatially-localized submodules are trained with a fraction of relevant image data. We provide more details and ad-ditional statistics in Sec. H of the supplement. achievable with classic Structure-from-Motion (SfM).
+Challenges. Within this setting, we encounter multiple challenges. Firstly, applications such as search-and-rescue are time-sensitive. According to the National Search and
+Rescue Plan [1], “the life expectancy of an injured survivor decreases as much as 80 percent during the ﬁrst 24 hours, while the chances of survival of uninjured survivors rapidly diminishes after the ﬁrst 3 days.” The ability to train a us-able model within a few hours would therefore be highly valuable. Secondly, as our datasets are orders of magnitude larger than previously evaluated datasets (Table 1), model capacity must be signiﬁcantly increased in order to ensure high visual ﬁdelity, further increasing training time. Finally, although interactive rendering is important for ﬂy-through and exploration at the scale we capture, existing real-time
+NeRF renderers either rely on pretabulating outputs into a
+ﬁnite-resolution structure, which scales poorly and signiﬁ-cantly degrades rendering performance, or require excessive preprocessing time.
+Mega-NeRF. In order to address these issues, we pro-pose Mega-NeRF, a framework for training large-scale 3D scenes that support interactive human-in-the-loop ﬂy-throughs. We begin by analyzing visibility statistics for large-scale scenes, as shown in Table 1. Because only a small fraction of the training images are visible from any particular scene point, we introduce a sparse network struc-ture where parameters are specialized to different regions of the scene. We introduce a simple geometric clustering algo-rithm that partitions training images (or rather pixels) into different NeRF submodules that can be trained in parallel.
+We further exploit spatial locality at render time to imple-Figure 2. Visualization of Mill 19 by Mega-NeRF. The top panel shows a high-level 3D rendering of Mill 19 within our interactive visualizer. The bottom-left panel contains a ground truth image captured by our drone. The following two panels illustrate the model reconstruction along with the associated depth map. ment a just-in-time visualization technique that allows for interactive ﬂy-throughs of the captured environment.
+Prior art. Our approach of using “multiple” NeRF sub-modules is closely inspired by the recent work of DeRF [28] and KiloNeRF [29], which use similar insights to accel-erate inference (or rendering) of an existing, pre-trained
+NeRF. However, even obtaining a pre-trained NeRF for our scene scales is essentially impossible with current training pipelines. We demonstrate that modularity is vital for train-ing, particularly when combined with an intelligent strategy for “sharding” training data into the appropriate modules via geometric clustering.
+Contributions. We propose a reformulation of the
+NeRF architecture that sparsiﬁes layer connections in a spatially-aware manner, facilitating efﬁciency improve-ments at training and rendering time. We then adapt the training process to exploit spatial locality and train the model subweights in a fully parallelizable manner, leading to a 3x improvement in training speed while exceeding the reconstruction quality of existing approaches. In conjunc-tion, we evaluate existing fast rendering approaches against our trained Mega-NeRF model and present a novel method that exploits temporal coherence. Our technique requires minimal preprocessing, avoids the ﬁnite resolution short-falls of other renderers, and maintains a high level of visual
+ﬁdelity. We also present a new large-scale dataset contain-ing thousands of HD images gathered from drone footage over 100,000 m2 of terrain near an industrial complex.
+2.

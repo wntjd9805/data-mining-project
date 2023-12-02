@@ -1,0 +1,117 @@
+Abstract
+Score matching (SM) [24] provides a compelling approach to learn energy-based models (EBMs) by avoiding the calculation of partition function. However, it remains largely open to learn energy-based latent variable models (EBLVMs), except some special cases. This paper presents a bi-level score matching (BiSM) method to learn EBLVMs with general structures by reformulating SM as a bi-level optimization problem. The higher level introduces a variational posterior of the latent variables and optimizes a modiﬁed SM objective, and the lower level optimizes the variational posterior to ﬁt the true posterior. To solve BiSM efﬁciently, we develop a stochastic optimization algorithm with gradient unrolling.
+Theoretically, we analyze the consistency of BiSM and the convergence of the stochastic algorithm. Empirically, we show the promise of BiSM in Gaussian restricted Boltzmann machines and highly nonstructural EBLVMs parameterized by deep convolutional neural networks. BiSM is comparable to the widely adopted contrastive divergence and SM methods when they are applicable; and can learn complex EBLVMs with intractable posteriors to generate natural images. 1
+
+Introduction
+An energy-based model (EBM) [35] employs an energy function mapping a conﬁguration of variables to a scalar to deﬁne a Gibbs distribution, whose density is proportional to the exponential negative energy. Being ﬂexible, EBMs can naturally incorporate latent variables to ﬁt complex data and extract features. Among them, representative models including restricted Boltzmann machines (RBMs) [21], deep belief networks (DBNs) [23] and deep Boltzmann machines (DBMs) [48] have been widely adopted [60, 55]. However, it is challenging to learn EBMs because of the presence of the partition function, which is an integral over all possible conﬁgurations, especially when latent variables present.
+The most widely used training approach is the maximum likelihood estimate (MLE), or equivalently minimizing the KL divergence. Such methods often adopt Markov chain Monte Carlo (MCMC) [42] or variational inference (VI) [29] to estimate the partition function (or its gradient with respect to the model parameters). Contrastive divergence (CD) [21] and its variants [57, 63, 43, 44, 9, 10, 16] are proven effective in models with fully visible variables or tractable posteriors of latent variables (e.g., RBMs). The recent work [63] present an unbiased version of contrastive divergence. Besides,
+Ingraham and Marks [26] perform approximate Bayesian inference over EBMs. In deep models such as DBNs and DBMs, previous work [23, 36, 48] often adopts layer-wise training strategy. Recently, several methods [34, 37] attempt to learn general energy-based latent variable models (EBLVMs) in a black-box manner by VI. In these methods, the problem of inferring the latent variables is addressed
+∗Equal contribution. † Corresponding author. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+by advances in amortized inference [31] but the variational bounds for the partition function are either of high-bias [37] or high-variance [34] on high-dimensional data.
+Score matching (SM) [24] provides a promising alternative approach to learning EBMs. Compared with MLE, SM does not need to access the partition function because of its foundation on Fisher divergence minimization [28], while involves a second order derivative. Many attempts [32, 59, 51, 54, 38, 45] try to estimate the second order derivative efﬁciently and recent work [38] can scale up to natural images. However, it is much more challenging to incorporate latent variables in SM than in
+MLE because of its speciﬁc form. As far as we know, extensions of SM for EBLVMs [56, 58] make strong structural assumptions that the posterior is tractable [56] or in the exponential family [58].
+Considering the complementary advantages between MLE and SM, a natural question arises:
+Can we infer the latent variables in nonstructural EBLVMs using amortized inference as in MLE and at the same time learn such models without explicitly estimating the partition function as in SM?
+In this paper, we present bi-level score matching (BiSM), which is generally applicable to existing
+SM objectives [59, 54, 38] to learn EBLVMs with a minimal model assumption. The key to our approach is to reformulate a given SM objective as a bi-level optimization problem. The higher level problem modiﬁes the original SM objective by approximating the marginal model distribution with the ratio of the model distribution over a variational posterior. The lower level problem optimizes certain divergence between the variational posterior and the true one. By reformulating the divergence used in the lower level problem, BiSM only needs to access the model energy and the variational posterior in its calculation. Further, under the nonparametric assumption [15], BiSM is equivalent to the original SM objective (see Theorem 1). To solve BiSM efﬁciently, we propose a practical algorithm using alternative stochastic gradient descent with gradient unrolling [41] and formally characterize the gradient bias and the convergence of the algorithm (see Theorem 2 and Corollary 3).
+We evaluate BiSM on two EBLVMs. The ﬁrst model is the well-known Gaussian restricted Boltzmann machine (GRBM) [60, 22]. We compare BiSM with the corresponding SM methods [56, 54] and the contrastive divergence (CD) [21, 57]. On a toy 2-D dataset and the Frey face dataset, BiSM achieves comparable performance to these strong baselines. The second model is a highly nonstructural
+EBLVM parameterized by deep convolutional neural networks to ﬁt natural images. The CD and
+SM-based baselines are not applicable because of the intractable posteriors while BiSM can perform inference and learning successfully. We show the promise of BiSM by testing the sample quality and the inference accuracy on the MNIST and CIFAR10 datasets. To the best of our knowledge, previous state-of-the-art EBLVMs [23, 36, 48] cannot generate natural images in such a purely unsupervised learning setting. 2 Preliminaries
+In this section, we present preliminaries about the Fisher divergence [28] and existing score matching methods in energy-based models (EBMs). Formally, an EBM deﬁnes a distribution: p(w; θ) =
+˜p(w; θ)/Z(θ) = e−E(w;θ)/Z(θ), where E(w; θ) is the associated energy function parameterized by learnable parameters θ, ˜p(w; θ) is the unnormalized density, and Z(θ) = (cid:82) e−E(w;θ)dw is the partition function. Here, we assume that the variable w is fully visible and continuous.
+Fisher divergence The Fisher divergence [28] between the empirical data distribution pD(w) and the model distribution p(w; θ) is deﬁned as:
+DF (pD(w)||p(w; θ)) (cid:44) 1 2
+EpD(w) (cid:2)||∇w log p(w; θ) − ∇w log pD(w)||2 2 (cid:3) , (1) where ∇w log p(w; θ) and ∇w log pD(w) are the model score function and data score function [24], respectively. The model score function does not depend on the value of Z(θ). Indeed, we have:
+∇w log p(w; θ) = ∇w log ˜p(w; θ) − ∇w log Z(θ) = ∇w log ˜p(w; θ), which makes the Fisher divergence suitable for learning EBMs.
+Score matching To get rid of the unknown ∇w log pD(w) in the Fisher divergence, Hyvärinen [24] proposes an equivalent form, named score matching (SM), as follows: (cid:21) w log ˜p(w; θ))
+≡ DF (pD(w)||p(w; θ)), (2)
+JSM (θ) (cid:44) EpD(w)
+||∇w log ˜p(w; θ)||2 2 + tr(∇2 (cid:20) 1 2 2
+where ∇2 w log ˜p(w; θ) is the Hessian matrix, tr(·) is the trace of a given matrix and ≡ means equivalence in parameter optimization. Though elegant, a straightforward application of SM is inefﬁcient, as the computation of tr(∇2 w log ˜p(w; θ)) is time-consuming on high-dimensional data.
+Sliced score matching To scale up SM, Song et al. [54] propose sliced score matching (SSM):
+JSSM (θ) (cid:44) 1 2
+EpD(w) (cid:2)||∇w log ˜p(w; θ)||2 2 (cid:3) + EpD(w)Ep(u) (cid:2)u(cid:62)∇2 w log ˜p(w; θ)u(cid:3) , (3) where u is a random variable that is independent of w and p(u) satisﬁes certain mild conditions [54] to ensure that SSM is consistent with SM. Instead of calculating the trace of the Hessian matrix in SM,
+SSM computes the product of the Hessian matrix and a vector, which can be efﬁciently implemented by taking two normal back-propagation processes.
+Denoising score matching Denoising score matching (DSM) [59] is another fast variant of SM:
+JDSM (θ) (cid:44) EpD(w)pσ( ˜w|w)||∇ ˜w log ˜p( ˜w; θ)−∇ ˜w log pσ( ˜w|w)||2 2 ≡ DF (pσ( ˜w)||p( ˜w; θ)), (4) where ˜w is the data perturbed by a noise disitribution pσ( ˜w|w) with a hyperparameter σ and pσ( ˜w) = (cid:82) pD(w)pσ( ˜w|w)dw. A commonly chosen perturbation distribution is the Gaussian one that pσ( ˜w|w) = N ( ˜w|w, σ2I). DSM optimizes DF (pσ( ˜w)||p( ˜w; θ)) and is slightly inconsistent.
+Multiscale denoising score matching Recently, Li et al. [38] propose multiscale denoising score matching (MDSM) to leverage different levels of noise to train EBMs on high-dimensional data as:
+JM DSM (θ) (cid:44) EpD(w)p(σ)pσ( ˜w|w)||∇ ˜w log ˜p( ˜w; θ) − ∇ ˜w log pσ0 ( ˜w|w)||2 2, (5) where p(σ) is a prior distribution over the noise levels and σ0 is a ﬁxed noise level. 3 Method
+In this paper, we aim to extend the above SM methods to learn general energy-based latent variable models (EBLVMs). In contrast to previous work [56, 58], our method only accesses the energy function without any structural assumption of the model. Formally, an EBLVM deﬁnes a probability distribution over a set of continuous visible variables v 2 and a set of latent variables h as follows: p(v, h; θ) = ˜p(v, h; θ)/Z(θ) = e−E(v,h;θ)/Z(θ), (6) where E(v, h; θ) is the associated energy function with learnable parameters θ, ˜p(v, h; θ) is the unnormalized density, and Z(θ) = (cid:82) e−E(v,h;θ)dvdh is the partition function. In general, the marginal distribution p(v; θ) and the posterior distribution p(h|v; θ) are intractable.
+We would like to minimize DF (q(v)||p(v; θ)), namely, the Fisher divergence between the marginal model distribution p(v; θ) and q(v), which can be the empirical data distribution pD(v) as in SM [24] or the perturbed one pσ(˜v) = (cid:82) pD(v)pσ(˜v|v)dv in DSM [59]. Equivalently, we can optimize a certain SM objective in Eqn. (2-5), which is generally expressed in the following form:
+J (θ) = Eq(v,(cid:15))F(∇v log p(v; θ), (cid:15), v), where F is a functional that depends on which SM objective we choose, (cid:15) is introduced to represent additional random noise used in SSM [54] or DSM [59], and q(v, (cid:15)) denotes the joint distribution of v and (cid:15). The same challenge for all SM objectives is that the marginal score function ∇v log p(v; θ) is intractable and we propose bi-level score matching (BiSM) to solve the problem in this paper. (7) 3.1 Bi-level Score Matching p(h|v;θ) − ∇v log Z(θ) = ∇v log ˜p(v,h;θ) the marginal score function can be rewritten as ∇v log p(v; θ) =
+First, we notice that
+∇v log ˜p(v,h;θ) p(h|v;θ) . We introduce a variational posterior distribu-tion q(h|v; φ) to approximate the true posterior p(h|v; θ), and obtain an approximation of the marginal score function using ∇v log ˜p(v,h;θ) q(h|v;θ) . We reformulate the general SM objective in Eqn. (7) as the following bi-level optimization problem:
+θ∗ = arg min
+θ∈Θ
+JBi(θ, φ∗(θ)), JBi(θ, φ) = Eq(v,(cid:15))Eq(h|v;φ)F (cid:18)
+∇v log
+˜p(v, h; θ) q(h|v; φ) (cid:19)
+, (cid:15), v
+, (8) 2See Sec. 4 for possible extensions on discrete v. 3
+where Θ is the hypothesis space of the model and φ∗(θ) is deﬁned as follows:
+φ∗(θ) = arg min
+φ∈Φ
+G(θ, φ), with G(θ, φ) = Eq(v,(cid:15))D (q(h|v; φ)||p(h|v; θ)) , (9) where Φ is the hypothesis space of the variational posterior and D is a certain divergence to be speciﬁed later. We denote φ∗ as a function of θ to explicitly present the dependency. We emphasize that the bi-level formulation is necessary because if we treat φ∗ as a constant with respect to θ, then
+∇θJ (θ) (cid:54)= ∇θJBi(θ, φ∗) in general. In contrast, the equivalence of the bi-level formulation in
+Eqn. (8-9) and SM under the nonparametric assumption [15] is characterized in Theorem 1.
+Theorem 1. (Equivalence of BiSM, proof in Appendix A.1) Assuming that ∀θ ∈ Θ, ∃φ ∈ Φ such that D(q(h|v; φ)||p(h|v; θ)) = 0, ∀v ∈ supp(q), we have ∇θJ (θ) = ∇θJBi(θ, φ∗(θ)).
+We notice that such assumptions have been made in the typical variational inference [29] to obtain a tight estimate of the log-likelihood and the generative adversarial networks [15] to guarantee validness. Further, in a practical case with a less powerful q(h|v; φ), we bound the bias of BiSM by the approximation error of q(h|v; φ) in Appendix A.1 to provide a complementary analysis.
+To learn general EBLVMs with intractable posteriors, the lower level optimization problem in Eqn. (9) can only access the unnormalized model distribution ˜p(v, h; θ) and the variational posterior q(h|v; φ) in calculation, as in the high-level problem in Eqn. (8). We ﬁrst consider the widely adopted KL divergence for variational inference and obtain an equivalent form regarding to optimizing φ:
+DKL (q(h|v; φ)||p(h|v; θ)) ≡ Eq(h|v;φ) log q(h|v; φ)
+˜p(v, h; θ)
+, (10) from which an unknown constant is subtracted. Therefore, Eqn. (10) is sufﬁcient for training φ but not suitable for evaluating the inference accuracy. In contrast, the Fisher divergence, which is an alternative approach for variational inference [62], can be directly calculated by:
+DF (q(h|v; φ)||p(h|v; θ)) = 1 2
+Eq(h|v;φ) (cid:2)||∇h log q(h|v; φ) − ∇h log ˜p(v, h; θ)||2 2 (cid:3) . (11)
+For the detailed derivation, please see Appendix A.2. Compared with the KL divergence in Eqn. (10), the Fisher divergence in Eqn. (11) can be used for both training and evaluation but cannot deal with discrete h in which case ∇h is not well deﬁned. In our experiments, we apply them according to the speciﬁc scenario. In principle, any other divergence that does not necessarily access p(v; θ) or p(h|v; θ) can be used here and we leave a systematical study of the divergence for the future work. 3.2 Stochastic Optimization for BiSM
+Our goal is to learn general EBLVMs whose energy can be parameterized by highly nonlinear and nonstructural functions, e.g. deep neural networks (DNNs). Such models are rarely studied before due to the challenges in training and inference. In Sec. 5.2, we propose an instance motivated by the fully visible EBMs [9, 38] to ﬁt natural images and validate the effectiveness of BiSM. To ﬁt the intractable posterior, we also employ a variational posterior parameterized by DNNs. In this context, it is impractical to exactly solve the BiSM problem in Eqn. (8-9) on full batch. Therefore, we develop a practical algorithm for BiSM by updating φ and θ alternatively using stochastic gradient descent. Formally, assuming a minibatch of data is given, let ˆJ (θ), ˆJBi(θ, φ) and ˆG(θ, φ) denote the corresponding functions evaluated on the minibatch. Motivated by our analysis in Theorem 2 presented later, we ﬁrst update φ for K times on the same minibatch of data by:
+φ ← φ − α
+∂ ˆG(θ, φ)
+∂φ
+, (12) where α is a preﬁxed learning rate scheme. We denote the resulting parameters of the variational posterior as φ0, which approximates ˆφ∗(θ) = arg minφ∈Φ ˆG(θ, φ). To update θ, the central challenge is to approximate the stochastic gradient ∂ ˆJBi(θ, ˆφ∗(θ))
+, which is addressed by the gradient unrolling technique [41]. Speciﬁcally, we start from φ0 and calculate ˆφN (θ) recursively by:
+∂θ
+ˆφ1(θ) = φ0 − α
+∂ ˆG(θ, φ)
+∂φ
+|φ=φ0, and ˆφn(θ) = ˆφn−1(θ) − α
+∂ ˆG(θ, φ)
+∂φ
+|φ= ˆφn−1(θ), (13) 4
+(14) (15) for n = 2, ..., N , where we treat φ0 as a constant with respect to θ, and make the dependence of ˆφn(θ) on φ0 implicit for simplicity. Note that Eqn. (13) is not used to update the variational parameters but to approximate ∂ ˆJBi(θ, ˆφ∗(θ)) by the gradient of a surrogate loss ˆJBi(θ, ˆφN (θ)):
+∂ ˆJBi(θ, ˆφN (θ))
+∂θ
+=
+∂θ
+∂ ˆJBi(θ, φ)
+∂θ
+|φ= ˆφN (θ) +
+∂ ˆJBi(θ, φ)
+∂φ
+|φ= ˆφN (θ)
+∂ ˆφN (θ)
+∂θ
+.
+Given the above stochastic gradient, we update the parameters in the model distribution by:
+θ ← θ − β
+∂ ˆJBi(θ, ˆφN (θ))
+∂θ
+, where β is a preﬁxed learning rate scheme. The whole training procedure is summarized in Algo-rithm 1. The gradient unrolling technique has been proposed to learn implicit directed generative models [41, 9]. In comparison, we learn EBMs and construct a different bi-level optimization problem based on the Fisher divergence. Further, below we formally analyze the approximation error of the stochastic gradient, which has not been explored in the related work [41, 9].
+Theorem 2. (Approximate error of the stochastic gradient, proof in Appendix A.4) Supposing that: 1. Both Θ and Φ are compact and convex, 2. ˆJBi(θ, φ) ∈ C 2(Ω), ˆG(θ, φ) ∈ C 3(Ω), where Ω is an open set including Θ × Φ (i.e. ˆJBi and ˆG are second and third order continuously differentiable on Ω respectively), 3. ˆG(θ, φ) is strongly convex on Φ for all θ ∈ Θ, 4. ∀N ≥ 0, ∀θ ∈ Θ, ∀φ0 ∈ Φ, ˆφN (θ, φ0) ∈ Φ and ˆφ∗(θ) ∈ Φ, then when α is small enough, there exists A, B, C > 0 and κ ∈ (0, 1) independent of θ and φ0, s.t.,
+||
+∂ ˆJBi(θ, ˆφN (θ, φ0))
+∂θ for all θ ∈ Θ, φ0 ∈ Φ and N ≥ 0.
+−
+∂ ˆJBi(θ, ˆφ∗(θ))
+∂θ
+|| ≤ (A + BN )κN ||φ0 − ˆφ∗(θ)|| + CκN ,
+Theorem 2 implies that the approximation error converges to zero in a linear rate in terms of N when ˆG is strongly convex, which is a commonly used assumption to obtain such results [3]. Although the assumption does not always hold in our experiments, Theorem 2 still provides insights into our implementation. As mentioned before, we update
+φ for K times on the same minibatch of data to reduce
+||φ0 − ˆφ∗||. In Fig. 1, we numerically validate Theorem 2.
+The gradient bias decays (approximately) exponentially w.r.t.
+N , which is consistent with Theorem 2. As for ||φ0 − ˆφ∗||, we ﬁnd it decreases from 1.38 to 0.87 as K increases from 0 to 20. It leads to smaller bias, which agrees with Fig. 1 and
+Theorem 2. Besides, we notice that the unrolling technique is not exclusive for advances in non-convex optimization [3] and we leave the general analysis for the future work. Due to the controllable approximation error, the convergence of
+BiSM can be formally characterized as follows.
+Corollary 3. (BiSM ﬁnds δ-stationary points, proof in Appendix A.5) For any accuracy level δ > 0, assuming Theorem 2 holds, using a sufﬁciently large N , i.e. asymptotically O(log 1
+δ ), and a proper learning rate scheme β [3], Algorithm 1 converges to a δ-stationary point of BiSM in Eqn. (8-9), and further a δ-stationary point of SM in Eqn. (7) if Theorem 1 also holds.
+Figure 1: The gradient bias (the left hand side of Theorem 2) w.r.t. N and
+K in GRBM on Frey face. 4

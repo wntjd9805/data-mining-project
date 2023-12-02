@@ -1,0 +1,222 @@
+Abstract
+We present Cross-lingual Open-Retrieval Answer Generation (CORA), the ﬁrst uniﬁed many-to-many question answering (QA) model that can answer questions across many languages, even for ones without language-speciﬁc annotated data or knowledge sources. We introduce a new dense passage retrieval algorithm that is trained to retrieve documents across languages for a question. Combined with a multilingual autoregressive generation model, CORA answers directly in the target language without any translation or in-language retrieval modules as used in prior work. We propose an iterative training method that automatically extends annotated data available only in high-resource languages to low-resource ones. Our results show that CORA substantially outperforms the previous state of the art on multilingual open QA benchmarks across 26 languages, 9 of which are unseen during training. Our analyses show the signiﬁcance of cross-lingual retrieval and generation in many languages, particularly under low-resource settings. Our code and trained model are publicly available at https://github.com/AkariAsai/
+CORA. 1
+
+Introduction
+Multilingual open question answering (QA) is the task of answering a question from a large collection of multilingual documents. Most recent progress in open QA is made for English by building a pipeline based on a dense passage retriever trained on large-scale English QA datasets to ﬁnd evidence passages in English (Lee et al., 2019; Karpukhin et al., 2020), followed by a reader that extracts an answer from retrieved passages. However, extending this approach to multilingual open QA poses new challenges. Answering multilingual questions requires retrieving evidence from knowledge sources of other languages than the original question since many languages have limited reference documents or the question sometimes inquires about concepts from other cultures (Asai et al., 2021;
+Lin et al., 2020). Nonetheless, large-scale cross-lingual open QA training data whose questions and evidence are in different languages are not available in many of those languages.
+To address these challenges, previous work in multilingual open QA (Ture and Boschee, 2016; Asai et al., 2021) translates questions into English, applies an English open QA system to answer in
+English, and then translates answers back to the target language. Those pipeline approaches suffer from error propagation of the machine translation component into the downstream QA, especially for low-resource languages. Moreover, they are not able to answer questions whose answers can be found in resources written in languages other than English or the target languages.
+In this paper, we introduce a uniﬁed many-to-many QA model that can answer questions in any target language by retrieving evidence from any language and generating answers in the target language.
+Our method (called CORA, Fig. 1) extends the retrieve-then-generate approach of English open
+QA (Lewis et al., 2020; Izacard and Grave, 2021b) with a single cross-lingual retriever and a generator that do not rely on language-speciﬁc retrievers or machine translation modules. The multilingual 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: Overview of CORA (mDPR and mGEN). retrieval module (mDPR) produces dense embeddings of a question and all multilingual passages, thereby retrieving passages across languages. The generation module (mGEN) is trained to output an answer in the target language conditioned on the retrieved multilingual passages. To overcome the aforementioned data scarcity issue, we automatically mine training data using external language links and train mDPR and mGEN iteratively. In particular, each iteration proceeds over two stages of updating model parameters with available training data and mining new training data cross-lingually by Wikipedia language links and predictions made by the models. This approach does not require any additional human annotations or machine translation, and can be applied to many new languages with low resources.
+Our experiments show that CORA advances the state of the art on two multilingual open QA datasets,
+XOR-TYDI QA (Asai et al., 2021) and MKQA (Longpre et al., 2020), across 26 typologically diverse languages; CORA achieves gains of 23.4 and 4.7 F1 points in XOR-TYDI QA and MKQA respectively, where MKQA data is not used for training. Moreover, CORA achieves F1 scores of roughly 30 over 8 languages on MKQA that have no training data or even reference Wikipedia documents, outperforming the state-of-the-art approach by 5.4 F1 points. Our controlled experiments and human analyses illustrate the impact of many-to-many cross-lingual retrieval in improving multilingual open QA performance. We further observe that through cross-lingual retrieval, CORA can ﬁnd answers to 20% of the multilingual questions that are valid but are originally annotated as unanswerable by humans due to the lack of evidence in the English knowledge sources. 2 Method
+We deﬁne multilingual open QA as the task of answering a question qL in a target language L given a collection of multilingual reference passages Cmulti, where evidence passages can be retrieved from any language. These passages come from Wikipedia articles that are not necessarily parallel over languages. We introduce CORA, which runs a retrieve-then-generate procedure to achieve this goal (Fig. 1). We further introduce a novel training scheme of iterative training with data mining (§ 2.2). 2.1 CORA Inference
+CORA directly retrieves evidence passages from any language for questions asked in any target language, and then generates answers in the target language conditioned on those passages. More for-mally, the CORA inference consists of two steps of (i) retrieving passages P multi and (ii) generating an answer aL based on the retrieved passages. P multi can be in any language included in Cmulti.
+P multi = mDPR(qL, Cmulti
+), aL = mGEN(qL, P multi
+).
+Multilingual Dense Passage Retriever (mDPR). mDPR extends Dense Passage Retriever (DPR;
+Karpukhin et al., 2020) to a multilingual setting. mDPR uses an iterative training approach to
+ﬁne-tune a pre-trained multilingual language model (e.g., mBERT; Devlin et al., 2019) to encode passages and questions separately. Once training is done, the representations for all passages from
+Cmulti are computed ofﬂine and stored locally. Formally, a passage encoding is obtained as follows: epL = mBERTp(p), where a passage p is a ﬁxed-length sequence of tokens from multilingual documents. At inference, mDPR independently obtains a d-dimensional (d = 768) encoding of the 2
+Figure 2: Overview of CORA iterative training and data mining. question eqL = mBERTq(qL
+). It retrieves k passages with the k highest relevance scores to the question, where the relevance score between a passage p and a question qL is estimated by the inner product of their encoding vectors, ⟨eqL, ep⟩.
+Multilingual Answer Generator (mGEN). We use a multilingual sequence-to-sequence model (e.g., mT5; Xue et al., 2021) to generate answers in the target language token-by-token given the retrieved multilingual passages P multi. We choose a generation approach because it can generate an answer in the target language L from passages across different languages.1 Moreover, the generator can be adapted to unseen languages, some of which may have little or no translation training data.
+Speciﬁcally, the generator outputs the sequence probability for aL as follows:
+P (aL
+∣qL, P multi
+) =
+T
+∏ i p(aL i ∣aL
+<i, qL, P multi
+), (1) where aL language tag to the question to indicate the target language. i denotes the i-th token in the answer, and T is the length of the answer. We append a 2.2 CORA Training
+We introduce an iterative training approach that encourages cross-lingual retrieval and answer generation conditioned on multilingual passages (sketched in Fig. 2 and Alg. 1). Each iteration proceeds over two stages: parameter updates (§ 2.2.1) where mDPR and mGEN are trained on the current training data and cross-lingual data mining (§ 2.2.2) where training data are automatically expanded by Wikipedia language links and model predictions.
+Initial training data. The initial training data is a combination of multilingual QA datasets: XOR-TYDI QA and TYDI QA (Clark et al., 2020), and an English open QA dataset (Natural Questions,
+Kwiatkowski et al., 2019). Each training instance from these datasets comprises a question, a positive passage, and an answer. Note that annotations in the existing QA datasets have critical limitations: positive passages are taken either from English (Asai et al., 2021) or the question’s language (Clark et al., 2020). Further, most of the non-English languages are not covered. Indeed, when we only train mDPR on this initial set, it often learns to retrieve passages in the same languages or similar languages with irrelevant context or context without sufﬁcient evidence to answer. 2.2.1 Parameter Updates
+−
+−
++ mDPR updates (line 3 in Alg. 1). Let D = {⟨qL m i,1, ⋯, p i=1 be m training instances. i , p i , p i,n⟩}
++
+Each instance consists of a question qL i , a passage that answers the question (positive passage) p i ,
+− and n passages that do not answer the question (negative passages) p i,j. For each question, we use positive passages for the other questions in the training batch as negative passages (in-batch negative, Gillick et al., 2019; Karpukhin et al., 2020). mDPR is updated by minimizing the negative log likelihood of positive passages:
+Lmdpr = − log exp(⟨eqL i exp(⟨eqL i ⟩) + ∑n
+, ep+ i ⟩) j=1 exp(⟨eqL i i
+, ep+
+.
+, ep− i,j ⟩) (2) 1An alternative approach of answer extraction requires translation for all language pairs (Asai et al., 2021). 3
+Algorithm 1: Iterative training that automatically mines training data.
+Data: Input QA pairs: (qL, aL
+) 4 mDP R, Bt
+)/* Train mDPR mDP R ← T rain(θt−1 1 initialize training data B1 = (qL, aL, pgold), L = {Eng, L}; 2 while t < T do
+Θt 3
+P multi ← mDPR(qL, embedding(Cmulti mGEN ← T rain(θt−1
+θt
+For L == Eng, P multi+ = LangLink(qL, Cmulti
+)) /* Mine data using Wikidata
+For pi ∈ P multi: if mGEN(qL, pi) == aL then positives.add(pi) else negatives.add(pi)
+Bt+1 += (qL, aL, positives, negatives) /* Add new training data t ← t + 1
+))/* Retrieve passages mGEN , (qL, aL, P multi
+))/* Train mGEN 6 8 5 7
+*/
+*/
+*/
+*/
+*/ 9 10 end mGEN updates (lines 4-5 in Alg. 1). After updating mDPR, we use mDPR to retrieve top k passages
+P multi for each qL. Given these pairs of the question and the retrieved passages (qL, P multi
+) as input, mGEN is trained to generate answer aL autoregressively (Eq. (1)) and minimize the cross-entropy loss. To train the model to generate in languages not covered by the original datasets, we translate aL to other languages using Wikipedia language links and create new synthetic answers.2
+See Appendix § A.2 for more detail. 2.2.2 Cross-lingual Data Mining
+After the parameter updates, we mine new training data using mDPR and Wikipedia language links and label the new data by mGEN predictions. This step is skipped in the ﬁnal iteration.
+Mining by trained mDPR and language links (line 4, 6 in Alg. 1). Trained mDPR can discover positive passages in another language that is not covered by the initial training data. At each iteration, we use retrieved passages P multi for qL (line 4 in Alg. 1) as a source of new positive and negative passages. This enables expanding data between language pairs not in the original data.
+To cover even more diverse languages, we use language links and ﬁnd passages in other languages that potentially include sufﬁcient evidence to answer. Wikipedia maintains article-level language links that connect articles on the same entity over languages. We use these links to expand training data from the English QA dataset of Natural Questions (line 6 in Alg. 1). Denote a training instance by (qEn, aEn, pgold). We ﬁrst translate the English answer aEn to a target language aL using language links. We use language links again to look up the English Wikipedia article that the gold passage pgold comes from. We then ﬁnd articles in non-English languages in the reference documents Cmulti that correspond to this article. Although the language link-based automatic translation cannot handle non-entity answers (e.g., short phrases), this helps us to scale to new languages without additional human annotation or machine translation. We add all passages from these articles to P multi as positive passage candidates, which are then passed to mGEN to evaluate whether each of them leads to aL or not.
+Automatic labeling by mGEN predictions (lines 7-8 in Alg. 1). A passage pi from P multi may not always provide sufﬁcient information to answer the question qL even when it includes the answer string aL. To ﬁlter out those spurious passages (Lin et al., 2018; Min et al., 2019), we take instances generated from the two mining methods described above, and run mGEN on each passage to predict an answer for the question. If the answer matches the correct answer aL, then the passage pi is labeled as a positive passage; otherwise we label the input passage as a negative passage. We assume that when mGEN fails to generate a correct answer given the passage, the passage may not provide sufﬁcient evidence to answer; this helps us ﬁlter out spurious passages that accidentally contain an answer string yet do not provide any clue to answer. We add these new positive and negative passages to the training data, and in the next iteration, mDPR is trained on this expanded training set (§ 2.2.1). 2This automatic answer translation is only done after the third epoch of initial training to prevent the model from overﬁtting to synthetic data. 4
+3 Experiments
+We evaluate CORA on two multilingual open QA datasets across 28 typologically diverse languages.3
+CORA achieves state-of-the-art performance across 26 languages, and greatly outperforms previous approaches that use language-speciﬁc components such as question or answer translation. 3.1 Datasets and Knowledge Sources
+Multilingual open QA datasets differ in covered languages, annotation schemes, and target application scenarios. We evaluate F1 and EM scores over the questions with answer annotations from two datasets, following the common evaluation practice in open QA (Lee et al., 2019).
+XOR-TYDI QA. XOR-TYDI QA (Asai et al., 2021) is a multilingual open QA dataset consisting of 7 typologically diverse languages, where questions are originally from TYDI QA (Clark et al., 2020) and posed by information-seeking native speakers. The answers are annotated by extracting spans from Wikipedia in the same language as the question (in-language data) or by translating English spans extracted from English Wikipedia to the target language (cross-lingual data). XOR-TYDI QA offers both training and evaluation data.
+MKQA. MKQA (Longpre et al., 2020) is an evaluation dataset created by translating 10k Natural
+Questions (Kwiatkowski et al., 2019) to 25 target languages. The parallel data enables us to compare the models’ performance across typologically diverse languages, in contrast to XOR-TYDI QA.
+MKQA has evaluation data only; XOR-TYDI QA and MKQA have ﬁve languages in common.
+Collection of multilingual documents Cmulti. We use the February 2019 Wikipedia dumps of 13 diverse languages from all XOR-TYDI QA languages and a subset of MKQA languages.4 We choose 13 languages to cover languages with a large number of Wikipedia articles and a variety of both Latin and non-Latin scripts. We extract plain text from Wikipedia articles using wikiextractor,5 and split each article into 100-token segments as in DPR (Karpukhin et al., 2020). We ﬁlter out disambiguation pages that distinguish pages that share the same article title6 as well as pages with fewer than 20 tokens, resulting in 43.6M passages. See more details in Appendix § B.2.
+Language categories. To better understand the model performance, we categorize the languages based on their availability during our training. We call the languages with human annotated gold paragraph and answer data seen languages. XOR-TYDI QA provides gold passages for 7 languages.
+For the languages in Cmulti without human-annotated passages, we mine new mDPR training data by our iterative approach (§ 2.2). We call these languages, which are seen during mDPR training, mDPR-seen. We also synthetically create mGEN training data as explained in § 2.2.1 by simply replacing answer entities with the corresponding ones in the target languages. The languages that are unseen by mDPR but are seen by mGEN are called mGEN-seen, and all other languages (i.e., included neither in mDPR nor mGEN training; 9 of the MKQA languages) unseen languages. 3.2 Baselines and Experimental Setting
+We compare CORA with the following strong baselines adopted from Asai et al. (2021).
+Translate-test (MT + DPR). As used in most previous work (e.g., Asai et al., 2021), this method translates a question to English, extracts an answer in English using DPR, and then translates the answer back to the target language. The translation models are obtained from MarianMT (Junczys-Dowmunt et al., 2018) and trained on the OPUS-MT dataset (Tiedemann, 2012).
+Monolingual baseline (BM25). This baseline retrieves passages solely from the target language and extracts the answer from the retrieved passages. Training neural network models such as DPR is infeasible with a few thousands of training examples. Due to the lack of training data in most of 3A full list of the language families and script types are in the appendix. 4Downloaded from https://archive.org/details/wikimediadownloads?and%5B%5D= year%3A%222019%22. 5https://github.com/attardi/wikiextractor 6https://en.wikipedia.org/wiki/Category:Disambiguation_pages. 5
+Models
+CORA
+SER
+GMT+GS
+MT+Mono
+MT+DPR
+BM25
+Closed-book
+Ar 59.8 32.0 31.5 25.1 7.6 31.1 14.9
+Bn 40.4 23.1 19.0 12.7 5.9 21.9 10.0
+Target Language Li F1
+Ja
+Ko
+Fi 42.2 23.6 18.3 20.4 16.2 21.4 11.4 44.5 14.4 8.8 12.9 9.0 12.4 22.2 27.1 13.6 20.1 10.5 5.3 12.1 9.4
+Ru 45.9 11.8 19.8 15.7 5.5 17.7 18.1
+Te 44.7 22.0 13.6 0.8 0.8 – 10.4
+Macro Average
+F1
+EM BLEU 43.5 20.1 18.7 14.0 7.2 – 13.8 33.5 13.5 12.1 10.5 3.3 – 9.6 31.1 20.1 16.8 11.4 6.3 – 7.4
+Table 1: Performance on XOR-FULL (test data F1 scores and macro-averaged F1, EM and BLEU scores). “GMT+GS” denotes the previous state-of-the-art model, which combines Google Custom
+Search in the target language and Google Translate + English DPR for cross-lingual retrieval (Asai et al., 2021). Concurrent to our work, “SER” is a state-of-the-art model, Single Encoder Retriever, submitted anonymously on July 14 to the XOR-FULL leaderboard (https://nlp.cs.washington. edu/xorqa/). We were not able to ﬁnd a BM25 implementation that supports Telugu. the target languages, we use a BM25-based lexical retriever implementation by Pyserini (Lin et al., 2021). We then feed the retrieved documents to a multilingual QA model to extract ﬁnal answers.
+MT+Mono. This baseline combines results from the translate-test method and the monolingual method to retrieve passages in both English and the target language. Following Asai et al. (2021), we prioritize predictions from the monolingual pipeline if they are over a certain threshold tuned on
+XOR-TYDI QA development set; otherwise we output predictions from the translate-test method.7
+Closed-book baseline. This model uses an mT5-base8 sequence-to-sequence model that takes a question as input and generates an answer in the target language without any retrieval at inference time (Roberts et al., 2020). This baseline assesses the models’ ability to memorize and retrieve knowledge from its parameters without retrieving reference documents.
+CORA details. For all experiments, we use a single retriever (mDPR) and a single generator (mGEN) that use the same passage embeddings. mDPR uses multilingual BERT base uncased,9 and the generator ﬁne-tunes mT5-base. We found that using other pre-trained language models such as mBART (Liu et al., 2020) for mGEN or XLM-R (Conneau et al., 2020) for mDPR did not improve performance and sometimes even hurt performance. We ﬁrst ﬁne-tune mDPR using gold passages from Natural Questions, and then further ﬁne-tune it using XOR-TYDI QA and TYDI QA’s gold passage data. We exclude the training questions in Natural Questions and TYDI QA that were used to create the MKQA or XOR-TYDI QA evaluation set. We run two iterations of CORA training (§ 2.2) after the initial ﬁne-tuning. All hyperparameters are in Appendix § B.5. 4 Results and Analysis 4.1 Multilingual Open QA Results
+XOR-TYDI QA. Table 1 reports the scores of CORA and the baselines in XOR-TYDI QA. CORA, which only uses a single retriever and a single generator, outperforms the baselines and the previous state-of-the-art model on XOR-TYDI QA by a large margin across all 7 languages. CORA achieves gains of 24.8 macro-averaged F1 points over the previous state-of-the-art method (GMT+GS), which uses external black-box APIs, and 23.4 points over the concurrent anonymous work (SER).
+MKQA. Tables 2 and 3 report the F1 scores of CORA and the baselines on over 6.7k MKQA questions with short answer annotations10 under seen and unseen settings. CORA signiﬁcantly 7For the languages not supported by Pyserini, we always output translate-test’s predictions. 8We did not use larger-sized variants due to our computational budget. 9The alternative of XLM-RoBERTa (Conneau et al., 2020) did not improve our results. 10Following previous work in open QA but different from the ofﬁcial script of MKQA (Longpre et al., 2020), we disregard the questions labeled as “no answer”. As shown in our human analysis, it is difﬁcult to prove an answer does not exist in the millions of multilingual documents even if the annotation says so. 6
+Setting
+CORA
+MT+Mono
+MT+DPR
+BM25
+Closed –
+Avg. over all L. 21.8 14.1 17.1 – 4.5
+Seen (Included in XOR-TYDI QA)
+En 40.6 19.3 43.3 19.4 8.0
+Ar 12.8 6.9 16.0 5.9 4.6
+Fi 26.8 17.5 21.7 9.9 3.6
+Ja 19.7 9.0 9.6 9.1 6.5
+Ko 12.0 7.0 5.7 6.9 3.8
+Ru 19.8 10.6 17.6 8.1 4.1
+Es 32.0 21.3 28.4 14.7 6.6 mDPR-seen
+He
+Sv 30.9 20.0 19.7 10.9 4.8 15.8 8.9 8.9 – 3.8
+Th 8.5 8.3 6.9 4.9 2.1
+Table 2: F1 scores on MKQA seen and mDPR-seen languages.
+Setting
+CORA
+MT+Mono
+MT+DPR
+BM25
+Closed
+Da
+De 30.4 19.3 26.2 9.5 4.7 30.2 21.6 25.9 12.5 5.6 mGEN-seen
+It
+Nl
+Fr
+Pl
+Pt
+Hu
+Vi
+Ms
+Km
+Unseen
+No 30.8 21.9 21.9 – 5.8 29.0 20.9 25.1 13.6 5.3 32.1 21.5 28.3 12.8 5.5 25.6 24.6 24.6 – 4.0 28.4 19.9 24.7 13.4 4.4 18.4 16.5 15.7 7.4 5.5 20.9 15.1 15.1 – 5.9 27.8 12.6 12.6 – 5.3 5.8 1.2 1.2 – 1.9 29.2 17.4 18.3 9.4 4.1
+Tr 22.2 16.6 18.2 8.8 3.8 cn 5.2 4.9 3.3 2.8 2.6 hk 6.7 3.8 3.8 – 2.3 tw 5.4 5.1 3.8 3.3 2.4
+“cn”: “Zh-cn” (Chinese, simpliﬁed). “hk”: “Zh-hk” (Chinese, Hong Kong). “tw”:“Zh-tw” (Chinese, traditional).
+Table 3: F1 scores on MKQA in mGEN-seen and unseen languages. outperforms the baselines in all languages by a large margin except for Arabic and English. Note that Longpre et al. (2020) report results in a simpliﬁed setting with gold reference articles from the original Natural Questions dataset given in advance, and thus their results are not comparable. CORA yields larger improvements over the translate-test baseline in the languages that are distant from
+English and with limited training data such as Malay (Ms; 27.8 vs. 12.6) and Hebrew (He; 15.8 vs. 8.9). The performance drop of the translate-test model from English (43.3 F1) to other languages indicates the error propagation from the translation process. BM25 performs very poorly in some low-resource languages such as Thai because of the lack of answer content in the target languages’
+Wikipedia. MT+Mono underpeforms the MT+DPR baseline in MKQA since it is challenging to rerank answers from two separate methods with uncaliberated conﬁdence scores. In contrast, CORA retrieves passages across languages, achieving around 30 F1 on a majority of the 26 languages. 4.2 Analysis
+Setting
+XOR-TYDI QA
+Avg. F1 Ar
+Ja
+Te
+Avg. F1
+Fi
+MKQA
+Ru
+Es
+CORA (i) mDPR1 + mGEN1 (ii) DPR (trained NQ)+mGEN (iii) CORA, Cmulti={En} (iv) mDPR+Ext.reader+MT 31.4 27.9 24.3 19.1 11.2 42.6 36.2 30.7 20.5 11.8 33.4 29.8 29.2 23.2 10.8 26.1 21.1 19.0 11.5 5.6 22.3 17.3 17.9 20.5 12.2 25.9 23.1 20.1 24.7 16.1 20.6 13.1 16.9 15.4 10.9 33.2 28.5 29.4 28.3 25.2
+Th 6.3 5.7 5.5 8.3 1.2
+Vi 22.6 18.6 18.2 21.9 12.7
+Table 4: Ablation studies on XOR-TYDI QA development set and a subset of MKQA.
+Ablations: Impact of CORA components. We compare CORA with the following four variants to study the impact of different components. (i) mDPR1 + mGEN1 only trains CORA using the initial labeled, annotated data and measures the impact of the iterative training. (ii) DPR (trained NQ) + mGEN replaces mDPR with a multilingual BERT-based DPR trained on English data from Natural
+Questions (NQ), and encodes all passages in Cmulti. This conﬁguration assesses the impact of cross-lingual training data. (iii) CORA, Cmulti={En} only retrieves from English during inference.
+This variant evaluates if English reference documents sufﬁce to answer multilingual questions. (iv) mDPR+Ext.reader+MT replaces mGEN with an extractive reader model (Karpukhin et al., 2020) followed by answer translation. This variant quantiﬁes the effectiveness of using a multilingual generation model over the approach that combines an extractive reader model with language-speciﬁc translation models. Note that for MKQA experiments, we sample the same 350 questions (∼5%) from the evaluation set for each language to reduce the computational cost over varying conﬁgurations. 7
+Ja Es 28 48 retrieval errors different lang 18 0 incorrect answer 22 36 annotation error 22 12 underspeciﬁed q 10 4
+Table 6: Error categories (%) on 50 errors sampled from Japanese (Ja) and Spanish (Es) data.
+Figure 3: Breakdown of the languages of retrieved reference pas-sages for sampled MKQA questions (%). The x and y axes indicate target (question) and retrieval reference languages respectively.
+Results in Table 4 show performance drops in all variants. This supports the following claims: (i) the iterative learning and data mining process is useful, (ii) mDPR trained with cross-lingual data substantially outperforms DPR with multilingual BERT trained on monolingual data only, (iii) reference languages other than English are important in answering multilingual questions, and (iv) a multilingual generation model substantially boosts the model performance.
+Setting
+Lang
+Script
+RL@10
+Rmulti@10
+RL@10
+Rmulti@10 mDPR
+DPR(NQ)
+Es
+Fi
+Latn mDPR-Seen
+Ja
+Th
+| Jpan | Cyrl | Thai
+Ru
+|
+Unseen
+Pt Ms
+Latn
+Tr
+Zh-Cn Zh-Hk Km
+| Khmr
+Hant
+| 53.7 52.8 63.4 60.9 52.3 46.0 63.1 53.1 32.9 42.0 24.6 32.9 42.3 54.0 36.0 49.1 14.9 28.0 12.6 29.4 50.0 49.4 42.0 62.6 63.4 55.4 45.7 48.8 32.0 56.8 58.0 44.0 12.6 40.6 9.1 36.3 16.6 42.3 14.0 39.4 15.7 25.1 13.4 23.4
+Table 5: Retrieval recall performance on MKQA as the percentage of the questions where at least one out of the top 10 passages includes an answer string in the target language (RL@10), or in any language (Rmulti@10). The same subset of the MKQA evaluation data are used as in the ablations.
+Retrieval performance and relationship to the ﬁnal QA performance. We evaluate CORA’s retrieval performance on MKQA using two recall metrics that measure the percentage of questions with at least one passage among the top 10 that includes a string in an answer set in the target language (RL@10) or in the union of answer sets from all languages that are available in MKQA (Rmulti@10).
+MKQA provides answer translations across 26 languages.
+Table 5 reports retrieval results for mDPR and multilingual BERT-based DPR trained on NQ: DPR (NQ). This is equivalent to (ii) from the ablations. We observe that mDPR performs well in Indo-European languages with Latin script, even when the language is unseen. Interestingly, there is a signiﬁcant performance gap between RL@10 and Rmulti@10 in languages with non-Latin script (e.g.,
+Japanese, Russian, Chinese); this suggests that our model often uses relevant passages from other languages with Latin script such as English or Spanish to answer questions in those languages with non-Latin script. Our mDPR outperforms DPR (NQ) by a large margin in unseen languages with limited resources, which are consistent with the ﬁndings in Table 3. Nevertheless, we still see low performance on Khmer and Thai even with the Rmulti@10 metric. We also observe that passage and query embeddings for those languages are far from other languages, which can be further studied in future work. We provide a two-dimensional visualization of the encoded passage representations in the appendix.
+Breakdown of reference languages. Fig. 3 breaks down retrieved reference languages for each target language. Our multilingual retrieval model often retrieves documents from the target language (if its reference documents are available), English, or its typologically similar languages. For example, mDPR often retrieves Spanish passages for Portuguese questions and Japanese passages for Chinese questions; while they are considered phylogenetically distant, Japanese and Chinese overlap in script.
+To further evaluate this, we conduct a controlled experiment: we remove Spanish, Swedish and
+Indonesian document embeddings and evaluate CORA on related languages: Danish, Portuguese and 8
+Figure 4: Cross-lingual retrieval and generation examples for three MKQA questions.
+Malay. We observe performance drops of 1.0 in Danish, 0.6 in Portuguese, and 3.4 F1 points in Malay.
+This illustrates that while CORA allows for retrieval from any language in principle (many-to-many), cross-lingual retrieval from closer languages with more language resources is particularly helpful.
+Error analysis and qualitative examples. Table 6 analyzes errors from CORA by manually inspecting 50 Japanese and Spanish wrong predictions from MKQA. We observe six major error categories: (a) retrieval errors, (b) generating correct answers in a different language (different lang), (c) incorrect answer generation (incorrect answer), (d) answer annotation errors (e.g., a correct alias isn’t covered by gold answers, or Wikipedia information is inconsistent with English.), and (e) ambiguous or underspeciﬁed questions such as “who won X this year” (underspeciﬁed q). The table shows that both in Japanese and Spanish, the retrieval errors are dominant. In Japanese, CORA often generates correct answers in English, not in Japanese (different lang).
+Fig. 4 shows some qualitative examples. The ﬁrst example shows an error in (b): mGEN is generating an answer in Russian, not in French though the answer itself is correct. This type of error happens especially when retrieved passages are in languages other than the target and English.
+Human evaluation on cross-lingual retrieval results.
+To observe how cross-lingual retrieval between distant languages is actually helping, we sample 25 Norwegian questions for which Spanish passages are included among the top 10 retrieved results. As seen in Fig. 3, CORA retrieves Spanish (es) passages for 6.8% of the Norwegian (no) questions. A Spanish speaker judges if the retrieved
+Spanish passages actually answer the given Norwegian questions.11 We found that in 96% of the cases, the retrieved Spanish passages are relevant in answering the question. One such example is presented in Fig. 4 (the second example).
+Human analysis on unanswerable questions. CORA retrieves passages from a larger multilingual document collection than the original human annotations. Thus, CORA may further improve the answer coverage over the original human annotations. MKQA includes questions that are marked as unanswerable by native English speakers given English knowledge sources. We sample 400 unanswerable Japanese questions whose top one retrieved passage is from a non-English Wikipedia article. Among these, 329 unanswerable questions are underspeciﬁed (also discussed in Asai and
+Choi, 2021). For 17 out of the 71 remaining questions, the answers predicted by CORA are correct.
+This ﬁnding indicates the signiﬁcance of cross-lingual retrieval and potential room for improvement in annotating multilingual open QA datasets. The third example in Fig. 4 shows one of these cases. 5

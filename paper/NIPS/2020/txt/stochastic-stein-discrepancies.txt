@@ -1,0 +1,60 @@
+Abstract
+Stein discrepancies (SDs) monitor convergence and non-convergence in approx-imate inference when exact integration and sampling are intractable. However, the computation of a Stein discrepancy can be prohibitive if the Stein operator – often a sum over likelihood terms or potentials – is expensive to evaluate. To address this deﬁciency, we show that stochastic Stein discrepancies (SSDs) based on subsampled approximations of the Stein operator inherit the convergence control properties of standard SDs with probability 1. Along the way, we establish the convergence of Stein variational gradient descent (SVGD) on unbounded domains, resolving an open question of Liu (2017). In our experiments with biased Markov chain Monte Carlo (MCMC) hyperparameter tuning, approximate MCMC sampler selection, and stochastic SVGD, SSDs deliver comparable inferences to standard
+SDs with orders of magnitude fewer likelihood evaluations. 1
+
+Introduction n
+Markov chain Monte Carlo (MCMC) methods [7] provide asymptotically correct sample estimates i=1 h(xi) of the complex integrals EP [h(Z)] = R h(z)dP (z) that arise in Bayesian inference, 1 n P maximum likelihood estimation [20], and probabilistic inference more broadly. However, MCMC methods often require cycling through a large dataset or a large set of factors to produce each new sample point xi. To avoid this computational burden, many have turned to scalable approximate
+MCMC methods [e.g. 1, 8, 14, 39, 50], which mimic standard MCMC procedures while using only a small subsample of datapoints to generate each new sample point. These techniques reduce Monte
+Carlo variance by delivering larger sample sizes in less time but sacriﬁce asymptotic correctness by introducing a persistent bias. This bias creates new difﬁculties for sampler monitoring, selection, and hyperparameter tuning, as standard MCMC diagnostics, like trace plots and effective sample size, rely upon asymptotic exactness.
+To effectively assess the quality of approximate MCMC outputs, a line of work [9, 21–23, 27, 35] developed computable Stein discrepancies (SDs) that quantify the maximum discrepancy between sample and target expectations and provably track sample convergence to the target P , even when explicit integration and direct sampling from P are intractable. SDs have since been used to compare approximate MCMC procedures [2], test goodness of ﬁt [11, 27, 28, 34], train generative models
+[40, 48], generate particle approximations [9, 10, 19], improve particle approximations [25, 32, 33], compress samples [42], conduct variational inference [41], and estimate parameters in intractable models [5]. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+However, the computation of the Stein discrepancy itself can be prohibitive if the Stein operator applied at each datapoint – often a sum over datapoint likelihoods or factors – is expensive to evaluate.
+This expense has led some users to heuristically approximate Stein discrepancies by subsampling data points [2, 33, 41]. In this paper, we formally justify this practice by proving that stochastic Stein discrepancies (SSDs) based on subsampling inherit the desirable convergence-tracking properties of standard SDs with probability 1. We then apply our techniques to analyze a scalable stochastic variant of the popular Stein variational gradient descent (SVGD) algorithm [33] for particle-based variational inference. Speciﬁcally, we generalize the compact-domain convergence results of Liu
+[31] to show, ﬁrst, that SVGD converges on unbounded domains and, second, that stochastic SVGD (SSVGD) converges to the same limit as SVGD with probability 1. We complement these results with a series of experiments illustrating the application of SSDs to biased MCMC hyperparameter tuning, approximate MCMC sampler selection, and particle-based variational inference. In each case, we ﬁnd that SSDs deliver inferences equivalent to or more accurate than standard SDs with orders of magnitude fewer datapoint accesses.
+The remainder of the paper is organized as follows. In Section 2, we review standard desiderata and past approaches for measuring the quality of a sample approximation. In Section 3, we provide a formal deﬁnition of stochastic Stein discrepancies for scalable sample quality measurement and present a stochastic SVGD algorithm for scalable particle-based variational inference. We provide probability 1 convergence guarantees for SSDs and SSVGD in Section 4 and demonstrate their practical value in Section 5. We discuss our ﬁndings and posit directions for future work in Section 6.
+Notation For vector-valued g on X ⊆ Rd, we deﬁne the expectation µ(g) , R g(x)dµ(x) for each probability measure µ, the divergence h∇, g(x)i , P gj(x), and the k·k2 boundedness and
+Lipschitzness parameters kgk∞ , supx∈Rd kg(x)k2 and Lip(g) , supx6=y∈X
+. For any matrix A, let kAkop , supkxk2≤1 kAxk2 be the operator norm of A. For any L ∈ N, we write [L] for
+{1, . . . , L}. We write ⇒ for the weak convergence and a.s.→ for almost sure convergence of probability measures. We denote the set of continuous functions and continuously differentiable functions on
+X as C(X ) and C 1(X ) respectively, and use the shorthand C and C 1 whenever X = Rd. We also denote the set of functions on Rd × Rd continuously differentiable in both arguments by C (1,1). kg(x)−g(y)k2 kx−yk2 d j=1
+∂
+∂xj 2 Measuring Sample Quality
+Consider a target distribution P supported on X ⊆ Rd. We assume that exact expectations under P are n unavailable for many functions of interest, so we will an employ a discrete measure Qn , 1 i=1 δxi based on a sample (xi)n i=1 to approximate expectations under P . Importantly, we will make no assumptions on the origins or nature of the sample points xi; they may be the output of i.i.d. sampling, drawn from an arbitrary Markov chain, or even generated by a deterministic quadrature rule. n P
+To assess the usefulness of a given sample, we seek a quality measure that quantiﬁes how well expectations under Qn match those under P . At the very least, this quality measure should (i) determine when Qn converges to the target P , (ii) determine when Qn does not converge to P , and (iii) be computationally tractable. Integral probability metrics (IPMs) [37] are natural candidates, as they measure the maximum absolute difference in expectation between probability measures µ and ν over a set of test functions H: dH(µ, ν) , sup h∈H
+|Eµ[h(X)] − Eν[h(Z)]|.
+Moreover, for many IPMs, like the Wasserstein distance (H = {h : X → R | Lip(h) ≤ 1}) and the
+Dudley metric (H = {h : X → R | khk∞ + Lip(h) ≤ 1}), convergence of dH(Qn, P ) → 0 implies that Qn ⇒ P , in satisfaction of Desideratum (ii). Unfortunately, these same IPMs typically cannot be computed without exact integration under P . Gorham and Mackey [21] circumvented this issue by constructing a new family of IPMs – Stein discrepancies – from test functions known a priori to be mean zero under P . Their construction was inspired by Charles Stein’s three-step method for proving central limit theorems [45]: 1. Identify an operator T that generates mean-zero functions on its domain G:
+EP [(T g)(Z)] = 0 for any g ∈ G. 2
+The chosen Stein operator T and Stein set G together yield an IPM-type measure which eschews explicit integration under P :
+S(µ, T , G) , dT G(µ, P ) = sup g∈G
+|Eµ[(T g)(X)] − EP [(T g)(Z)]| = sup g∈G
+|Eµ[(T g)(X)]|. (1)
+Gorham and Mackey [21] named this measure the Stein discrepancy. 2. Lower bound the Stein discrepancy by an IPM known to dominate convergence in distribution.
+This is typically done for a large class of targets once and thus ensures that S(Qn, T , G) → 0 implies Qn ⇒ P (Desideratum (ii)). 3. Upper bound the Stein discrepancy to ensure that the Stein discrepancy S(Qn, T , G) → 0 when
+Qn converges suitably to P (Desideratum (i)).
+Prior work has instantiated a variety of Stein operators T and Stein sets G satisfying Desiderata (i)-(iii) for large classes of target distributions [9, 10, 18, 21–23, 27, 35, 45, 46]. We will focus on
+L decomposable operators: T = P l=1 Tl that decompose as a sum of L base operators Tl that are less expensive to evaluate than T . A prime example is the Langevin Stein operator derived in [21], applied to a differentiable posterior density p(x) ∝ π0(x) Q
+π(·|x) a likelihood function, and (yl)L
+L l=1 Tl for operator TP = P (TP g)(x) = h∇ log p(x), g(x)i + h∇, g(x)i, (2) l=1 π(yl|x) on Rd for π0 a prior density, l=1 a sequence of observed datapoints. In this case, the Langevin
+L (Tlg)(x) = h∇ log pl(x), g(x)i + 1
+L h∇, g(x)i and pl(x) , π0(x)1/Lπ(yl|x), (3) so that each base operator involves accessing only a single datapoint. 3 Stochastic Stein Discrepancies
+L
+Whenever the Stein operator decomposes as T = P l=1 Tl, the standard Stein discrepancy (SD) objective (1) demands that every base operator Tl be evaluated at every sample point xi; this cost can quickly become prohibitive if L and n are large. To alleviate this burden, we will consider a new class of discrepancy measures based on subsampling base operators. We emphasize that our aim in doing so is not to approximate standard SDs but rather to develop more practical alternative discrepancy measures that control convergence in their own right. To this end, we ﬁx a batch size m and, for each i ∈ [n], independently select a uniformly random subset σi of size m from [L]. Then for any G, we deﬁne the stochastic Stein discrepancy (SSD) as the random quantity
+SS(Qn, T , G) , supg∈G(cid:12) (4) (cid:12) where, for each σ ⊆ [L], we introduce the subset operator Tσ , Pl∈σ Tl. In our running example of the Langevin posterior decomposition (3), we have
+L m (Tσi g)(xi)(cid:12) (cid:12) 1 n P n i=1
+, (Tσg)(x) = h∇ log pσ(x), g(x)i + m
+L h∇, g(x)i for pσ(x) , π0(x)m/L Ql∈σ π(yl|x), so that each subset operator processes only a minibatch of m datapoints.
+By construction, the SSD reduces the number of base operator evaluations by a factor of m/L.
+Nevertheless, we will see in the Section 4 that SSDs inherit the convergence-determining properties of standard SDs with probability 1. Notably, the continued detection of convergence and non-convergence to P is made possible by the use of an independent subset σi per sample point. If, for example, the same minibatch of m datapoints were used for all sample points instead, then the resulting discrepancy would determine convergence to an incorrect posterior conditioned on that minibatch rather than to the desired target P . 3.1 Stochastic kernel Stein discrepancies
+Before turning to the convergence theory we pause to highlight a second property of practical import: when the Stein set is a unit ball of a reproducing kernel Hilbert space (RKHS), the SSD (9) admits a closed-form solution. We illustrate this for the Langevin operator (2) and the kernel Stein set [22]
+Gk,k·k
+, {g = (g1, . . . , gd) | kvk∗ ≤ 1 for vj , kgjkKk } (5) with arbitrary vector norm k·k and k·kKk the RKHS norm of a reproducing kernel k on Rd × Rd. 3
+Algorithm 1 Stochastic Stein Variational Gradient Descent (SSVGD)
+Input: Particles (x0 for r = 0, · · · , R − 1 do i )n i=1, target ∇ log p = Pl∈[L] ∇ log pl, kernel k, batch size m, rounds R
+For each j ∈ [n]: sample independent mini-batch σj of size m from [L]
+For each i ∈ [n]: xr+1 1 n P n,R = 1 i + ǫr
+Output: Particle approximation Qm i )∇ log pσj (xr of the target P m k(xr n i=1 δxR i ← xr n j=1 n P j , xr
+L i j ) + ∇xr j k(xr j , xr i )
+Proposition 1 (SKSD closed form). If k ∈ C (1,1), then SS(Qn, TP , Gk,k·k) = kwk where, ∀j ∈ [d], w2 j
+, 1 n2 P n i=1 P n i′=1( L m ∇xij log pσi (xi) + ∇xij )( L m ∇xi′ j log pσi′ (xi′ ) + ∇xi′ j )k(xi, xi′ ).
+We call such discrepancies stochastic kernel Stein discrepancies (SKSDs) in homage to the standard kernel Stein discrepancies (KSDs) introduced in [11, 22, 34]. See App. A for the proof of Prop. 1.

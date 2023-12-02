@@ -1,0 +1,296 @@
+Abstract
+Sampling-based inference and learning techniques, especially Bayesian inference, provide an essential approach to handling uncertainty in machine learning (ML). As these techniques are increasingly used in daily life, it becomes essential to safeguard the ML systems with various trustworthy-related constraints, such as fairness, safety, interpretability. Mathematically, enforcing these constraints in probabilistic inference can be cast into sampling from intractable distributions subject to general nonlinear constraints, for which practical efﬁcient algorithms are still largely missing. In this work, we propose a family of constrained sampling algorithms which generalize Langevin Dynamics (LD) and Stein Variational Gradient Descent (SVGD) to incorporate a moment constraint speciﬁed by a general nonlinear function. By exploiting the gradient ﬂow structure of LD and SVGD, we derive two types of algorithms for handling constraints, including a primal-dual gradient approach and the constraint controlled gradient descent approach. We investigate the continuous-time mean-ﬁeld limit of these algorithms and show that they have
+O(1/t) convergence under mild conditions. Moreover, the LD variant converges linearly assuming that a log Sobolev like inequality holds. Various numerical experiments are conducted to demonstrate the efﬁciency of our algorithms in trustworthy settings. 1
+
+Introduction
+Efﬁcient approximation and sampling methods of intractable distributions plays a key role in proba-bilistic machine learning, especially Bayesian inference. Traditionally, this problem has been framed as Monte Carlo sampling. Recently, variational optimization ideas, which frame the sampling prob-lem into functional minimization problem of KL divergence in the space of distributions, have been popularized, as exempliﬁed by Langevin dynamics (through the lens of Wasserstein gradient ﬂow (Jordan et al., 1998)), and Stein variational gradient descent (Liu & Wang, 2016; Liu, 2017; Liu & 0 be a probability density function supported on Rd from which it is intractable to
+Wang, 2018). Let p∗ draw samples exactly; p∗ 0 can be the posterior distribution in Bayesian inference, or a probabilistic graphical model constructed based on data and expert knowledge. The variational methods consider
+∗: Equal contribution. Code is available at https://github.com/gnobitab/ConstrainedSampling. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+to minimize the following KL divergence objective in the space of distributions, denoted by P , min q∈P
+KL(q || p∗ 0), (1) which, if solved exactly, recovers the target distribution q = p∗ 0. Langevin dynamics and SVGD can be viewed as solving (1) following two different types of gradient ﬂow under different metrization of
+P; in practice, both Langevin dynamics and SVGD yield a particle approximation, a set of points (a.k.a. particles) {θi}n 0 in weak convergence; the difference is that Langevin dynamics obtains the particles with a random diffusion process, while SVGD evolves the particles with a deterministic repulsive interacting particle system. i=1 ⊂ Rd, whose empirical measure q = (cid:80)n i=1 δθi/n approximates p∗
+However, most existing works focus on sampling from unconstrained domains, reﬂecting the fact that Problem (1) is an unconstrainted optimization on P. In many cases, especially trustworthy machine learning, we would like to impose a constraint of high practical importance in addition to approximating p∗ 0, yielding a constrained variant of (1)
+KL(q || p∗ min q∈P 0), 0 subject to a moment constraint Eq[g(θ)] ≤ 0, with g where we ﬁnd the best approximation of p∗ a general nonlinear function speciﬁed by the users. If p∗ 0 is the posterior distribution in Bayesian inference, Problem (2) can be viewed as a form of posterior regularization (Zhu et al., 2014). Our framework provides a powerful tool for enabling reliable trustworthy machine learning with fairness, safety, interpretability, and other constraints, which we illustrate as follows. s.t. Eq[g(θ)]≤0, (2)
+Fairness Constraints A motivating example is Bayesian fairness (Chakraborty, 2020; Ji et al., 2020; Dimitrakakis et al., 2019), in which, in addition to approximating the posterior distribution, we want to enforce equalized odds or other fairness constraints on different demographic subgroups.
+Speciﬁcally, suppose we are given a dataset D = {x(i), y(i), z(i)}N i=1 consisting of the feature vector x(i), a label y(i), and a protected attribute z(i) (e.g., male vs. female), and we want to ﬁt it with a prediction model ˆy(x; θ) described by a parameter θ. In typical Bayesian inference, we are interested in ﬁnding a distribution q on θ to approximate the posterior distribution p∗ 0(θ) = p(θ | D). In fair
+Bayesian inference, we also hope q to satisfy certain fairness constraints. For example, to control the disparate impact, one can introduce a constraint of Eq[g(θ)] ≤ 0 with g(θ) = (cid:96)f air(θ) − (cid:15), (cid:96)f air(θ) = (covD[z, ˆy(x; θ)])2, (3) where we enforce the prediction ˆy(x; θ) to be uncorrelated with the protected attribute z. Therefore, solving (2) allows us to obtain the best approximation of p∗
+Safety and Interpretability Constraints
+It is difﬁcult to control and make sense of the behavior of large AI models such as deep neural networks. In many applications, such as healthcare, robotics, and AI-based systems, it is essential to add guardrails to ensure that the AI models stay within a pre-speciﬁed safety region. For example, we may want to ensure that the prediction ˆy(x, θ) must fall inside a pre-speciﬁed interval [ˆy0,−(x), ˆy0,+(x)], which can be ensured by Eq[g(θ)] ≤ 0 with 0 subject to the fairness constraint. g(θ) = Dist(ˆy(x, θ),
+[ˆy0,−(x), ˆy0,+(x)]), where Dist(·, ·) is a point-to-set distance. Similar approach can also be used to control and increase the interpretability of deep neural networks (DNNs), by enforcing that the prediction of DNNs is close to simple interpretable models such as linear classiﬁers and logic rules.
+Prior-Agnostic Bayesian Inference
+The posterior of typical Bayesian inference depends on both the likelihood (cid:96)(θ) which represents the ﬁtness on data and a prior distribution (let it be p∗ 0). A poor choice of prior may heavily inﬂuence the posterior and yield poor ﬁtness. One approach to automatically limiting the inﬂuence of prior is to ﬁnd a q that minimizes KL(q || p∗ 0), subject to the moment constraint with g(θ) = −(cid:96)(θ) + (cid:15), so that we always have a guaranteed high data ﬁtness (i.e., high (cid:96)(θ)) regardless of the choice of the prior. Note that p∗ 0 here is the prior, while it is the posterior in the two settings above.
+Our Contribution We advance the frontier of sampling with constraints in the following ways: i)
+We propose two general approaches to extend SVGD and Langevin dynamics to the constrained setting (1), including a primal-dual gradient method (see Algorithm 1), and a novel constraint controlled gradient descent method (see Algorithm 2). ii) We develop novel theoretical analysis on both methods for both convex and non-convex settings. iii) We demonstrate the power of our approaches on a variety of tasks related to trustworthy machine learning, including fair Bayesian classiﬁcation, incorporating logic rules into black-box models, and training monotonic neural networks. 2
+Overview of the Main Algorithms
+We provide a quick summary of the practical algorithms that we develop for solving (1), so that the readers with a practical interest can skip the main theoretical derivation, which is in Section 2.1. i=1 ⊂ Rd through iteration t, such
+Our algorithms iteratively update a set of n particles {θi,t}n that its empirical distribution, denoted as qt = (cid:80)n i=1 δθi,t/n, approximately solves the constrained
+Problem 2 in a proper sense when t → +∞ and n → +∞. The updates of our algorithm for the
+SVGD and Langevin cases are:
+SVGD:
+Langevin:
+θi,t+1 = θi,t + hEθ∼qt[(∇ log p∗
+θi,t+1 = θi,t + h(∇ log p∗ 0(θ) − λt∇g(θ))k(θ, θi,t) + ∇θkt(θ, θi,t)],
+√ 0(θi,t) − λt∇g(θi,t)) + 2hξi,t, (4) (5) where {ξt,i} are i.i.d. standard Gaussian noise and h is a step size. The updates modify the standard
+SVGD and Langevin update rules by introducing an extra λt∇g(θ) term to account the constraint in (2), where λt ≥ 0 serves as a Lagrange multipler, whose update rule is described below.
+Primal-dual Gradient Method A straightforward approach is to update λt by performing pro-jected gradient descent on the dual problem of (2). As we show in Section 2.2, for both the SVGD and Langevin case, this can be achieved by,
+λt = max(λt−1 + ˜hEqt[g(θ)], 0), where ˜h is a step size that can different from h. This is similar to the typical primal-dual gradient method on ﬁnite dimensional optimization: we increase λt−1 if Eqt[g(θ)] ≥ 0 (constraint violated) and decrease it if the constraint is met. See Algorithm 1, and the detailed version in Algorithm 3 in the appendix. (6)
+Constraint Controlled Gradient Method Because λt is iteratively updated in (14), the result can be sensitive to the initialization λ0 and the learning rate η of λ. In Section 2.3, we propose an alternative “constraint controlled” method so (4) and (5) yield the steepest descent on the KL objective while ensuring that the solution converges to the feasible set rapidly when it is violated.
+The derived update λt is different for the Langevin and SVGD cases and is shown below:
+Langevin: λt = max
+SVGD:
+λt = max (cid:32)
+αEqt[g] + Eqt[(∇ log p∗ 0)(cid:62)∇g + ∇(cid:62)∇g]
+Eqt[(cid:107)∇g(cid:107)2] (cid:18) αEθ∼qt [g(θ)] + Eθ,θ(cid:48)∼qt[∇θ(cid:48)g(θ(cid:48))(cid:62)(∇ log p∗ (cid:33)
+, 0
+,
+Eθ,θ(cid:48)∼qt [∇g(θ)(cid:62)∇g(θ(cid:48))kt(θ, θ(cid:48))] 0(θ) + ∇θ)kt(θ, θ(cid:48))] (7) (cid:19)
+, 0
+, (8) where α > 0 is a coefﬁcient. Note that the λt here is completely decided by the information at the t-th iteration and does not need to be iteratively updated from λt−1 like (6). See Algorithm 2 and more details in Algorithm 4 in Appendix. 2 Main Results
+We ﬁrst introduce the background on SVGD and Langevin through the view of minimizing (1) via functional steepest descent in Section 2.1. We then introduce our two approaches to extending SVGD and Langevin dynamics for solving the constraint optimization in (2) in Section 2.2 and Section 2.3.
+We provide theoretical analysis of both approaches with and without convexity assumptions. 2.1 Review on Langevin Dynamics and SVGD: Sampling with Steepest Descent
+We provide a uniﬁed introduction to Langevin dynamics and Stein variational gradient descent (SVGD), which can be viewed as minimizing KL(q || p∗ 0) with two different types of gradient ﬂow on the space of distributions P. Our results apply to both algorithms. For audience with special interest in one of the two algorithms, we recommend ignoring the other one in the ﬁrst read.
+Assume we start from an initial density q0 and the associated random variable θ0 ∼ q0. We consider moving the random variable θt along a time-dependent vector ﬁeld φt : Rd → Rd. In other words,
+θt is driven by an ordinary differential equation (ODE): dθt/dt = φt(xt). Let qt be the distribution 3
+of θt at time t, which is known to follow the Fokker-Planck equation dqt/dt = −∇(cid:62)(φtqt), where
+∇(cid:62)f (θ) := (cid:80)d (cid:96)=1 ∂θ(cid:96)f (cid:96)(θ) denotes the divergence operator of a vector-valued function f : Rd → Rd with θ(cid:96) and f(cid:96) the (cid:96)-th element of θ and f , respectively; here we use the “(cid:62)” notation because we formally view ∇ as a d-dimensional column vector.
+To decrease KL(qt || p∗ function set Ft, so that the decreasing rate − d 0) as fast as possible, we want to choose φt, from a pre-decided candidate 0) is maximized. One can show that dt KL(qt || p∗
+− d dt
+KL(qt || p∗ 0) = Eθ∼qt (cid:2)(∇ log p∗ 0(θ) − ∇ log qt(θ))(cid:62)φt(θ)(cid:3) := Rqt,p∗ 0
+[φt], (9) which is a linear functional Rqt,p∗ inner product (cid:104)·, ·(cid:105)Ft and a norm (cid:107)·(cid:107)Ft continuous linear functional, there exists an element rqt,p∗ 0 the Riesz representation of Rqt,p∗
+We call rqt,p∗ into an optimization: (cid:26) 0 acting on Ft. Assume Ft is a Hilbert space, equipped with an
+. By Riesz representation theorem, assuming Rqt,p∗ 0 is a
+, φ(cid:105)Ft . 0 in Ft. The optimal choice of φt in Ft can be framed
+∈ Ft, such that Rqt,p∗
+[φ] = (cid:104)rqt,p∗ (cid:27) 0 0 0
+= rqt,p∗ 0
+,
+DFt(qt, p∗ 0)2 = (cid:13) (cid:13)rqt,p∗ 0 (cid:13) 2 (cid:13)
+, (10)
+φt = arg min
+φ∈Ft
+−(cid:104)rqt,p∗ 0
+, φ(cid:105)Ft + 1 2 (cid:107)φ(cid:107)2
+Ft 0 ; here we deﬁned DFt(qt, p∗ to constrain the scale of φ, yielding the optimal solution 0)2 to be the corresponding maximum descending rate of 0. In this work, we where we add a regularization (cid:107)φ(cid:107)2
+Ft
+φt = rqt,p∗
+KL divergence, which can be viewed as a discrepancy measure between qt and p∗ always assume that Ft is sufﬁciently large, so that DFt(qt, p∗
+Langevin dynamics and SVGD can be viewed as using different Hilbert spaces Ft, hence yielding different Riesz representation rqt,p∗ 0 for the linear operator Rqt,p∗ 0 .
+Langevin Dynamics Taking Ft to be Lqt,2, the Hilbert space of Rd → Rd maps equipped with inner product (cid:104)φ, φ(cid:48)(cid:105)Lqt,2 := Eθ∼qt[φ(θ)(cid:62)φ(cid:48)(θ)]. Then it is immediate to see from (9) that 0) = 0 implies qt = p∗ 0.
+φt(θ) = rqt,p∗ 0 (θ) = ∇ log p∗ 0(θ) − ∇ log qt(θ). (11) 0)2 is the Fisher divergence Eθ∼qt
+In this case, DFt(qt, p∗
+. Note that the Fokker Planck equation, dqt/dt = −∇(cid:62)((∇ log p∗ 0(θ)qt(θ)) +
+∇(cid:62)∇qt(θ), coincides with the density functions of the Langevin diffusion process dθt =
+∇ log p∗ 2dWt, whose time-discretization yields the (unadjusted) Langevin Monte Carlo method; here Wt is the standard Wiener process. Meanwhile, other discretization methods also exist, see e.g. Wibisono (2018); Salim et al. (2020). 0(θ) − ∇ log qt(θ)(cid:107)2(cid:105) 0 − ∇ log qt)qt) = −∇(cid:62)(∇ log p∗ 0(θt)dt + (cid:107)∇ log p∗
+√ (cid:104)
+In SVGD, we take Ft to the reproducing kernel
+Stein Variational Gradient Descent (SVGD)
+Hilbert space of a positive deﬁnite and continuously differentiable kernel kt(θ, θ(cid:48)). By the reproducing property of RKHS and Stein identity (see Liu & Wang (2016)), one can show that the optimal φt is
+φt(·) = rqt,p∗ 0 (·) = Eθ∼qt[∇ log p∗ 0(θ)kt(θ, ·) + ∇θkt(θ, ·)], (12)
+Related, DFt(qt, p∗ 0)2 = (cid:13)
+DF (qt, p∗ 0) reduces to kernel Stein discrepancy (Liu et al., 2016; Chwialkowski et al., 2016): (cid:13)rqt,p∗ 0 (cid:13) 2 (cid:13)
+Ft
+= Eθ∼qt[(∇θ log p∗ 0(θ) + ∇θ)(cid:62)(∇θ(cid:48) log p∗ 0(θ(cid:48)) + ∇θ(cid:48))kt(θ, θ(cid:48))].
+A nice property of the φt in (12), compared with the φt in (11), is that it depends on qt only through the expectation operator Eqt, which enables a direct particle implementation of dθt = φtdt, instead of resolving to a diffusion process. Speciﬁcally, if we initialize q0 = (cid:80)n i=1 δθi,0 /n to be the empirical measure of a set of particles {θi,0}i, then qt remains to be an empirical measure, that is, qt = (cid:80)n i=1 δθi,t/n, where the particles are evolved by d dt
+θi,t = Eθ∼qt[∇ log p∗ 0(θ)kt(θ, xi,t) + ∇θkt(θ, θi,t)],
+∀i = 1, . . . , n,
+This is a set of differential equations coupled by the mean ﬁeld qt. Following Liu & Wang (2016), the bandwidth parameter of the kernel kt(θ, θ(cid:48)) at time t can depend on the current particles {θi,t}i via the median trick. 4
+2.2 Primal-Dual Gradient Method
+Introducing a Lagrange multipler λ, Problem (2) is equivalent to the following minimax problem: min q∈P max
+λ≥0
+{L(q, λ) = KL(q || p∗ 0) + λEq[g(θ)]} . (13)
+We solve the minimax problem by alternatively updating λ and q with gradient descent. Note that we can rewrite L(q, λ) into L(q, λ) = KL(q || p∗
+λ(θ) = p∗ p∗ 0(θ) exp(−λg(θ) + Φ(λ)),
+L(q, λ) = − log Eθ∼p∗
+λ)+Φ(λ), with and Φ(λ) = min q∈P
+[exp(−λg(θ))], 0
+λ = arg minq∈P L(q, λ). Therefore, if we want to minimize L(q, λt) with a ﬁxed λt, we should
+, which can be done by following the functional gradient descent (θt). With a ﬁxed q, we perform standard and p∗ update qt to move it towards p∗
+λt with either SVGD or Langevin dynamics: dθt/dt = rqt,p∗
+λt projected gradient ascent on λ shown in (6):
+λt = max(λt−1 + ˜hEqt[g(θ)], 0), (14) where ˜h is a step size. In the continuous time limit (˜h → 0), we ﬁnd the λt follows a projected ordinary differential equation. It can be written jointly with the density qt of θt as a primal-dual gradient ﬂow (PDGF): dqt dt
+= −∇ · (φtqt) = −∇ · (rqt,p∗
+λt qt), dλt dt
+= [ηEqt[g]]λt,+, (15) with [a]λ,+ = I(λ ≤ 0) max(a, 0) + I(λ > 0)a and η = ˜h/h characterizes the update speed of λt relative to qt. Again, rqt,p∗ is deﬁned by (11) for the Langevin dynamics, and (12) for the SVGD, as
+λt 0 is replaced by p∗ long as p∗
+.
+λt
+Numerical Implementation To implement (15) through a particle-based algorithm, we use Euler discretization and approximate qt with empirical measure (cid:80)n i=1 are the particles at time t. This yields the updates of SVGD and Langevin shown in (4) and (5). Note that in (5), we run n parallel chains of Langevin dynamics, which are coupled since they share the common
+λ. The empirical distribution of {θi,t} is used to approximate Eqt[g(θ)] in (14). See Algorithm 1 and more details in Algorithm 3. i=1 δθi,t/n, where {θi,t}n
+Convergence Analysis
+One problem of primal-dual gradient method is that the algorithm does not try to meet the constraint directly. Instead, it tries to minimize KL(q || p∗
+λ) which involves the constraint. So in order to prove
+λ) and its maximum descending rate DF (q, p∗ the convergence, we need to assume that KL(q || p∗
+λ) dominate the constraint function g. In particular, we consider the following assumptions:
+Assumption 2.1. There exist positive constants c1, c2 < ∞, such that for any t ≥ 0, (Eqt[g] − Ep∗ (Eqt[g] − Ep∗
+λt
+λt
+[g])2 ≤ c1DFt(qt, p∗
+λt
+[g])2 ≤ c2KL(qt || p∗
+λt
+)2
+). (16) (17)
+Algorithm 2 Constraint Controlled Method
+Algorithm 1 Primal-Dual Method
+Initialize the particles {θi,0}n qt = (cid:80) i δθi,t/n. for iteration t do
+Update the particles {θi,t}n (SVGD), or Eq. (5) (Langevin).
+Update λt by Eq. (14). end for i=1 and λ0. Let i=1 by Eq. (4)
+Initialize the particles {θi,0}n (cid:80) i δθi,t/n. for iteration t do
+If SVGD, update {θi,t}n update λt by Eq. (8)
+If Langevin, update {θi,t}n then Update λt by Eq. (7). end for i=1. Let qt = i=1 by Eq. (4), and then i=1 Eq. (5), and
+Condition (17) always holds when g is a bounded function, due to the Pinsker’s inequality (See e.g., Lemma A.1 of Cui & Tong (2021)). Condition (16) holds if g can be written into a form of
+λ(θ)(cid:62)ψ(θ) + ∇(cid:62)ψ(θ) for some a ∈ R, ψ ∈ Ft and (cid:107)ψ(cid:107)2 g(θ) = a + ∇ log p∗
+≤ c1 (see Lemma
+Ft
+B.1 in Appendix). It can also be obtained by (17) and a log-Sobolev like inequality (18), which we will discuss later. 5
+Assumption 2.2. There exists 0 < v0 ≤ v1 < ∞ such that v0 ≤ varθ∼p∗
+λt
+[g(θ)] ≤ v1 for ∀t ≥ 0.
+This is a mild assumption, and holds when g is bounded and is not a constant on the support of p∗
+λt
+.
+Our analysis is based on the following Lyapunov function for the minimax problem on L(q, λ):
+E(q, λ) = L(q, λ) − 2Φ(λ) + max
+λ≥0
+Φ(λ).
+Lemma 2.3. We have E(q, λ) ≥ 0, and E(q, λ) = 0 iff (q, λ) is a saddle point of L(q, λ).
+Under mild conditions, we can show E(qt, λt) is decaying along PDGF. Moreover, we can ﬁnd a solution that meets the KKT requirement approximately.
+Theorem 2.4. If (16) holds and 0 < η < 1/(2c1), then E(qt, λt) decreases monotonically following the primal-dual gradient ﬂow in (15),
+− d dt
+E(qt, λt) ≥ ∆(qt, λt) := (1 − 2c1η)DFt(qt, p∗
+λt
+)2 + 1 2
+η(Eqt[g])2 × I(λ > 0 or Eqt[g] > 0).
+Also (15) ﬁnds an approximate solution with an O(1/T ) rate: mint∈[0,T ] ∆(qt, λt) ≤ 1
+T E(q0, λ0), ∀T ≥ 0.
+Note that ∆(q, λ) is a measure of optimality. This is because ∆(q, λ) = 0 implies the KKT condition of the constrained optimization (1) holds, which is q = p∗
+λ, Eq[g] ≤ 0 and λEq[g] = 0.
+Linear Convergence with Log-Sobolev like Condition We can further show a linear convergence of KL divergence to the optimal solution by assuming a Logarithmic Sobolev like inequality.
+Assumption 2.5. There exists a positive constant c3 < ∞, such that for any t ≥ 0,
+KL(qt || p∗
+λt
+) ≤ c3DFt(qt, p∗
+λt
+)2. (18)
+Theorem 2.6. Suppose problem (13) has a solution (q∗, λ∗), and Assumptions 2.1,2.2 and 2.5 hold.
+The PDGF following (15) with 0 < η < 1/(2c1) will converge to q∗ linearly in KL divergence: where α1 = max{1 + 1
+KL(qt||q∗) ≤ α1E(qt, λt) ≤ α1 exp(−α2t)E(q0, λ0), 2 c2, v1 2v0
+} and α2 = min{ 1 c3 (1 − c1η), 1 2 ηv0}.
++ 1 2v0
+Assumption 2.5 is equivalent to the log-Sobolev inequality in the Langevin case (when Ft = Lqt,2 and DF (·, ·)2 is Fisher divergence), which holds when log p∗
+λ is a bounded perturbation of a strongly concave function (Holley & Stroock, 1986). In particular, it holds when p∗ 0 is strongly log-concave and g is convex. So it can be seen as a strong convexity (concavity) assumption. In the optimization literature, e.g. Nesterov et al. (2018), it is well known such assumption is necessary for linear convergence; without it, we can usually only show O(1/t) convergence similar to Theorem 2.4.
+For SVGD, Assumption 2.5 is less well understood. If one replaces qt with any probability measure q, then (18) would fail to hold for kernel Stein discrepancy (KSD) because if qt is a discrete particle
+λ) = ∞ but DFt (qt, p∗ measure, we would have KL(qt || p∗
+λ) < ∞ under some mild conditions on the kernel kt; see also Lemma 36 of Duncan et al. (2019). On the other hand, it is unclear if (17) will hold for the smaller class of densities where {qt : t ∈ [0, ∞)} takes place in SVGD given that the initialization q0 is sufﬁciently regular (and in what sense). Therefore, Theorem 2.6 is not readily applicable to SVGD. We hope future works can draw more understandings on this issue. 2.3 Constraint Controlled Gradient Descent
+The results of the primal-dual gradient method can be sensitive to the initialization λ0 and the learning rate η of λ. We now propose a “constraint controlled” method, which ﬁnds a constrained variant of steepest descent direction φt that yields the steepest descent on the KL objective like Section 2.1, while ensuring that the solution converges to the feasible set rapidly when it is violated.
+Following Section 2.1, assume we update qt by dθt = φt(θt)dt, and want to decide the optimal
+φt. To solve the constrained optimization (2), in addition to maximizing the descending rate of KL 6
+divergence as Section 2.1, we also want to ensure that the constraint Eqt[g] is properly controlled, such that 1) if the constraint is not met (i.e., Eqt[g] ≥ 0), we should monotonically decrease Eqt[g], and 2) after the constraint is met (i.e., Eqt[g] ≤ 0), we should monotonically descend the loss
+KL(qt, p∗ 0), while ensuring that the solution stays within the constraint set. Note that d dt
+Eqt[g] = Eqt[∇g(θ)(cid:62)φt(θ)] := Sqt,g[φt] = (cid:104)sqt,g, φt(cid:105)Ft, where Sqt,g is a linear operator on Ft, whose Riesz representation is assumed to be sqt,g. Generalizing the functional steepest descent idea in (10), we propose to set φt to be the solution of (cid:26)
+φt = arg min
+φ∈Ft
+−(cid:104)rqt,p∗ 0
+, φ(cid:105)Ft + 1 2 (cid:107)φ(cid:107)2
+Ft s.t. (cid:104)sqt,g, φ(cid:105)Ft ≤ −αEqt[g] (cid:27)
+, (19) where α ≥ 0 is a control coefﬁcient. This ensures that, if the constraint is not met (i.e. Eqt[g] > 0),
+Eqt[g] ≤ −αEqt[g] < 0). If the constraint is met (Eqt[g] ≤ 0), then the constraint is descending ( d dt it allows Eqt[g] to increase, but with a rate smaller than −αEqt[g], which decreases towards zero when the solution approaches the constraint boundary {q : Eq[g] = 0}; this on one hand allows us to have the ﬂexibility to choose φ to decrease KL(q || p∗ 0)), and on the other hand ensures the solution is conﬁned inside the constraint set. The high-level idea here is similar to the control barrier functions in control theory (e.g., Ames et al., 2019), which works in completely different settings.
+Note that the constraint in (19) can be viewed as a linearization of the constant Eq[g] ≤ 0 around qt, as αEqt+1/α[g] = αEqt[g] + d
+Eqt[g] = αEqt[g] + (cid:104)sqt,g, φ(cid:105)Ft, while the loss in (19) can be viewed dt as a simple quadratic approximation of KL(q || p∗ 0). Therefore, (19) can be viewed as a functional variant of sequential quadratic programming (Nocedal & Wright, 2006).
+Using the Lagrange duality of (19), it is easy to derive that φt = rqt,p∗ (cid:32)
+λt = max
+αEqt [g] + (cid:104)rqt,p∗ (cid:107)sqt,g(cid:107)2
+Ft 0
+, sqt,g(cid:105)Ft 0
+− λtsqt,g = rqt,p∗
+λt (cid:33)
+, with
+, 0
+. (20)
+See Lemma B.2 in Appendix. Therefore, the density following the constraint controlled gradient ﬂow (CCGF) should satisfy: dqt dt
+= −∇ · (φtqt) = −∇ · (rqt,p∗
+λt qt). (21)
+This is similar to PDGF (15) as qt is driven towards p∗
+. But the λt in PDGF is recursively updated by
+λt the algorithm, while CCGF has the explicit formula for λt. Intuitively, CCGF will be more efﬁcient.
+Next, we obtain Langevin and SVGD variants by taking Ft to be Lqt,2 and RKHS, respectively.
+= ∇ log p∗
+Langevin Dynamics and its implementation Assume Ft = Lqt,2. We have rqt,p∗ 0 −
+∇ log qt and sqt,g = ∇g. Hence φt = ∇ log p∗ 0 − λt∇g − ∇ log qt, with λt deﬁned in (7). The evolution of qt associated with dθ = φt(θ)dt is standard Fokker Planck equation associated with p∗
+, which can be realized by the same parallel Langevin particle dynamics in (5), when setting
+λt qt = (cid:80)n i=1 δi,t/n. Note that λt depends on qt only through the expectation Eqt[·], which can be replaced by the empirical average of the particles. See Algorithm 2 and more details in Algorithm 4.
+The SVGD Case Let Ft be the RKHS of kernel kt(θ, θ(cid:48)). Then it is easy to show that sqt,g(·) =
+Eθ∼qt[∇θg(θ)kt(θ, ·)]. Therefore, φt(·) = Eθ∼qt[(∇ log p∗ 0(θ) − λt∇g(θ))kt(θ, ·) + ∇θkt(θ, ·)], with λt deﬁned in (8). Similar to regular SVGD, we set qt = (cid:80)n i=1 δθi,t/n, which is iteratively updated with SVGD updates with p∗ as the target distribution as (4). Also, λt again only depends
+λt on Eqt[·], which should be evaluated with the empirical mean of the particles. See Algorithm 2 and the detailed version in Algorithm 4. 0
+Convergence Analysis
+Since CCGF tries to meet the constraint explicitly, we have the following attractive properties:
+Theorem 2.7. Suppose (cid:107)sqt,g(cid:107)Ft (cid:54)= 0 in the CCGF (21). Then with φt deﬁned in (20), we have
+Eqt [g] ≤ exp(−αt)Eq0 [g],
+∀t ≥ 0.
+If Eqt0
+[g] ≤ 0 for some t0 ≥ 0, then Eqt[g] ≤ 0 and d dt KL(qt || p∗ 0) ≤ 0 for all t ≥ s. 7
+Note that the requirement (cid:107)sqt,g(cid:107)Ft (cid:54)= 0 is necessary for the λt in CCGF to be well deﬁned. If fact,
+Eqt[g] = 0 along any update direction φ. And if Ft = Lqt,2, one can show if (cid:107)sqt,g(cid:107)Ft = 0, then d dt g is a constant function qt-a.s.. In other words, this is an ill-posed scenario where local methods like
+CCGF have no chance to solve. An assumption slightly stronger than λt (cid:54)= ∞ would be assuming it is bounded from above:
+Assumption 2.8. There exists an upper bound λmax,+ < ∞, such that for all time t when the constraint is not satisﬁed (i.e., Eqt[g] > 0), we have λt ≤ λmax,+ in (20).
+This is a mild regularity condition, which holds, for example, if Eqt[g] and (cid:107)rqt(cid:107) are upper bound, and (cid:107)sqt,g(cid:107) > c− > 0. In the following, we show that, under Assumption 2.8, our algorithm meets the KKT condition with a O(1/t) rate. Further, if Assumption 2.5 holds, then KL(qt || q∗) converges to zero exponentially fast. Note that the conditions here are milder than that of the primal-dual method (which needs Assumption 2.1 and 2.2).
+Theorem 2.9. Let {qt} be the density function of dθt = φt(θ)dt with φt deﬁned in (20). Under
+Assumption 2.8, we have min t∈[0,T ]
+∆2(qt, λt) := DFt(qt, p∗
+λt
+)2 + α(−λtEqt[g])+ ≤ 1
+T (KL(q0, p∗ 0) + λmax,+(Eq0[g])+) .
+Note that, given that Eqt[g] ≤ 0 (see Theorem 2.7), ∆2(qt, λt) = 0 implies the rest of KKT condition (i.e., qt = p∗
+λt and (−λtEqt[g])+ = 0).
+We establish below the linear convergence of KL divergence under the log-Sobolev condition (18).
+Theorem 2.10. Suppose problem (13) has a solution (q∗, λ∗), (cid:107)sqt,g(cid:107)Ft (cid:54)= 0, and Assumption 2.5 also holds. Then the CCGF following (21) with α ≤ 1/c3 will converge to q∗ linearly in KL divergence:
+KL(qt || q∗) ≤ e−αtKL(q0 || q∗),
+∀t ∈ [0, +∞).
+Similar to Theorem 2.6, this result is not readily applicable to the SVGD case because (18) can not be veriﬁed for SVGD. 3 Experiments
+Algorithms and Settings We summarize the tested methods and the unconstrained baselines here: Langevin: Vanilla Langevin dynamics. We run n parallel chains of Langevin dynamics for sampling; SVGD: Vanilla SVGD with codes from Liu & Wang (2016); Primal-Dual+Langevin:
+Langevin dynamics with Primal-dual gradient descent; Primal-Dual+SVGD: SVGD with Primal-dual gradient descent; Control+Langevin: Langevin dynamics with constraint controlled gradient descent; Control+SVGD: SVGD with constraint controlled gradient descent. For the SVGD methods, we follow the conﬁguration in Liu & Wang (2016). We use the RBF kernel with bandwidth chosen by the standard median trick, that is, we use kt(θ, θ(cid:48)) = exp(− (cid:107)θ − θ(cid:48)(cid:107)2 /w2 t )) where the bandwidth wt is set by wt = Median{(cid:107)θi,t − θj,t(cid:107) : i (cid:54)= j} based on the particles {θi,t}n i=1 at the t-th iteration.
+As a remark regarding the choice of kernel, Gorham & Mackey (2017) provided a counter-example that suggests that Stein discrepancy with Gaussian RBF kernel may fail to metrize the weak con-vergence and suggested to use inverse multi-quadratic (IMQ) kernel which does not suffer from the problem. However, this counter-example assumes to use a ﬁxed bandwidth and does not hold for
+Gaussian RBF kernel equipped with the median trick which can adapt to the scale of the data better.
+We leave the study of better and adaptive choice of kernels to future works. In our implementation, we adopt the same decaying step size as suggested in Welling & Teh (2011) for both SVGD and
+Langevin dynamics, where ht = h0(1.0 + t)−0.55 and h0 is a hyper-parameter. The step size for the Lagrangian multiplier in primal-dual methods is chosen from {0.001, 0.01, 0.1, 1, 10, 100, 1000}.
+The hyper-parameters are determined by grid-search to reach the smallest constraint loss in each experiment. 8
+s s o
+L c i g o
+L n o i t a l o i
+V t s e
+T s s o
+L o n o
+M s s o
+L o n o
+M t s e
+T
+Training LL
+Test Accuracy
+Training LL
+Test LL (a) Logic Constraint on Loan Application (b) Monotonic Constraint on COMPAS
+Figure 1: Trade-off curve with different (cid:15). ‘LL’: log-likelihood. ‘Mono’: monotonicity. Note that the x-axis are ﬂipped so larger values are on the left. s s o
+L s s e n r i a
+F t c a p m
+I e t a r a p s i
+D s s o
+L s s e n r i a
+F
+L
+L g n i n i a r
+T
+Training LL
+Test Accuracy (a) Trade-off Curve with Different (cid:15)
+Iterations
+Iterations (b) Training Curve
+Figure 2: Experiment results on learning fair Bayesian neural networks. ‘LL’: log-likelihood. Note that in (a) the x-axis are ﬂipped so larger values are on the left.
+Embedding Logic Rules into Black-box Models ML models can provide accurate predictions but are difﬁcult to interpret and control explicitly. Our method can be used to enforce the ML model to be consistent with a set of logic rules to improve the interpretability and safety. We illustrate this with a loan classiﬁcation problem of predicting whether to lend loans to a speciﬁc applicant. We impose the two logic rules: (1) an applicant must be denied if she has the lowest credit rank and not employed; (2) an applicant must be approved if she has the highest credit rank and has been employed over 15 years. To apply our method, we set p∗ 0 to be the typical posterior distribution of Bayesian logistic regression, and deﬁne the constraint to g(θ) = (cid:96)logic(θ) − (cid:15), with (cid:96)logic(θ) = E(x,y)∼Dlogic[Loss(y, ˆy(x; θ))], where Dlogic is the uniform distribution on the (x, y) that satisfy the logic constraints, Loss is the classiﬁcation loss and ˆy(x; θ) is the prediction by the
+Bayesian logistic regression model. We vary the threshold (cid:15) in {0.001, 0.01, 0.02, 0.03, 0.04, 0.05} and ﬁnd the corresponding training log-likelihood (LL). In combination, they are plotted as a trade-off curve shown in in Figure 1(a, left). In Figure 1(a, right), we plot the trade-off curve of the testing accuracy vs. the constraint violation ((Eθ∼q[(cid:96)logic(θ)] − (cid:15))+) on the testing data. We can see that the controlled-based methods tend to enforce the constraints better (reaching lower values in logic loss) in both training and testing set, and the SVGD methods tend to achieve higher test accuracy.
+Training Monotonic Bayesian Neural Networks
+In some applications, it can be desirable to enforce the ML prediction to be monotonic w.r.t certain attributes (Karpf, 1991; Sill, 1998). For example, when predicting admission decisions, a fair ML system must admit a student with higher
+GPA over the students with lower GPA, given that they are identical in the other features. We apply our method to enforce monotonicity in Bayesian neural networks. We use the COMPAS dataset following the setting in Liu et al. (2020). In this case, p∗ 0 is the posterior of a Bayesian neural network on the data, and g is deﬁned as g(θ) = (cid:96)mono(θ) − (cid:15) with (cid:96)mono(θ) = Ex∼D [(cid:107)(−∂xmono ˆy(x; θ))+(cid:107)1].
+Here, xmono denotes the subset of features to which the output should be monotonic. By varying (cid:15) in
+{0.0001, 0.01, 0.1, 0.5}, we plot in Figure 1(b) the trade-off curve of LL vs. the monotonic loss on training/testing set, which follow similar trends as Figure 1(a).
+Training Fair Bayesian Neural Networks We use the constraint deﬁned in (3), and use the Adult
+Income dataset (Kohavi, 1996), which is a classiﬁcation problem of predicting whether the annual income of a person is ≥ $50,000, with gender as the protected attribute. For the experiment, we follow the setting in Martinez et al. (2020); Liu & Vicente (2020). With (cid:15) = {0.0001, 0.001, 0.005, 0.01},
+Figure 2(a, left) shows the trade-off curve of training LL vs. fairness loss, and Figure 2(a, right) shows the testing accuracy vs. CV score (Calders & Verwer, 2010), a standard measure of disparate impact. Figure 2(b) shows an example of training curves. We can again see that the control based methods enforce the constraints more strictly and in a faster speed. 9
+Constrained Sampling on Generative Models We ap-ply our method on Noise Conditional Score Networks (NCSN) (Song & Ermon, 2019). NCSN models the dis-tribution p∗ 0 of images by training a neural network to estimate its score function ∇ log p∗ 0, then generates im-ages by running Langevin dynamics with the learned score function. Here, we add constraints to draw rare samples from the generative model. In this experiment, we constrain the center of the generated images to be a black square, by deﬁning the constraint function to be g(θ) = (cid:107)θΩ(cid:107) − (cid:15), where θ denotes the whole image, θΩ is a image patch on region Ω, which is the square at the center of image. We use a threshold of (cid:15) = 0.0001. We use Control+Langevin to draw samples under the con-straint, as the original NCSN model is based on Langevin dynamics. As shown in Fig. 3, our method successfully generates diverse images without violating the constraints. 4

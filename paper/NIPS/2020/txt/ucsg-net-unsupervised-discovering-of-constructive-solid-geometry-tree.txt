@@ -1,0 +1,286 @@
+Abstract
+Signed distance ﬁeld (SDF) is a prominent implicit representation of 3D meshes.
+Methods that are based on such representation achieved state-of-the-art 3D shape reconstruction quality. However, these methods struggle to reconstruct non-convex shapes. One remedy is to incorporate a constructive solid geometry framework (CSG) that represents a shape as a decomposition into primitives. It allows to embody a 3D shape of high complexity and non-convexity with a simple tree representation of Boolean operations. Nevertheless, existing approaches are su-pervised and require the entire CSG parse tree that is given upfront during the training process. On the contrary, we propose a model that extracts a CSG parse tree without any supervision - UCSG-NET. Our model predicts parameters of primitives and binarizes their SDF representation through differentiable indicator function. It is achieved jointly with discovering the structure of a Boolean operators tree. The model selects dynamically which operator combination over primitives leads to the reconstruction of high ﬁdelity. We evaluate our method on 2D and 3D autoencoding tasks. We show that the predicted parse tree representation is interpretable and can be used in CAD software.1 1
+
+Introduction
+Neural networks for 3D shape analysis gained much popularity in recent years. Among their main advantages are fast inference for unknown shapes and high generalization power. Many approaches rely on the different representations of the input: implicit such as voxel grids, point clouds and signed distance ﬁelds [1–3], or explicit - meshes [4]. Meshes can be found in computer-aided design applications, where a graphic designer often composes complex shapes out simple shapes primitives, such as boxes and spheres.
+Existing methods for representing meshes, such as BSP-NET [5] and CVXNET [6], achieve remark-able accuracy on a reconstruction tasks. However, the process of generating the mesh from predicted planes requires an additional post-processing step. These methods also assume that any object can be decomposed into a union of convex primitives. While holding, it requires many such primitives to represent concave shapes. Consequently, the decoding process is difﬁcult to explain and modiﬁed with some external expert knowledge. On the other hand, there are fully interpretable approaches, like CSG-NET [7, 8], that utilize CSG parse tree to represent 3D shape construction process. Such solutions require expensive supervision that assumes assigned CSG parse tree for each example given during training.
+∗Now at Warsaw University of Technology 1We published our code at https://github.com/kacperkan/ucsgnet 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Figure 1: Pipeline of the UCSG-NET. Example of CSG layer is shown in Figure 3.
+In this work, we propose a novel model for representing 3D meshes capable of learning CSG parse trees in an unsupervised manner - UCSG-NET. We achieve the stated goal by introducing so-called
+CSG Layers capable of learning explainable Boolean operations for pairs primitives. CSG Layers create the interpretable network of the geometric operations that produce complex shapes from a limited number of simple primitives. We evaluate the representation capabilities of meshes of our approach using challenging 2D and 3D datasets. We summarize our main contributions as:
+•
+Our method is the ﬁrst one that is able to predict CSG tree without any supervision and achieve state-of-the-art results on the 2D reconstruction task comparing to CSG-NET trained in a supervised manner. Predictions of our method are fully interpretable and can aid in
+CAD applications.
+We deﬁne and describe a novel formulation of constructive solid geometry operations for occupancy value representation for 2D and 3D data.
+• 2 Method
+We propose an end-to-end neural network model that predicts parameters of simple geometric primitives and their constructive solid geometry composition to reconstruct a given object. Using our approach, one can predict the CSG parse tree that can be further passed to an external rendering software in order to reconstruct the shape. To achieve this, our model predicts primitive shapes in
+SDF representation. Then, it converts them into occupancy values taking 1 if a point in the 2D or the 3D space is inside the shape and 0 otherwise. CSG operations on such a representation are deﬁned as clipped summations and differences of binary values. The model dynamically chooses which operation should be used. During the validation, we retrieve the predicted CSG parse tree and shape primitives, and pass them to the rendering software. Thus, we need a single point in 3D space to infer the structure of the CSG tree. It is possible since primitive parameters and CSG operations are predicted independently from sampled points. In the following subsections, we present 2D examples for clarity. The method scales to 3D inputs trivially.
+O 2.1 Constructive Solid Geometry Network
+The UCSG-NET architecture is provided in Figure 1. The model is composed of the following main components: encoder, primitive parameter prediction network, signed distance ﬁeld to indicator function converter and constructive solid geometry layers.
+Encoder We process the input object by mapping it into low dimensional latent vector z of
+I length dz using an encoder fθ, e.g. fθ(
+) = z. Depending on the data type, we use either a 2D or
+I 3D convolutional neural network as an encoder. The latent vector is then passed to the primitive parameter prediction network. 2
+×
+Primitive parameter prediction network The role of this component is to extract the parameters of the primitives, given the latent representation of the input object. The primitive parameter prediction network gφ consists of multiple fully connected layers interleaved with activation functions. The last layer predicts parameters of primitives in the SDF representation. We consider primitives such as boxes and spheres that allow us to calculate signed distance analytically. We note that planes can be used as well, thus extending approaches like BSP-NET [5] and CVXNET [6]. The mathematical formulation of used shapes is provided in the supplementary material. The network produces N tuples
+Rdp describes vector of parameters of a particular shape (ex. radius of a of
+N pi, ti, qi}
+|
+Rdq - the rotation represented as a sphere), while ti ∈ quaternion for 3D shapes and a matrix for 2D shapes. We further combine k different shapes to be predicted by using a fully connected layer for each shape type separately, thus producing kN = M shapes and M
+. pi ∈
+Rdt is the translation of the shape and qi ∈ (dp + dt + dq) parameters in total. i
+{
+∈
+Once parameters are predicted, we use them to calculate signed distance values for sampled points x from volume of space that boundaries are normalized to unit square (or unit cube for 3D data). For each shape, that has an analytical equation dist parametrized by p that calculates signed distance from a point x to its surface, we obtain (x ti); pi). 1
+Di = dist(q− i
+−
+Signed Distance Field to Indicator Function Converter CSG operations in SDF representation are often deﬁned as a combination of min and max functions on distance values. One has to apply either LogSumExp operation as in CVXNET or standard Softmax function to obtain differentiable approximation. However, we cast our problem to predict CSG operations for occupancy-valued sets.
+The motivation is that these are linear operations, hence they provide better training stability.
+We transform signed distances function that is learned with the rest of the pipeline: to occupancy values
+D
+O ∈ { 0, 1
+}
+. We use parametrized α clipping (cid:20) 1
+=
+O
+D
+α
+− (cid:21) (cid:26)inside, outside,
+= 1
+[0,1]
+O
+O ∈
+][0,1] clips values to the given range and
+[0, 1) (1) means an where α is a learnable scalar and α > 0, [
+· approximation of occupancy values.
+[0, 1)
+O means outside of the shape and limα
+. Gradual learning of α allows to distribute 0, 1
+} gradients to all shapes in early stages of training. There are no speciﬁc restrictions for α initialization and we set α = 1 in our experiments. The value is pushed towards 0 by optimizing jointly with the rest of parameters by adding the term to the optimized loss. The method follows ﬁndings of
+Sakr et al. [9] that increasing slope of clipping function can be used to obtain binary activations.
+O
+= 1 indicates the inside and the surface of a shape. 0 O ∈ {
+O ∈
+α
+→
+|
+|
+Constructive Solid Geometry Layer Predicted sets of occupancy values and output of the encoder 1 CSG layers that combine shapes using boolean operators: union z are passed to a sequence of L (denoted by
+∗). To grasp an idea of how CSG is performed
+∗), intersection ( on occupancy-valued sets, we show example operations in Figure 2. CSG operations for two sets A and B are described as:
+A
+≥
+∗) and difference (
+∩
+∗ B = [A
+−
+A
+∪
+∗ B = [A + B][0,1]
+∗ B = [A + B 1][0,1]
+−
+A
+∪
+∩
+B
+∗ A = [B
+−
+−
+B][0,1]
+A][0,1]
+−
+− left, K(l)
+The question is how to choose operands A and B, denoted as left and right operands, from input shapes O(l) that would compose the output shape in O(l+1). We create two learnable matrices
+K(l) dz. Vectors stored in rows of these matrices serve as keys for a query z to select appropriate shapes for all 4 operations. The input latent code z is used as a query to retrieve the most appropriate operand shapes for each layer. We perform dot product between matrices
+K(l) right and z, and compute softmax along M input shapes. left, K(l) right ∈
+RM
+× (2)
+V(l) left = softmax(K(l) leftz)
+V(l) right = softmax(K(l) rightz) (3)
+The index of a particular operand is retrieved using Gumbel-Softmax [10] reparametrization of the categorical distribution:
+ˆV (l) side,i = (cid:16)(cid:16) exp (cid:80)M j=1 exp side,i) + ci log(V (l) (cid:16)(cid:16) log(V (l) side,j) + cj (cid:17)
+/τ (l)(cid:17) (cid:17) (cid:17)
+/τ (l) for i = 1, ..., M and side
+∈ { left, right (4)
+} 3
+(cid:104) (cid:104) (cid:104) (cid:104)
+A
+A
+∗ B :
+∪
+∗ B :
+∩
+A
+B
+∗ B :
+−
+∗ A :
+−
++
++
+−
+−
+= (cid:105)
+[0,1] (cid:105) 1
+− (cid:105)
+[0,1] (cid:105)
+[0,1]
+=
+[0,1]
+=
+=
+Figure 2: Example of constructive solid geometry on occupancy-valued sets
+Figure 3: Example of relation layer prediction. The CSG layer chooses pairs operands by masking input shapes and performs all Boolean operations on selected shapes. where ci is a sample from Gumbel(0, 1). The beneﬁt of the reparametrization is twofold. Firstly, the expectation over the distribution stays the same despite changing τ (l). Secondly, we can manipulate
+τ (l) so for τ (l) 0 the distribution degenerates to categorical distribution. Hence, a single shape selection replaces the fuzzy sum of all input shapes in that case. That way, we allow the network to select the most appropriate shape for the composition during learning by decreasing τ (l) gradually. By the end of the learning process, we can retrieve a single shape to be used for the CSG. The temperature (l)
+τ (l) is learned jointly with the rest of the parameters. Left and right operands right are retrieved as: (l) left,
+→
+O
+O (l) right =
+O (l) i
+O
+ˆV (l) right,i (l) left =
+O (l) i
+O
+ˆV (l) left,i (5)
+M (cid:88) i=1
+M (cid:88) i=1
+A set of output shapes from the l + 1 CSG layer is obtained by performing all operations in Equation 2 on selected operands: (cid:104) (cid:104) (l+1)
+A
+∗B =
+∪ (l+1)
+A
+∗B =
+∩
+O
+O (l) left +
+O
+O (cid:105) (l) right (l) left +
+O
+O (l+1) = (l) right − (cid:104)
+O
+∪
+O
+[0,1] (cid:105) 1 (l+1)
+A
+∗B =
+O
+− (l+1)
+B
+∗A =
+O
+−
+[0,1] (l+1)
+∗B;
+A (l+1)
+∗B;
+A
+O
+∩ (l+1)
+A
+∗B;
+O
+−
+O
+− (l) right (l) left (l) left − O (l) right − O (cid:105) (cid:104)
+O (cid:104)
+O (l+1)
+∗A
+B (cid:105)
+[0,1] (cid:105)
+[0,1] (6) (7)
+∈ where left, right
+M denotes left and right operands of the operation. By performing these operations manually, we increase the diversity of possible shape combinations and leave to the model which operations should be used for the reconstruction. Operations can be repeated to output multiple shapes. Note that the computation overhead increases linearly with the number of output shapes per layer. The whole procedure can be stacked in l
+L layers to create a CSG network. The L-th layer outputs a union since it is guaranteed to return a non-empty shape in most cases.
+≤
+At this point, the network has to learn passing primitives untouched by operators if any primitive should be used in later layers of the CSG tree to create, for example, nested rings. To mitigate the problem, each l + 1 layer receives outputs from the l-th layer concatenated with the original binarized values (0). For the ﬁrst layer l = 1, it means receiving initial shapes only.
+O
+Additional information passing The information about what is left to reconstruct changes layer by layer. Therefore, we incorporate it into the latent code to improve the reconstruction quality and stabilize training. Firstly, we encode ˆV(l) = [ ˆV(l) right] with a neural network h(l) containing a single hidden layer. Then, we employ GRU unit [11] that takes the latent code z(l) and encoded
+ˆV(l) as an input, and outputs the updated latent code z(l+1) for the next layer. The hidden state of the
+GRU unit is learnable. The initial z(0) is the output from the encoder. left; ˆV(l)
+Interpretability All introduced components of the UCSG-NET lead us to interpretable predictions of mesh reconstructions. To see this, consider the following case. When α 0, we obtain occupancy values calculated with Equation 1. Thus, shapes represented as these values will occupy the same
+≈ 4
+∈
+M pi, ti, qi}
+|
+ˆV (l) left,i, arg maxj
+∗ B, A
+. These meshes can be visualized volume as meshes reconstructed from parameters i
+{ and edited explicitly. To further combine these primitives through CSG operations, we calculate
+ˆV (l) right,j for left and right operands respectively. Then, we arg maxi
+M
+M
+∈
+∈ perform operations A
+∗ B, A right are one-hot vectors, and operations performed on occupancy values, as in Figure 2, are equivalent to
+CSG operations executed on aforementioned meshes, ex. by merging binary space partitioning trees of meshes [12]. Additionally, the whole CSG tree can be pruned to form binary tree, by investigating which meshes were selected through ˆV(l) right for the reconstruction, thus leaving the tree with 2L l nodes at each layer l 0, both ˆV(l) left, ˆV(l) left, ˆV(l)
+∗ A. When
+∗ B and B
+Lτ (l)
+L.2
+∀l
+≈
+−
+−
+∪
+∩
+≤
+−
+≤ 2.2 Training
+The pipeline is optimized end-to-end using a backpropagation algorithm in a two-stage process.
+First stage The goal is to ﬁnd compositions of primitives that minimize the reconstruction error.
+We employ mean squared error of predicted occupancy values ˆ
+∗. Values
+O are calculated for X which combines points sampled from the surface of the ground truth, and randomly sampled inside a unit cube (or square for 2D case): (L) with the ground truth
+O
+We also ensure that the network predicts only positive values of parameters of shapes since only for such these shapes have analytical descriptions:
+MSE = Ex
+∈
+X[(
+L (L)
+O
+− O
+∗)2] (8)
+P =
+L
+M (cid:88) (cid:88) i=1 pi pi
+∈ max( pi, 0)
+− (9)
+To stop primitives from drifting away from the center of considered space in the early stages of the training, we minimize the clipped squared norm of the translation vector. At the same time, we allow primitives to be freely translated inside the space of interest:
+T =
+L
+M (cid:88) i=1 max( 2, 0.5) ti||
+|| (10)
+The last component includes minimizing to perform continuous binarization of distances into
+{inside, outside} indicator values. Our goal is to ﬁnd optimal parameters of our model by minimizing the total loss:
+α
+|
+| where we set λT = λα = 0.1. total =
+L
+MSE +
+P + λT
+T + λα|
+L
+α
+|
+L
+L (11)
+Second stage We strive for interpretable CSG relations. To achieve this, we output occupancy values, obtained with Equation 1, so these values create binary-valued sets since the α at this stage is near 0. The stage is triggered, when α
+L to resemble one-hot mask by decreasing the temperature τ (l) in CSG layers. The optimized loss is deﬁned as: 0.05. Its main goal is to enforce ˆV(l) for l
+≤
+≤
+∗total =
+L total + λτ
+L
+L (cid:88) l=1
+τ (l)
+|
+| (12) 0, predictions of the CSG where we set λτ = 0.1 for all experiments. Once α layers become fully interpretable as described above, i.e. CSG parse trees of reconstructions can be retrieved and processed using explicit representation of meshes. We also ensure that α and τ (l) 5, if they become negative. stay positive by manual clipping values to small positive number (cid:15)
+During experiments, we initialize them to α = 1 and τ (l) = 2. Additional implementation details are provided in supplementary material. 0 and 10−
+∀l
+≈
+≈
+≈
+≤
+Lτ (l) 2We consider the worst case, since some shapes can be reused in consecutive layers, hence number of used shapes in the layer l can be less than 2L−l. 5
+3

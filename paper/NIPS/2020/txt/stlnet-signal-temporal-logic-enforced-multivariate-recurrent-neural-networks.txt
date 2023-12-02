@@ -1,0 +1,215 @@
+Abstract
+Recurrent Neural Networks (RNNs) have made great achievements for sequential prediction tasks. In practice, the target sequence often follows certain model properties or patterns (e.g., reasonable ranges, consecutive changes, resource constraint, temporal correlations between multiple variables, existence, unusual cases, etc.). However, RNNs cannot guarantee their learned distributions satisfy these properties. It is even more challenging for the prediction of large-scale and complex Cyber-Physical Systems. Failure to produce outcomes that meet these properties will result in inaccurate and even meaningless results. In this paper, we develop a new temporal logic-based learning framework, STLnet, which guides the RNN learning process with auxiliary knowledge of model properties, and produces a more robust model for improved future predictions. Our framework can be applied to general sequential deep learning models, and trained in an end-to-end manner with back-propagation. We evaluate the performance of STLnet using large-scale real-world city data. The experimental results show STLnet not only improves the accuracy of predictions, but importantly also guarantees the satisfaction of model properties and increases the robustness of RNNs. 1
+
+Introduction
+Deep Neural Networks (DNNs), especially Recurrent Neural Networks (RNNs) have great achieve-ments for sequential prediction tasks and are broadly applied to support the decision making of
+Cyber-Physical Systems (CPSs) [6, 15, 26]. Usually, in CPSs, RNNs are applied to predict the changing of system states or their environment. Systems take actions based on the prediction to guarantee the safety and performance of the system. For example, the power plant predicts the usages of energy in the next few days and decides how much energy to generate. An event service predicts the population and trafﬁc for a big concert and allocates police and security resources. Training
+RNNs for complex CPSs (i.e., creating a prediction model) such as for Smart Cities is difﬁcult [17].
+The models are not always robust, often subject to anomalies, and subject to erroneous predictions, especially when the predictions are projected into the future (errors grow over time).
+On the other hand, the target sequence often follows speciﬁc model properties or patterns, which should also be followed by the predicted sequence. For example, power plants have maximum and minimum limits of energy that can be generated per day, and the changing of air quality is relevant to the changing of trafﬁc volume in the past hour. However, RNNs have no way to guarantee that their estimated distributions satisfy these model properties, especially for the properties with multiple variables and temporal features. Failure to follow these model properties can result in inaccurate and even meaningless results, e.g., predicted trafﬁc volume exceeding the road capacity and inaccurate population estimation due to ignorance of big events happening a few hours ago.
+Challenges: It is very challenging to enforce multivariate RNNs to follow temporal model properties in a sequence prediction task. The optimization mechanism of RNNs (i.e., back propagate the loss between estimated value and target value individually in a predicted sequence at each time 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+unit without comparing the temporal correlation of the two sequences, thus lack an integrated view about the sequential predictions) causes the challenge of the networks to follow the temporal model properties. In addition, unlike classiﬁcation problems, it is more difﬁcult to ﬁnd an alternative approximate sequence that satisﬁes the property for knowledge distillation.
+Contributions:
+In this paper, we create a new temporal logic-based learning framework, called
+STLnet, to guide the RNN learning process with auxiliary knowledge of model properties and to produce a more robust model that can then be used for improved future predictions. Unlike existing approaches, STLnet enforces the predicted multivariate sequence to follow its model properties by treating the sequence (i.e. a trace) as a whole. We ﬁrst identify six key types of model properties and formalize them using Signal Temporal Logic (STL) [5]. Following the idea of knowledge distillation [8], the STLnet framework is built with a teacher network and a student network. In the teacher network, we create a STL trace generator to generate a trace that is closest to the trace predicted by the student network and satisﬁes the model properties simultaneously. We also create algorithms to efﬁciently generate satisfaction traces tailored to deep learning processes. We evaluate the performance of STLnet by applying it to an LSTM [9] network and a transformer network [23] for multivariate sequential prediction. The experimental results show that STLnet signiﬁcantly increases the satisfaction of different types model properties (by about 4 times) and further improves the prediction accuracy (by about 18.5%).
+To the best of our knowledge, our framework is the ﬁrst work that integrates signal temporal logic with deep neural networks for sequential prediction. The strength of temporal logic offers a much stronger power to control a sequential system and a more ﬂexible way to specify various types of properties. Different from previous literature, our method also creates a practical way to ensure the satisfaction of the logic rules. STLnet can be applied to general deep models to perform multivariate time series prediction and can be trained in an end-to-end manner. STLnet increases the robustness of the deep learning models. 2 Model Property Formalization using Signal Temporal Logic
+In this paper, we refer to model properties as the inherent properties, rules, or patterns followed by the output sequences of target models or systems. These model properties are usually already known by the system or deﬁned by the users before prediction, e.g., constraints by the physical world, or rules followed by the application domains (e.g., robotics). In practice, we can also mine the properties from the models’ historical behaviors [12]. Actively learning these model properties helps build more robust deep neural networks.
+Speciﬁcation Language – Signal Temporal Logic:
+In order to enforce RNNs to learn the model properties, we ﬁrst formalize properties using a machine-understandable speciﬁcation language. For multivariate sequence prediction, capturing the relations between variables on the temporal domain is the most important task. Therefore, we apply STL [5] to formalize the model properties. STL is a very powerful formalism used to specify temporal properties of discrete and continuous signals. In this paper, we target the properties of the outputs of RNN models, which are discrete-time signals.
+The syntax of an STL formula ϕ is usually deﬁned as follows (see Appendix for formal deﬁnition),
+ϕ ::= µ | ¬ϕ | ϕ1 ∧ ϕ2 | ϕ1 ∨ ϕ2 | ♦(a,b)ϕ | (cid:3)(a,b)ϕ | ϕU(a,b)ϕ.
+We call µ a signal predicate, which is a formula in the form of f (x) ≥ 0 with a signal variable x ∈ X and a function f : X → R. The temporal operators (cid:3), ♦, and U denote “always", “eventually" and
+“until", respectively. The bounded interval (a, b) denotes the time interval of temporal operators. U can be expressed by (cid:3) and ♦, thus we only consider (cid:3) and ♦ in this work.
+Model Properties and Formalization: Systems from different application domains have varied types of model properties. Focusing on the CPSs, we identify several critical types (not necessarily a complete list) of model properties for the key applications below. We give speciﬁc examples of properties under each type in Table 1.
+• Reasonable Range: One of the most fundamental model properties is that the value of the sequence should always be within a reasonable range constrained by the system or physical world, such as the road capacity of vehicles, normal ambient temperature, etc. It is not trivial for RNNs to learn 2
+Table 1: Examples of Model Properties and Their STL Formulas
+Property Type
+Reasonable
+Range
+Consecutive
+Changes
+Resource
+Constraint
+Variable and
+Temporal
+Correlation
+Existence
+Unusual Cases
+Example
+The trafﬁc volume on a road can never exceed the road capacity.
+The number of people in a shopping mall should not increase or decrease more than 1000 in 10 min if exits number is less than 5.
+The total energy distributed to all buildings should be less than e.
+For two consecutive intersections on a one-way direction road, if there are 10 cars passing intersection A, then there should be at least 10 cars passing intersection B within the next 5 minutes.
+There should be at least 1 patrol car around school every day.
+If there is a concert on Friday, the number of people in the nearby shopping mall will increase at least 200 within 2 hours.
+STL formula (cid:3)[0,24](x1 <
+α1) ∧ · · · ∧ (cid:3)[0,24](xn < αn) y < 5 → (cid:3)[0,10](∆x < 1000) (cid:3)[0,24]sum(x1, . . . , xn) < e (x1 > 10 → ♦[0,5](x2 > 10)) ∧ · · · ∧ (xn > 10 →
+♦[0,5](xn+1 > 10))
+♦[0,24]x1 ≥ 1 ∧ · · · ∧ ♦[0,24]xn ≥ 1 xEvent = True ∧ xDay = Fri →
+♦[0,2]∆x > 200. reasonable ranges since they could vary by variable, conditionally relate to another variable, and dynamically change over time.
+• Consecutive Changes: For most applications in CPSs and other domains, the consecutive changes of the target model over a ﬁxed period follow speciﬁc properties, such as pollution levels or trafﬁc volume levels from one time period to the next are bounded.
+• Resource Constraint: The target models are often constrained by the resources, such as the available police resources to deal with an accident, or the maximum energy allocated by several locations.
+The resource constraints could also change over time in a real deployment, and are not necessarily the same as the training data. RNNs are highly likely to produce inaccurate or wrong outcomes without adapting the prediction results based on resource constraints.
+• Variable and Temporal Correlation: There are correlations between different variables or locations over time, some of which are already known or easily discovered before training the learning model.
+These include the differences in air quality levels of adjacent locations, correlations between the air quality levels and trafﬁc volume in the past hour, etc.
+• Existence: Existence is a prevalent property in practice, but extremely difﬁcult for RNNs to predict.
+It speciﬁes the case that at least one of the values in the sequence (eventually) satisﬁes a speciﬁc property, e.g., trafﬁc will be back to normal within 30 min after resolving an accident.
+• Unusual Cases: The outputs of CPSs are highly affected by the environment and sensitive to uncertainties. For some unusual cases, there is a limited amount of data available in the training set. It is necessary to specify and teach the networks to learn the properties of these unusual cases (e.g., the inﬂuence of accidents or events on the population).
+In Table 1, we present examples of these model properties and how to formalize them using STL.
+As we can see from the examples, most of the properties have temporal features over a given period, e.g., [0, 2] indicates the next 2 hours from the checking point, [0, 24] indicates the next 24 hours (as checking every hour for the whole day). These properties describe the essential features of the systems with complex temporal dependency among multiple variables. Traditional RNNs have no mechanism to check or learn them explicitly. 3 Problem Formulation
+With the model properties speciﬁed, we formally deﬁne the logic enforced learning problem. Let
+ω = {ω1, ω2, . . . , ωm} denotes the target sequences of data with m variables over a ﬁnite discrete time domain T such that for the kth variable, ωk[t] = xk
+[0,i] be a preﬁx of sequence ωk over the time domain {t0, ..., ti} ⊆ T, and let xk
+[i+1,n] be a sufﬁx of sequence ωk over the time domain {ti+1, ..., tn} ⊆ T, where n denotes the total time instances, thus we denote the target sequence as ωk = xk
+[i+1,n]. We have a deep learning prediction model f with parameter t at any time t ∈ T. Let xk
+[0,i]xk 3
+Figure 1: STLnet Framework
+[0,i], x2
+[0,i], . . . , xm
+θ that predicts a sufﬁx sequence with its preﬁx as inputs, i.e., (ˆx1
+[i+1,n]) =
+[0,i]); θ). We denote the predicted sequence as ˆω = {ˆω1, ˆω2, . . . , ˆωm}, where f ((x1
+ˆωk = xk
+[i+1,n]. Suppose the target sequence ω is drawn from a data distribution, i.e., ω ← w, and satisﬁes a set of properties, i.e., ω |= ϕ1 ∧ ϕ2 ∧ ... ∧ ϕν, The goal is to ﬁnd the model parameter
+θ that minimizes the distance (for a predeﬁned distance metric D) between the predicted sequence and the target sequence, and enforces the predicted sequence follows the same properties as well, i.e.,
+[i+1,n], . . . , ˆxm
+[i+1,n], ˆx2
+[0,i] ˆxk
+ˆθ = arg min
+Eω←w [D(ω, ˆω)]
+θ s.t. ˆω |= ϕ1 ∧ ϕ2 ∧ ... ∧ ϕν 4 STLnet
+Our solution is STLnet which enforces multivariate RNNs to return results that follow the model properties of the system. In this section, we ﬁrst introduce the construction of STLnet in the training phase and show how to enforce the results to guarantee the satisfaction in the testing phase. Then, we present the STL trace generator, which is the key component of the teacher network. 4.1 STLnet Framework
+Following the idea of knowledge distillation [8], the STLNet framework is built with a teacher network and a student network (as shown in Figure 1). The main idea is that whenever the student network fails to predict a trace (sequence) that follows the model properties, the teacher network generates a trace that is close to the trace returned by the student network and satisﬁes the model properties simultaneously. The student network then updates its parameters by learning from both the target trace and outcome of the teacher network.
+In the training phase, our goal is to teach STLnet to learn from the “correct” traces, which include three major steps.
+Step 1 - Student network construction: To start with, we build the basic student network, i.e., a general multivariate RNN f (e.g., LSTM, GRU, Bi-LSTM, etc.).
+It takes the past states as inputs and predict their future states in n time units, (ˆx1
+[i+1,n]) = f ((x1
+[0,i]); θ). We denote the predicted sequence as ˆω = {ˆω1, ˆω2, . . . , ˆωm}, where
+ˆωk = xk
+[0,i], . . . , xm
+[i+1,n] (i.e., the yellow box in Figure 1).
+[0,i], x2
+[0,i] ˆxk
+[i+1,n], . . . , ˆxm
+[i+1,n], ˆx2
+Step 2 - Teacher network construction: Next, we construct the teacher network q(x) to generate a trace that satisﬁes the model properties ϕ1 ∧ ϕ2 ∧ · · · ∧ ϕν and has the shortest distance to the original 4
+Figure 2: An example of STL trace generator (ϕ = (cid:3)[0,3]x ≥ 1 ∧ ♦[1,3]x ≤ 5) prediction. We ﬁrst formalize the model properties using STL. q is constructed by projecting p into a subspace constrained by the properties. Different than the structure of the student network p, q has an
+STL trace generator. The STL trace generator ﬁrst checks if this trace follows the properties, if yes, then output the trace ω(cid:48) = ˆω. If not, it generates a new trace ω(cid:48), which ﬁrst follows the properties,
+ω(cid:48) |= ϕ1 ∧ ϕ2 · · · ∧ ϕm and secondly, it is the closest trace to the original predicted trace ˆω. Here we use L1 distance to measure the distance between two traces, i.e., the total amount of changes. We present the details of STL trace generator in Section 4.2.
+Step 3 - Back propagation with loss LSTL: The loss function is constructed by two parts to guide the student network p(x) to balance between emulating the teacher’s output and predicting the target trace. The target trace is ω, thus the ﬁrst part of the loss is L(ˆω, ω), where L calculates the L-2 distance between two traces. The second part of the loss function is deﬁned by the L-2 distance between the predicted trace ˆω and teacher’s output ω(cid:48), i.e., L(ˆω, ω(cid:48)). Thus, the student network is back propagated using the loss function as,
+LSTL = βL(ˆω, ω) + (1 − β)L(ˆω, ω(cid:48)) (1)
+The network is trained iteratively by repeating Steps 2 and 3 until convergence.
+Similar to other distilled networks [10], in the testing phase, we can use either the distilled student network p or the teacher network q after a ﬁnal projection. Our results show that both models substantially improve over the base network that is trained without STL speciﬁed properties. In practice, q can guarantee the satisfaction of model properties while p is more lightweight and efﬁcient.
+We compare the performance of p and q with baseline network extensively in the evaluation. 4.2 STL Trace Generator
+In this subsection, we introduce the algorithms of the key component of the teacher network, i.e., the
+STL trace generator. It is easy to check if a trace satisﬁes a speciﬁc property, however, to train the network, STLnet also needs to obtain the closest satisfying trace when the prediction results violate a property. It is a very difﬁcult and time-consuming task.
+In this paper, tailoring to the deep learning process, we create a STL trace generator. The key idea is to obtain a small Disjunctive Normal Form (DNF, a canonical normal form of a logical formula consisting of a disjunction of conjunctions) set representing the possible satisfaction ranges of each time on the trace before the optimization of the Deep Learning model. Then, we obtain the closest satisfaction trace of each instance in the training and testing phase. A simpliﬁed example of STL trace generator with a single variable is demonstrated in Figure 2.
+Converting STL to DNF We ﬁrst convert the STL formula into DNF and calculate the satisfaction range for each time unit on the sequence (left part of Figure 2). A nice property of a DNF representa-tion is that for a trace to satisfy the requirement, it is a sufﬁcient and necessary condition for it to match some clause φ inside ϕ. Therefore, we can check the properties in a straightforward manner by comparing the distance of the trace to each of the clauses in formula ϕ. 5
+Algorithm 1 Converting STL to DNF with Calculation of Satisfaction Range 1: function CalDNF(ϕ, t, sgn) 2:
+Input:STL Formula ϕ, time t, sign sgn
+Output: DNF Set ξ representing the satisfac-tion range if sgn = False then switch ϕ do case µ return {xj t | f (xj t ) < 0}; case ¬ϕ return CalDNF(ϕ, t, True); case ϕ1 ∧ ϕ2 return CalDNF(¬ϕ1 ∨ ¬ϕ2, t, True); 39: case ϕ1 ∨ ϕ2 40: return CalDNF(¬ϕ1 ∧ ¬ϕ2, t, True); 41: case (cid:3)T ϕ return CalDNF (♦T ¬ϕ, t, True); case ♦T ϕ return CalDNF ((cid:3)T ¬ϕ, t, True) else switch ϕ do case µ return {xj t | f (xj t ) ≥ 0}; case ¬ϕ return CalDNF(ϕ, t, False) case ϕ1 ∧ ϕ2
+ξ ← ∅; for φ1 ∈ CalDNF(ϕ1, t, sgn) do for φ2 ∈ CalDNF(ϕ2, t, sgn) do 28: 29: 30: 31: 32: 33: 34: 35: 36: 37: 38: 42: 43: 44: 45: 46: 47: 48: 49: 50: 51: 52: 53: 54: 3: 4: 5: 6: 7: 8: 9: 10: 11: 12: 13: 14: 15: 16: 17: 18: 19: 20: 21: 22: 23: 24: 25: 26: 27: end if 55: 56: end function
+ξ ← ξ ∨ (φ1 ∧ φ2); end for end for return ξ; case ϕ1 ∨ ϕ2
+ξ1 ← CalDNF(ϕ1, t, sgn) ;
+ξ2 ← CalDNF(ϕ2, t, sgn) ; return ξ1 ∨ ξ2; case (cid:3)T ϕ
+ξ ← {True} for t ∈ T do
+ξ1 ← CalDNF(ϕ1, t, sgn) ;
+ξ2 ← ∅; for φ1 ∈ ξ do for φ2 ∈ ξ1 do
+ξ2 ← ξ2 ∨ (φ1 ∧ φ2); end for end for
+ξ ← ξ2; end for return ξ; case ♦T ϕ
+ξ ← ∅; for t ∈ T do
+ξ ← ξ ∨ CalDNF(ϕ, t, sgn); end for return ξ;
+Proposition 4.1 (STL formula in DNF representation). Every STL ϕ can be represented in the DNF formula ξ(ϕ), where ξ(ϕ) is a formula that includes several clauses φk that are connected with the disjunction operator, and the length of φk is denoted by |φk|. Each clause φk can be further represented by several Boolean variables li that are connected with the conjunction operator. Finally, each Boolean variable li is the satisfaction range of a speciﬁc parameter.
+ξ(ϕ) = φ1 ∨ φ2 ∨ ... ∨ φK 1 ∧ l(k) 2 ∧ .. ∧ l(k)
+φk l(k) t | f (xj i
+= l(k)
+= {xj
+|φk| ∀k ∈ {1, 2..K} t ) ≥ 0} where (t ∈ T ), ∀i ∈ {1, 2..|φk|} (2)
+Algorithm 1 shows how to construct the DNF representation of the STL formula. The algorithm follows a top-down recursive manner. For every operator and its corresponding sub-tree, we ﬁrst calculate the DNF formula of its children sub-trees, and then combine them with the operator.
+Speciﬁcally, the negation operator causes the DNF formula to become a CNF. Therefore, here we use
+De Morgan rule to sink the negation operator to the bottom level. Each clause of the DNF formula is guaranteed to have no duplicate variables. To be noted, if the set returned is an empty set, we know that the input requirement is unsatisﬁable and we don’t progress to the next steps. The computation time of Algorithm 1 is relevant to the number of predicates in the STL formula. We only execute it once in the pre-processing step before the training phase, thus it tailors to deep learning processes efﬁciently.
+Simplifying Candidate DNF Set:
+In order to further obtain a smaller manageable DNF set, we reduce the size of the DNF set by ﬁnding the overlaps between the clauses. We ﬁrst deﬁne the distance between a trace and a clause in DNF. (Note that we use L1 distance in the deﬁnition, which can be extended to any Lp distance measure.) 6
+Deﬁnition 1 (L1-Distance of a trace to a clause). Let clause φ = l1 ∧ l2 ∧ .. ∧ lm. The distance between a trace ω and clause φ is deﬁned as
+DL1(ω, φ) = min
+ω(cid:48)
+T (cid:88) t=1
+|ω(cid:48) t − ωt|, where ω(cid:48) |= li ∀i ∈ {1, 2..m} (3)
+The return value is a non-negative real number. If a variable satisﬁes a constrain in a clause, the term will be evaluated to 0; Otherwise, it will return the minimal distance over all the items in the satisfaction of li (not necessary to be 1).
+Proposition 4.2 (The order of set). For two clauses φi and φj in a DNF ξ, if ∀ω |= (φi), ω |= φj, and φi ⊆ φj, then we have DL1(ω, φi) ≤ DL1(ω, φj).
+If the satisfaction set of one clause is the subset of the satisfaction set of another clause, the ﬁrst clause is unnecessary, as stated in Proposition 4.2. Therefore, we provide a pairwise comparison between all clauses, and we can remove some of the clauses and obtain a smaller set of DNF before training.
+Generating the optimal trace To satisfy a DNF representation, at least one of the clauses φk needs to be satisﬁed. Therefore, the best ω(cid:48) is found by a speciﬁc k, as formally stated in Proposition 4.3.
+Proposition 4.3 (Shortest distance of a trace to the DNF formula). Let ˆω be the trace that satisfy the
+DNF formula ϕ = φ1 ∨ φ2 ∨ ... ∨ φK that has minimal distance to the input trace ω, then we have
+ˆk = arg min k
+DL1(ω, φk) (4) and ˆω is the trace that minimizes DL1(ω, φˆk) by DL1(ω, ˆω) = DL1(ω, φˆk).
+For each clause in the DNF set, we calculate the distance between the trace to be optimized with the clause. The distance can be then calculated by a summation over the distance of the satisfaction of all the Boolean variables. After the distance calculation, we return the optimal trace with the minimal distance as our generated target trace. The returned trace is therefore guaranteed to satisfy the requirement. In the example given in Figure 2 (right side), if the trace predicted by the student network is ˆω = (0, 6.1, 7.2, 0.5), then, the optimal new trace generated by the teacher network is
+ω(cid:48) = (1, 6.1, 7.2, 1), which has the shortest distance to ˆω and satisﬁes its model property. 5 Evaluation
+We evaluate the performance of STLnet from two aspects: the capability of learning different types of model properties and the performance in learning from a city dataset with multiple variables.
+In all experiments, we evaluate the performance using three metrics, i.e., Root Mean Square Error (RMSE), property satisfaction rate, and average STL robustness value ρ. RMSE measures the accuracy of the prediction, property satisfaction rate shows the percentage of the predicted sequence that satisﬁes the property, and STL robustness value ρ shows the degree of satisfaction (we refer paper [5] or our supplementary materials for the deﬁnition of quantitative semantics). Brieﬂy, if
+ρ ≤ 0, the property is violated. The smaller ρ is, the more the property is violated.
+To evaluate the performance of STLnet, we applied it to two networks, i.e., an LSTM network [9] and a transformer network [23] for multivariate sequential prediction. For each model, we compare the experimental results among three networks, i.e., general model, model with STLnet testing with the student network (p), and model with STLnet testing with the teacher network (q). Applying STLnet-q can guarantee the satisfaction of all model properties, so we also present the results of STLnet-p here to show the improvement we achieved through training. To be noted, STLnet is general and can apply to all RNNs. We use LSTM and Transformer networks as examples. The experiments are evaluated on a server machine with 20 CPUs, each core is 2.2GHz, and 4 Nvidia GeForce RTX 2080Ti GPUs.
+The operating system is Centos 7. 7
+Table 2: Comparison of Accuracy and Property Satisfaction among LSTM, STLnet-p and STLnet-q
+RMSE 0.026 94.304 4.214 0.309 2.188 8.603
+ϕ1
+ϕ2
+ϕ3
+ϕ4
+ϕ5
+ϕ6
+LSTM
+Violateρ
+Sat Rate 92.00%
+-0.298 75.61% -117.982
+-1.589 75.47%
+-36.884 56.68% 0.84% -463.534 59.54% -282.403
+LSTM STLnet-p
+Violateρ
+Sat Rate
+-0.014 98.34%
+-1.603 97.78%
+-0.606 87.69%
+-3.906 83.09% 75.64%
+-19.842 61.85% -282.403
+RMSE 0.025 90.016 4.209 0.230 1.151 8.532
+LSTM STLnet-q
+RMSE 0.025 90.160 4.209 0.229 1.162 7.122
+Sat Rate Violateρ 0 100.00% 0 100.00% 0 100.00% 0 100.00% 0 100.00% 0 100.00%
+Table 3: Comparison of Accuracy and Property Satisfaction among Transformer Model, STLnet-p and STLnet-q
+RMSE 0.045 105.211 4.340 0.124 2.196 8.156
+Transformer
+Violateρ
+Sat Rate
+-18.808 27.76% 49.44% -109.282
+-3.855 52.96%
+-38.893 0.36%
+-31.172 8.88% 20.08% -301.175
+Transformer STLnet-p
+Violateρ
+Sat Rate
+-1.835 89.48%
+-18.874 76.08%
+-2.596 60.70%
+-5.101 51.00%
+-4.612 50.20% 20.32% -307.165
+RMSE 0.031 111.688 4.339 0.135 1.805 8.326
+Transformer STLnet-q
+RMSE 0.031 111.655 4.339 0.135 1.804 2.657
+Sat Rate Violateρ 0 100.00% 0 100.00% 0 100.00% 0 100.00% 0 100.00% 0 100.00%
+ϕ1
+ϕ2
+ϕ3
+ϕ4
+ϕ5
+ϕ6 5.1 Learning Model Properties
+The goal of the ﬁrst set of experiments is to show that STLnet is general and robust to different types of model properties and improves the satisfaction rate signiﬁcantly. To start with, we synthesize six sets of data that satisfy six types of model properties, respectively. Due to the page limit, the detailed description of the synthesized data and model properties, and the datasets are provided in the supplementary materials.
+The results shown in Table 2 and Table 3 are obtained from 25 runs. From the results, we can see that: (1) STLnet signiﬁcantly improves the model property satisfaction rate for both LSTM and Transformer. For all the property, both satisfaction rate and violation degree are improved by
+STLnet. For example, property ϕ5 and ϕ4, the satisfaction rates of basic LSTM are only 0.84% and 56.68% with very high violation degrees (-463.534 and -36.884), while STLnet-p achieves 75.64% and 83.09% satisfaction rate with violation degree dropping to -19.842 and -3.906, respectively.
+STLnet-q can guarantee the satisfaction of all the model properties. (2) For ϕ1 to ϕ6, STNnet not only improves the satisfaction rate, but also decreases the RMSE value. In general, STL-q can further improve the accuracy. For example, property ϕ6 (property type of unusual cases), RNNs are not able to learn the unusual cases which have a small portion of instances in the training data and lead to a low satisfaction rate. While STLnet guides the predicted trace follow the property (in both training and testing), it also decreases RMSE. It indicates that learning model properties can support RNNs to build a more accurate model. Overall, the results prove the effectiveness and generalizability of
+STLnet dealing with different types of model properties. 5.2 Multivariate Air Quality Prediction with Model Properties
+The goal of the second set of experiments is to show how STLnet improves the accuracy and robustness of RNNs in a real-world CPS application, especially in cases of noisy/missing sensing data, and long term prediction. We apply STLnet to train RNN models with air quality datasets.
+The dataset includes 1.3 million instances of 6 pollutants (i.e., PM2.5, PM10, CO, SO2, NO2, O3) collected from 130 locations in Beijing every hour between 5/1/2014 and 4/30/2015 [15]. To build the LSTM network, we regard one pollutant from one location as one variable, and concatenate all variables from the same time unit. Next, we specify important model properties, including reasonable ranges, consecutive changes, correlations between different pollutants, and between different locations, etc.
+The results of the comparison are presented in Figure 3. From the results, we can see that, (1) STLnet improves both property satisfaction rate (i.e., from 20% to over 70% on average) and RMSE (i.e., from about 150 to 130 on average). STLnet-q outperforms STLnet-p regarding the satisfaction rate 8
+(a) RMSE-prediction lengths (b) Satisfaction Rate - prediction lengths (c) RMSE -missing data % (d) Satisfaction Rate - missing data %
+Figure 3: Comparison of RMSE and Satisfaction Rate among LSTM, STLnet-p and STLnet-q and achieves a similar RMSE as STLnet-p. (2) Figure 3 (a) and (b) compare the performance with different time lengths of prediction. When predicting future 5-time units, three networks have a very similar RMSE value. With the prediction length increasing, the RMSE value of LSTM increases greatly. However, with STLnet, the prediction accuracy is improved, e.g., when l = 18, RMSE drops from 162 to 132 (18.5%). (3) Datasets with missing data affect the learning performance. We test the model performance with different percentages of missing data. The results show that STLnet is able to improve model accuracy by as much as 14% and property satisfaction rate by 3 to 4 times (p and q, respectively). Overall, the results indicate the effectiveness and robustness of STLnet in a real-world application. It also can support RNN models to perform long-term prediction with missing data. 6

@@ -1,0 +1,223 @@
+Abstract
+Post-training quantization compresses a neural network within few hours with only a small unlabeled calibration set. However, so far it has been only discussed and empiri-cally demonstrated in the context of uniform quantization on convolutional neural networks. We thus propose a new post-training non-uniform quantization method, called Mr.BiQ, allowing low bit-width quantization even on Transformer models. In particular, we leverage multi-level binarization for weights while allowing activations to be represented as various data formats (e.g., INT8, bfloat16, binary-coding, and FP32). Unlike conventional methods which optimize full-precision weights first, then decompose the weights into quantization parameters, Mr.BiQ recognizes the quantiza-tion parameters (i.e., scaling factors and bit-code) as di-rectly and jointly learnable parameters during the optimiza-tion. To verify the superiority of the proposed quantization scheme, we test Mr.BiQ on various models including con-volutional neural networks and Transformer models. Ac-cording to experimental results, Mr.BiQ shows significant improvement in terms of accuracy when the bit-width of weights is equal to 2: up to 5.35 p.p. improvement in CNNs, up to 4.23 p.p. improvement in Vision Transformers, and up to 3.37 point improvement in Transformers for NLP. 1.
+
+Introduction
+As deep neural networks scale up rapidly to improve model accuracy, it becomes more challenging not only to reduce memory footprint but also to achieve low end-to-end latency in resource-constrained environments. To mit-igate such challenges, many researchers have made a con-siderable amount of effort on advancing model compression techniques such as pruning [12, 24, 28], low-rank approxi-mation [23, 37], knowledge distillation [9, 14], and quanti-zation [4, 7, 11, 22, 29, 35, 40].
+*Equal contribution. Correspondence to: dragwon.jeon@samsung.com
+†This work was done when they were working at Samsung Research.
+Quantization, among such compression techniques, is particularly effective in terms of reducing the model size and accelerating inference even on commodity hardware.
+By representing each parameter with lower bit-width, quan-tization can reduce the model size, and hence alleviate memory bottleneck issues. In addition, since quantization maintains dense formats of tensors, parallelism can be fully exploited without irregular data structures. These irregular-ities, induced by certain compression methods such as prun-ing, require much support for specialized hardware designs.
+As such, quantization can be implemented efficiently with-out a lot of support for specialized hardware designs and makes it practical to deploy quantized models on various hardware form factors.
+By and large, quantization can be classified into two cat-egories: quantization-aware training (QAT) [7, 47, 49] and
+In gen-post-training quantization (PTQ) [22, 29, 40, 44]. eral, QAT yields higher accuracy than PTQ because it di-rectly aims to minimize the loss of the network. Nonethe-less, QAT relies on the entire training dataset and requires a thorough hyperparameter search, which leads to the same amount of training time and overhead as the full-precision models. On the other hand, PTQ allows the quantization of pre-trained models with only a small calibration dataset or without any dataset, which enables us to compress models even when data access is restricted due to various reasons including privacy concerns. PTQ also does not require a comprehensive understanding of the model, and thus has been attracting attention recently.
+Early works on post-training quantization are concen-trated on minimizing the quantization error which is defined as the mean squared error between the original weights and the quantized weights (i.e., min E[(w − wq)2]). However, recent works [22, 29] tend to focus on minimizing the re-construction error (i.e., min E[(Wx − Wqx)2]) that can be derived from the second-order approximation of the loss by the Taylor series. Although minimizing the reconstruc-tion error for PTQ is proven to be effective, PTQ has been discussed and empirically demonstrated only in the context of uniform quantization on convolutional neural networks
+(CNNs). We also notice that the previous works study map-ping scheme for weights and step-size learning for activa-tions separately, and thus we may miss the opportunity to investigate any synergistic effects when those two are opti-mized jointly.
+In this work, we propose Mr.BiQ1, a post-training non-uniform quantization method that follows the form of multi-level binary (or binary code) while minimizing the reconstruction error. We extend general principles of post-training quantization to non-uniform quantization and demonstrate our proposed method on recently proposed
+Transformer models for vision tasks and natural language processing (NLP) tasks in addition to CNNs.
+In particu-lar, we introduce a novel approach that enables optimization of quantization parameters (i.e., both binary-coding and the multi-level step size) jointly. Since the search space of uni-form quantization is a subset of that of non-uniform quanti-zation, our work provides a comprehensive search of quan-tized models and pushes the limit of quantization to signifi-cantly low bit-width (i.e., W2A42 or W2A8) with negligible accuracy drop.
+Note that, in terms of acceleration, multi-level binary as the form of quantized weights can be combined with various formats for activations (e.g., INT, bfloat16, and FP32) as well as binary code. When both weights and activations are binary-coded, matrix multiplications can be accelerated by xnor-popcnt operations [4]. If activations are maintained to be full-precision, we can exploit a dedicated computational kernel, BiQGEMM [16], available for commodity hardware.
+Furthermore, with fixed-point activations, the computation mainly requires integer adders which is effective in terms of chip area and power consumption [1, 8].
+To sum up, we propose a new method for post-training multi-level binary quantization. Unlike the conventional approaches, Mr.BiQ recognizes both quantization parame-ters as learnable parameters and obtains quantized weights by multiplying them in a bottom-up fashion. Overall, we achieve state-of-the-art accuracy not only in CNNs but also improvement in in Transformer models: up to 5.35 p.p.
+CNNs (RegNetX-3.2GF [33]-W2A4), up to 4.23 p.p. im-provement in Vision Transformers (DeiT-S [42]-W2A8), and up to 3.37 point improvement in Transformers for NLP (DistilBERT [39]-SQUAD v1.1-W2A8). 2. Preliminaries
+In multi-level binary (or binary-coding) quantization (BiQ), multiple bits share the scaling factor αi ∈ R while each bit in the binary codes bi ∈ {−1, 1}n (1 ≤ i ≤ q) de-termines the sign of the corresponding scaling factor. And a 1Post-training Multi-Level Binary Quantization based on Minimizing the Reconstruction error. 22-bit Weights, 4-bit Activations linear combination of {αi}q tized weights wq. Thus, we have i=1 and {bi}q i=1 produces quan-Q(w) = wq ∈ QBiQ = (cid:40) q (cid:88) xi|xi ∈ {+αi, −αi}
+, (cid:41)n (1) where q is quantization bit-width.
+AMQ [47] and LQ-Nets [49] proposed BiQ methods in a quantization-aware training (QAT) manner, where the quan-tizer Q decomposes w ∈ Rn into the scale factors {αi}q and the binary coding vectors {bi}q proximated to be wq = (cid:80)q the mean squared error: i=1 i=1, such that w is ap-i as a result of minimizing i α∗ i b∗ i , b∗
+α∗ i = arg min
+αi,bi
+||w − q (cid:88) i=1
+αibi||2. (2)
+Algorithm 1 Alternating Multi-bit Quantization [47]
+Input: Full-precision weight w ∈ Rn, bit-width q, alternating cycles (AC) T
+Output: αi ∈ R, bi ∈ {−1, 1}n, 1 ≤ i ≤ q 1: procedure DECOMPOSITION(w, q, T ) 2: 3: 4: 5:
+{αi, bi}q for t ← 1 to T do i=1 ← greedy method (w)
+{αi}q
+{bi}q i=1 ← least squares (B, w) i=1 ← binary search (α1, ..., αq, w)
+▷ See Eq. (3)
+▷ See Eq. (4)
+Algorithm 1 describes a method to reduce the mean squared error as in Eq. (2). When the residue ri denotes w − (cid:80)i−1 k=0 αkbk, for i ≥ 1, we can obtain bi and αi se-quentially as bi = sign(ri) and αi = r⊤ i bi n
+, (3) for 1 ≤ i ≤ q and α0 = 0, which is the greedy method (Line 2 in Algorithm 1) [10]. Furthermore, scaling factors
+{αi}q i=1 can be refined with ordinary least squares (Line 4) [10]:
+[α1, ..., αq] = ((B⊤B)−1B⊤w)⊤, (4) where B = [b1, ..., bq] ∈ {−1, 1}n×q. Then, the bi-nary coding vectors {bi}q i=1 can be optimized by bi-nary search, which re-calibrates the binary codes such that each weight is assigned to the nearest neighbor in
+{(cid:80)q xi|xi ∈ {+αi, −αi}} (Line 5). This alternating pro-cess can be performed iteratively (Line 3–5) to further min-imize the quantization error as in Eq. (2) [47].
+Existing methods perform Algorithm 1 every step during training, and update full-precision weights w using straight through estimator (STE) ( ∂L
+∂wq ) [2] (See the left of
+Figure 1).
+∂w = ∂L
+Figure 1. Comparing the proposed method (bottom-up) with conventional methods (top-down). 3. Mr.BiQ
+We propose a novel post-training multi-level binary quantization (BiQ) method with a low computational cost.
+Unlike the conventional methods [47, 49], which decom-pose w into {αi}q i=1 (i.e., a top-down ap-proach) with a least squares solution, our method optimizes scale factors and bit-code as learnable parameters that are to be combined to yield quantized weights wq (i.e., a bottom-up approach, see Figure 1). i=1 and {bi}q
+Given a pre-trained model, parameters {αi}q i=1 and
+{bi}q i=1 are initialized as illustrated in Algorithm 1 and then followed by our quantization techniques which aim to minimize the block-wise reconstruction error within a few epochs. A block can be defined as one or more consecutive layers and is usually set to a residual block. The objec-tive function per-block to be optimized during our proposed quantization process is as follows: becomes the largest due to the magnitude of α1. Such a large gradient for b1, however, is not desirable because the change in b3 (of the lower bit-position) should be more fre-quent than that in b1 (of the higher bit-position) if we target smoothness in the amount of the overall change in wq when the corresponding bit-code is updated. To be more specific, we would like to mutate the bit-code gradually from the lower bit-position (e.g., 111 → 110), which would be also observed in the changes of full-precision weights, not rad-ically (e.g., 111 → 011). Such radical change may arise from a non-differentiable step function of which the output is binary parameter bi. In practice, binary parameters could not converge during the optimization by the na¨ıve approach.
+To fundamentally address this issue, we reformu-late full-precision weights w using the initial {αi}q and {bi}q where {bi}q form. i=1 i=1 before conducting post-training quantization, i=1 is translated to softbit vector, a differentiable arg min wq
+∆zT · H(z) · ∆z, (5) where ∆z is the perturbation of the block outputs and H(z) is the Hessian matrix of the block outputs. However, com-puting the Hessian requires high computational cost, so we approximate it as c × I, where c is a constant and I is the identity matrix. Thus, the objective function becomes as follows:
+For brevity, we define several functions as follows:
+• base(w) := the smaller one of the 2-nearest neighbors (2-nn) in C to w, where C = {(cid:80)q xi|xi ∈ {+αi, −αi}}
+• scale(w) := the distance between 2-nn in C to w
+• m(w) := the distance between w and base(w)
+• sb=softbit(w) := clip( m(w) scale(w) , 0, 1) arg min wq (cid:12) (cid:12) (cid:12)z − zq(cid:12) (cid:12) (cid:12) (cid:12) (cid:12) 2
+F , (6)
+By exploiting such functions, we can reformulate w as where z and zq are the block outputs of the pre-trained full-precision network and the quantized network, respectively (i.e., ∆z = z − zq). Thus, we can consider this process a sort of knowledge distillation [9, 14] in which the pre-trained model corresponds to a teacher while the quantized model becomes a student. Note that, we also used the em-pirical Fisher instead of the Hessian as done in BRECQ [22], but there were no significant differences in the results be-tween utilizing the Fisher or not.
+In fact, the empirical
+Fisher approximation may negatively affect the results [19].
+To explain a na¨ıve approach optimizing quantization pa-rameters in a bottom-up manner, we suppose that a quan-tized weight wq is equals to α1b1 + α2b2 + α3b3, the order of αi is given as α1 > α2 > α3 ≥ 0, and g denotes ∂L
+∂wq .
+Then, we can compute the gradient with respect to bi as g · αi, which means the gradient to be accumulated into b1 follows: w ≈ wr = base(w) + softbit(w) × scale(w) (7) which is identical to full-precision w except outliers of
+|w| > (cid:80) αi. Figure 2 provides an example of reformula-tion when quantization bit-width is equal to 2. Note that softbit(w) can be considered the result of min-max scaling of w’s for each section.
+To encourage softbit to converge towards either 0 or 1, we use an adaptive rounding method proposed in
+AdaRound [29] where rectified sigmoid [26] is utilized as follows: h(v) = clip(S(v)(ζ − γ) + γ, 0, 1), (8) where S(·) denotes the sigmoid function, and ζ and γ are stretch parameters. We initialize v as h−1(softbit(w))
+Figure 2. Reformulation. When quantization bit-width is 2, there are four quantization points (qij ∈ QBiQ, i, j ∈ {0, 1}) and three sections ([q00, q01], [q01, q10], and [q10, q11]), where subscripts denote the bit-code corresponding to the quantization point. Weights in each section share base and scale, but each weight has its own m. Reformulation allows softbit (sb) to be a real number between 0 and 1, and sb is encouraged to be either 0 or 1 during the optimization. Provided that sb of w1 close to q00 is converged to 1 after the optimization, the bit-code of w1 is changed from ’00’ to ’01’. and add the regularization term to the objective to enforce h(v) to be either 0 or 1, which can be expressed as arg min wq (cid:12) (cid:12) (cid:12)z − zq(cid:12) (cid:12) (cid:12) (cid:12) (cid:12) 2
+F + λ (cid:88) 1 − (cid:12) (cid:12)2h(vi) − 1(cid:12) (cid:12)
+β
+. (9) i
+In Eq. (9), β is annealed during the optimization such that h(v) gets closer to either 0 or 1 [29]. By reformulating w as in Eq. (7), we can compute the gradient of {αi}q i=1 and sb as does in the computation of gradient of a floating-point number. As shown in Figure 2, the scaling factors, the bi-nary code, and softbit are involved when back-propagating gradients. Depending on the optimized sb, each element of w is assigned to one of the two nearest neighbors in
+{(cid:80)q xi|xi ∈ {+αi, −αi}} which is revised by optimized
+{αi}q i=1.
+Algorithm 2 summarizes how Mr.BiQ optimizes a block by minimizing the reconstruction error. Mr.BiQ only needs
+Algorithm 2 Mr.BiQ
+Input: Full-precision weights wb ∈ Rn in a block fb, bit-width q, i=1 ← Decomposition(wb, q, 50) ▷ Algorithm 1
+▷ See Eq.(7)
+Sampled data set Dc b ← reformulation(wb, α1, . . . , αq)
+Output: Quantized block fb(·; wq b ) 1: procedure MR.BIQ(wb, q, Dc) 2: 3: 4: 5: 6: 7: 8: 9: 10:
+{αi, bi}q wr for each input x ∈ Dc do b−1(. . . f q aq ← f q 2 (f q zq ← fb(aq; wr b ) a ← fb−1(. . . f2(f1(x; w1); w2) . . . ; wb−1) z ← fb(a; wb) (cid:12) (cid:12)zq − z(cid:12)
+L ← (cid:12) (cid:12) 2 (cid:12) (cid:12) (cid:12)
+F
+L.backward() 2) . . . ; wq
+▷ Update wr 1 (x; wq 1); wq b−1)
+▷ Student block
+▷ Teacher block
+▷ See Eq.(6) and (9) b and the step size of aq 11: 12:
+QBiQ ← update(α1, . . . , αq)
+{bi}q i=1 ← Restore(sb) i=1 and {bi}q a small unlabeled calibration set Dc sampled from the train-ing data set Dt (i.e., Dc ⊂ Dt and |Dc| ≪ |Dt|). Af-ter initialization of {αi}q i=1 (Line 2 in Algo-rithm 2), Mr.BiQ reformulates wb using initial {αi}q i=1 and the binary coding vectors is translated into softbit vector sb ∈ Rn (Line 3). Then, Mr.BiQ optimizes both {αi}q i=1 and sb to minimize the reconstruction error (Line 4–10).
+After the optimization, QBiQ is updated based on the opti-mized {αi}q i=1 (Line 11) and each element of softbit vector sb is restored to the nearest bit-code (Line 12). The op-timization is sequentially performed from the block closest to the input layer. To compensate accumulation of quantiza-tion error, the student block takes the quantized activations passed through the previous quantized blocks as the input (i.e., aq in Line 5) which is different from the input of the teacher block (i.e., a in Line 7). The notation f q b indicates the quantized output of the block fb (i.e., f q b =Q(fb), where
+Q is any quantizer.). In Section 4, we utilize LSQ [7] as the activation quantizer and the step size of activations can be optimized along with wr b in Line 10. 4. Experimental Results
+We evaluate our proposed method by testing it on re-cently proposed Transformer models for vision tasks and natural language processing (NLP) tasks in addition to convolutional neural networks (CNNs). With randomly sampled 1K images from ImageNet (ILSVRC12) [36], we quantize various CNNs including ResNet [13], Mo-bileNetV2 [38], RegNet [33] and MnasNet [41]. Also, we quantize transformer models for vision tasks such as
+ViT [6] and DeiT [42]. As for the NLP tasks, we evalu-ate MNLI-matched, MRPC (from GLUE benchmark [43]) and SQuAD 1.1 [34] for on both BERT [5] and Distil-Table 1. Ablation Study (top-1 accuracy (%))
+#Bits (W/A) 32/32 2/32 3/32 4/32
+Methods
+Full Prec.
+Alpha-only
+Bit-only
+Mr.BiQ
+Alpha-only
+Bit-only
+Mr.BiQ
+Alpha-only
+Bit-only
+Mr.BiQ
+ResNet-18
+ResNet-50 MobileNetV2
+RegNetX-600MF
+RegNetX-3.2GF MnasNet 71.08 37.20 66.83 67.92 65.23 69.71 70.17 68.88 70.41 70.76 77.00 48.21 72.12 73.10 72.61 75.52 75.83 75.31 76.19 76.42 72.49 27.33 58.83 62.96 65.79 69.26 70.57 70.66 71.28 72.11 73.71 35.64 65.45 67.24 68.09 71.45 72.11 71.88 72.79 73.15 78.36 53.34 73.06 74.89 74.52 76.91 77.63 76.97 77.65 78.24 76.68 33.45 60.12 70.12 71.84 74.17 75.15 75.45 75.97 76.17
+BERT [39].
+Throughout this section, we mainly compare Mr.BiQ with BRECQ [22], a post-training quantization framework, which has shown the state-of-the-art result among integer-based PTQ approaches while it has shown comparable re-Such a framework includes sults to QAT approaches.
+AdaRound [29] for weight quantization and learned step size quantization (LSQ) [7] for activation quantization.
+While BRECQ selects asymmetric quantization for both weights and activations, Mr.BiQ utilizes symmetric quanti-zation for both of them. In all experiments, weights and ac-tivations are quantized channel-wise and layer-wise, respec-tively. We also quantize activation uniformly using LSQ [7] as did in BRECQ. Note that activation quantization opti-mizes only the step size. Based on the step size optimized offline, activations can be allocated to the nearest quantiza-tion point at inference by rounding off.
+For all CNNs evaluations, we quantize the weights of the first and the last layer into 8 bits as did in [22]. For Trans-former models (i.e., ViT [6], DeiT [42], BERT [5], and Dis-tilBERT [39]), we do not quantize the input of the softmax layer and the normalization layer as did in [25, 32, 50]. We measure the accuracy of 20 runs with randomly sampled datasets, and then the average values and the standard de-viations are obtained. Moreover, we evaluate the t-test to identify whether the figures are statistically different or not.
+Please refer to Appendix for more details on other specific experimental setups. 4.1. Ablation Study
+In Table 1, we first compare three different schemes to optimize quantization parameters: scaling factors (labeled
+”Alpha-only”), binary codes (”Bit-only”), and both of them (”Mr.BiQ”). To minimize the block-wise reconstruction er-ror, each block is optimized for 20K steps with a batch size of 32, except in the case of ”Alpha-only” optimization for which 1k-step is enough to converge successfully. From our evaluation, learning only scaling factors (”Alpha-only”) is enough to achieve nearly full accuracy at 4-bit quantization while the accuracy reaches a saturation point at 3-bit in most schemes. Thus, ”Alpha-only” may be a good choice if we use more than 3-bit for quantization since it is simple and takes less time than others. At ultra-low bit-width (i.e., 2-bit), however, improvement in accuracy is severely bound to the initial bit-code, which implies that the bit-flipping is re-quired in order to further improve the accuracy of the mod-els. Indeed, ”Bit-only” shows a great improvement in accu-racy and reaches nearly the same accuracy as prior works; but there is still room for improvement of the accuracy by optimizing both the multi-level step size and the bit-code to-gether. Mr.BiQ is such an algorithm to allow both of them to be optimized jointly and presents the best accuracy among the three quantization schemes for multi-level binary quan-tization. 4.2. Comparison on Convolutional Neural Nets
+Weight-Only Quantized Models As the baseline, we test
+”Data-free” quantization, a na¨ıve approach, which mini-mizes the quantization error without any retraining, fine-tuning, or calibration.
+In other words, ”Data-free” per-forms Algorithm 1 once from the pre-trained model. We also implement existing methods [47, 49] in a post-training quantization manner (labeled ”Top-down”). By setting the objective as minimizing the block-wise reconstruction er-ror, ”Top-down” decomposes weights into {αi}q i=1 and
+{bi}q i=1, and updates weights using STE during the opti-mization. In addition, the results of BRECQ are included in the comparison. As shown in Table 2, Mr.BiQ outperforms other methods especially when weights are quantized into 2-bit. The results also indicate that our bottom-up approach (i.e., Mr.BiQ) is clearly better than the conventional BiQ method (”Top-down”) at least in post-training. In Table 2,
+BRECQ uses the Fisher information matrix while Mr.BiQ does not.
+Table 2. The evaluation on Weight-Only Quantized Models (top-1 accuracy (%))
+Methods
+Full Prec.
+Data-free
+BiQ
+Top-down
+Mr.BiQ
+INT
+BRECQ* [22]
+Data-free
+BiQ
+Top-down
+Mr.BiQ
+INT
+BRECQ* [22]
+Data-free
+BiQ
+Top-down
+Mr.BiQ
+#Bits (W/A) 32/32 2/32 3/32 4/32
+BRECQ* [22]
+INT
+* The figures are taken from [22].
+ResNet-18
+ResNet-50 MobileNetV2
+RegNetX-600MF
+RegNetX-3.2GF MnasNet 71.08 0.16 63.45 77.00 0.12 68.67 67.92±0.11 73.10±0.11 66.30±0.12 72.40±0.12 5.50 68.41 15.75 74.19 70.17±0.08 75.83±0.07 69.81±0.05 75.61±0.09 55.69 69.70 58.19 75.63 70.76±0.06 76.42±0.06 70.70±0.07 76.29±0.04 72.49 0.07 50.35 62.96±0.18 59.67±0.13 0.53 66.67 70.57±0.10 69.50±0.12 29.32 70.15 72.11±0.07 71.66±0.04 73.71 0.11 58.32 67.24±0.10 65.83±0.13 4.95 69.03 72.11±0.10 71.48±0.07 36.67 71.30 73.15±0.07 73.02±0.09 78.36 0.11 67.87 76.68 0.11 57.47 74.89±0.10 70.12±0.17 73.88±0.14 67.13±0.13 20.65 75.21 5.52 72.25 77.63±0.08 75.15±0.09 77.22±0.04 74.58±0.08 66.58 76.77 54.47 75.21 78.24±0.05 76.17±0.06 78.04±0.04 76.00±0.02
+Table 3. The evaluation on Fully-Quantized Models (top-1 accuracy(%))
+#Bits (W/A) 32/32 2/4
+Full Prec.
+Mr.BiQ
+BRECQ* [22]
+AdaQuant* [15]
+Mr.BiQ
+BRECQ* [22]
+Bit-Split* [44]
+AdaQuant* [15]
+ZeroQ* [3]
+LAPQ* [31]
+* The figures are taken from [22]. 71.08 66.61±0.10 64.80±0.08 0.21 69.68±0.08 69.60±0.04 67.56 67.5 21.71 60.3 4/4
+ResNet-18
+ResNet-50 MobileNetV2
+RegNetX-600MF
+RegNetX-3.2GF MnasNet 77.00 71.38±0.15 70.29±0.23 0.12 75.17±0.08 75.05±0.09 73.71 73.7 2.94 70.0 72.49 57.27±0.22 53.34±0.15 0.10 68.97±0.09 66.57±0.67
+-34.95 26.24 49.7 73.71 64.15±0.12 59.31±0.49
+-71.18±0.09 68.33±0.28
+--28.54 57.71 78.36 72.50±0.11 67.15±0.11
+-76.65±0.10 74.21±0.19
+--12.24 55.89 76.68 65.48±0.18 63.01±0.35
+-73.39±0.13 73.56±0.24
+--3.89 65.32
+Fully-Quantized Models Table 3 evaluates the accuracy of the models quantized by various approaches, when both weights and activations are quantized. Likewise, the results show that Mr.BiQ outperforms other methods. Note that, even if there is no accuracy drop due to activation quan-tization in ”Top-down” (if so, the results of ”Top-down” after activation quantization is the same as ”Top-down” in
+Table 2), the performance is inferior to Mr.BiQ of Table 3 which includes activation quantization.
+Table 4. The t-tests between Mr.BiQ and BRECQ [22] (p-value)
+#Bits (W/A) 2/4 4/4 t-test
+ResNet-18
+ResNet-50
+Student
+Welch
+Student
+Welch 1.14E-33 7.64E-35 2.98E-19 2.37E-19 1.46E-29 4.25E-31 9.91E-23 9.13E-23
+RegNetX
+-600MF 3.25E-28 4.74E-34 1.17E-31 6.28E-32
+RegNetX
+-3.2GF 9.84E-44 9.89E-48 2.66E-42 3.98E-43
+We also perform the t-test to identify whether the fig-ures listed in Table 3 have statistical significance. To con-duct the test, we reproduce the results of BRECQ using their open-source code3. Because we use the different sampled datasets in each experiment, we evaluate an unpaired t-test such as Student’s and Welch’s t-test [45]. When the sample means from evaluations of Mr.BiQ and BRECQ are denoted by ˜X1 and ˜X2, we set the null hypothesis and the alterna-tive hypothesis as H0 : ˜X1 = ˜X2 and Ha : ˜X1 > ˜X2, respectively. Table 4 shows the p-values of each evaluation when quantization bit-width is W2A4 or W4A4. The results indicate that the null hypothesis is rejected in favor of the al-ternative hypothesis. In other words, the performance gap between Mr.BiQ and BRECQ is not likely to have occurred by chance. 4.3. Comparison on Transformer Models
+We measure the accuracy on Transformer models not only for vision tasks (such as ViT-Base (ViT-B), ViT-Large (ViT-L), DeiT-Small (DeiT-S), and DeiT-Base (DeiT-B)) but also for NLP tasks (such as BERT and DistilBERT). 3https://github.com/yhhhli/BRECQ
+Table 5. Comparison on Vision Transformers (top-1 accuracy(%)) 3/8 2/8
+W/A
+† [22]
+† [22]
+Full Prec.
+Data-free
+Mr.BiQ
+BRECQ
+Data-free
+Mr.BiQ
+BRECQ
+Data-free
+Mr.BiQ
+BRECQ
+Data-free
+Mr.BiQ
+BRECQ
+Percentilea [21]
+PTQVTa,b [25]
+Bit-Splita [44]
+EasyQuanta [46] a The figures are taken from [25]. The baselines are 77.91, 76.53, 79.8 and 81.8 for
+ViT-B 78.04 55.70 75.46±0.11 71.52±2.76 74.73 77.41±0.06 75.56±1.90 76.98 77.76±0.05 76.49±1.70 74.28 77.34±0.07 77.34±0.06 71.58 75.26
+--DeiT-B 81.74 37.72 78.97±0.07 76.91±0.13 75.43 81.10±0.08 80.76±0.05 79.49 81.45±0.04 81.43±0.05 78.70 80.86±0.07 81.03±0.06 73.99 77.47 76.39 75.86
+DeiT-S 79.72 13.99 73.15±0.16 68.92±0.15 67.01 78.09±0.10 77.46±0.09 75.72 79.07±0.05 78.96±0.06 71.58 76.82±0.10 77.88±0.06 70.49 75.1 74.04 73.26
+ViT-L 76.93 57.82 75.86±0.12 72.45±1.04 74.57 76.73±0.07 76.08±0.44 76.15 76.84±0.05 76.58±0.06 74.69 76.33±0.08 75.99±0.04 71.48 75.46
+--† [22]
+† [22] 4/8 6/6
+ViT-B, ViT-L, DeiT-S and DeiT-B, respectively. b It represents the results for mixed-precision.
+† We apply BRECQ to Transformer models for vision tasks based on the open-source code.
+Although BRECQ did not evaluate Transformer models, we implemented block-wise adaptive rounding based on the open-source code, as an integer-based approach, for com-parison as shown in Table 5 and 6. For quantization, we define a block as an encoder layer. In other words, we per-form the optimization for each encoder consisting of several layers.
+Similar to results in CNNs, Mr.BiQ is especially effec-tive when the weights are quantized to 2-bit. To the best of our knowledge, this work is the first to present a reasonable accuracy on Transformer models with 2-bit weights after post-training quantization. Interestingly, when parameters of BERT and DistilBERT are optimized with small datasets such as MRPC, we observed the accuracy is improved over the full-precision baseline, which is also reported in other works (e.g., in [18]). This observation may indicated that quantization has a regularization effect. Compared to QAT approaches (such as Q8BERT [48], TerneryBERT [50], and
+KDLSQ-BERT [17]), Mr.BiQ shows prominent results par-ticularly in low bit-width (i.e., 2-bit). Note that QAT per-forms end-to-end back-propagation with the entire dataset.
+In terms of the amount of dataset and time required for op-timization, Mr.BiQ shows competitive accuracy (or score) even compared to QAT approaches. 5.

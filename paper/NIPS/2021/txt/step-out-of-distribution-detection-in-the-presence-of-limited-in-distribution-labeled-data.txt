@@ -1,0 +1,199 @@
+Abstract
+Existing semi-supervised learning (SSL) studies typically assume that unlabeled and test data are drawn from the same distribution as labeled data. However, in many real-world applications, it is desirable to have SSL algorithms that not only classify the samples drawn from the same distribution of labeled data but also detect out-of-distribution (OOD) samples drawn from an unknown distribution.
+In this paper, we study a setting called semi-supervised OOD detection. Two main challenges compared with previous OOD detection settings are i) the lack of labeled data and in-distribution data; ii) OOD samples could be unseen during training. Efforts on this direction remain limited. In this paper, we present an approach STEP significantly improving OOD detection performance by introducing a new technique: Structure-Keep Unzipping. It learns a new representation space in which OOD samples could be separated well. An efficient optimization algorithm is derived to solve the objective. Comprehensive experiments across various OOD detection benchmarks clearly show that our STEP approach outperforms other methods by a large margin and achieves remarkable detection performance on several benchmarks. 1
+
+Introduction
+Deep learning has achieved success in many application scenarios, such as computer vision, speech recognition, natural language processing [10]. The excellent performance typically rely on sufficient supervised information. However, collecting large amounts of well-labeled training data is not always available in real-world applications due to the expensive cost of the labeling process. Therefore, tremendous efforts have been devoted to semi-supervised learning (SSL) [36, 30] which aims to enhance the model performance by exploiting much cheaper unlabeled data, and have shown promising performance [52, 37, 29].
+Previous SSL studies [39, 41] typically work on the assumption that unlabeled data and test data are drawn from the same distribution as labeled data. However, it is often the case that such an assumption fails in practical applications [13, 14]. For example, in document classification [9], irrelevant documents readily occur in the testing data leading to high-confidence misclassification.
+Similar cases commonly appear in other applications, such as medical diagnosis [4] and autonomous driving [8]. In such applications, it is desirable to have SSL algorithms which could not only classify samples from known distributions accurately but also be equipped with the ability to detect out-of-distribution (OOD) samples from unknown distributions precisely.
+∗Contribute to this work equally
+†Corresponding author 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+OOD detection has been studied for a long history with numerous methods proposed, such as ODIN
+[31], Mahalanobis [27], DeConf [20], ELOC [43]. These methods perform OOD detection based on the logits of the model or the Mahalanobis distance in the feature space. However, it is hard to adapt these methods to semi-supervised settings because they all rely on massive labeled data. There are some methods associating with unlabeled data, such as UOOD [49], CSI [40], SSD [38] have been proposed recently. These methods assume that the model can obtain sufficient in-distribution (ID) labeled data or ID unlabeled data during the training process. Such an assumption also limits their ability to practical problems.
+Therefore, we study a novel setting called semi-supervised OOD detection. Specifically, only a tiny subset of ID labeled data is observed. The other ones remain unlabeled and may belong to ID or OOD. Here, we assume that abundant ID data is contained in the unlabeled data for extracting
+ID information. This setting is ubiquitous in real-world applications. For example, in web page classification [47], acquiring large numbers of web pages annotated with relevant categories is very expensive, and unlabeled web pages crawled from the Internet according to keywords usually contain irrelevant pages that belong to unseen categories. In medical diagnosis [4], warning users of the model’s uncertainty is crucial because any unfaithful diagnosis will bring unimaginable disasters to the patients’ health. In ride-sharing liability judgment [15], detecting abnormal orders is of significant value, while collecting training data will meet similar problems stated above. Similar cases often occur in other real-world applications, such as crowdsourcing [45, 28]. There are two main challenges for us compared with previous OOD detection settings. First, both the labeled data and directly available ID data are limited, while sufficient unlabeled data is mixed with ID and OOD samples.
+Second, OOD samples could be unseen during the training, requiring more stringent generalization of the model.
+Focusing on semi-supervised OOD detection, we find that the widely-used Mahalanobis distance is no longer suitable as the confidence score for OOD detection. This is because the necessary covariance matrix ˆΣ for calculating Mahalanobis distance is hard to estimate accurately with limited ID samples which will severely affect the performance of OOD detection. To alleviate this issue, we propose a novel STEP (STructure-keEP) approach. The idea is to detect OOD samples in a detection-specific space where we maintain the same local topological structures as the original feature space, because the relationships between samples need to be confirmed through local topological structures. We introduce a new objective and optimize it efficiently. The experiments prove that our STEP approach outperforms previous methods by a large margin on diverse data sets.
+The contributions of our paper are summarized as follows:
+• We propose a practical setting for OOD detection, called semi-supervised OOD detection.
+• To alleviate the problem of Mahalanobis distance that the necessary covariance matrix ˆΣ is hard to be estimated with limited ID samples, we present a new distance calculated in a detection-specific space as OOD confidence scores.
+• We evaluate our approach with comprehensive experiments across various OOD detection benchmarks. Our proposal outperforms previous methods by a large margin and achieves remarkable detection performance on several benchmarks. 2 Method 2.1 Notations and Setting
+In the semi-supervised OOD detection setting, we assume that a limited label data set Dl =
+{(xi, yi)}n i=1 consisting n samples with labels drawn from ID, and an unlabeled data set Du =
+{(xi)}m i=1 consisting m unlabeled samples drawn both ID and OOD, are accessible during the train-ing phase. We denote the set of ground-truth classes in the labeled data set Dl and unlabeled data set
+Du as Cl and Cu, respectively. The labeled samples can be classified into one of K classes denoted by Cl = {c1, c2, . . . , cK}, and the unlabeled samples can be classified into the seen K classes Cl and some unseen classes denoted by Cn = Cu\Cl. The goal is to distinguish whether a sample in Du or an unknown testing sample is drawn from ID or not. 2
+2.2
+Inaccurate Mahalanobis Distance and Our Approach
+Mahalanobis distance which is widely used in previous studies [27, 38], has been proven to be a powerful metric in OOD detection. MD(xi, xj) denotes the function measuring the Mahalanobis distance between sample xi and sample xj based on estimated covariance matrix ˆΣ:
+MD(xi, xj) = (cid:113) (xi − xj)⊤ ˆΣ−1(xi − xj) (1)
+Previous methods mentioned above calculate the minimum Mahalanobis distance between target sample x and each class center as the confidence score:
+SCOREMD(x) = min c∈c1,c2,...,cK
+MD(x, µc) (2) where µc denotes the center of samples which belong to class c and ˆΣ is the covariance matrix estimated on all ID samples.
+However, ˆΣ is hard to be accurately estimated in a semi-supervised OOD detection setting because the available ID labeled data set Dl is insufficient. Inaccurate estimation of ˆΣ will affect the calculation of Mahalanobis distance. This makes it difficult for the algorithm to distinguish OOD samples and
+ID samples near the cluster boundary.
+Instead of using inaccurate Mahalanobis distance, we decide to learn a P to project samples into space where a large margin separates ID samples and OOD samples. Inspired by the topological technology
+[44] used in noisy label problems and cluster assumption [36] used in SSL, we hope that the projected samples can maintain the same local topological structure as the original space while increasing the distance between samples not directly topologically connected. Because of the inaccurate estimation of ˆΣ, we consider that relationship between samples that are not topologically adjacent is uncertain.
+Their relationships need to be confirmed through each local topological structure. We formulate our goal into the objective: max
+P s.t. (cid:88)
+∥Pxi − Pxj∥2 xi,xj ∈Dl∪Du
+∥Pxi − Pxn∥2 = MD(xi, xn), (3) if xn ∈ Bk(xi) where, M(xi, xj) is the Mahalanobis distance between xi and xj in the feature space and Bk(xi) is the set of k nearest neighbours of xi.
+Finally, our detection-specific metric can directly calculate as L2 distance in the projected space:
+N (xi, xj) = ∥Pxi − Pxj∥2 (4) 2.3 Backbone Pretraining
+Our semi-supervised OOD detection task considers OOD detection as a clustering problem based on the feature space. Therefore, reliable feature representations are essential. Benefiting from recent progress on self-supervised learning, we adopt a simple contrastive learning method SimCLR [5] to pre-train our backbone network on the whole dataset Du ∪ Dl in an unsupervised fashion. We find that representations obtained by SimCLR have a reasonable ability to distinguish ID and OOD samples. Notably, the learned representations could be not only used for our STEP approach but also used as the initialization of downstream tasks. 2.4 Structure-Keep Unzipping
+Based on the representations obtained by SimCLR, we further train a P to project samples into a detection-specific space via our objective formulated in Eq.(3). However, there are two main i) Building a KNN graph for extracting topological structure needs O(n2d2) time difficulties: complexity to calculate Mahalanobis distance between each pair of samples. This step is very time-consuming because we use an ensemble of representations from each backbone network’s layer, and feature dimension d is relatively large. ii) The constraint in Eq.(3) can not be directly optimized. 3
+Figure 1: The overall of STEP approach: (a) In initial step, we use contrastive learning to train initial representations. (b) In step A, we estimated statistics information via limited labeled data and extracted topological structure via the KNN algorithm. (c) In step B, we train a P to project all the samples into a detection-specific space where we can use L2 distances as OOD scores.
+First, we transform the process of calculating pairwise Mahalanobis distance into calculating pairwise
+Euclidean distance in projection space. The time complexity of this step reduces from O(n2d2) to O(n2d). Specifically, as shown in Eq.(5), we can perform cholesky decomposition on ˆΣ−1 to get linear projector the PMD. Then, we multiply all samples by PMD to project them into a new space where Euclidean distance equals to original Mahalanobis distance between each pair of samples. There are n2 pairwise Euclidean distances to calculate, and each calculation costs O(d) time complexity. Therefore, the total time complexity of this step is O(n2d).
+MD(xi, xj) = (cid:113) (xi − xj)⊤ ˆΣ−1(xi − xj) = ∥PMDxi − PMDxj∥2 (5)
+MDPMD = ˆΣ−1
+After converting Mahalanobis distance to Euclidean distance, we can further use the advanced KNN toolkit, such as Faiss [22], to speed up the entire process.
+P⊤ s.t.
+Second, we define LKeep and LU nzip that can be directly optimized to approximately achieve our objective shown in Eq.(3). Both LKeep and LU nzip are shown in Eq.(6): (cid:26)LKeep = max(0, ∥Pxi − Pxn∥2 − MD(xi, xn)),
+LU nzip = −∥Pxi − Pxj∥2. (6) where xi, xj are randomly sampled from Dl ∪ Du, and xn is randomly sampled from Bk(xi). The final loss to optimize P is Loss = LKeep +LU nzip. The overall of our STEP approach is summarized in Fig.(1), and the pseudo-code of our approach is shown in Algo.(1).
+In the detection stage, we directly use the minimum L2 distance between the target sample and each class center in the detection-specific space as the confidence score:
+Score(x) = min c∈{c1,c2,...,cK }
+N (x, µc) (7) where the µc is the center of class c in the original feature space. 3 Experiments 3.1 Experimental Setup
+In-distribution Data Set. We use CIFAR-10 and CIFAR-100 [25] as ID data sets in our experiments.
+They both contain 50,000 training images and 10,000 testing images. The image size of these two data sets is 32 × 32. For CIFAR-10, each image belongs to one of 10 classes, and we randomly sample 250 training images as ID labeled data Dl. For CIFAR-100, the size of image classes is 100, and we randomly sample 400 training images as ID labeled data. Dl. We add the remaining training images to the unlabeled data Du. 4
+Algorithm 1 Training Phase of STEP
+Input: Dl: ID labeled data set; Du: unlabeled mixed data set; K: number of neighbours
+Output: pre-trained backbone fθ(·); projctor P 1: train backbone fθ(·) via contrastive learning on Dl ∪ Du 2: estimate ˆΣ on Dl with fθ(·) 3: calculate PMD based on ˆΣ−1 4: build KNN on Dl ∪ Du with PMD and fθ(·) 5: for epoch ∈ {1, 2, . . . , epochmax} do 6: 7: 8: 9: 10: end for 11: return fθ(·) and P randomly sample xi, xj from Dl ∪ Du randomly sample xn from Bk(xi) calculate Loss based on Eq.(6) optimize P via SGD according to Loss
+Out-of-distribution Data Set. We use Tiny ImageNet data set [6] and Large-scale Scene Understand-ing data set [48] as OOD data sets. The Tiny ImageNet data set (TIN) is a subset of ImageNet, which contains 10,000 test images, includes 200 different classes. Following the settings used by previous studies [31, 43, 49], we use two variants of TIN: TinyImageNet-crop (TINc) and TinyImageNet-resize (TINr), by randomly cropping or downsampling each image to 32 × 32, respectively. The Large-scale
+Scene Understanding data set (LSUN) contains 10,000 testing images belonging to 10 different scene categories. Similarly, we use two variants of LSUN: LSUN-crop (LSUNc) and LSUN-resize (LSUNr). Because some comparison methods in our experiments heavily rely on OOD validation.
+We randomly draw several images from ID testing images and OOD images as the OOD validation set. The rest of the OOD images are added to unlabeled data Du and used as testing data. These
+OOD data sets are released by ODIN [31] with their code1.
+Comparsion Methods. We compare our STEP approach with representative OOD detection methods, including the state-of-the-art UOOD method. ODIN [31] is a common baseline of OOD detection.
+It uses maximal softmax score combining temperature scaling and input preprocessing tricks to distinguish ID and OOD samples. MAH [27] uses Mahalanobis distance as the OOD confidence score. For features of each layer in the backbone model, it independently calculates the Mahalanobis distances between the target sample and each known class center. Then it integrates them by weighted averaging via an extra OOD validation set. We denote it as MAH † because it uses a validation set when training. UOOD [49] utilizes a two-head CNN consisting of one common feature extractor and two classifiers which has different decision boundaries to detect OOD samples. This method optimizes a discrepancy loss between two classifiers during the training stage and uses this discrepancy as the
+OOD score when testing. However, this method relies on extra OOD validation to perform model selection. Therefore, we denoted it as UOOD † in our experiments. For fair comparisons, we also implement a variant of it denoting as UOOD . UOOD that uses discrepancy loss to perform model selection instead of the performance on an extra OOD validation set.
+Evaluation Metrics. Following the settings used by previous studies [49, 43, 31], we evaluate our approach with five common metrics: AUROC, FPR at 95% TPR, Detection Error, AUPR-In, and
+AUPR-Out. More details about evaluation metrics are presented in the supplementary material.
+Implementation Details. In all experiments, we adopt the Densenet-BC [21] as the backbone since it is widely used in previous studies [49, 43, 31]. Our backbone is trained by SOTA contrastive learning method SimCLR [5] for 500 epochs. We set the learning rate to 10−3 with a cosine annealing strategy. For fair comparisons, each comparison method can use the pre-trained backbone model.
+MAH [27] uses the features from different layers extracted from the pre-trained backbone model.
+A well-trained linear classifier with a pre-trained backbone model is provided for ODIN [31] and
+UOOD [49]. The hyper-parameter K for STEP is set to 12 for all data set pairs. All experiments are performed on one single NVIDIA 3090 graphics card. More details on implementation are provided in the supplementary material and our code has been open source 2. 1https://github.com/ShiyuLiang/odin-pytorch 2https://www.lamda.nju.edu.cn/code_step.ashx 5
+3.2 Experiment Results
+OOD Detection Performance. We evaluate STEP with compared methods on various OOD bench-marks. Analyzed by five common metrics, the results are shown in Tab.(1). From the results, we observe that ODIN suffers from severe performance degradation. Moreover, its performance is close to random guessing in some cases. The limitation of labeled data mainly causes this. We can hardly train a high-quality classification model to provide accurate logits for ODIN . Hence, ODIN can not give the correct judgment based on inaccurate logits. Our STEP approach outperforms methods that do not heavily rely on an OOD validation set by a large margin. Even compared with those methods that heavily rely on the OOD validation set, such as UOOD † and MAH †, our STEP approach is still better than them in most cases. However, a good OOD validation set is expensive and nearly impossible to build in the real world. The number of OOD samples can be infinitely many, and a fixed-size validation set cannot capture the complete OOD information. Therefore, introducing the validation set during training will reduce the model’s generalization in the real environment. We will verify this in detail in subsequent experiments.
+Table 1: Performance comparison on various OOD benchmarks evaluated by 5 common metrics.
+Methods with † use extra OOD validation set. The best results are indicated in bold. Our approach outperforms other methods in most cases, even though they use an extra OOD validation set.
+Metrics
+ID
+Dataset
+C
+O
+R
+U
+A
+↑
+R
+P
+T
+% 5 9 t a
+R
+P
+F r o r r
+E n o i t c e t e
+D
+↓
+↓ n
+I
+-R
+P
+U
+A
+↑
+-t u
+O
+R
+P
+U
+A
+↑ 0 1 r a f i
+C 0 0 1 r a f i
+C 0 1 r a f i
+C 0 0 1 r a f i
+C 0 1 r a f i
+C 0 0 1 r a f i
+C 0 1 r a f i
+C 0 0 1 r a f i
+C 0 1 r a f i
+C 0 0 1 r a f i
+C
+OOD
+Dataset
+TINc
+TINr
+LSUNc
+LSUNr
+TINc
+TINr
+LSUNc
+LSUNr
+TINc
+TINr
+LSUNc
+LSUNr
+TINc
+TINr
+LSUNc
+LSUNr
+TINc
+TINr
+LSUNc
+LSUNr
+TINc
+TINr
+LSUNc
+LSUNr
+TINc
+TINr
+LSUNc
+LSUNr
+TINc
+TINr
+LSUNc
+LSUNr
+TINc
+TINr
+LSUNc
+LSUNr
+TINc
+TINr
+LSUNc
+LSUNr
+ODIN
+MAH †
+UOOD
+UOOD †
+STEP 81.00 ± 6.30 59.10 ± 2.08 76.17 ± 5.37 69.05 ± 3.49 61.65 ± 6.71 54.46 ± 0.74 46.99 ± 4.99 52.06 ± 2.24 53.37 ± 10.55 89.76 ± 1.45 64.06 ± 9.12 76.89 ± 5.04 84.24 ± 8.02 90.10 ± 0.46 93.49 ± 2.42 89.79 ± 0.79 25.53 ± 4.67 43.04 ± 1.48 29.57 ± 3.82 35.52 ± 2.46 40.95 ± 5.07 46.36 ± 0.56 48.47 ± 1.61 46.73 ± 0.66 76.80 ± 8.20 57.10 ± 2.11 72.16 ± 6.60 65.37 ± 3.39 58.29 ± 5.01 52.96 ± 0.59 47.41 ± 2.86 50.47 ± 1.75 83.63 ± 5.11 58.83 ± 1.77 78.43 ± 5.12 70.51 ± 3.97 62.88 ± 7.90 55.94 ± 0.71 49.91 ± 4.42 55.18 ± 1.56 87.67 ± 2.47 86.88 ± 0.87 97.68 ± 0.09 90.41 ± 1.00 71.15 ± 2.20 73.94 ± 1.79 93.91 ± 3.41 78.45 ± 1.11 44.17 ± 6.43 58.57 ± 3.09 7.73 ± 0.46 45.41 ± 3.87 90.15 ± 1.99 80.55 ± 1.89 24.93 ± 21.75 69.69 ± 2.42 19.93 ± 2.63 20.14 ± 0.82 6.28 ± 0.25 16.23 ± 0.95 32.58 ± 1.64 31.09 ± 1.44 11.20 ± 3.73 27.33 ± 1.03 85.35 ± 2.86 86.79 ± 1.17 96.70 ± 0.21 89.93 ± 1.23 71.18 ± 2.69 70.95 ± 2.20 92.26 ± 2.17 74.22 ± 1.14 88.67 ± 2.28 84.26 ± 0.95 98.16 ± 0.12 88.84 ± 1.20 65.14 ± 2.21 71.57 ± 1.71 93.77 ± 5.30 78.19 ± 1.33 6 90.46 ± 9.74 84.67 ± 9.41 96.92 ± 2.04 80.87 ± 24.45 98.34 ± 1.57 84.80 ± 8.87 97.49 ± 1.48 97.61 ± 0.55 29.35 ± 30.05 31.72 ± 11.50 6.59 ± 3.22 32.69 ± 31.93 5.22 ± 5.59 29.09 ± 15.68 6.24 ± 3.80 4.92 ± 1.33 11.59 ± 11.35 18.07 ± 5.55 4.20 ± 2.12 18.40 ± 15.68 3.67 ± 3.62 16.53 ± 7.87 4.24 ± 2.34 3.11 ± 0.78 89.31 ± 10.05 79.02 ± 12.17 94.78 ± 4.07 79.41 ± 19.89 97.55 ± 2.04 77.32 ± 9.81 95.45 ± 2.32 95.53 ± 0.95 91.34 ± 8.69 89.21 ± 6.22 98.01 ± 1.18 84.45 ± 21.48 98.77 ± 1.23 89.44 ± 6.96 98.33 ± 0.99 98.49 ± 0.37 99.07 ± 0.48 92.63 ± 3.42 98.79 ± 0.67 97.81 ± 0.94 98.84 ± 0.83 95.31 ± 0.93 99.31 ± 0.62 98.96 ± 0.40 2.75 ± 1.65 19.61 ± 9.50 3.56 ± 1.93 6.49 ± 2.89 3.16 ± 2.25 11.10 ± 4.21 1.93 ± 2.43 2.39 ± 0.74 2.54 ± 1.27 11.71 ± 4.56 2.58 ± 1.32 4.99 ± 1.91 2.76 ± 1.00 6.88 ± 2.33 2.06 ± 1.54 1.90 ± 0.51 98.59 ± 0.67 88.72 ± 4.93 98.31 ± 0.92 96.86 ± 1.27 98.24 ± 1.50 91.67 ± 1.29 99.09 ± 0.88 98.11 ± 0.78 99.32 ± 0.35 94.60 ± 2.70 99.14 ± 0.48 98.41 ± 0.70 99.08 ± 0.51 96.84 ± 0.82 99.39 ± 0.48 99.32 ± 0.24 99.99 ± 0.00 95.61 ± 0.36 99.99 ± 0.00 99.07 ± 0.20 99.99 ± 0.01 93.51 ± 1.17 99.99 ± 0.00 98.20 ± 0.56 0.00 ± 0.00 17.63 ± 1.10 0.00 ± 0.00 4.48 ± 1.02 0.00 ± 0.01 23.21 ± 4.14 0.00 ± 0.00 8.25 ± 3.14 0.12 ± 0.01 10.77 ± 0.52 0.11 ± 0.01 4.66 ± 0.57 0.32 ± 0.06 13.26 ± 1.61 0.23 ± 0.04 6.40 ± 1.32 99.99 ± 0.00 94.71 ± 0.51 100.00 ± 0.00 99.02 ± 0.20 99.99 ± 0.01 91.91 ± 1.34 99.99 ± 0.00 98.07 ± 0.52 99.99 ± 0.00 96.31 ± 0.28 99.99 ± 0.00 99.14 ± 0.19 99.99 ± 0.01 94.66 ± 1.07 99.99 ± 0.00 98.35 ± 0.56
+Generalization of OOD Detection. Our STEP approach and some previous studies (e.g., UOOD
+, MAH ) could utilize OOD samples during the training phase. For example, our STEP performs contrastive learning on both ID and OOD data, UOOD optimizes the discrepancy loss on ID and
+OOD unlabeled data and selects the final model with an extra OOD validation set, MAH tunes their weighting parameters on an OOD validation set. Let known OOD samples denote the OOD samples that the algorithm used during the training phase, contrasting to unknown OOD samples. We want to explore whether the use of known OOD samples will reduce the performance of the model on unknown OOD samples. Therefore, we design a novel experiment for algorithms using OOD samples, in which the model is trained with ID dataset and known OOD samples while tested with unknown samples. As an example, we train the model on the ID data set (CIFAR-10) and OOD data set (TINr) and replace all OOD samples in the test set with a new OOD data set (TINc) when testing. An
+OOD detection model with strong generalization should obtain consistent performance, no matter what OOD data set we used to construct the testing set. We tested four OOD detection methods on
+CIFAR-10 with two different OOD data set pairs. From the results shown in Fig.(2), we found that
+UOOD † and MAH † have severe performance degradation when detecting unknown OOD samples.
+This phenomenon is because the OOD validation set used by these methods introduces a severe bias to their models. Furthermore, we also conducted experiments to analyze the relationship between
+OOD detection performance and loss and verified the instability in the training process of the SOTA
+UOOD † method. We put the extra experiments in the supplementary material. ODIN’s performance changes very randomly, which is also in line with expectations because it has only seen ID data during the training process. Our STEP approach gives a high and relatively close performance on both known and unknown OOD data sets, which proves the effectiveness and strong generalization of our approach. Further, we suggest that the experimental method proposed should be verified in all future OOD detection studies that use OOD samples in the training process.
+Figure 2: Performance of different methods on Known / Unknown OOD data set evaluated by various metrics. The results shows that our STEP approach not only has very good OOD detection performance, but also can generalize to unknown OOD samples.
+Ablation Study. As introduced in Section 2, our STEP approach contains four components in total:
+MAH, KNN, Unzipping, and Structure-Keep. Comprehensive ablation studies are conducted to verify the effectiveness of each component. As shown in Tab.(2), we sequentially add the components of
+STEP and verify the performance of each model on two OOD benchmarks. The first line in the table shows the results of directly distinguishing the minimum Mahalanobis distance from the target sample to each class center. Since necessary ˆΣ cannot be accurately estimated, the detection performance is not ideal. The second line proves that the geodetic distance can alleviate the inaccurate estimation problem to a certain extent, thereby improving the detection performance. The third line is the incomplete version of our STEP approach to remove Structure-Keep. The result of this line proves that the Structure-Keep technique is very important. Otherwise, the detection performance will be greatly reduced. The fourth line, our STEP approach, gives the best results. This proves that the four steps proposed in this article can only be integrated together to get the best results. 7
+Table 2: Ablation Study of our STEP approach evaluated by AUROC. This table proves that every part of our approach is indispensable.
+Different parts of STEP
+Data set pair
+MAH KNN Unzipping
+Sturture-Keep Cifar10-TINr Cifar10-LSUNr
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓ 90.96 ± 0.28 91.26 ± 1.74 79.58 ± 0.69 95.62 ± 0.39 93.46 ± 0.51 97.35 ± 0.45 80.38 ± 0.95 99.07 ± 0.20
+In this paragraph, we verify the robustness of STEP to hyper-parameter K and the
+Robustness. number of labeled data |Dl|. We test the performance of STEP on different OOD data sets for different choices of K in a large range from 2 to 18. Fig.(3a) shows that STEP is not sensitive to the hyper-parameter K (the number of neighbors when KNN is built). Furthermore, we find that choosing a smaller K helps improve the detection performance. Then we test how the amount of ID labeled data affects the performance of different methods. From the results shown in Fig.(3b), we find that our STEP is very tolerant of the amount of ID labeled data. Even in the case of extremely insufficient
+ID labeled data, an acceptable performance still can be achieved by our STEP approach. (a) AUROC with various K on different OOD bench-marks. (b) AUROC of different methods with various sizes of labeled data.
+Figure 3: The robustness of STEP approach. (a), (b) show that STEP approach is robust on K and size of labeled data, respectively. 4

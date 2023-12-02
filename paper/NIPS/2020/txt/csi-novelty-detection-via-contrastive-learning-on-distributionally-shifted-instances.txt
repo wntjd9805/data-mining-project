@@ -1,0 +1,291 @@
+Abstract
+Novelty detection, i.e., identifying whether a given sample is drawn from outside the training distribution, is essential for reliable machine learning. To this end, there have been many attempts at learning a representation well-suited for novelty detection and designing a score based on such representation. In this paper, we propose a simple, yet effective method named contrasting shifted instances (CSI), inspired by the recent success on contrastive learning of visual representations.
+Speciﬁcally, in addition to contrasting a given sample with other instances as in conventional contrastive learning methods, our training scheme contrasts the sample with distributionally-shifted augmentations of itself. Based on this, we propose a new detection score that is speciﬁc to the proposed training scheme. Our experiments demonstrate the superiority of our method under various novelty de-tection scenarios, including unlabeled one-class, unlabeled multi-class and labeled multi-class settings, with various image benchmark datasets. Code and pre-trained models are available at https://github.com/alinlab/CSI. 1
+
+Introduction
+Out-of-distribution (OOD) detection [26], also referred to as a novelty- or anomaly detection is a task of identifying whether a test input is drawn far from the training distribution (in-distribution) or not.
+In general, the OOD detection problem aims to detect OOD samples where a detector is allowed to access only to training data. The space of OOD samples is typically huge, i.e., an OOD sample can vary signiﬁcantly and arbitrarily from the given training distribution. Hence, assuming speciﬁc prior knowledge, e.g., external data representing some speciﬁc OODs, may introduce a bias to the detector.
+The OOD detection is a classic yet essential problem in machine learning, with a broad range of applications, including medical diagnosis [4], fraud detection [53], and autonomous driving [12].
+A long line of literature has thus been proposed, including density-based [74, 46, 6, 47, 11, 55, 61, 17], reconstruction-based [58, 76, 9, 54, 52, 7], one-class classiﬁer [59, 56], and self-supervised [15, 25, 2] approaches. Overall, a majority of recent literature is concerned with (a) modeling the representation to better encode normality [23, 25], and (b) deﬁning a new detection score [56, 2]. In particular, recent studies have shown that inductive biases from self-supervised learning signiﬁcantly help to learn discriminative features for OOD detection [15, 25, 2].
+Meanwhile, recent progress on self-supervised learning has proven the effectiveness of contrastive learning in various domains, e.g., computer vision [21, 5], audio processing [50], and reinforcement learning [63]. Contrastive learning extracts a strong inductive bias from multiple (similar) views of a sample by let them attract each other, yet repelling them to other samples. Instance discrimination [69]
+∗Equal contribution 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+is a special type of contrastive learning where the views are restricted up to different augmentations, which have achieved state-of-the-art results on visual representation learning [21, 5].
+Inspired by the recent success of instance discrimination, we aim to utilize its power of representation learning for OOD detection. To this end, we investigate the following questions: (a) how to learn a (more) discriminative representation for detecting OODs and (b) how to design a score function utilizing the representation from (a). We remark that the desired representation for OOD detection may differ from that for standard representation learning [23, 25], as the former aims to discriminate in-distribution and OOD samples, while the latter aims to discriminate within in-distribution samples.
+We ﬁrst found that existing contrastive learning scheme is already reasonably effective for detecting
+OOD samples with a proper detection score. We further observe that one can improve its performance by utilizing “hard” augmentations, e.g., rotation, that were known to be harmful and unused for the standard contrastive learning [5]. In particular, while the existing contrastive learning schemes act by pulling all augmented samples toward the original sample, we suggest to additionally push the samples with hard or distribution-shifting augmentations away from the original. We observe that contrasting shifted samples help OOD detection, as the model now learns a new task of discriminating between in- and out-of-distribution, in addition to the original task of discriminating within in-distribution.
+Contribution. We propose a simple yet effective method for OOD detection, coined contrasting shifted instances (CSI). Built upon the existing contrastive learning scheme [5], we propose two novel additional components: (a) a new training method which contrasts distributionally-shifted augmentations (of the given sample) in addition to other instances, and (b) a score function which utilizes both the contrastively learned representation and our new training scheme in (a). Finally, we show that CSI enjoys broader usage by applying it to improve the conﬁdence-calibration of the classiﬁers: it relaxes the overconﬁdence issue in their predictions for both in- and out-of-distribution samples while maintaining the classiﬁcation accuracy.
+We verify the effectiveness of CSI under various environments of detecting OOD, including unlabeled one-class, unlabeled multi-class, and labeled multi-class settings. To our best knowledge, we are the
+ﬁrst to demonstrate all three settings under a single framework. Overall, CSI outperforms the baseline methods for all tested datasets. In particular, CSI achieves new state-of-the-art results2 on one-class classiﬁcation, e.g., it improves the mean area under the receiver operating characteristics (AUROC) from 90.1% to 94.3% (+4.2%) for CIFAR-10 [33], 79.8% to 89.6% (+9.8%) for CIFAR-100 [33], and 85.7% to 91.6% (+5.9%) for ImageNet-30 [25] one-class datasets, respectively. We remark that
+CSI gives a larger improvement in harder (or near-distribution) OOD samples. To verify this, we also release new benchmark datasets: ﬁxed version of the resized LSUN and ImageNet [39].
+We remark that learning representation to discriminate in- vs. out-of-distributions is an important but under-explored problem. We believe that our work would guide new interesting directions in the future, for both representation learning and OOD detection. 2 CSI: Contrasting shifted instances
+For a given dataset {xm}M m=1 sampled from a data distribution pdata(x) on the data space X , the goal of out-of-distribution (OOD) detection is to model a detector from {xm} that identiﬁes whether x is sampled from the data generating distribution (or in-distribution) pdata(x) or not. As modeling pdata(x) directly is prohibitive in most cases, many existing methods for OOD detection deﬁne a score function s(x) that a high value heuristically represents that x is from in-distribution. 2.1 Contrastive learning
+The idea of contrastive learning is to learn an encoder fθ to extract the necessary information to distinguish similar samples from the others. Let x be a query, {x+}, and {x−} be a set of positive and negative samples, respectively, and sim(z, z(cid:48)) := z · z(cid:48)/(cid:107)z(cid:107)(cid:107)z(cid:48)(cid:107) be the cosine similarity. Then, the primitive form of the contrastive loss is deﬁned as follows:
+Lcon(x, {x+}, {x−}) := − 1
+|{x+}| log (cid:80) x(cid:48)∈{x+} exp(sim(z(x), z(x(cid:48)))/τ ) x(cid:48)∈{x+}∪{x−} exp(sim(z(x), z(x(cid:48)))/τ ) (cid:80)
+, (1) where |{x+}| denotes the cardinality of the set {x+}, z(x) denotes the output feature of the contrastive layer, and τ denotes a temperature hyper-parameter. One can deﬁne the contrastive feature z(x) 2We do not compare with methods using external OOD samples [24, 57]. 2
+directly from the encoder fθ, i.e., z(x) = fθ(x) [21], or apply an additional projection layer gφ, i.e., z(x) = gφ(fθ(x)) [5]. We use the projection layer following the recent studies [5, 30].
+In this paper, we speciﬁcally consider the simple contrastive learning (SimCLR) [5], a simple and effective objective based on the task of instance discrimination [69]. Let ˜x(1) be two independent augmentations of xi from a pre-deﬁned family T , namely, ˜x(1) := T1(xi) and ˜x(2) :=
+T2(xi), where T1, T2 ∼ T . Then the SimCLR objective can be deﬁned by the contrastive loss (1) where each (˜x(1)
+, ˜x(2)
+) are considered as query-key pairs while others being i negatives. Namely, for a given batch B := {xi}B i=1, the SimCLR objective is deﬁned as follows:
+) and (˜x(2) and ˜x(2)
+, ˜x(1) i i i i i
+LSimCLR(B; T ) := 1 2B
+B (cid:88) i=1
+Lcon(˜x(1) i
+, ˜x(2) i
+, ˜B−i) + Lcon(˜x(2) i
+, ˜x(1) i
+, ˜B−i), (2) where ˜B := {˜x(1) i }B i=1 ∪ {˜x(2) i }B i=1 and ˜B−i := {˜x(1) j }j(cid:54)=i ∪ {˜x(2) j }j(cid:54)=i. 2.2 Contrastive learning for distribution-shifting transformations
+Chen et al. [5] has performed an extensive study on which family of augmentations T leads to a better representation when used in SimCLR, i.e., which transformations should fθ consider as positives. Overall, the authors report that some of the examined augmentations (e.g., rotation), sometimes degrades the discriminative performance of SimCLR. One of our key ﬁndings is that such augmentations can be useful for OOD detection by considering them as negatives - contrast from the original sample. In this paper, we explore which family of augmentations S, which we call distribution-shifting transformations, or simply shifting transformations, would lead to better representation in terms of OOD detection when used as negatives in SimCLR.
+Contrasting shifted instances. We consider a set S consisting of K different (random or determin-istic) transformations, including the identity I: namely, we denote S := {S0 = I, S1, . . . , SK−1}.
+In contrast to the vanilla SimCLR that considers augmented samples as positive to each other, we attempt to consider them as negative if the augmentation is from S. For a given batch of samples
+B = {xi}B i=1, this can be done simply by augmenting B via S before putting it into the SimCLR loss deﬁned in (2): namely, we deﬁne contrasting shifted instances (con-SI) loss as follows:
+Lcon-SI := LSimCLR (cid:32) (cid:91)
+S∈S (cid:33)
+BS; T
+, where BS := {S(xi)}B i=1. (3)
+Here, our intuition is to regard each distributionally-shifted sample (i.e., S (cid:54)= I) as an OOD with respect to the original. In this respect, con-SI attempts to discriminate an in-distribution (i.e., S = I) sample from other OOD (i.e., S ∈ {S1, . . . , SK−1}) samples. We further verify the effectiveness of con-SI in our experimental results: although con-SI does not improve representation for standard classiﬁcation, it does improve OOD detection signiﬁcantly (see linear evaluation in Section 3.2).
+Classifying shifted instances. In addition to contrasting shifted instances, we consider an auxiliary task that predicts which shifting transformation yS ∈ S is applied for a given input x, in order to facilitate fθ to discriminate each shifted instance. Speciﬁcally, we add a linear layer to fθ for modeling an auxiliary softmax classiﬁer pcls-SI(yS |x), as in [15, 25, 2]. Let ˜BS be the batch augmented from
+BS via SimCLR; then, we deﬁne classifying shifted instances (cls-SI) loss as follows:
+Lcls-SI := 1 2B 1
+K (cid:88) (cid:88)
+S∈S
+˜xS ∈ ˜BS
+− log pcls-SI(yS = S | ˜xS).
+The ﬁnal loss of our proposed method, CSI, is deﬁned by combining the two objectives:
+LCSI = Lcon-SI + λ · Lcls-SI (4) (5) where λ > 0 is a balancing hyper-parameter. We simply set λ = 1 for all our experiments.
+OOD-ness: How to choose the shifting transformation? In principle, we choose the shifting trans-formation that generates the most OOD-like yet semantically meaningful samples. Intuitively, such samples can be most effective (‘nearby’ but ‘not-too-nearby’) OOD samples, as also discussed in
+Section 3.2. More speciﬁcally, we measure the OOD-ness of a transformation by the area under the receiver operating characteristics (AUROC) between in-distribution vs. transformed samples under vanilla SimCLR, using the detection score (6) deﬁned in Section 2.3. The transformation with high
+OOD-ness values (i.e., OOD-like) indeed performs better (see Table 4 and Table 5 in Section 3.2). 3
+2.3 Score functions for detecting out-of-distribution
+Upon the representation z(·) learned by our proposed training objective, we deﬁne several score functions for detecting out-of-distribution; whether a given x is OOD or not. We ﬁrst propose a detection score that is applicable to any contrastive representation. We then introduce how one could incorporate additional information learned by contrasting (and classifying) shifted instances as in (5).
+Detection score for contrastive representation. Overall, we ﬁnd that two features from SimCLR representations are surprisingly effective for detecting OOD samples: (a) the cosine similarity to the nearest training sample in {xm}, i.e., maxm sim(z(xm), z(x)), and (b) the norm of the representation, i.e., (cid:107)z(x)(cid:107). Intuitively, the contrastive loss increases the norm of in-distribution samples, as it is an easy way to minimize the cosine similarity of identical samples by increasing the denominator of (1). We discuss further detailed analysis of both features in Appendix H. We simply combine these features to deﬁne a detection score scon for contrastive representation: scon(x; {xm}) := max sim(z(xm), z(x)) · (cid:107)z(x)(cid:107). (6) m
+We also discuss how one can reduce the computation and memory cost by choosing a proper subset (i.e., coreset) of training samples in Appendix E.
+Utilizing shifting transformations. Given that our proposed LCSI is used for training, one can further improve the detection score scon signiﬁcantly by incorporating shifting transformations S.
+Here, we propose two additional scores, scon-SI and scls-SI, where are corresponded to Lcon-SI (3) and Lcls-SI (4), respectively.
+Firstly, we deﬁne scon-SI by taking an expectation of scon over S ∈ S: scon-SI(x; {xm}) := (cid:88)
+S∈S
+λcon
+S scon(S(x); {S(xm)}), (7)
+S := M/ (cid:80) where λcon a balancing term to scale the scores of each shifting transformation (See Appendix F for details).
+Secondly, we deﬁne scls-SI utilizing the auxiliary classiﬁer p(yS |x) upon fθ as follows: m(cid:107)z(S(xm))(cid:107) for M training samples is m scon(S(xm); {S(xm)}) = M/ (cid:80) scls-SI(x) := (cid:88)
+S∈S
+λcls
+S WSfθ(S(x)), (8)
+S := M/ (cid:80) where λcls weight vector in the linear layer of p(yS |x) per S ∈ S. m[WSfθ(S(xm))] are again balancing terms similarly to above, and WS is the
+Finally, the combined score for CSI representation is deﬁned as follows: sCSI(x; {xm}) := scon-SI(x; {xm}) + scls-SI(x). (9)
+Ensembling over random augmentations. In addition, we ﬁnd one can further improve each of the proposed scores by ensembling it over random augmentations T (x) where T ∼ T . Namely, for instance, the ensembled CSI score is deﬁned by sCSI-ens(x) := ET ∼T [sCSI(T (x))]. Unless otherwise noted, we use these ensembled versions of (6) to (9) in our experiments. See Appendix D for details. 2.4 Extension for training conﬁdence-calibrated classiﬁers
+Furthermore, we propose an extension of CSI for training conﬁdence-calibrated classiﬁers [22, 37] from a given labeled dataset {(xm, ym)}m ⊆ X × Y by adapting it to supervised contrastive learning (SupCLR) [30]. Here, the goal is to model a classiﬁer p(y|x) that is (a) accurate on predicting y when x is in-distribution, and (b) the conﬁdence ssup(x) := maxy p(y|x) [22] of the classiﬁer is well-calibrated, i.e., ssup(x) should be low if x is an OOD sample or arg maxy p(y|x) (cid:54)= true label.
+Supervised contrastive learning (SupCLR). SupCLR is a supervised extension of SimCLR that contrasts samples in class-wise, instead of in instance-wise: every samples of the same classes are i=1 be a training batch with class labels yi ∈ Y, and ˜C be considered as positives. Let C = {(xi, yi)}B an augmented batch by random transformation T , i.e., ˜C := {(˜xj, yj) | ˜xj ∈ ˜B}. For a given label y, we divide ˜C into two subsets ˜C = ˜Cy ∪ ˜C−y where ˜Cy contains the samples of label y and ˜C−y contains the remaining. Then, the SupCLR objective is deﬁned by:
+LSupCLR(C; T ) := 1 2B 2B (cid:88) j=1
+Lcon(˜xj, ˜Cyj \ {˜xj}, ˜C−yj ). (10) 4
+Table 1: AUROC (%) of various OOD detection methods trained on one-class dataset of (a) CIFAR-10, (b) CIFAR-100 (super-class), and (c) ImageNet-30. For CIFAR-10, we report the means and standard deviations of per-class AUROC averaged over ﬁve trials, and the ﬁnal column indicates the mean
+AUROC across all the classes. For CIFAR-100 and ImaegeNet-30, we only report the mean AUROC over a single trial. Bold denotes the best results, and ∗ denotes the values from the reference. See
+Appendix C for additional results, e.g., per-class AUROC on CIFAR-100 and ImageNet-30.
+Plane
+-Network
+Method
+OC-SVM∗ [59] 65.6
+DeepSVDD∗ [56] LeNet 61.7
+AnoGAN∗ [58] DCGAN 67.1
+OCGAN∗ [52]
+OCGAN 75.7
+Geom∗ [15]
+WRN-16-8 74.7
+Rot∗ [25]
+WRN-16-4 71.9
+Rot+Trans∗ [25] WRN-16-4 77.5
+GOAD∗ [2]
+WRN-10-4 77.2
+ResNet-18
+Rot [25]
+ResNet-18
+Rot+Trans [25]
+ResNet-18
+GOAD [2] (a) One-class CIFAR-10
+Car 40.9 65.9 54.7 53.1 95.7 94.5 96.9 96.7
+Bird 65.3 50.8 52.9 64.0 78.1 78.4 87.3 83.3
+Cat 50.1 59.1 54.5 62.0 72.4 70.0 80.9 77.7
+Deer 75.2 60.9 65.1 72.3 87.8 77.2 92.7 87.8
+Dog 51.2 65.7 60.3 62.0 87.8 86.6 90.2 87.8
+Frog
+Horse
+Ship
+Truck Mean 71.8 67.7 58.5 72.3 83.4 81.6 90.9 90.0 51.2 67.3 62.5 57.5 95.5 93.7 96.5 96.1 67.9 75.9 75.8 82.0 93.3 90.7 95.2 93.8 48.5 73.1 66.5 55.4 91.3 88.8 93.3 92.0 58.8 64.8 61.8 65.7 86.0 83.3 90.1 88.2 88.4 89.8 85.1 78.3±0.2 94.3±0.3 86.2±0.4 80.8±0.6 89.4±0.5 89.0±0.4 88.9±0.4 95.1±0.2 92.3±0.3 89.7±0.3 80.4±0.3 96.4±0.2 85.9±0.3 81.1±0.5 91.3±0.3 89.6±0.3 89.9±0.3 95.9±0.1 95.0±0.1 92.6±0.2 75.5±0.3 94.1±0.3 81.8±0.5 72.0±0.3 83.7±0.9 84.4±0.3 82.9±0.8 93.9±0.3 92.9±0.3 89.5±0.2
+CSI (ours)
+ResNet-18 89.9±0.1 99.1±0.0 93.1±0.2 86.4±0.2 93.9±0.1 93.2±0.2 95.1±0.1 98.7±0.0 97.9±0.0 95.5±0.1 94.3 (b) One-class CIFAR-100 (super-class) (c) One-class ImageNet-30
+Method
+OC-SVM∗ [59]
+Geom∗ [15]
+Rot [25]
+Rot+Trans [25]
+GOAD [2]
+CSI (ours)
+Network
+AUROC
+-WRN-16-8
+ResNet-18
+ResNet-18
+ResNet-18
+ResNet-18 63.1 78.7 77.7 79.8 74.5 89.6
+Network
+Method
+Rot∗ [25]
+ResNet-18
+Rot+Trans∗ [25]
+ResNet-18
+Rot+Attn∗ [25]
+ResNet-18
+Rot+Trans+Attn∗ [25]
+ResNet-18
+Rot+Trans+Attn+Resize∗ [25] ResNet-18
+ResNet-18
+CSI (ours)
+AUROC 65.3 77.9 81.6 84.8 85.7 91.6
+After training the embedding network fθ(x) with the SupCLR objective (10), we train a linear classiﬁer upon fθ(x) to model pSupCLR(y|x).
+Supervised extension of CSI. We extend CSI by incorporating the shifting transformations S into the SupCLR objective: here, we consider a joint label (y, yS ) ∈ Y × S of class label y and shifting transformation yS . Then, the supervised contrasting shifted instances (sup-CSI) loss is given by:
+Lsup-CSI := LSupCLR (cid:32) (cid:91)
+S∈S (cid:33)
+CS; T
+, where CS := {(S(xi), (yi, S))}B i=1. (11)
+Note that we do not use the auxiliary classiﬁcation loss Lcls-SI (4), since the objective already classiﬁes the shifted instances under a self-label augmented [35] space Y × S.
+Upon the learned representation via (11), we additionally train two linear classiﬁers: pCSI(y|x) and pCSI-joint(y, yS |x) that predicts the class labels and joint labels, respectively. We directly apply ssup(x) for the former pCSI(y|x). For the latter, on the other hand, we marginalize the joint prediction over the shifting transformation in a similar manner of Section 2.3. Precisely, let l(x) ∈ RC×K be logit values of pCSI-joint(y, yS |x) for |Y| = C and |S| = K, and l(x)k ∈ RC be logit values correspond to pCSI-joint(y, yS = Sk|x). Then, the ensembled probability is: pCSI-ens(y|x) := σ (cid:32) 1
+K (cid:88) k (cid:33) l(Sk(x))k
+, (12) where σ denotes the softmax activation. Here, we use pCSI-ens to compute the conﬁdence ssup(x).
+We denote the conﬁdence computed by pCSI and pCSI-ens and “CSI” and “CSI-ens”, respectively. 3 Experiments
+In Section 3.1, we report OOD detection results on unlabeled one-class, unlabeled multi-class, and labeled multi-class datasets. In Section 3.2, we analyze the effects on various shifting transformations in the context of OOD detection, as well as an ablation study on each component we propose. 5
+Table 2: AUROC (%) of various OOD detection methods trained on unlabeled (a) CIFAR-10 and (b)
+ImageNet-30. The reported results are averaged over ﬁve trials, subscripts denote standard deviation, and bold denote the best results. ∗ denotes the values from the reference. (a) Unlabeled CIFAR-10
+CIFAR10 →
+SVHN LSUN ImageNet LSUN (FIX) ImageNet (FIX) CIFAR-100 Interp.
+Network
+Method
+Likelihood∗
+PixelCNN++ 8.3
+Likelihood∗ 8.3
+Glow
+Likelihood∗ 63.0
+EBM
+Likelihood Ratio∗ [55] PixelCNN++ 91.2
+Input Complexity∗ [61] PixelCNN++ 92.9
+Input Complexity∗ [61] Glow 95.0
+------64.2 66.3
+--58.9 71.6
+------------52.6 58.2
+--53.5 73.6 52.6 58.2 70.0
+---Rot [25]
+Rot+Trans [25]
+GOAD [2]
+CSI (ours)
+ResNet-18
+ResNet-18
+ResNet-18
+ResNet-18 97.6±0.2 89.2±0.7 90.5±0.3 97.8±0.2 92.8±0.9 94.2±0.7 96.3±0.2 89.3±1.5 91.8±1.2 99.8±0.0 97.5±0.3 97.6±0.3 77.7±0.3 81.6±0.4 78.8±0.3 90.3±0.3 83.2±0.1 86.7±0.1 83.3±0.1 93.3±0.1 79.0±0.1 82.3±0.2 77.2±0.3 89.2±0.1 64.0±0.3 68.1±0.8 59.4±1.1 79.3±0.2 (b) Unlabeled ImageNet-30
+ImageNet-30 →
+Method
+Network
+CUB-200
+Dogs
+Pets
+Flowers Food-101 Places-365 Caltech-256
+DTD
+Rot [25]
+ResNet-18
+Rot+Trans [25] ResNet-18
+ResNet-18
+GOAD [2]
+ResNet-18
+CSI (ours) 76.5±0.7 74.5±0.5 71.5±1.4 90.5±0.1 77.2±0.5 77.8±1.1 74.3±1.6 97.1±0.1 70.0±0.5 70.0±0.8 65.5±1.3 85.2±0.2 87.2±0.2 86.3±0.3 82.8±1.4 94.7±0.4 72.7±1.5 71.6±1.4 68.7±0.7 89.2±0.3 52.6±1.4 53.1±1.7 51.0±1.1 78.3±0.3 70.9±0.1 70.0±0.2 67.4±0.8 87.1±0.1 89.9±0.5 89.4±0.6 87.5±0.8 96.9±0.1
+Setup. We use ResNet-18 [20] architecture for all the experiments. For data augmentations T , we adopt those used by Chen et al. [5]: namely, we use the combination of Inception crop [64], hori-zontal ﬂip, color jitter, and grayscale. For shifting transformations S, we use the random rotation 0°, 90°, 180°, 270° unless speciﬁed otherwise, as rotation has the highest OOD-ness (see Section 2.2) values for natural images, e.g., CIFAR-10 [33]. However, we remark that the best shifting transforma-tion can be different for other datasets, e.g., Gaussian noise performs better than rotation for texture datasets (see Table 6 in Section 3.2). By default, we train our models from scratch with the training objective in (5) and detect OOD samples with the ensembled version of the score in (9).
+We mainly report the area under the receiver operating characteristic curve (AUROC) as a threshold-free evaluation metric for a detection score. In addition, we report the test accuracy and the expected calibration error (ECE) [45, 19] for the experiments on labeled multi-class datasets. Here, ECE estimates whether a classiﬁer can indicate when they are likely to be incorrect for test samples (from in-distribution) by measuring the difference between prediction conﬁdence and accuracy. The formal description of the metrics and detailed experimental setups are in Appendix A. 3.1 Main results
+Unlabeled one-class datasets. We start by considering the one-class setup: here, for a given multi-class dataset of C classes, we conduct C one-class classiﬁcation tasks, where each task chooses one of the classes as in-distribution while the remaining classes being out-of-distribution. We run our experiments on three datasets, following the prior work [15, 25, 2]: CIFAR-10 [33], CIFAR-100 labeled into 20 super-classes [33], and ImageNet-30 [25] datasets. We compare CSI with various prior methods including one-class classiﬁer [59, 56], reconstruction-based [58, 52], and self-supervised
+[15, 25, 2] approaches. Table 1 summarizes the results, showing that CSI signiﬁcantly outperforms the prior methods in all the tested cases. We provide the full, additional results, e.g., class-wise
+AUROC on CIFAR-100 (super-class) and ImageNet-30, in Appendix C.
+Unlabeled multi-class datasets. In this setup, we assume that in-distribution samples are from a speciﬁc multi-class dataset without labels, testing on various external datasets as out-of-distribution.
+We compare CSI on two in-distribution datasets: CIFAR-10 [33] and ImageNet-30 [25]. We consider the following datasets as out-of-distribution: SVHN [48], resized LSUN and ImageNet [39], CIFAR-100 [33], and linearly-interpolated samples of CIFAR-10 (Interp.) [11] for CIFAR-10 experiments, and CUB-200 [67], Dogs [29], Pets [51], Flowers [49], Food-101 [3], Places-365 [75], Caltech-256 [18], and DTD [8] for ImageNet-30. We compare CSI with various prior methods, including density-based [11, 55, 61] and self-supervised [15, 2] approaches. 6
+Table 3: Test accuracy (%), ECE (%), and AUROC (%) of conﬁdence-calibrated classiﬁers trained on labeled (a) CIFAR-10 and (b) ImageNet-30. The reported results are averaged over ﬁve trials for
+CIFAR-10 and one trial for ImageNet-30. Subscripts denote standard deviation, and bold denote the best results. CSI-ens denotes the ensembled prediction, i.e., 4 times slower (as we use rotation). (a) Labeled CIFAR-10
+CIFAR10 →
+Train method
+Test acc.
+ECE
+SVHN LSUN ImageNet LSUN (FIX)
+ImageNet (FIX) CIFAR100
+Interp.
+Cross Entropy 93.0±0.2 6.44±0.2 88.6±0.9 90.7±0.5
+SupCLR [30] 93.8±0.1 5.56±0.1 97.3±0.1 92.8±0.5 94.8±0.1 4.40±0.1 96.5±0.2 96.3±0.5
+CSI (ours)
+CSI-ens (ours) 96.1±0.1 3.50±0.1 97.9±0.1 97.7±0.4 88.3±0.6 91.4±1.2 96.2±0.4 97.6±0.3 87.5±0.3 91.6±1.5 92.1±0.5 93.5±0.4 87.4±0.3 90.5±0.5 92.4±0.0 94.0±0.1 85.8±0.3 88.6±0.2 90.5±0.1 92.2±0.1 75.4±0.7 75.7±0.1 78.5±0.2 80.1±0.3 (b) Labeled ImageNet-30
+ImageNet-30 →
+Train method
+Test acc. ECE CUB-200 Dogs
+Cross Entropy
+SupCLR [30]
+CSI (ours)
+CSI-ens (ours) 94.3 96.9 97.0 97.8 5.08 3.12 2.61 2.19 88.0 86.3 93.4 94.6 96.7 95.6 97.7 98.3
+Pets 95.0 94.2 96.9 97.4
+Flowers
+Food-101
+Places-365 Caltech-256 DTD 89.7 92.2 96.0 96.2 79.8 81.2 87.0 88.9 90.5 89.7 92.5 94.0 90.6 90.2 91.9 93.2 90.1 92.1 93.7 97.4
+Table 2 shows the results. Overall, CSI signiﬁcantly outperforms the prior methods in all benchmarks tested. We remark that CSI is particularly effective for detecting hard (i.e., near-distribution) OOD samples, e.g., CIFAR-100 and Interp. in Table 2a. Also, CSI still shows a notable performance in the cases when prior methods often fail, e.g., AUROC of 50% (i.e., random guess) for Places-365 dataset in Table 2b. Finally, we notice that the resized LSUN and ImageNet datasets ofﬁcially released by
+Liang et al. [39] might be misleading to evaluate detection performance for hard OODs: we ﬁnd that those datasets contain some unintended artifacts, due to incorrect resizing procedure. Such an artifact makes those datasets easily-detectable, e.g., via input statistics. In this respect, we produce and test on their ﬁxed versions, coined LSUN (FIX), and ImageNet (FIX). See Appendix I for details.
+Labeled multi-class datasets. We also consider the labeled version of the above setting: namely, we now assume that every in-distribution sample also contains discriminative label information. We use the same datasets considered in the unlabeled multi-class setup for in- and out-of-distribution datasets. We train our model as proposed in Section 2.4, and compare it with those trained by other methods, the cross-entropy and supervised contrastive learning (SupCLR) [30]. Since our goal is to calibrate the conﬁdence, the maximum softmax probability is used to detect OOD samples (see [22]).
+Table 3 shows the results. Overall, CSI consistently improves AUROC and ECE for all benchmarks tested. Interestingly, CSI also improves test accuracy; even our original purpose of CSI is to learn a representation for OOD detection. CSI can further improve the performance by ensembling over the transformations. We also remark that our results on unlabeled datasets (in Table 2) already show comparable performance to the supervised baselines (in Table 3). 3.2 Ablation study
+We perform an ablation study on various shifting transformations, training objectives, and detection scores. Throughout this section, we report the mean AUROC values on one-class CIFAR-10.
+Shifting transformation. We measure the OOD-ness (see Section 2.2) of transformations, i.e., the
+AUROC between in-distribution vs. transformed samples under vanilla SimCLR, and the effects of those transformations when used as a shifting transformation. In particular, we consider Cutout
+[10], Sobel ﬁltering [28], Gaussian noise, Gaussian blur, and rotation [14]. We remark that these transformations are reported to be ineffective in improving the class discriminative power of SimCLR
+[5]. We also consider the transformation coined “Perm”, which randomly permutes each part of the evenly partitioned image. Intuitively, such transformations commonly shift the input distribution, hence forcing them to be aligned can be harmful. Figure 1 visualizes the considered transformations.
+Table 4 shows AUROC values of the vanilla SimCLR, where the in-distribution samples shifted by the chosen transformation are given as OOD samples. The shifted samples are easily detected: it validates our intuition that the considered transformations shift the input distribution. In particular,
+“Perm” and “Rotate” are the most distinguishable, which implies they shift the distribution the most. 7
+(a) Original (b) Cutout (c) Sobel (d) Noise (e) Blur (f) Perm (g) Rotate
+Figure 1: Visualization of the original image and the considered shifting transformations.
+Table 4: OOD-ness (%), i.e., the AUROC between in-distribution vs. transformed samples under the vanilla SimCLR (see Section 2.2), of various transformations. The vanilla SimCLR is trained on one-class CIFAR-10 under ResNet-18. Each column denotes the applied transformation.
+Cutout
+Sobel Noise Blur
+Perm Rotate
+OOD-ness 79.5 69.2 74.4 76.0 83.8 85.2
+Table 5: Ablation study on various transformations, added or removed from the vanilla SimCLR.
+“Align” and “Shift” indicates that the transformation is used as T and S, respectively. (a) We add a new transformation as an aligned (up) or shifting (down) transformations. (b) We remove (up) or convert-to-shift (down) the transformation from the vanilla SimCLR. All reported values are the mean AUROC (%) over one-class CIFAR-10, and “Base” denotes the vanilla SimCLR.
+Base 87.9 (a) Add transformations (b) Remove transformations
+Cutout
+Sobel Noise Blur
+Perm Rotate
+Crop
+Jitter Gray
++Align
++Shift 84.3 88.5 85.0 88.3 85.5 89.3 88.0 89.2 73.1 90.7 76.5 94.3
+-Align
++Shift 55.7
+-78.8
+-78.4 88.3
+Note that “Perm” and “Rotate” turns out to be the most effective shifting transformations; it implies that the transformations shift the distribution most indeed performs best for CSI.3
+Besides, we apply the transformation upon the vanilla SimCLR: align the transformed samples to the original samples (i.e., use as T ) or consider them as the shifted samples (i.e., use as S). Table 5a shows that aligning the transformations degrade (or on par) the detection performance, while shifting the transformations gives consistent improvements. We also remove or convert-to-shift the transformation from the vanilla SimCLR in Table 5b, and see similar results. We remark that one can further improve the performance by combining multiple shifting transformations (see Appendix G).
+Table 6: OOD-ness (%) and AUROC (%) on DTD, where Textile is used for OOD.
+Data-dependence of shifting transformations. We re-mark that the best shifting transformation depends on the dataset. For example, consider the rotation-invariant datasets: Describable Textures Dataset (DTD) [8] and
+Textile [60] are in- vs. out-of-distribution, respectively (see Appendix J for more visual examples). For such datasets, rotation (Rot.) does not shift the distribution, and Gaussian noise (Noise) is more suitable transfor-mation (see Table 6a). Table 6b shows that CSI using
+Gaussian noise (“CSI(N)”) indeed improves the vanilla
+SimCLR (“Base”) while CSI using rotation (“CSI(R)”) degrades instead. This results support our principles on selecting shifting transformations. (a) OOD-ness
+Rot. Noise 70.3 50.6 75.7 65.9 (b) AUROC
+Base CSI(R) CSI(N) 80.1
+Linear evaluation. We also measure the linear evaluation [32], the accuracy of a linear classiﬁer to discriminate classes of in-distribution samples. It is widely used for evaluating the quality of (unsupervised) learned representation. We report the linear evaluation of vanilla SimCLR and CSI (with shifting rotation), trained under unlabeled CIFAR-10. They show comparable results, 90.48% for SimCLR and 90.19% for CSI; CSI is more specialized to learn a representation for OOD detection.
+Training objective. In Table 7a, we assess the individual effects of each component that consists of our ﬁnal training objective (5): namely, we compare the vanilla SimCLR (2), contrasting shifted 3We also have tried contrasting external OOD samples similarly to [24]; however, we ﬁnd that naïvely using them in our framework degrade the performance. This is because the contrastive loss also discriminates within external OOD samples, which is unnecessary and an additional learning burden for our purpose. 8
+Table 7: Ablation study on each component of our proposed (a) training objective and (b) detection score. For (a), we use the corresponding detection score for each training loss; namely, (6) to (9) for (2) to (5), respectively. For (b), we use the model trained by the ﬁnal training loss (5). We measure the mean AUROC (%) values, trained under CIFAR-10 with ResNet-18. Each row indicates the corresponding equation of the given checkmarks, and bold denotes the best results. “Con.”, “Cls.”, and “Ensem.” denotes contrast, classify, and ensemble, respectively. (a) Training objective (b) Detection score
+SimCLR Con.
+Cls. AUROC
+Con. Cls.
+Ensem. AUROC
+LSimCLR (2)
+Lcon-SI (3)
+Lcls-SI (4)
+LCSI (5) (cid:88) (cid:88)
+-(cid:88)
+-(cid:88)
+-(cid:88)
+--(cid:88) (cid:88) 87.9 91.6 88.6 94.3 scon (6) scon-SI (7) scls-SI (8) sCSI (9) (cid:88) (cid:88)
+-(cid:88)
+--(cid:88) (cid:88)
+-(cid:88) (cid:88) (cid:88) 91.3 93.3 93.8 94.3 instances (3), and classifying shifted instances (4) losses. For the evaluation of the models of different training objectives (2) to (5), we use the detection scores deﬁned in (6) to (9), respectively. We remark that both contrasting and classifying shows better results than the vanilla SimCLR; and combining them (i.e., the ﬁnal CSI objective (5)) gives further improvements, i.e., two losses are complementary.
+Detection score. Finally, Table 7b shows the effect of each component in our detection score: the vanilla contrastive (6), contrasting shifted instances (7), and classifying shifted instances (8) scores.
+We ensemble the scores over both T and S for (7) to (9), and use a single sample for (6). All the reported values are evaluated from the model trained by the ﬁnal objective 5. Similar to above, both contrasting and classifying scores show better results than the vanilla contrastive score; and combining them (i.e., the ﬁnal CSI score (9)) gives further improvements. 4

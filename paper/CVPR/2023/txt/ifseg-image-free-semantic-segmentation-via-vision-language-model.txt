@@ -1,0 +1,214 @@
+Abstract
+Vision-language (VL) pre-training has recently gained much attention for its transferability and flexibility in novel concepts (e.g., cross-modality transfer) across various visual tasks. However, VL-driven segmentation has been under-explored, and the existing approaches still have the bur-den of acquiring additional training images or even seg-mentation annotations to adapt a VL model to downstream segmentation tasks.
+In this paper, we introduce a novel image-free segmentation task where the goal is to perform semantic segmentation given only a set of the target seman-tic categories, but without any task-specific images and an-notations. To tackle this challenging task, our proposed method, coined IFSeg, generates VL-driven artificial image-segmentation pairs and updates a pre-trained VL model to a segmentation task. We construct this artificial train-ing data by creating a 2D map of random semantic cat-egories and another map of their corresponding word to-kens. Given that a pre-trained VL model projects visual and text tokens into a common space where tokens that share the semantics are located closely, this artificially generated word map can replace the real image inputs for such a VL model. Through an extensive set of experiments, our model not only establishes an effective baseline for this novel task but also demonstrates strong performances compared to ex-isting methods that rely on stronger supervision, such as task-specific images and segmentation masks. Code is avail-able at https://github.com/alinlab/ifseg. 1.
+
+Introduction
+Understanding a new concept with less cost (e.g., col-lecting data, annotations, or training) is a challenging yet essential problem in machine learning [41]. The most com-mon practice is fine-tuning a foundation model, pre-trained on a large amount of data [3, 6, 12, 18], for downstream tasks.
+*Equal contribution
+†Work was done while at KAIST
+Figure 1. Visualization of image-free segmentation results via
+IFSeg on a web image. Here, we present a web image (Top) and its segmentation results (Middle and Bottom) of our image-free segmentation approach. Note that our model is not trained with any task-specific images and annotations, but only the text words (e.g.,
+“grass”, “cat”, “dog” and “other”) as semantic categories.
+In particular, such large-scale models have shown success-ful adaptation to downstream tasks with only little supervi-sion across vision [6] and language [3] domains. Recently, pre-training approaches in the vision-language (VL) domain have also achieved remarkable results in transferring to novel tasks (e.g., few-shot or zero-shot transfer [37]) with various elaborate designs, including modality interaction between the dual encoders [20, 32], the multi-modal encoder [22, 43], and the encoder-decoder [1, 8, 39, 42, 44, 49].
+Semantic segmentation is one of the crucial tasks in com-puter vision that requires understanding dense representa-tions for pixel-wise classifications. Inspired by the success of the contrastive VL pre-training, CLIP [32], several re-cent attempts [15, 25, 27, 48, 53] have explored CLIP-based segmentation approaches for better transferability (e.g., zero-shot [4, 45] and open-vocabulary segmentation [51]). How-ever, the existing zero-shot or open-vocabulary segmentation approaches still suffer from a burden of training on addi-tional image data, segmentation annotations [15, 25, 48, 53], or natural language supervision [27, 47], to adapt pre-trained
+VL models to downstream segmentation tasks. In the wild, however, such training data is not readily available; e.g., there would be no task-specific training images or labels for novel web images like Fig. 1. This limitation inspires us to investigate how to fully utilize the VL models for seman-tic segmentation in a lightweight manner, even without any image data or human-annotated supervision.
+Meanwhile, the recent encoder-decoder VL models [1, 8, 39, 42, 44, 49] also have gained popularity with their unique characteristics of image-to-text generation via the VL de-coder network. Motivated by this, we explore the potential usability of the VL decoder to segment pixels in the text generation manner as an alternative to traditional vision segmentation decoders, e.g., Semantic FPN [23] and Uper-Net [46]. Interestingly, we found that a solely given set of semantic categories enables the encoder-decoder VL mod-els to perform semantic segmentation without any training images or annotations; Fig. 1 shows the quality of semantic segmentation results on the image-free segmentation task with a wild uncurated image downloaded from the web.
+Contribution. In this paper, we introduce a novel Image-Free Segmentation task that aims to segment target semantic categories when only a set of the target semantic categories is given without any task-specific images and annotations.
+Our core idea to tackle this challenge is that a word set of semantic categories can serve as an artificial image for the VL models on their cross-modal embedding space. To this end, we propose a simple yet effective VL-driven self-supervised task, coined IFSeg, that generates artificial image-segmentation pairs using word tokens and updates the VL models to segment them. Specifically, we construct this arti-ficial training data by creating a 2D map of random semantic categories (i.e., artificial image tokens) and another map of their corresponding word tokens. We provide overall illus-trations and the proposed method for semantic segmentation via the VL models in Figs. 2 and 3, respectively.
+To demonstrate the effectiveness of our method for image-free semantic segmentation, we incorporate our method with the publicly available encoder-decoder VL model [42].1 In 1Our framework can be incorporated with any encoder-decoder VL models and is expected to be improved by using even larger or better VL models, cf., pretraining OFA was performed on 22M image-text pairs, while the popular CLIP [32] was pre-trained on 400M image-text pairs. particular, the proposed method, albeit with weaker super-vision (i.e., only segmentation categories), can even outper-form the baselines that use much stronger supervision, such as task-specific images and segmentation masks. For ex-ample, our method outperforms MaskCLIP+ [53] without 118k training images on a zero-shot segmentation scenario in the COCO Stuff benchmark by achieving +6.9 higher mIoU. In addition, we conduct conventional scenarios hav-ing images and annotations available for further analysis, including supervised and semi-supervised approaches. As a result, we demonstrate our method still outperforms the recent VL-driven supervised segmentation baselines. For example, our method has achieved an improved +2.0 mIoU compared to DenseCLIP [34] on the ADE20K benchmark.
+Overall, our work newly introduces image-free semantic segmentation, a challenging yet potentially crucial task for the computer vision domain, and also highlights the broad applicability of the recent tending VL models. We hope our work could inspire researchers to rethink a new research direction for segmentation tasks in a dataset-free manner. 2. Method
+In this section, we present a method for performing semantic segmentation tasks using vision-language (VL) encoder-decoder models and our image-free approach in a self-supervised manner. Inspired by the success of zero-shot transfer (e.g., zero-shot image classification [32]) in the re-cent VL models, we aim to perform semantic segmentation only given a set of target semantic categories but without any task-specific images and annotations during training.
+However, several prior works [15, 53] observed that it is challenging to directly segment semantic categories via VL models, e.g., CLIP [32], without any modifications and addi-tional training. Nonetheless, we address this challenging task using the pre-trained VL models with an encoder-decoder ar-chitecture. In Sec. 2.1, we introduce the VL encoder-decoder architecture and describe how it operates in our method. In
+Sec. 2.2, we describe how the semantic segmentation task can be handled in the encoder-decoder VL model. In Sec. 2.3, we present our image-free semantic segmentation method. 2.1. VL Encoder-Decoder Architecture
+Here, we introduce the VL model architecture in our framework and describe its operation step-by-step.
+Data format. Our method operates based on sequence data.
+For instance, let x be a sequence data of length Lx and let ex be its embedding in a D-dimensional vector space: x = x(0), ..., x(Lx−
+{ 1)] (Lx− (0); ...; ex 1)
+,
+}
+RLx×
+D. (1) (2) ex = [ex
+∈
+Specifically, we deal with the raw image-text (
+XI, tokenizing them into a sequence of tokens. The text
+XT) by
+XT is
+Figure 2. Illustration of the semantic segmentation in VL encoder-decoder. Our method incorporates a transformer encoder-decoder (fenc, fdec) along with an external image backbone (fimg) for tokenizing a given image. Given a pair of an image and a prompt sentence, the transformer generates contextualized embeddings through its self-attention layers. The decoder then sequentially predicts the probability distribution over the semantic categories in a region (e.g., p(i)), by transforming an input composed of the special begin-of-sequence (BOS) embedding and the contextualized embeddings at the preceding region indices (e.g., [eBOS; f (0)(ex); ...; f (i−1)(ex)]) through its self-attention and cross-attention layers. Finally, bilinear interpolation is applied to obtain the final prediction in a desired spatial size.
+= tokenized by a dictionary of N pre-1}
+V
+− defined words2 and the corresponding word embedding ma-RN
+D that are related by the trix E = [e0; ...; eN lookup operation ei := Emb(vi). For example, we consider the following source text tokens and their embedding, v0, ..., vN
+{ 1]
+∈
+−
+×
+×
+×
+→
+I ; ...; (cid:101)e(LI−
+I xT = eT = [e(0) x(0)
+T , ..., x(LT−
+T ; ...; e(LT−
+{ 1)
+]
+T
+T 1)
+,
+}
+RLT×
+D, (3) (4)
+∈
+:= Emb(x(i)
+T ). To deal with the
+T ∈ V
+XI, an image backbone3 is introduced to produce a
+C, followed by a spatial
+W
+×
+LI), resulting in the sequence where x(i) image 2D feature map of shape H flatten operation (H and e(i)
+T
+W fimg(
+XI) = (cid:101)eI = [(cid:101)e(0) 1)
+]
+∈
+RLI×
+C. (5)
+Additionally, a learnable linear layer is applied to fix the
+D, which we output channel size, eI = Linear((cid:101)eI) interpret as the embedding of the conceptual image tokens:
+RLI×
+∈ xI =
+{
+I ; ...; x(LI− x(0)
+I 1)
+.
+} (6)
+D in Eq. (2), where Lx := LI + LT.
+Concatenating them together, we assign the token sequence in Eq. (1) and the embedding representation x := xI, xT}
+{
+RLx× ex = [eI; eT]
+∈
+VL model architecture. VL models predict a target y = y(0), ..., y(Ly− x)
+{
+| given the multi-modal source x. To be specific, we employ an encoder-decoder model [38], where an encoder produces a contextualized encoding of x, and a decoder predicts the target distribution based on the encoding. Specifically, the based on a learned distribution P (y
+} 1) 2We utilize the bytes pair encoding (BPE) [35] words. 3Typical vision models (e.g., convolutional neural nets) are used. transformer architecture [14,40] is adopted for implementing the modules, fenc and fdec. The transformer encoder fenc produces the contextualized embedding of x by transforming the embedding ex with the self-attention mechanism [40], fenc(ex) = [f (0) enc(ex); ...; f (Lx− enc 1) (ex)]
+∈
+RLx
+D.
+× (7)
+Then, the transformer decoder fdec sequentially pro-duces the output, by transforming a decoder input di =
+[d(0); ...; d(i)]
+D with the self-attention and the cross-attention [40] mechanism with respect to fenc(ex),
+R(i+1)
+∈
+× h(i) = fdec(di; fenc(ex))
+RD.
+∈ (8)
+The formulation of the decoder input di would vary depend-ing on the tasks. For example, the formulation during the pre-training is often the earlier targets, d(i) := Emb(y(i 1)) for i > 0, and a special begin-of-sequence embedding d(0) := eBOS. However, we will revisit and alter this for-mulation in Sec. 2.2 for the semantic segmentation task.
+−
+Finally, a linear transform by the embedding matrix E produces a logit over the dictionary
+,
+P (y(i) x)
+|
+∝
+E
+·
+V h(i)
+∈
+RN . (9)
+During the VL pre-training (e.g., image captioning), all mod-ules are trained end-to-end by maximizing the likelihood in
+Eq. (9). We assume that the VL pre-training would align the image tokens with the word tokens in the contextualized embedding space in Eq. (7), which is the key idea in our framework introduced in Sec. 2.3. 2.2. Semantic Segmentation via Encoder-Decoder
+In this section, we formulate the semantic segmentation task in the VL encoder-decoder model and discuss the techni-cal considerations. An overall pipeline is depicted in Fig. 2.
+Figure 3. Overview of the proposed Image-Free Segmentation (IFSeg) task. (a) Training: Artificial training data is constructed by randomly sampling words from the segmentation vocabulary Vseg = {v0, v1} (e.g., “v0: grass” and “v1: giraffe”). Sub-word tokens (e.g., “-gir” and “-affe”) are managed by averaging their embeddings. Given the artificial image token xI and the prompt xT, we adapt a pre-trained VL encoder-decoder to predict the corresponding word for each region of the artificial image token in a self-supervised manner (i.e., ygt = xI). (b) Inference: During the inference on a real image XI, the real image token is generated using the image backbone fimg(XI). The adapted VL encoder-decoder predicts the semantic category words for individual image regions (or pixels).
+V
+Task formulation. Given M semantic categories of interest, we formulate a semantic segmentation task as decoding a category word for each dense region of the image. However, this design could be cumbersome in practice, since a certain semantic category word may be tokenized to multiple sub-(e.g., “giraffe” is tokenized to 2 words in the dictionary sub-words: “ gir” and “affe” in Fig. 3). As a remedy, we treat such a category as a temporary additional word and append the average embedding of the sub-word tokens to the embedding matrix E. In this way, each semantic category is
+. always treated as one distinct word, 1}
+To perform the task, we aim to produce spatially con-ditioned4 decoder outputs on the image tokens x(i) (i.e.,
+I
+Eq. (6)). Specifically, we enforce an alternative formulation of decoder input di in Eq. (8) such that the encoder output of the preceding index is used, i.e., d(i) = f (i (ex) for
+− enc i > 0, where d(0) = eBOS without modification. Then, we get LI number of decoder outputs as v′0, ..., v′M
+{
+Vseg = 1)
+− h = [h(0); ...; h(LI− 1)]
+RLI×
+D.
+∈ (10)
+Next, we calculate the logit with Eq. (9) and apply softmax
+Vseg to get the after masking out the words that are not in normalized probability over the M categories, p = [p(0); ...; p(LI− 1)]
+RLI×
+M .
+∈ (11)
+H
+Then, we recover the spatial dimension of the image back-bone fimg (i.e., LI →
+W ) and up-sample it with bilinear (cid:102)W (e.g., an irregular interpolation to match a desired size (cid:101)P shape of the image
+×
+XI). As a result, we obtain the output
+R (cid:101)H
+× (cid:102)W (cid:101)p = [(cid:101)p(0); ...; (cid:101)p( (cid:101)H (cid:102)W
+· 1)]
+−
+M ,
+× (12)
+×
+∈ and the predictive distribution is defined as: x) := (cid:101)p(i)
+| 4We also replace the decoder’s position embedding with the encoder’s
+P (y(i) (13)
+RM .
+∈ image position embedding for better visual understanding.
+Finally, we predict the category with the highest probability,
+ˆy(i) = arg max y
+∈Vseg
+P (y(i) = y x).
+| (14)
+For fine-tuning given a segmentation label y(i) by the semantic category words in negative log-likelihood as the objective to minimize: gt (represented
+Vseg), we consider the
+Lseg(x, ygt) = (cid:88) i ln P (y(i) = y(i) gt |
+− x). (15)
+Prompt design. The text tokens xT in Eq. (3) can be pro-vided as the prompt for instructing the details of the semantic segmentation task, namely the task description and the list of target classes. Specifically, we follow the “task descrip-tion + category enumeration” protocol in the VQA task [42] where the target classes are enumerated after the task de-scription, e.g., “what is the segmentation map of the image? object: giraffe, grass,” in Fig. 3. In this design, we expect the
+VL model to capture the cross-modal relationships between image tokens xI and the semantic categories. 2.3. Image-free Semantic Segmentation
+In this section, we introduce a VL-driven self-supervised task, coined IFSeg (Image-Free Segmentation), to tackle the image-free semantic segmentation via the encoder-decoder
+VL model. Our main idea is that during the VL pre-training (in Sec. 2.1), the real image tokens and their correspond-ing semantic category word tokens can be considered in-terchangeable because they are both likely to be located in close proximity within the shared contextualized embedding space. To this end, we generate artificial image tokens using given word tokens and update the VL model to segment the corresponding word tokens in a self-supervised manner.
+In other words, we generate artificial training data for an image-free semantic segmentation task. We provide a brief overview of the proposed image-free approach in Fig. 3.
+Constructing artificial image tokens. We construct artifi-cial training data (i.e., image-segmentation token pairs) from a set of M unique category words
+. v′0, ..., v′M 1}
+{
+Specifically, we randomly sample with replacement U
+V number of words to construct a grid map (cid:101)vIFSeg as follows:
+Vseg :=
+−
+× (cid:101)vIFSeg =
+{(cid:101)v(0)
+IFSeg, ..., (cid:101)v(U
+V
+·
+IFSeg 1)
+−
+.
+} (16)
+The initial grid sizes U , V are randomly drawn from a range with a hyper-parameter S. Then, we up-scale 1, 2, ..., S
+{ the grid to have the spatial resolution of the image backbone (i.e., H
+W ) via the nearest neighbor interpolation,
+}
+× vIFSeg = v(0)
+IFSeg, ..., v(H
+{
+W
+·
+IFSeg 1)
+−
+.
+} (17)
+In our experiments, we use H = W = 32 by following the configuration of the VL pre-training, and we also set S = 32 as the size of the initial map, so it can vary in the largest range (see Appendix B for analysis on the effect of the initial grid range S). The goal of using various random maps to up-sample our data is to bridge the gap between real images and our synthetic data by introducing a shape regularization effect. This effect allows objects to be depicted as a cluster of various sizes rather than being randomly scattered. Finally, we train the model with the artificial image tokens vIFSeg (replacing the real image tokens in Eq. (6)) and their cor-responding ground truths using the maximum likelihood in
+Eq. (15). We note that the image backbone, fimg (in Eq. (5)) is frozen during our self-supervised training.
+Post-processing for image-free segmentation. One chal-lenge of the image-free segmentation task is the discrepancy in input modality between training and evaluation, which arises due to the absence of real training images. For exam-ple, it is challenging to learn image-specific priors such as object shapes and label coherence in regions with similar textures. To resolve this issue, we found that averaging the output probability based on the image feature (i.e., outputs of image backbone fimg) significantly enhances the segmen-tation quality. Specifically, we search K-nearest neighbors of the image features in Eq. (5) using the cosine similarity,
+∥(cid:101)e(i) (cid:101)e(i)
+. Then, given a set of neighborhood (i), we iterate averaging the probability in Eq. (9) indices with the neighborhood as follows,
+I ∥ · ∥(cid:101)e(j)
+I ∥
+· (cid:101)e(j)
+I /
+N
+I p(i) := (cid:88) (i) j
+∈N p(j)/ (i)
+.
+|
+|N (18) 3.

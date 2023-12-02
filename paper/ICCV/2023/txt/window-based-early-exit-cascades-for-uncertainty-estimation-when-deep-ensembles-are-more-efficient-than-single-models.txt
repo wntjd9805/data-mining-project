@@ -1,0 +1,231 @@
+Abstract
+Deep Ensembles are a simple, reliable, and effective method of improving both the predictive performance and uncertainty estimates of deep learning approaches. How-ever, they are widely criticised as being computationally expensive, due to the need to deploy multiple independent models. Recent work has challenged this view, showing that for predictive accuracy, ensembles can be more com-putationally efficient (at inference) than scaling single mod-els within an architecture family. This is achieved by cas-cading ensemble members via an early-exit approach. In this work, we investigate extending these efficiency gains to tasks related to uncertainty estimation. As many such tasks, e.g. selective classification, are binary classification, our key novel insight is to only pass samples within a win-dow close to the binary decision boundary to later cascade stages. Experiments on ImageNet-scale data across a num-ber of network architectures and uncertainty tasks show that the proposed window-based early-exit approach is able to achieve a superior uncertainty-computation trade-off com-pared to scaling single models. For example, a cascaded
+EfficientNet-B2 ensemble is able to achieve similar cover-age at 5% risk as a single EfficientNet-B4 with <30% the number of MACs. We also find that cascades/ensembles give more reliable improvements on OOD data vs scaling models up. Code for this work is available at: https://github.com/Guoxoug/window-early-exit. 1.
+
+Introduction
+It is important for deep learning systems to provide reliable estimates of predictive uncertainty in scenarios where it is costly to make mistakes, e.g. healthcare [2] and autonomous driving [33]. A model should know when to defer a prediction to a human expert or simply discard it as too uncertain. Deep Ensembles [39], where multiple networks of the same architecture are trained independently inference, are a simple approach to and combined at
+Figure 1. Coverage at risk=5% (selective classification perfor-mance) against average computation per sample (MACs). Ensem-bles are able to outperform scaling single models at higher levels of computation. Our window-based cascade approach is able to achieve a better uncertainty-computation trade-off compared to single models via adaptive inference. The models are Efficient-Nets, ensembles are size M = 2 and the dataset is ImageNet-1k. improving both the predictive and uncertainty-related performance of deep neural networks. Moreover, as it is an easy-to-implement baseline, the approach has accumulated a large volume of empirical evidence in support of its efficacy across a wide range of data types and uncertainty-related tasks [3, 14–17, 19, 22, 34, 47–49, 52, 81, 83].
+A common criticism of Deep Ensembles is that they are expensive to deploy [14, 24, 49], as the cost scales linearly with the ensemble size. However, recent work
+[7, 35, 46, 76, 87], has shown that ensembling can be more efficient than scaling a single model when evaluating for predictive accuracy.
+In particular, Wang et al. [76] show that cascading ensemble members via adaptive early-exiting [40, 71, 77] enables ensembles to obtain consistently better accuracy-computation trade-offs vs scaling single models within an architecture family. This approach involves sequentially running inference on each member and exiting computation early if the ensemble up to that point is sufficiently confident. Thus computation is saved by only passing the most difficult samples to the more powerful later cascade stages. Although Wang et al. [76] have shown promising results for accuracy, the
+uncertainty-computation trade-off for ensembles remains unexplored. The key contributions of this work are: 1. We investigate the unexplored trade-off between uncertainty-related performance and computational cost for Deep Ensembles vs scaling single models. We evaluate over multiple downstream tasks: selective classification (SC) [18], out-of-distribution (OOD) detection [84], and selective classification with OOD data (SCOD) [34, 82]. Experiments are performed over a range of ImageNet-scale datasets and convolu-tional neural network (CNN) architectures. Compared to single-model scaling, we find that Deep Ensembles are more efficient for high levels of compute and give more reliable improvements on OOD data. 2. We propose a novel window-based early-exit pol-icy, which enables cascaded Deep Ensembles to achieve a superior uncertainty-computation trade-off compared to model scaling. Our key insight is that many downstream tasks for uncertainty estimation can be formulated as binary classification. Thus, only samples in a window near the binary decision boundary should be evaluated by the more costly but better-performing later cascade stages. Results can be previewed in Fig. 1. We also validate our exit policy on MSDNet [28], a dedicated multi-exit architecture. 2. Preliminaries 2.1. Uncertainty estimation: downstream tasks
+In this work, we take a task-oriented view, that motivates the estimation of uncertainties from the perspective of wanting to detect costly or failed predictions [31, 82].
+Fig. 2 illustrates the tasks discussed in this section.
+Selective classification (SC). Consider a neural network classifier, with parameters θ, that models the conditional distribution P (y|x; θ) over K labels y ∈ Y = {ωk}K k=1 given inputs x ∈ X = RD.
+It is trained on dataset
+Dtr = {y(n),x(n)}N n=1 drawn from the distribution pID(y,x).
+This is typically achieved with a categorical softmax output.
+The classification function f for test input x∗ is defined as f (x∗) = ˆy = argmax
+P (ω|x∗;θ) . (1)
+ω
+A selective classifier [10] is a function pair (f, g) that includes the aforementioned classifier f (x), which yields prediction ˆy, and a binary rejection function, g(x;τ ) = (cid:40) 0 (reject prediction), 1 (accept prediction), if U (x) > τ if U (x) ≤ τ , (2)
+Figure 2. Illustration of uncertainty-related tasks evaluated in this work. SC aims to accept correct predictions and reject misclassifi-cations. OOD detection aims to separate ID data from OOD data.
+SCOD is SC where we additionally want to reject OOD data. outputs of the neural network. Intuitively, uncertain sam-ples are rejected. The selective risk [18] is then defined as
+Risk(f,g;τ ) =
+EpID(x)[g(x;τ )LSC(f (x))]
+EpID(x)[g(x;τ )]
+, (3) where
+LSC(f (x)) = (cid:40) 0, 1, if f (x) = y if f (x) ̸= y (correct) (misclassified) , (4) is the 0/1 error. Intuitively, selective risk measures the aver-age loss over the accepted samples. The coverage is defined as Cov = EpID(x)[g(x;τ )], i.e. the proportion of predictions accepted. It is desirable to maximise coverage (accept as many as possible) and minimise risk (reduce the error rate of accepted samples). This is achieved by either improving g, i.e. better rejection of misclassifications, or by improving f , i.e. better accuracy so fewer misclassifications to reject.
+SC performance can be either measured using the threshold-free metric, Area Under the Risk-Coverage curve (AURC↓)1 [18], or be evaluated at an appropriate threshold
+τ based on a desired criterion [80], e.g. coverage at 5% risk (Cov@5↑). In practice, τ can be determined by matching the desired criterion on a held-out validation dataset.
+Out-of-distribution (OOD) detection. Regular classi-fication assumes that at deployment, samples originate from the same distribution as the one the classifier was trained on, (y∗,x∗) ∼ pID(y,x). This may not be the case in the real world. OOD detection aims to filter out samples that originate from some distribution pOOD(x) with labels that are disjoint from Y [84].2 We now assume a mix of in-distribution (ID) and OOD data occurs at deployment, x∗ ∼ pmix(x) pmix(x) = αpID(x)+(1−α)pOOD(x), α ∈ [0,1] . (5) where U (x) is a measure of predictive uncertainty and τ is an operating threshold. U is typically calculated using the 1Arrows by a metric indicate whether higher (↑) or lower (↓) is better. 2Note this is different to covariate shift where Y is preserved [84]
+Predictions on OOD data may be costly to pass downstream, e.g. a self-driving car classifying a bear as a car. OOD de-tection is again performed using a binary detection function, g(x;τ ) = (cid:40) 0 (OOD), 1 (ID), if U (x) > τ if U (x) ≤ τ . (6)
+We intuitively want high uncertainty on OOD data. OOD detection may be evaluated using the threshold-free
+Area Under the Receiver Operating Characteristic curve (AUROC↑), or at a threshold τ determined on ID data e.g. false positive rate at 95% true positive rate (FPR@95↓).
+We assume no access to OOD data before deployment, although other work [26, 65] relaxes this constraint.
+Selective classification with OOD Data (SCOD). As
+OOD detection does not consider the quality of predictions classified as “ID” by the detector (there may be many ID misclassifications), recent work [31, 34, 82] has argued for a task that combines SC with OOD detection. We adopt the problem definition and naming from [82].3 In SCOD, the objective is to reject both ID misclassifications and OOD samples, in order to minimise the loss on the accepted predictions. We assume Eq. (5) at deployment and perform binary rejection using Eq. (2). The loss becomes
+LSCOD(f (x)) =
+
+
+ 0, 1,
+β, if f (x) = y,(y,x) ∼ pID if f (x) ̸= y,(y,x) ∼ pID (β ≥ 0) , if x ∼ pOOD, (7) where a cost is incurred if either an ID misclassification or an OOD sample is accepted, and β reflects the relative cost of these two events. The risk is now given by
+R(f,g;τ ) =
+Epmix(x)[g(x;τ )LSCOD(f (x))]
+Epmix(x)[g(x;τ )]
+. (8)
+SCOD can be evaluated similarly to SC with AURC↓.
+However, as we assume no access to pOOD pre-deployment, threshold τ according to risk on pmix we cannot set (Eq. (8)). We can however set τ according to coverage and then use e.g. Risk@(Cov=)80↓ as a threshold-specific measure. This coverage may be only over the ID data (equivalent to TPR for OOD detection), in which case an
+ID validation set can be used. Alternatively, one may use coverage over all samples. Here statistics of U (not labels) would need to be obtained from pmix during deployment. 2.2. Ensembles and cascades
+Deep Ensembles. Training multiple deep neural net-works of the same architecture on the same data, but with 3The research community has yet to converge on a single name for this task, so other than “SCOD” readers may encounter “failure detection”
+[31], “unknown detection” [34] or “unified open-set recognition” [5]. different random seeds is a well-established approach to improving the quality of uncertainty estimates [39]. With a Deep Ensemble of M networks Θ = {θ(m)}M m=1, the predictive distribution is typically obtained as
+P (y|x;Θ) = 1
+M
+M (cid:88)
+P (y|x;θ(m)) , (9) m=1 that is to say the mean of the member softmax outputs.
+Predictions are then obtained similarly to Eq. (1). To calcu-late ensemble uncertainty we adopt the simple approaches of directly using the predictive distribution or averaging individual member uncertainties as in [83],
+U (x;Θ) = U (P (y|x;Θ)) ,
+U (x;Θ) = 1
+M
+M (cid:88)
+U (x;θ(m)) , m=1 (10) (11) although there exist more advanced methods [8, 48, 83].
+Adaptive inference with early-exit cascades. One approach to improving the efficiency of deep learning approaches is through adaptive inference, where compu-tation is allocated conditionally based on the input sample
+[23, 40]. Early-exit approaches [40] involve terminating computation early depending on the input when produc-ing a prediction. This may be achieved by designing architectures with intermediate predictors [28, 71], or by cascading full networks in series [76, 77]. By placing more powerful, but also more expensive predictors later on, computation is intuitively saved on “easy” samples that exit early. Although there is work on learnt exit policies
+[6, 64], a simple and widely adopted approach is to exit if intermediate estimates of uncertainty are below a threshold t [28, 36, 71, 77].
+If there are multiple exits, then there may be multiple thresholds. Thresholds can be chosen arbitrarily or optimised on an ID validation set subject to an accuracy or computational constraint [36, 69, 76]. Alg. 1 applies this to Deep Ensembles (for classification) [76].
+Algorithm 1 Cascaded Deep Ensemble Classifier
+Require: Ensemble {θ(m)}M
+Thresholds {t(m)}M −1 m=1 m=1
+Test Input x∗ for l = 1,2,...,M do
+Do inference on x∗ using lth ensemble member θ(l)
+Cache outputs for lth member
+Calculate U (x∗;{θ(m)}l m=1)
+▷ Eqs. (10) and (11) using model outputs only up to l if l = M or U < t(l) then
+◁
+▷ single threshold (per exit)
+▷ exit early using l members if confident, or full ens. ◁ return ˆy = argmaxωP (ω|x∗;{θ(m)}l m=1)
+Figure 3. Illustration of intuition for early-exit approaches with a 2D binary classification problem. The most efficient gains in accuracy are obtained when samples in a region/window near the decision boundary of the first, simple classifier are passed to the second, more powerful (and more costly) classifier. These samples are most likely to be 1) incorrectly classified initially and 2) corrected later on. it is non-obvious as to how to extend this intuition to uncertainty estimation. Do we need a “meta-uncertainty” to measure the uncertainty of uncertainty estimates? Our key insight is to view early-exiting from a decision boundary perspective, and to recall that many downstream tasks using estimates of predictive uncertainty are in fact binary classification (see Sec. 2.1, Eqs. (2) and (6)).
+Common measures of uncertainty used for early-exiting, such as the maximum softmax probability (MSP) [25], in-tuitively approximate the distance from the classifier deci-sion boundary [54]. Passing samples from the region near the decision boundary to a more powerful model will result in the most efficient improvement in classification perfor-mance. This is because these samples are more likely to be: 1. incorrectly classified by the initial stage and 2. corrected by the next stage (given they are wrong).
+This is illustrated in Fig. 3. Applying this intuition to uncertainty-related tasks leads us to our proposed approach. 3.2. Approach: window-based early-exiting
+In contrast to existing early-exit approaches that target the decision boundary of the multi-class classification problem using a single threshold on uncertainty, we pro-pose to early-exit only on samples outside of a window
+[t1,t2] around the decision boundary τ (Eqs. (2) and (6)) corresponding to the uncertainty-related task of interest, as in Fig. 3. Our approach is detailed in Alg. 2 and Fig. 5.
+Algorithm 2 Window-Based Cascaded Deep Ens. (ours) m=1 Windows {[t1,t2](m)}M −1
+Require: Ensemble {θ(m)}M m=1
+Test Input x∗ for l = 1,2,...,M do
+Do inference on x∗ using lth ensemble member θ(l)
+Cache outputs for lth member
+Calculate U (x∗;{θ(m)}l m=1)
+▷ Eqs. (10) and (11) using model outputs only up to l if l = M or U /∈ [t1,t2](l) then
+▷ exit if U outside window, or full ens. return U , ˆy = argmaxωP (ω|x∗;{θ(m)}l m=1)
+◁
+◁
+Figure 4. The existing single-threshold policy (top) from Alg. 1 vs our window-based approach (bottom) (Alg. 2), as more samples are passed onto the second stage of an ensemble, increasing computation. Although a single threshold is efficient for accuracy, it is not for selective classification (Cov@5↑). Our window-based policy shows efficient improvements on the uncertainty-related task, by targeting the accept/reject decision boundary. For SC we use MSP (U (x) = − maxω P (ω|x)) and the final exited uncertainties (Fig. 5) with Eq. (10). We use an
+EfficientNet-B2 ensemble with M = 2. The data is ImageNet-1k.
+In their work, Wang et al. [76] show that the approach in Alg. 1 enables ensembles to achieve a better accuracy-computation trade-off compared to scaling single models.
+We will now extend this to uncertainty estimation. 3. Window-Based Cascades:
+Targeting Uncertainty-Related Tasks
+Alg. 1 (single threshold) results in underwhelming uncertainty efficiency. Fig. 4 shows that although a rapid improvement in predictive accuracy can be achieved with a small increase in average multiply–accumulate (MAC) operations, uncertainty-related Cov@5↑ only improves after a much larger increase in computation. To better understand why we consider one intuition for early exiting. 3.1. Early-exiting on samples far away from the decision boundary
+The typical intuition behind explaining early-exit approaches for multi-class classification is that we can save computation by exiting if an intermediate classifier is confident (low uncertainty) in its prediction. However,
+Ensemble
+Input x
+DNN
+θ(1)
+Input x
+DNN
+θ(2)
+DNN
+θ(M )
+Unc.
+U (1)
+Unc.
+U (2)
+Exit Decision
+Single Threshold (Alg. 1)
+Window (ours) (Alg. 2)
+No t(1) < U (1) 1 < U (1) < t(1) t(1) 2
+Yes
+Exit
+No t(2) < U (2) 1 < U (2) < t(2) t(2) 2
+Yes to θ(3) and further
+Exit
+Output
+Pred. ˆy(1)
+Unc. U (1)
+Output
+Pred. ˆy(2)
+Unc. U (2)
+Uncertainty Task (e.g. SC) reject if uncertain
+No
+U (1)
+> τ
+Accept
+Pred. ˆy(1)
+Yes
+Reject
+No
+U (2)
+> τ
+Accept
+Pred. ˆy(2)
+Yes
+Reject
+Figure 5. End-to-end illustration of cascaded Deep Ensembles applied to a binary uncertainty-related task. Each ensemble member is run sequentially. Computation terminates depending on a single threshold (Alg. 1) or window-based (ours) (Alg. 2) exit decision. After exiting, the downstream uncertainty-related task is performed using the uncertainty estimate of the ensemble up to the exit point.
+In our case, to find [t1,t2], we
+Implementation details. find τ for each exit independently on an ID validation dataset according to the desired criterion, e.g. 80% coverage (Sec. 2.1), and draw a window to capture a certain symmetric percentile of samples either side of τ .
+For example, setting [t1, t2] at ±15 percentiles around
+τ would result in 70% of samples exiting early. Final binary classification for the uncertainty-related task is then performed using a new τ which is found using the final exited uncertainties of the overall adaptive system (Fig. 5).
+We note that it is possible to optimise the window pa-rameters [t1,t2] on the ID validation dataset for further im-provements, just as regular early-exit thresholds can be op-timised [36, 69, 76]. This becomes more relevant in sys-tems with multiple exits.
+It is desirable to automatically determine [t1,t2] when the number of thresholds to find is higher. However, we leave this to future work, as our aim is to simply show the efficacy of our window-based approach.
+Efficient gains in uncertainty estimation. Fig. 4 shows this window-based approach efficiently improves that
+Cov@5↑. We note that gains in accuracy (over all samples) are worse, as the multi-class decision boundary is no longer targeted. However, during SC, we are concerned with the accuracy of only the accepted samples. To explain the SC behaviour of single threshold (Alg. 1) in Fig. 4, imagine sweeping a single dashed line over Fig. 3 – the step-like boost occurs when the single t passes over the decision boundary τ meaning samples near τ are now passed on.
+The intuition so far has only been linked to the idea that later stages of the cascade have a better binary classifier g, however for SC, it is also the case that they may have a
+Figure 6. Risk-coverage curves for single model, ensemble, and a window-based cascade. The cascade aims to target risk=5%.
+Near the desired operating point the cascade is able to achieve ensemble-like coverage performance, for a small increase in in-ference MACs. Further away, at irrelevant operating points, the cascade behaves closer to the single model. This is because the un-certainties around these operating points will be mainly from just the single model, not the ensemble. The setup is the same as Fig. 4. better multi-class classifier f . In this case, after progressing to the next stage, samples may find themselves changing from misclassifications to correct (multi-class) predictions.
+Our approach targets a specific threshold, which is the actual deployment setting. The efficiency gains arise from the fact that only samples within a window around τ are passed to the next cascade stage (Fig. 3) – the most relevant samples receive additional computation. Fig. 6 shows that a window-based cascade is able to achieve the full ensem-ble’s performance around the desired 5% risk, however, its behaviour tends to the single model further away (outside the window). This is because, for decision boundaries outside the window, the sample uncertainties will be from the earlier stage. As such, threshold-free evaluation metrics (e.g. AURC↓) are not suitable for a given window.
+4. Experimental Results and Discussion 4.1. Main results
+Setup. We train two families of computationally efficient image classification CNNs on ImageNet-1k [61]: Effi-cientNet [68] and MobileNet-V2 [63]. For EfficientNet, we scale from B0→B4. For MobileNet-V2 we use the scalings4 in Tab. 1. For each model we train a Deep En-semble size M = 2 using random seeds {1,2}. This results in 10 individual ensembles, 5 composed of EfficientNets and 5 composed of MobileNet-V2s. We train for 250 epochs, holding out a random subset of 50,000 images for validation, and then evaluate on the original validation set.
+Table 1. MobileNet-V2 scaling used in experiments. input resolution width factor 160 1.0 192 1.0 224 1.0 224 1.3 224 1.4
+All models are trained using Pytorch [53] and Lightning
+[12]. Full training details and code can be found in the sup-plementary material. We measure inference computation in multiply-accumulate (MAC) operations5 using ptflops.6
+We cascade each ensemble in both directions over seeds (1 → {1, 2} and 2 → {1, 2}) and report the mean values.
+Note that from this point onwards we refer to cascaded
+Deep Ensembles as “cascades” and non-adaptive Deep
+Ensembles as simply “ensembles” for the sake of brevity.
+Scaling vs architecture design. We note that the main comparison in this section is between ensembling and simple scaling, e.g. increasing network width, given a model architecture. Designing a new architecture can also lead to improved computational efficiency. However, the development cost of architecture design, via expert knowledge or neural architecture search [11, 59], makes direct comparison to scaling or ensembling difficult. 4.1.1 Selective classification.
+We evaluate SC performance at two different operating points on the risk-coverage curve: Cov@5↑ and Risk@80↓.
+These represent operating at a much lower risk tolerance vs without selection (∼20-30%) and operating at high cov-erage. Following Sec. 3.2, we find windows by expanding
+[t1,t2] about τ of the first model in the cascade, capturing symmetric percentiles on either side. We find on the valida-tion set that passing ±10% (20% in total) of ID data around
+τ to the second stage is sufficient to recover most of the 4https://github.com/keras-team/keras/blob/ master/keras/applications/mobilenet_v2.py. 5Other work may refer to MACs as FLOPs or MADs. 6https://github.com/sovrasov/flops-counter. pytorch
+Figure 7. Selective classification performance against average computation (log-scale MACs) for EfficientNet B0→B4 and scaled MobileNet-V2. Ensembles are quite competitive compared to single-model scaling, with an uncertainty-computation trade-off that is slightly worse for lower levels of compute and superior for higher computation. Our window-based cascades are able to achieve better uncertainty-computation trade-offs in all cases compared to scaling single models. The data is ImageNet-1k. ensemble’s performance. We use this window size for the remainder of our experiments. As mentioned previously, we leave further optimisation of [t1,t2] to future work.
+We use the standard (negative) Maximum Softmax
+Probability (MSP) [18, 25] score, U (x) = −maxωP (ω|x), to measure uncertainty for SC. For the ensemble, we use
+Eq. (10) to calculate U . Note that this leads to better misclassification rejection compared to Eq. (11), as we are using Eq. (9) for classification with the ensemble.
+Cascades are best and ensembles are competitive.
+Fig. 7 shows that ensembles are slightly weaker than scal-ing single models in the lower computation region, and can outperform them at higher compute costs. This is in line with previous work on accuracy [35, 46, 76]. Moreover, it is clear, that by cascading ensembles using our window-based early-exit policy, a superior uncertainty-computation trade-off can be achieved, similar to accuracy in [76]. 4.1.2 OOD detection.
+We use two high-resolution OOD datasets designed for
+ImageNet-scale experiments. Openimage-O [75] and iNat-uralist [30] are subsets of larger datasets [37, 73] where im-ages were selected to be disjoint to ImageNet-1k labels. The former covers a wide range of classes (like ImageNet); the latter contains botanical images. Additional dataset details can be found in the supplementary material. We evaluate at two operating points, FPR@80↓ and FPR@95↓, which
+To correct for this slowdown, we propose adjusting the window such that [t1, t2] capture ±10% around τ of pmix rather than of pID (Eq. (5)). To achieve this, percentiles need to be calculated over the U s of the test data. As this does not require labels, it could be practically achieved by collecting statistics during deployment and adjusting
+[t1,t2] accordingly. For online processing this may be done in a running manner, whereas for offline data processing, all samples could be processed by the first cascade stage, percentiles could be then calculated, and the corresponding subset of samples passed on to the next stage. Fig. 8 shows that adjusted windows recover cascade efficiency, allowing them to outperform or match single models in all cases.
+Larger speedups are observed for FPR@95↓, as this τ is on the tail of the ID distribution of U and is likely to be closer to the mode of the OOD distribution.
+Scaling doesn’t reliably improve OOD detection but ensembling does. Fig. 8 shows that although model scaling has a general trend of reducing FPR↓, it is in-consistent between different models, OOD datasets, and operating thresholds. In fact, scaling up does not always improve OOD detection, e.g. EfficientNet on iNaturalist.
+On the other hand, cascades/ensembles reliably reduce
+FPR↓ relative to their corresponding single members. This suggests that cascades are the safer choice for efficiently boosting OOD detection performance, given that model scaling may not even improve detection at all.
+Our results are roughly in line with those in [74], who find a general positive correlation between ID accuracy and
+OOD detection performance. We note that they observe more consistent improvements than us for OOD detection when model scaling with ResNets, however, the OOD data they use is different to ours.7 Besides, they do observe a drop in performance when scaling from ResNet-50→101 on their “easy” OOD dataset ([74] Fig. 3b). 4.1.3 SCOD.
+We keep the same OOD datasets as the previous section, as well as the 1:1 ratio of ID:OOD data. We set β = 1 (Eq. (7)), i.e. accepting OOD data and misclassifications is equally costly. We evaluate Risk@80↓, and Risk@50↓, where the coverage is over the ID data (see Sec. 2.1). The first offers higher coverage, whilst the second results in much lower risks. We evaluate with windows set as in Sec. 4.1.1, as well as the adjusted windows from the previous section.
+We use (negative) MSP for U just as in Sec. 4.1.1.
+Overall results (in Fig. 9) are similar to Sec. 4.1.1, with the cascades outperforming scaling single models for all 7It has been found in [4] that the OOD datasets used in [74] are heavily polluted with ID samples. However, it is unclear how this finding affects the corresponding empirical takeaways from [74].
+Figure 8. OOD detection performance vs computation. Window-based cascades are competitive overall but suffer from slowdown due to distributional shift in some cases. Adjusting the window at deployment recovers cascade efficiency, allowing for more efficient uncertainties compared to scaling single models. Scaling single models does not reliably reduce FPR↓, but ensembling does, suggesting that ensembles/cascades are the safer option for improving OOD detection. We assume a 1:1 ratio of ID:OOD data. represent high and very high retention of ID data. Initially, we set [t1,t2] in the same fashion as for SC (Sec. 4.1.1). To measure average computation, we evaluate on a simple sce-nario where α = 0.5 (Eq. (5)), i.e. the number of OOD sam-ples is equal to ID samples. The OOD datasets are smaller, so we randomly subsample the ImageNet evaluation set.
+We use the simple and popular Energy [45] score,
+U (x) = −log(cid:80) kexpvk, where v are the pre-softmax logits.
+For the ensemble, we use Eq. (11) to calculate U as in [83].
+Beware of distribution shift when early exiting. Fig. 8 shows that in most scenarios, window-based cascades are better or competitive with single models. However, cas-cades are weaker in some cases. We hypothesise that this is due to there being more OOD data between [t1,t2] com-pared to ID data, slowing the cascade down, as in this case τ is on the lower tail of the ID data. We remark that slowdown under distributional shift is a general problem with early-exit approaches, and is an interesting direction for further research. We also note that there will be less slowdown in scenarios where OOD data is rarer than ID data (α > 0.5).
+Figure 10. Real-world latency and throughput uncertainty effi-ciency gains for window-based cascades for EfficientNet-B0→B4.
+We use a NVIDIA V100 32GB GPU to measure throughput and an Intel Xeon E5-2698v4 CPU to measure latency.
+Figure 9. SCOD performance vs computation. Results are in-line with previous Figs. 7 and 8. Window-based cascades achieve more efficient uncertainty-related performance compared to scaling single models, and sometimes benefit from deployment-time window adjustment. Ensembles perform better than before, being more efficient than single-model scaling for EfficientNets. levels of computation. Ensembles perform even better than for in-distribution SC, producing consistently better uncertainty-computation trade-offs vs scaling EfficientNet.
+This suggests that ensembling leads to even greater gains in being able to distinguish OOD data from correct ID predictions, compared to rejecting ID misclassifications.
+Some of the OOD detection behaviour from the previous section carries over to SCOD, with ensembling being a more reliable way to reduce risk compared to model scaling (see EfficientNet on iNaturalist). Using adjusted windows leads to little change in Risk@50↓, as a stricter
+τ will have fewer OOD samples near it to cause slowdown.
+Improvements in Risk@80↓, where τ is closer to the OOD distribution of U , can be observed in some cases, however. 4.2. Real-world latency and throughput
+We validate our window-based cascades by measuring average real-world latency (batch size 1) and throughput (batch size 256) for EfficientNets. We use Pytorch and measure latency on an Intel Xeon E5-2698 v4 CPU and throughput on a NVIDIA V100 32GB GPU. For latency, the exit condition is evaluated for each sample, whilst for throughput, it is evaluated over the whole batch, and then
+Figure 11. Top: comparison of single-threshold vs window-based early-exit policies on MSDNet exits 3→5. Our approach generalises to uncertainty estimation on other early-exit archi-tectures. Bottom: window-based policy applied to 3 exits of MS-DNet for SC. Our approach generalises to multiple early exits. the corresponding subset of the batch is passed to the sec-ond model. Fig. 10 shows that the theoretical MACs results in Sec. 4.1.1 can indeed translate to real-world deployment. 4.3. Other early-exit architectures
+Although the focus of this work has been on adaptive the proposed inference with cascaded Deep Ensembles, window-based early-exit policy can be applied to any early-exit network. To show this, we apply a similar analysis to
+Fig. 4 between the 3rd and 5th exits of a MSDNet8 (step=7)
+[28] pretrained on ImageNet-1k. Fig. 11 shows that our window-based early-exit policy does indeed generalise to other early-exit architectures. Note that MSDNet exits are not ensembled [28]. However, recall that SC can improve with either g or f (Sec. 2.1), so we still expect later exits to be better as they are more accurate (better f ). 8https://github.com/kalviny/MSDNet-PyTorch
+ResNet-50 ImageNet (-)MSP
+Model Weights from [41]
+Uncertainty
+Pytorch Inference
+%cov %risk MACs↓ GPU
+@5↑ @80↓ (×109) (av.)
+CPU
+Throughput↑ Latency↓ batch=1 batch=256 (ms) (img/s)
+Single Model
+Deep Ens. M = 2 (sequential)
+Window-Based Cascade (ours)
+Packed Ens. α = 3,M = 4,γ = 1 54.2 57.5 57.0 53.7 12.9 11.7 11.9 12.7 4.09 8.18 4.91 9.29 826 439 687 335 39.7 84.2 50.6 67.6
+Table 2. Comparison of our approach with the recently proposed
+Packed Ensembles [41]. We use pre-trained ResNet-50 models provided by Laurent et al. [41]. Window-based cascades achieve better selective classification performance at a lower theoret-ical and practical computational cost vs Packed Ensembles.
+We perform measurements using the same hardware as in Fig. 10.
+To show that our approach generalises beyond a single exit, we also apply it to exits {2,3,5} of MSDNet. We fix
+[t1,t2](2) at ±10 percentiles around τ (2) and vary the width of the first window [t1,t2](1). Fig. 11 shows that we achieve an efficient uncertainty trade-off vs the individual exits. See the supplement for similar results on additional early-exit architectures: GFNet [78] and ViT-based DVT [58]. 4.4. Comparison with Packed Ensembles
+Packed Ensembles [41] are a recent approach aimed at increasing the computational efficiency of Deep Ensem-bles. They utilise grouped convolutions in order to enforce explicit subnetworks within a larger neural network. This means that subnetworks are run in parallel, with the aim of better utilising the parallel compute found in modern machine learning hardware such as GPGPUs.
+We compare their SC performance on ImageNet to our approach in Tab. 2. Our window-based cascade is more efficient, both in terms of theoretical and practical computational cost. We note that Packed Ensembles are underwhelming in our experiments, which is likely due to there being less overparameterisation to exploit for ResNet-50 on ImageNet, compared to smaller-scale data such as
+CIFAR [38]. On the other hand, our window-based cas-cades behave as expected, achieving near-Deep-Ensemble performance for ∼ 20% additional cost (vs a single model). probabilities that match the true accuracy of a classifier. It is orthogonal to the aforementioned tasks (and the focus of this paper), as in binary classification only the rank ordering of scores matters, rather than absolute probabilities [31].
+Other work aims to generally improve uncertainties over multiple evaluation metrics. Deep ensembles [39] have stood out as a strong and reliable baseline in this field. However, due to their increased cost, there have been many proposed single-inference approaches with the aim of improving uncertainty estimates at a lower cost.
+Examples include, low-rank weight matrices and weight sharing (BatchEnsemble) [79], implicit/explicit subnet-works (MIMO/Packed Ensembles) [24, 41], using spectral normalisation combined with a gaussian process (SNGP)
+[44] or a gaussian mixture model (DDU) [51], distribution distillation of the ensemble into a single model (EnD2)
+[13, 15, 62] and more [17, 20, 55, 56, 72]. We note that our work is generally orthogonal to these, as single-inference approaches can be ensembled [16] and then cascaded using our window-based adaptive inference approach.
+Early-exit networks. Within the wide range of ap-proaches for dynamic or adaptive inference [23], where computation allocation is not fixed during deployment, early-exiting is a simple and popular choice [40, 71]. The core idea is to terminate computation early on “easier” sam-ples in order to make more efficient use of computational resources. This can be performed by cascading entire net-works of increasing predictive performance [58, 76–78], or by attaching intermediate predictors to a backbone [36, 86] or by designing a specialised architecture [28, 85]. Exit policies can be rules-based or learnt [40]. Although the vast majority of work in this field focuses on predictive accuracy,
+MOOD [43] proposes an approach targeting OOD detec-tion. Unlike our window-based policy, their policy relies on a heuristic based on input image PNG [60] compression ra-tio to determine the exit and is restricted to only the task of
+OOD detection. Qendro et al. [57] utilise a multi-exit archi-tecture to improve uncertainty-related performance. How-ever, they ensemble all exits without any adaptive inference. 5.

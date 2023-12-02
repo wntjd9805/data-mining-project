@@ -1,0 +1,240 @@
+Abstract
+Fairness and robustness are critical elements of Trustworthy AI that need to be addressed together. Fairness is about learning an unbiased model while robustness is about learning from corrupted data, and it is known that addressing only one of them may have an adverse affect on the other. In this work, we propose a sample selection-based algorithm for fair and robust training. To this end, we formulate a combinatorial optimization problem for the unbiased selection of samples in the presence of data corruption. Observing that solving this optimization problem is strongly NP-hard, we propose a greedy algorithm that is efﬁcient and effective in practice. Experiments show that our algorithm obtains fairness and robustness that are better than or comparable to the state-of-the-art technique, both on synthetic and benchmark real datasets. Moreover, unlike other fair and robust training baselines, our algorithm can be used by only modifying the sampling step in batch selection without changing the training algorithm or leveraging additional clean data. 1
+
+Introduction
+Trustworthy AI is becoming essential for modern machine learning. While a traditional focus of machine learning is to train the most accurate model possible, companies that actually deploy AI including Microsoft [2021], Google [2020], and IBM [2020] are now pledging to make their AI systems fair, robust, interpretable, and transparent as well. Among the key objectives, we focus on fairness and robustness because they are closely related and need to be addressed together. Fairness is about learning an unbiased model while robustness is about learning a resilient model even on noisy data, and both issues root from the same training data. A recent work [Roh et al., 2020] shows that improving fairness while ignoring noisy data may lead to a worse accuracy-fairness tradeoff.
+Likewise, focusing on robustness only may have an adverse affect on fairness as we explain below.
+There are several possible approaches for supporting fairness and robustness together. One is an in-processing approach where the model architecture itself is modiﬁed to optimize the two objectives.
+In particular, the state-of-the-art approach called FR-Train [Roh et al., 2020] uses adversarial learning to train a classiﬁer and two discriminators for fairness and robustness. However, such an approach requires the application developer to use a speciﬁc model architecture and is thus restrictive. Another approach is to preprocess the data [Kamiran and Calders, 2011] and remove any bias and noise before model training, but this requires modifying the data itself. In addition, we are not aware of a general data cleaning method that is designed to explicitly improve model fairness and robustness together.
+Instead, we propose an adaptive sample selection approach for the purpose of improving fairness and robustness. This approach can easily be deployed as a batch selection method, which does not require
+∗Corresponding author 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+(a) The size ratios of (label y, sensitive group z) sets within the COMPAS dataset. (b) Tracing the model losses on (label y, sensitive group z) sets when training logistic regression on the COMPAS dataset.
+Figure 1: The ProPublica COMPAS dataset [Angwin et al., 2016] has bias where the set (y = 1, z = 1) has the smallest size in Figure 1a. However, when training a logistic regression model on this dataset, the same set has the highest loss at every epoch as shown in Figure 1b. Blindly applying clean selection at any point will thus discard (y = 1, z = 1) samples the most, which results in even worse bias and possibly worse fairness. modifying the model or data. Our techniques build on top of two recent lines of sample selection research: clean selection for robust training [Rousseeuw, 1984, Song et al., 2019, Shen and Sanghavi, 2019] and batch selection for fairness [Roh et al., 2021]. Clean selection is a standard approach for discarding samples that have high-loss values and are thus considered noisy. More recently, batch selection for fairness has been proposed where the idea is to adaptively adjust sampling ratios among sensitive groups (e.g., black or white populations) so that the trained model is not discriminative.
+We note that state-of-the-art clean selection techniques like Iterative Trimmed Loss Minimization (ITLM) [Shen and Sanghavi, 2019] are not designed to address fairness and may actually worsen the data bias when used alone. For example, Figure 1 shows how the ProPublica COMPAS dataset (used by U.S. courts to predict criminal recidivism rates [Angwin et al., 2016]) can be divided into four sets where the label y is either 0 or 1, and the sensitive attribute z is either 0 or 1. The sizes of the sets are biased where (y = 1, z = 1) is the smallest. However, the model loss on (y = 1, z = 1) is the highest among the sets as shown in Figure 1b. Hence, blindly applying clean selection to remove high-loss samples will discard (y = 1, z = 1) samples the most, resulting in a worse bias that may negatively affect fairness as we demonstrate in Sec. 2.
+We thus formulate a combinatorial optimization problem for fair and robust sample selection that achieves unbiased sampling in the presence of data corruption. To avoid discrimination on a certain group, we adaptively adjust the maximum number of samples per (y, z) set using the recently proposed FairBatch system [Roh et al., 2021], which solves a bilevel optimization problem of unfairness mitigation and standard empirical risk minimization through batch selection. We show that our optimization problem for sample selection can be viewed as a multidimensional knapsack problem and is thus strongly NP-hard [Garey and Johnson, 1979]. We then propose an efﬁcient greedy algorithm that is effective in practice. Our method supports prominent group fairness measures: equalized odds [Hardt et al., 2016] and demographic parity [Feldman et al., 2015]. For data corruption, we currently assume noisy labels [Song et al., 2020], which can be produced by random ﬂipping or adversarial attacks.
+Experiments on synthetic and benchmark real datasets (COMPAS [Angwin et al., 2016] and Adult-Census [Kohavi, 1996]) show that our method obtains accuracy and fairness results that are better than baselines using fairness algorithms [Zafar et al., 2017a,b, Roh et al., 2021] and on par with and sometimes better than FR-Train [Roh et al., 2020], which leverages additional clean data.
+Notation Let θ be the model weights, x ∈ X be the input feature to the classiﬁer, y ∈ Y be the true class, and ˆy ∈ Y be the predicted class where ˆy is a function of (x, θ). Let z ∈ Z be a sensitive attribute, e.g., race or gender. Let d = (x, y) be a training sample that contains a feature and label.
+Let S be a selected subset from the entire dataset D, where the cardinality of D is n. In the model training, we use a loss function (cid:96)θ(·) where a smaller value indicates a more accurate prediction. 2 Unfairness in Clean Selection
+We demonstrate how clean selection that only focuses on robust training may lead to unfair models.
+Throughout this paper, we use ITLM [Shen and Sanghavi, 2019] as a representative clean selection 2
+(a) Accuracy. (b) Equalized odds disparity. (c) Demographic parity disparity.
+Figure 2: Performances of logistic regression with and without ITLM (ITLM and LR, respectively) on the ProPublica COMPAS dataset while varying the noise rate using label ﬂipping [Paudice et al., 2018]. Although ITLM improves accuracy (higher is better), the fairness worsens according to the equalized odds and demographic parity disparity measures (lower is better). method for its simplicity, although other methods can be used as well. We ﬁrst introduce ITLM and demonstrate how ITLM can actually worsen fairness.
+ITLM Cleaning samples based on their loss values is a traditional robust training tech-nique [Rousseeuw, 1984] that is widely used due to its efﬁciency. Recently, ITLM was proposed as a scalable approach for sample selection where lower loss samples are considered cleaner. The following optimization problem is solved with theoretical guarantees of convergence: min
+S:|S|=(cid:98)τ n(cid:99) (cid:88) si∈S (cid:96)θ(si) where S is the selected set, si is a sample in S, and τ is the ratio of clean samples in the entire data.
+Potential Unfairness We show how applying ITLM may lead to unfairness through a simple experiment. We use the benchmark ProPublica COMPAS dataset [Angwin et al., 2016] where the label y indicates recidivism, and the sensitive attribute z is set to gender. We inject noise into the training set using label ﬂipping techniques [Paudice et al., 2018]. For simplicity, we assume that
+ITLM knows the clean ratio τ of the data and selects (cid:98)τ n(cid:99) samples. We train a logistic regression model on the dataset, and ITLM iteratively selects clean samples during the training.
+We show the accuracy and fairness performances of logistic regression with and without ITLM while varying the noise rate (i.e., portion of labels ﬂipped) in Figure 2. As expected, ITLM increasingly improves the model accuracy for larger noise rates as shown in Figure 2a. At the same time, however, the fairness worsens according to the two measures we use in this paper (see deﬁnitions in Sec. 5) – equalized odds [Hardt et al., 2016] disparity and demographic parity [Feldman et al., 2015] disparity – as shown in Figures 2b and 2c, respectively. The results conﬁrm our claims in Sec. 1. 3 Framework
+We provide an optimization framework for training models on top of clean selection with fairness constraints. The entire optimization involves three joint optimizations, which we explain in a piecewise fashion: (1) how to perform clean selection with fairness constraints, (2) how to train a model on top of the selected samples, and (3) how to generate the fairness constraints. In Sec. 4 we present a concrete algorithm for solving all the optimizations. 3.1 Clean Selection with Fairness Constraints
+The ﬁrst optimization is to select clean samples such that the loss is minimized while fairness constraints are satisﬁed. For now, we assume that the fairness constraints are given where the selected samples of a certain set (y = y, z = z) cannot exceed a portion λ(y,z) of the selected samples of the class y = y. Notice that (cid:80) z λ(y,z) = 1, ∀y ∈ Y. The fairness constraints are speciﬁed as upper bounds because using equality constraints may lead to infeasible solutions. We explain how the λ 3
+values are determined in Sec. 3.3. We thus solve the following optimization for sample selection: min p n (cid:88) i=1 (cid:96)θ(di) pi n (cid:88) s.t. pi ≤ τ n , (cid:88) pj ≤ λ(y,z)|Sy|, ∀(y, z) ∈ Y × Z, (1) (2) i=1 j∈I(y,z) pi ∈ {0, 1}, i = 1, ..., n where pi indicates whether the data sample di is selected or not, I(y,z) is an index set of the (y, z) class, and Sy is the selected samples for y = y. Note that |Sy| = (cid:80) pj. In Eq. 2, the ﬁrst j∈Iy constraint comes from ITLM while the second constraint is for the fairness.
+An important detail is that we use inequalities in all of our constraints, unlike ITLM. The reason is that we may not be able to ﬁnd a feasible solution of selected samples if we only use equality constraints. For example, if λ(1,0) = λ(1,1) = 0.5, but we have zero (y = 1, z = 0) samples, then the fairness equality constraint for (y = 1, z = 0) can never be satisﬁed. 3.2 Model Training
+The next optimization is to train a model on top of the selected samples from Sec. 3.1. Recall that the sample selection optimization only uses inequality constraints, which means that for some set (y = y, z = z), its size |S(y,z)| may be smaller than λ(y,z)|Sy|. However, we would like to train the model as if there were λ(y,z)|Sy| samples for the intended fairness performance. We thus reweight each set (y = y, z = z) by λ(y,z)|Sy|
+|S(y,z)| and perform weighted empirical risk minimization (ERM) for model training. We then solve the bilevel optimization of model training and sample selection in
+Sec. 3.1 as follows: min
+θ (cid:88) (cid:88) si∈Sλ (y,z)∈(Y,Z)
+Sλ =
+IS(y,z)(si)
+λ(y,z)|Sy|
+|S(y,z)| (cid:96)θ(si) arg min
+S={di|pi=1}:Eq. 2
+Eq. 1 (3) (4) where λ is the set of λ(y,z) for all z ∈ Z, y ∈ Y. 3.3 Fairness Constraint Generation
+To determine the λy,z values, we adaptively adjust sampling ratios of sensitive groups using the techniques in FairBatch [Roh et al., 2021]. For each batch selection, we compute the fairness of the intermediate model and decide which sensitive groups should be sampled more (or less) in the next batch. The sampling rates become the λ(y,z) values used in the fairness constraints of Eq. 2.
+FairBatch supports all the group fairness measures used in this paper. As an illustration, we state
+FairBatch’s optimization when using equalized odds disparity (see Sec. A.1 for the optimization using demographic parity disparity): max{|L(y,z(cid:48)) − L(y,z)|}, z (cid:54)= z(cid:48), z, z(cid:48) ∈ Z, y ∈ Y (5) min
+λ where L(y,z) = 1/|Sλ(y,z)| (cid:80) (cid:96)θ(si), and Sλ(y,z) is a subset of Sλ from Eq. 4 for the (y = y, z = z) set. FairBatch adjusts λ in each epoch via a signed gradient-based algorithm to the direction of reducing unfairness. For example, if the speciﬁc sensitive group z is less accurate on the y = y samples in the epoch t (i.e., z is discriminated in terms of equalized odds), FairBatch selects more data from the (y = y, z = z) set to increase the model’s accuracy on that set:
+Sλ(y,z) (y,z) = λ(t)
+λ(t+1) (y,z) − α · sign(L(y,z(cid:48)) − L(y,z)), z (cid:54)= z(cid:48) (6) where α is the step size of λ updates. To integrate FairBatch with our framework, we adaptively adjust λ as above for an intermediate model trained on the selected set Sλ from Eq. 4. 4
+Algorithm 1: Greedy-Based
+Clean and Fair Sample Selection
+Input: loss (cid:96)θ(d), fair ratio lambda λ, clean ratio τ proﬁt = max((cid:96)θ(d)) − (cid:96)θ(d) sortIdx = Sort(proﬁt)
+S ← [ ] for idx in sortIdx do if didx does not violate any constraint in Eq. 8 w.r.t. λ and τ then
+Append didx to S
+Output :S 4 Algorithm
+Algorithm 2: Overall Fair and Robust Model Training
+Input: train data (xtrain, ytrain), clean ratio τ , loss function (cid:96)θ(·) d ← (xtrain, ytrain)
+θ ← initial model parameters
+λ = {λy,z|y ∈ Y, z ∈ Z} ← random sampling ratios for each epoch do
+S = Algorithm1((cid:96)θ(d), λ, τy)
+Draw minibatches from S w.r.t. λy,z|Sy|/|S(y,z)| for each minibatch do
+Update model parameters θ according to the minibatch
+Update ∀λy,z ∈ λ using the update rule as in Eq. 6
+Output :model parameters θ
+We present our algorithm for solving the optimization problem in Sec. 3. We ﬁrst explain how the clean selection with fairness constraints problem in Sec. 3.1 can be converted to a multi-dimensional knapsack problem, which has known solutions. We then describe the full algorithm that includes the three functionalities: clean and fair selection, model training, and fairness constraint generation.
+The clean and fair selection problem can be converted to an equivalent multi-dimensional knapsack problem by (1) maximizing the sum of (max((cid:96)θ(d)) − (cid:96)θ(di))’s instead of minimizing the sum of (cid:96)θ(di)’s where d is the set of di’s and (2) re-arranging the fairness constraints so that the right-hand side expressions become constants (instead of containing the variable Sy) as follows: max n (cid:88) i=1 (max((cid:96)θ(d)) − (cid:96)θ(di)) pi (7) s.t. (cid:80)n i=1 pi ≤ τ n, (cid:80)n i=1 wipi ≤ τ n, where wi =
+
+
+ 1 1 − λ(y,z) 2 − λ(y,z) if di /∈ Dy if di ∈ Dy and di /∈ Dz if di ∈ D(y,z)
+, ∀(y, z) ∈ Y × Z , (8) pi ∈ {0, 1}, i = 1, ..., n where D(y,z) is a subset for the (y, z) class. More details on the conversion are in Sec. A.2.
+The multi-dimensional knapsack problem is known to be strongly NP-hard [Garey and Johnson, 1979]. Although exact algorithms have been proposed, they have exponential time complexi-ties [Kellerer et al., 2004] and are thus impractical. There is a polynomial-time approximation scheme (PTAS) [Caprara et al., 2000], but the actual computation time increases exponentially for more accurate solutions [Kellerer et al., 2004]. Since our method runs within a single model training, we cannot tolerate such runtimes and thus opt for a greedy algorithm that is efﬁcient and known to return reasonable solutions in practice [Akçay et al., 2007]. Algorithm 1 takes a greedy approach by sorting all the samples in descending order by their (max((cid:96)θ(d)) − (cid:96)θ(di)) values and then sequentially selecting the samples that do not violate any of the constraints. The computational complexity is thus O(n log n) where n is the total number of samples.
+We now present our overall model training process for weighted ERM in Algorithm 2. For each epoch, we ﬁrst select a clean and fair sample set S using Algorithm 1. We then draw minibatches from S according to the (y = y, z = z)-wise weights described in Sec. 3.2 and update the model parameters θ via stochastic gradient descent. A minibatch selection with uniform sampling can be considered as an unbiased estimator of the ERM, so sampling each (y = y, z = z) set in proportion to its weight results in an unbiased estimator of the weighted ERM. Finally, at the end of the epoch, we update the λ values using the update rules as in Eq. 6. We discuss about convergence in Sec. A.3. 5
+5 Experiments
+We evaluate our proposed algorithm. We use logistic regression for all experiments. We evaluate our models on separate clean test sets and repeat all experiments with 5 different random seeds. We use
+PyTorch, and all experiments are run on Intel Xeon Silver 4210R CPUs and NVIDIA Quadro RTX 8000 GPUs. More detailed settings are in Sec. B.1.
+Fairness Measures We focus on two representative group fairness measures: (1) equalized odds (EO) [Hardt et al., 2016], whose goal is to obtain the same accuracy between sensitive groups conditioned on the true labels and (2) demographic parity (DP) [Feldman et al., 2015], which is satisﬁed when the sensitive groups have the same positive prediction ratio. We evaluate the fairness disparities over sensitive groups as follows: EO disparity = maxz∈Z,y∈Y | Pr(ˆy = 1|z = z, y = y) −
+Pr(ˆy = 1|y = y)| and DP disparity = maxz∈Z | Pr(ˆy = 1|z = z) − Pr(ˆy = 1)|. Note that the classi-ﬁer is perfectly fair when the fairness disparity is zero.
+Datasets We use a total of three datasets: one synthetic dataset and two real benchmark datasets. We generate a synthetic dataset using a similar method to Zafar et al. [2017a]. The synthetic dataset has 3,200 samples and consists of two non-sensitive features (x1, x2), one sensitive feature z, and one label class y. Each sample (x1, x2, y) is drawn from the following Gaussian distributions: (x1, x2)|y = 1 ∼ N ([1; 1], [5, 1; 1, 5]) and (x1, x2)|y = 0 ∼ N ([−1; −1], [10, 1; 1, 3]). We add the sensitive feature z to have a biased distribution: Pr(z = 1) = 7 Pr((x(cid:48) 2)|y = 1) +
+Pr((x(cid:48) 1, x(cid:48) 2) = (x1 cos(π/5) − x2 sin(π/5), x1 sin(π/5) + x2 cos(π/5)). We visualize the synthetic dataset in Sec. B.2. We utilize two real datasets, ProPublica COMPAS [Angwin et al., 2016] and AdultCensus [Kohavi, 1996], and use the same pre-processing in IBM Fairness 360 [Bellamy et al., 2019]. COMPAS and AdultCensus consist of 5,278 and 43,131 samples, respectively. The labels in COMPAS indicate recidivism, and the labels in AdultCensus indicate each customer’s annual income level. For both datasets, we use gender as the sensitive attribute. Our experiments do not use any direct personal identiﬁer, such as name or date of birth. 2)|y = 0)] where (x(cid:48) 2)|y = 1)/[7 Pr((x(cid:48) 1, x(cid:48) 1, x(cid:48) 1, x(cid:48)
+Noise Injection We use two methods for noise injection: (1) label ﬂipping [Paudice et al., 2018], which minimizes the model accuracy (Label Flipping) and (2) targeted label ﬂipping [Roh et al., 2020], which ﬂips the labels of a speciﬁc group (Group-Targeted Label Flipping). When targeting a group in (2), we choose the one that, when attacked, results in the lowest model accuracy on all groups. The two methods represent different scenarios for label ﬂipping attacks. In Secs. 5.1, 5.2, and 5.4, we ﬂip 10% of labels in the training data, and in Sec. 5.3, we ﬂip 10% to 20% of labels (i.e., varying the noise rate) in the training data.
+Baselines We compare our proposed algorithm with four types of baselines: (1) vanilla training using logistic regression (LR); (2) robust only training using ITLM [Shen and Sanghavi, 2019]; (3) fair only training using FairBatch [Roh et al., 2021]; and (4) fair and robust training where we evaluate two baselines and a state-of-the-art method called FR-Train [Roh et al., 2020]. The two baselines are as follows where each runs in two steps:
+• ITLM→FB: Runs ITLM and then FairBatch on the resulting clean samples.
+• ITLM→Penalty: Runs ITLM and then an in-processing fairness algorithm [Zafar et al., 2017a,b] on the clean samples. The fairness algorithm adds a penalty term to the loss function for reducing the covariance between the sensitive attribute and the predicted labels.
+FR-Train [Roh et al., 2020] performs adversarial training between a classiﬁer and fair and robust discriminators. For the robust training, FR-Train relies on a separate clean validation set. Since
+FR-Train beneﬁts from additional data, its performances can be viewed as an upper bound for our algorithm, which does not utilize such data.
+In Sec. B.3, we also compare with other two-step baselines that improve the fairness both during and after clean sample selection.
+Hyperparameters We choose the step size for updating λ (i.e., α in Eq. 6) within the candidate set {0.0001, 0.0005, 0.001} using cross-validation. We assume the clean ratio τ is known for any dataset. If the clean ratio is not known in advance, it can be inferred using cross-validation [Liu and
+Tao, 2015, Yu et al., 2018]. For all baselines, we start from a candidate set of hyperparameters and 6
+Table 1: Performances on the synthetic test set w.r.t. equalized odds disparity (EO Disp.) and demographic parity disparity (DP Disp.). We compare our algorithm with four types of baselines: (1) vanilla training: LR; (2) robust training: ITLM [Shen and Sanghavi, 2019]; (3) fair training: FB [Roh et al., 2021]; and (4) fair and robust training: ITLM→FB, ITLM→Penalty [Zafar et al., 2017a,b], and FR-Train [Roh et al., 2020]. We ﬂip 10% of labels in the training data. Experiments are repeated 5 times. We highlight the best and second-best performances among the fair and robust algorithms.
+Label Flipping
+Group-Targeted Label Flipping
+Method
+LR
+ITLM
+FB
+Acc.
+EO Disp.
+Acc.
+DP Disp.
+Acc.
+EO Disp.
+Acc.
+DP Disp.
+.665±.003 .557±.015
+.665±.003 .400±.010
+.600±.002 .405±.008
+.600±.002 .300±.006
+.716±.001 .424±.003
+.509±.017 .051±.018
+.716±.001 .380±.002
+.683±.002 .063±.019
+.719±.001 .315±.017
+.544±.005 .072±.010
+.719±.001 .287±.009
+.526±.003 .082±.002
+ITLM→FB
+ITLM→Penalty
+.718±.003 .199±.020
+.651±.051 .172±.046
+.725±.002 .089±.032
+.674±.012 .068±.014
+.707±.001 .108±.030
+.706±.001 .080±.004
+.704±.003 .067±.027
+.688±.004 .044±.004
+Ours
+.727±.002 .064±.005
+.720±.001 .006±.001
+.726±.001 .040±.002
+.720±.001 .039±.007
+FR-Train
+.722±.005 .078±.010
+.711±.003 .057±.027
+.715±.003 .046±.011
+.706±.011 .079±.030
+Table 2: Performances on the COMPAS test set w.r.t. equalized odds disparity (EO Disp.) and demographic parity disparity (DP Disp.). Other experimental settings are identical to Table 1.
+Label Flipping
+Group-Targeted Label Flipping
+Method
+LR
+ITLM
+FB
+Acc.
+EO Disp.
+Acc.
+DP Disp.
+Acc.
+EO Disp.
+Acc.
+DP Disp.
+.503±.002 .123±.021
+.503±.002 .093±.020
+.513±.000 .668±.000
+.513±.000 .648±.000
+.536±.000 .145±.003
+.509±.001 .083±.013
+.536±.000 .094±.003
+.503±.002 .046±.010
+.539±.002 .573±.019
+.525±.004 .093±.003
+.539±.002 .547±.015
+.507±.004 .059±.010
+ITLM→FB
+ITLM→Penalty
+.520±.001 .064±.013
+.523±.003 .074±.027
+.523±.003 .039±.009
+.525±.001 .059±.008
+.538±.008 .315±.074
+.517±.014 .436±.028
+.520±.013 .130±.105
+.514±.007 .094±.022
+Ours
+.521±.000 .044±.000
+.544±.000 .025±.000
+.545±.009 .084±.012
+.521±.000 .024±.000
+FR-Train
+.620±.009 .074±.015
+.607±.016 .050±.013
+.611±.029 .081±.020
+.597±.039 .045±.014 use cross-validation to choose the hyperparameters that result in the best fairness while having an accuracy that best aligns with other results. More hyperparameters are described in Sec. B.1. 5.1 Accuracy and Fairness
+We ﬁrst compare the accuracy and fairness results of our algorithm with other methods on the synthetic dataset in Table 1. We inject noise into the synthetic dataset either using label ﬂipping or targeted label ﬂipping. For both cases, our algorithm achieves the highest accuracy and fairness results compared to the baselines. Compared to LR, our algorithm has higher accuracy and lower EO and DP disparities, which indicates better fairness. Compared to ITLM and FB, our algorithm shows much better fairness and accuracy, respectively. FB’s accuracy is noticeably low as a result of a worse accuracy-fairness tradeoff in the presence of noise. We now compare with the fair and robust training methods. Both ITLM→FB and ITLM→Penalty usually show worse accuracy and fairness compared to our algorithm, which shows that noise and bias cannot easily be mitigated in separate steps.
+Compared to FR-Train, our algorithm surprisingly has similar accuracy and better fairness, which suggests that sample selection techniques like ours can outperform in-processing techniques like
+FR-Train that also rely on clean validation sets. We also perform an accuracy-fairness trade-off comparison between our algorithm and FR-Train in Sec. B.4, where the trends are consistent with the results in Table 1.
+We now make the same comparisons using real datasets. We show the COMPAS dataset results here in Table 2 and the AdultCensus dataset results in Sec. B.5 as they are similar. The results for LR, ITLM, and FB are similar to those for the synthetic dataset. Compared to the fair and robust algorithms ITLM->FB, ITLM->Penalty, and FR-Train, our algorithm usually has the best or second-best accuracy and fairness values as highlighted in Table 2. Unlike in the synthetic dataset,
+FR-Train obtains very high accuracy values with competitive fairness. We suspect that FR-Train is beneﬁting from its clean validation set, which motivates us to perform a more detailed comparison with our algorithm in the next section. 7
+Table 3: Detailed comparison with FR-Train on the COMPAS test set using 10% label ﬂipping. We use the following three different validation sets for FR-Train: (1) noisy; (2) noisy, but cleaned with
+ITLM; and (3) clean.
+Method
+Acc.
+EO Disp.
+Acc.
+DP Disp.
+.620±.009 .074±.015
+FR-Train with clean val. set
+FR-Train with noisy val. set cleaned with ITLM .531±.033 .087±.018
+.502±.034 .073±.021
+FR-Train with noisy val. set
+.521±.000 .044±.000
+Ours
+.607±.016 .050±.013
+.530±.024 .059±.018
+.513±.035 .041±.024
+.544±.000 .025±.000 (a) Accuracy. (b) Demographic parity disparity.
+Figure 3: Performances of LR, ITLM, FR-Train, and our algorithm (Ours) on the synthetic data while varying the noise rate using label ﬂipping [Paudice et al., 2018]. 5.2 Detailed Comparison with FR-Train
+We perform a more detailed comparison between our algorithm and FR-Train. In Sec. 5.1, we observed that FR-Train takes advantage of its clean validation set to obtain very high accuracy values on the COMPAS dataset. We would like to see how that result changes when using validation sets that are less clean. In Table 3, we compare with two scenarios: (1) FR-Train has no clean data, so the validation set is just as noisy as the training set with 10% of its labels ﬂipped and (2) the validation set starts as noisy, but is then cleaned using ITLM, which is the best we can do if there is no clean data. As a result, our algorithm is comparable to the realistic scenario (2) for FR-Train.
+We also compare runtimes (i.e., wall clock times in seconds) of our algorithm and FR-Train on the syn-thetic and COMPAS datasets w.r.t. equalized odds. As a result, Table 4 shows that our algorithm is faster on the synthetic dataset, but a bit slower on the COM-PAS dataset. Our algorithm’s runtime bottleneck is the greedy algorithm (Algorithm 1) for batch selection.
+FR-Train trains slowly because it trains three models (one classiﬁer and two discriminators) together. Hence, there is no clear winner.
+Table 4: Runtime comparison (in seconds) of our algorithm and FR-Train on the syn-thetic and COMPAS test sets w.r.t. equal-ized odds disparity. Other experimental set-tings are identical to Table 1.
+Method
+Synthetic COMPAS
+FR-Train
+Ours 90.986 44.746 230.304 241.291 5.3 Varying the Noise Rate
+We compare the algorithm performances when varying the noise rate (i.e., portion of labels ﬂipped) in the data. Figure 3 shows the accuracy and fairness (w.r.t. demographic parity disparity) of LR,
+ITLM, FR-Train, and our algorithm when varying the noise rate in the synthetic data. Even if the noise rate increases, the relative performances among the four methods do not change signiﬁcantly.
+Our algorithm still outperforms LR and ITLM in terms of accuracy and fairness and is comparable to
+FR-Train having worse accuracy, but better fairness. The results w.r.t. equalized odds disparity are similar and can be found in Sec. B.6. 5.4 Ablation Study
+In Table 5, we conduct an ablation study to investigate the effect of each component in our algorithm.
+We consider three ablation scenarios: (1) remove the fairness constraints in Eq. 2, which reduce discrimination in sample selection, (2) remove the weights in Eq. 3, which ensure fair model training, and (3) remove both functionalities (i.e., same as ITLM). As a result, each ablation scenario leads 8
+Table 5: Ablation study on the synthetic and COMPAS test sets using 10% label ﬂipping. We consider the following three ablation scenarios: (1) w/o fairness constraints; (2) w/o ERM weights; and (3) w/o both.
+Synthetic
+COMPAS
+Method
+Acc.
+EO Disp.
+Acc.
+DP Disp.
+Acc.
+EO Disp.
+Acc.
+DP Disp.
+.716±.001 .424±.003 .716±.009 .380±.002
+W/o both
+.718±.002 .070±.004 .723±.001 .036±.002
+W/o fairness const.
+W/o ERM weights .727±.001 .233±.014 .727±.000 .251±.009
+.727±.002 .064±.005 .720±.001 .006±.001
+Ours
+.536±.000 .145±.003 .536±.000 .094±.003
+.520±.002 .110±.005 .520±.002 .073±.002
+.531±.004 .152±.018 .529±.007 .058±.020
+.521±.000 .044±.000 .544±.000 .025±.000 to either worse accuracy and fairness or slightly-better accuracy, but much worse fairness. We thus conclude that both functionalities are necessary. 6

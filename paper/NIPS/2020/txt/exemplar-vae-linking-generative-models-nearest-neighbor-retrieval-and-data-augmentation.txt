@@ -1,0 +1,88 @@
+Abstract
+We introduce Exemplar VAEs, a family of generative models that bridge the gap between parametric and non-parametric, exemplar based generative models.
+Exemplar VAE is a variant of VAE with a non-parametric prior in the latent space based on a Parzen window estimator. To sample from it, one ﬁrst draws a random exemplar from a training set, then stochastically transforms that exemplar into a latent code and a new observation. We propose retrieval augmented training (RAT) as a way to speed up Exemplar VAE training by using approximate nearest neighbor search in the latent space to deﬁne a lower bound on log marginal likelihood. To enhance generalization, model parameters are learned using exemplar leave-one-out and subsampling. Experiments demonstrate the effectiveness of Exemplar
+VAEs on density estimation and representation learning. Importantly, generative data augmentation using Exemplar VAEs on permutation invariant MNIST and
+Fashion MNIST reduces classiﬁcation error from 1.17% to 0.69% and from 8.56% to 8.16%. Code is available at https://github.com/sajadn/Exemplar-VAE. 1
+
+Introduction
+Non-parametric, exemplar based methods use large, diverse sets of exemplars, and relatively simple learning algorithms such as Parzen window estimation [44] and CRFs [34], to deliver impressive results on image generation (e.g., texture synthesis [15], image super resolution [16], and inpaiting [10, 25]). These approaches generate new images by randomly selecting an exemplar from an existing dataset, and modifying it to form a new observation. Sample quality of such models improves as dataset size increases, and additional training data can be incorporated easily without further optimization. However, exemplar based methods require a distance metric to deﬁne neighborhood structures, and metric learning in high dimensional spaces is a challenge in itself [28, 57].
+Conversely, conventional parametric generative models based on deep neural nets enable learning complex distributions (e.g., [43, 47]). One can use standard generative frameworks [13, 14, 18, 32, 49] to optimize a decoder network to convert noise samples drawn from a factored Gaussian distribution into real images. When training is complete, one would discard the training dataset and generate new samples using the decoder network alone. Hence, the burden of generative modeling rests entirely on the model parameters, and additional data cannot be incorporated without training.
+This paper combines the advantages of exemplar based and parametric methods using amortized variational inference, yielding a new generative model called Exemplar VAE. It can be viewed as a variant of Variational Autoencoder (VAE) [32, 49] with a non-parametric Gaussian mixture (Parzen window) prior on latent codes.
+To sample from the Exemplar VAE, one ﬁrst draws a random exemplar from a training set, then stochastically transforms it into a latent code. A decoder than transforms the latent code into a new observation. Replacing the conventional Gaussian prior into a non-parameteric Parzen window improves the representation quality of VAEs as measured by kNN classiﬁcation, presumably because a Gaussian mixture prior with many components captures the manifold of images and their attributes better. Exemplar VAE also improves density estimation on MNIST, Fashion MNIST, Omniglot, and
+CelebA, while enabling controlled generation of images guided by exemplars. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+We are inspired by recent work on generative models augmented with external memory (e.g., [23, 37, 55, 30, 4]), but unlike most existing work, we do not rely on pre-speciﬁed distance metrics to deﬁne neighborhood structures. Instead, we simultaneously learn an autoencoder, a latent space, and a distance metric by maximizing log-likelihood lower bounds. We make critical technical contributions to make Exemplar VAEs scalable to large datasets, and enhance their generalization.
+The main contributions of this paper are summarized as follows: 1. We introduce Exemplar VAE along with critical regularizers that combat overﬁtting; 2. We propose retrieval augmented training (RAT), using approximate nearest neighbor search in the latent space, to speed up training based on a novel log-likelihood lower bound; 3. Experimental results demonstrate that Exemplar VAEs consistently outperform VAEs with a
+Guassian prior or VampPrior [55] on density estimation and representation learning; 4. We demonstrate the effectiveness of generative data augmentation with Exemplar VAEs for supervised learning, reducing classiﬁcation error of permutation invariant MNIST and Fashion
+MNIST signiﬁcantly, from 1.17% to 0.69% and from 8.56% to 8.16% respectively. 2 Exemplar based Generative Models
+By way of background, an exemplar based generative model is deﬁned in terms of a dataset of N exemplars, X ≡ {xn}N n=1, and a parametric transition distribution, Tθ(x | x(cid:48)), which stochastically transforms an exemplar x(cid:48) into a new observation x. The log density of a data point x under an exemplar based generative model {X, Tθ} can be expressed as log p(x | X, θ) = log (cid:88)N n=1 1
+N
+Tθ(x | xn) , (1) where we assume the prior probability of selecting each exemplar is uniform. Suitable transition distributions should place considerable probability mass on the reconstruction of an exemplar from itself, i.e., Tθ(x | x) should be large for all x. Further, an ideal transition distribution should be able to model the conditional dependencies between different dimensions of x given x(cid:48), since the dependence of x on x(cid:48) is often insufﬁcient to make dimensions of x conditionally independent.
+One can view the Parzen window or Kernel Density estimator [44], as a simple type of exemplar based generative model in which the transition distribution is deﬁned in terms of a prespeciﬁed kernel function and its meta-parameters. With a Gaussian kernel, a Parzen window estimator takes the form log p(x | X, σ2) = − log C − log N + log
+√ (cid:88)N n=1 exp
+−(cid:107)x − xn(cid:107)2 2σ2
+, (2) 2πσ) is the log normalizing constant of an isotropic Gaussian in dx dimen-where log C = dx log( sions. The non-parametric nature of Parzen window estimators enables one to exploit extremely large heterogeneous datasets of exemplars for density estimation. That said, simple Parzen window estima-tion typically underperforms parametric density estimation, especially in high dimensional spaces, due to the inﬂexibility of typical transition distributions, e.g., when T (x | x(cid:48)) = N (x | x(cid:48), σ2I).
+This work aims to adopt desirable properties of non-parametric exemplar based models to help scale parametric models to large heterogeneous datasets and representation learning. In effect, we learn a latent representation of the data for which a Parzen window estimator is an effective prior. 3 Exemplar Variational Autoencoders
+The generative process of an Exemplar VAE is summarized in three steps: 1. Sample n ∼ Uniform(1, N ) to obtain a random exemplar xn from the training set, X ≡ {xn}N n=1. 2. Sample z ∼ rφ(· | xn) using an exemplar based prior, rφ, to transform an exemplar xn into a distribution over latent codes, from which z is drawn. 3. Sample x ∼ pθ(· | z) using a decoder to transform z into a distribution over observations, from which x is drawn.
+Accordingly, the Exemplar VAE can be interpreted as a variant of exemplar based generative models in (1) with a parametric transition function deﬁned in terms of a latent variable z, i.e.,
+Tφ,θ(x | x(cid:48)) = (cid:90) z rφ(z | x(cid:48)) pθ(x | z) dz . (3) 2
+Figure 1: Exemplar VAE is a type of VAE with a non-parametric mixture prior in the latent space. Here, only 3 exemplars are shown, but the set of exemplars often includes thousands of data points from the training dataset.
+The objective function is similar to a standard VAE with the exception that the KL term measures the disparity between the variational posterior qφ(z | x) and a mixture of exemplar based priors (cid:80)N n=1 rφ(z | xn)/N .
+This model assumes that, conditioned on z, an observation x is independent from an exemplar x(cid:48). This conditional independence simpliﬁes the formulation, enables efﬁcient optimization, and encourages a useful latent representation.
+By marginalizing over the exemplar index n and the latent variable z, one can derive an evidence lower bound (ELBO) [3, 29] on log marginal likelihood for a data point x as follows (derivation in section F of supplementary materials): log p(x; X, θ, φ) = log
+N (cid:88) n=1 1
+N
+Tφ,θ(x | xn) = log
+N (cid:88) n=1 1
+N (cid:90) z rφ(z | xn) pθ(x | z) dz (4)
+E qφ(z|x) (cid:124)
+≥ log pθ(x | z) (cid:123)(cid:122) reconstruction
+= O(θ, φ; x, X). (cid:125)
+− E log qφ(z|x) (cid:124) (cid:80)N qφ(z | x) n=1 rφ(z | xn)/N (cid:123)(cid:122) (cid:125)
+KL term (5)
+We use (5) as the Exemplar VAE objective to optimize parameters θ and φ. Note that O(θ, φ; x, X) is similar to the ELBO for a standard VAE, the difference being the deﬁnition of the prior p(z) in the KL term. The impact of exemplars on the learning objective can be summarized in the form of a mixture model prior in the latent space, with one mixture component per exemplar, i.e., p (z | X) = (cid:80) nrφ(z | xn)/N . Fig. 1 illustrates the training procedure and objective function for
+Exemplar VAE.
+A VAE with a Gaussian prior uses an encoder during training to deﬁne a variational bound [32]. Once training is ﬁnished, new observations are generated using the decoder network alone. To sample from an Exemplar VAE, we need the decoder and access to a set of exemplars and the exemplar based prior rφ. Importantly, given the non-parametric nature of Exemplar VAEs, one can train this model with one set of exemplars and perform generation with another, potentially much larger set.
+As depicted in Figure 1, the Exemplar VAE employs two encoder networks, i.e., qφ(z | x) as the variational posterior, and rφ(z | xn) for mapping an exemplar xn to the latent space for the exemplar based prior. We adopt Gaussian distributions for both qφ and rφ. To ensure that T (x | x) is large, we share the means of qφ and rφ. This is also inspired by the VampPrior [55] and discussions of the aggregated variational posterior as a prior [40, 27]. Accordingly, we deﬁne qφ(z | x) = N (z | µφ(x) , Λφ(x)), rφ(z | xn) = N (z | µφ(xn) , σ2I) . (6) (7)
+The two encoders use the same parametric mean function µφ, but they differ in their covariance functions. The variational posterior uses a data dependent diagonal covariance matrix Λφ, while the exemplar based prior uses an isotropic Gaussian (per exemplar), with a shared, scalar parameter σ2.
+Accordingly, log p (z | X), the log of the aggregated exemplar based prior is given by log p (z | X) = − log C (cid:48) − log N + log (cid:88)N j=1 exp
+−(cid:107)z − µφ(xj)(cid:107)2 2σ2
+, (8) 3
+√ where log C (cid:48) = dz log( 2πσ). Recall the deﬁnition of Parzen window estimator with a Gaussian kernel in (2), and note the similarity between (2) and (8). The Exemplar VAE’s Gaussian mixture prior is a Parzen window estimate in the latent space, hence the Exemplar VAE can be interpreted as a deep variant of Parzen window estimation.
+The primary reason to adopt a shared σ2 across exemplars in (7) is computational efﬁciency. Having a shared σ2 enables parallel computation of all pairwise distances between a minibatch of latent codes {zb}B j=1 using a single matrix product. It also enables the use of existing approximate nearest neighbor search methods for Euclidean distance (e.g., [42]) to speed up Exemplar VAE training, as described next. b=1 and Gaussian means {µφ(xj)}N 3.1 Retrieval Augmented Training (RAT) for Efﬁcient Optimization
+The computational cost of training an Exemplar VAE can become a burden as the number of exemplars increases. This can be mitigated with fast, approximate nearest neighbor search in the latent space to
+ﬁnd a subset of exemplars that exert the maximum inﬂuence on the generation of each data point.
+Interesting, as shown below, the use of approximate nearest neighbor for training Exemplar VAEs is mathematically justiﬁed based on a lower bound on the log marginal likelihood.
+The most costly step in training an Exemplar VAE is in the computation of log p (z | X) in (8) given a large dataset of exemplars X, where z ∼ qφ(z | x) is drawn from the variational posterior of x.
+The rest of the computation, to estimate the reconstruction error and the entropy of the variational posterior, is the same as a standard VAE. To speed up the computation of log p (z | X), we evaluate z against K (cid:28) N exemplars that exert the maximal inﬂuence on z, and ignore the rest. This is a reasonable approximation in high dimensional spaces where only the nearest Gaussian means matter in a Gaussian mixture model. Let kNN(z) ≡ {πk}K k=1 denote the set of K exemplar indices with approximately largest rφ(z | xπk ), or equivalently, the smallest (cid:107)z − µφ(xπk )(cid:107)2 for the model in (7).
+Since probability densities are non-negative and log is monotonically increasing, it follows that log p(cid:0)z | X(cid:1) = − log N + log
+N (cid:88) j=1 rφ(z | xj) ≥ − log N + log (cid:88) rφ(z | xπk ) (9) k∈kNN(z)
+As such, approximating the exemplar prior with approximate kNN is a lower bound on (8) and (5).
+To avoid re-calculating {µφ(xj)}N j=1 for each gradient update, we store a cache table of most recent latent means for each exemplar. Such cached latent means are used for approximate nearest neighbor search to ﬁnd kNN(z). Once approximate kNN indices are found, the latent means,
+{µφ(xπk )}k∈kNN(z), are re-calculated to ensure that the bound in (9) is valid. The cache is updated whenever a new latent mean of a training point is available, i.e., we update the cache table for any point covered by the training minibatch or the kNN exemplar sets. Section C in the supplementary materials summaries the Retrieval Augmented Training (RAT) procedure. 3.2 Regularizing the Exemplar based Prior
+Training an Exemplar VAE by simply maximizing O(θ, φ; x, X) in (5), averaged over training data points x, often yields massive overﬁtting. This is not surprising, since a ﬂexible transition distribution can put all its probability mass on the reconstruction of each exemplar, i.e., p(x | x), yielding high log-likelihood on training data but poor generalization. Prior work [4, 55] also observed such overﬁtting, but no remedies have been provided. To mitigate overﬁtting we propose two simple but effective regularization strategies: 1. Leave-one-out during training. The generation of a given data point is expressed in terms of dependence on all exemplars except that point itself. The non-parametric nature of the generative model enables easy adoption of such a leave-one-out (LOO) objective during training, to optimize
+O1(φ, θ; X) = (cid:88)N i=1 log (cid:88)N n=1 1[i(cid:54)=n]
+N −1
+Tφ,θ(xi | xn) , (10) where 1[i(cid:54)=n] ∈ {0, 1} is an indicator function, taking the value of 1 if and only if i (cid:54)= n. 2. Exemplar subsampling. Beyond LOO, we observe that explaining a training point using a subset of the remaining training exemplars improves generalization. To that end, we use a hyper-parameter
+M to deﬁne the exemplar subset size for the generative model. To generate xi we draw M indices 4
+m=1 uniformly at random from subsets of {1, . . . , N } \ {i}. Let π ∼ ΠN,i
+π ≡ {πm}M
+M denote this sampling procedure with (N −1 choose M ) possible subsets. This results in the objective function
+O2(φ, θ; X) = (cid:88)N i=1
+E
+π∼ ΠN,i
+M log (cid:88)M m=1 1
+M
+Tφ,θ(xi | xπm) . (11)
+By moving Eπ inside the log in (11) we recover O1; i.e., O2 is a lower bound on O1, via Jensen’s inequality. Interestingly, we ﬁnd O2 often yields better generalization than O1.
+Once training is ﬁnished, all N training exemplars are used to explain the generation of the validation or test sets using (1), for which the two regularizers discussed above are not used. Even though cross validation is commonly used for parameter tuning and model selection, in (11) cross validation is used as a training objective directly, suggestive of a meta-learning perspective. The non-parameteric nature of the exemplar based prior enables the use of the regularization techniques above, but this would not be straightforward for training parametric generative models.
+Learning objective. To complete the deﬁnition of the learning objective for an Exemplar VAE, we combine RAT and exemplar sub-sampling to obtain the ﬁnal Exemplar VAE objective:
+O3(θ, φ; X) =
+N (cid:88) (cid:34)
+E qφ(z|xi) log pθ(xi | z) qφ(z | xi)
++ E
+ΠN,i
+M (π)
+M (cid:88) log m=1 i=1 1[πm∈kNN(z)]
+√ 2πσ)dz ( exp
+−(cid:107)z − µφ(xπm )(cid:107)2 2σ2 (cid:35)
+, (12) where, for brevity, the additive constant − log M has been dropped. We use the reparametrization trick to back propagate through E qφ(z | xi). For small datasets and fully connected architectures we do not use RAT, but for convolutional models and large datasets the use of RAT is essential. 4

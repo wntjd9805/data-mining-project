@@ -1,0 +1,279 @@
+Abstract
+Traditional methods for Unsupervised Domain Adapta-tion (UDA) targeting semantic segmentation exploit infor-mation common to the source and target domains, using both labeled source data and unlabeled target data. In this paper, we investigate a setting where the source data is un-available, but the classiﬁer trained on the source data is; hence named “model adaptation”. Such a scenario arises when data sharing is prohibited, for instance, because of privacy, or Intellectual Property (IP) issues.
+To tackle this problem, we propose a method that re-duces the uncertainty of predictions on the target domain data. We accomplish this in two ways: minimizing the en-tropy of the predicted posterior, and maximizing the noise robustness of the feature representation. We show the ef-ﬁcacy of our method on the transfer of segmentation from computer generated images to real-world driving images, and transfer between data collected in different cities, and surprisingly reach performance comparable with that of the methods that have access to source data. 1.
+
+Introduction
+The successes of deep learning, especially in semantic segmentation, have been driven in large part by large ar-chitectures [10, 9]. While architectural improvements have made tremendous strides in improving performance, these large computation machines require vast amounts of data to be trained adequately. A few large densely labeled datasets such as Cityscapes [17], or Berkeley Deep Drive [73] ex-ist, but producing them, for instance for a new use case due to a different environment, or sensors, is very labori-ous and expensive; Cordts et al. [17] reports that each im-age required about 90 minutes for labeling and veriﬁcation.
+Added to the difﬁculty of collecting data for segmentation, minor changes in conditions like change of cities between train and test results in a drop of performance [15], as so does change in lighting conditions [19], as it violates the pivotal assumption of test and train data being sampled from the same distribution [57]. Thus, owing to the large costs, both time and economic, creating annotated datasets for each scenario is impractical, motivating the re-use or trans-fer of knowledge from available images to requisite appli-cation.
+The problem of transfer for segmentation has been pre-dominantly investigated in literature (see Section 4) in two settings: adapting a model trained on synthetically gener-ated images to real images, and adapting a model to cities different than the ones it has been trained for. We too adopt these settings for study in this paper. The synthetic-to-real images adaptation has attracted a lot of attention as the cost of generating segmentation ground truth for graphically ren-dered frames like GTA [58], or Synthia [60] is substantially lower. Richter et al. [58] labeled a total of 24,966 frames at an average of 7 seconds per frame, a large drop from 90 minutes taken for Cityscapes. However, due the nature of their generation, these synthetic images have a signiﬁcant domain gap to the real images, which results in a large drop in the performance of networks trained on synthetic data when they are used on real images. Similarly, given the ex-isting real world datasets like Cityscapes, it is paramount that the knowledge learned on these datasets is effectively transferred to different scenarios, without having to provide annotated data for each scenario.
+A large portion of the methods that has been devoted to tackling this problem, like some of the ones reviewed in
+Section 4, require the labeled source data to be available along with the unlabeled target data for the adaptation pro-cess. We, in this paper, focus on the problem where the source data itself is not available but the source trained clas-siﬁer is [16]. This is similar to life-long learning [63], where the goal is to adapt to several tasks over several domains, and the only information payload that is carried over is the model itself. Differing from that, we are not concerned with preserving the performance on the source task. The current problem of source data-less transfer is pertinent when there exist data sharing restrictions on the source data; a common way to circumvent this is to share the trained classiﬁer from which the input data itself cannot be reconstructed. A clas-sical application is in medical image processing, where pa-tient data cannot be freely shared due to privacy concerns, 9613
+but a trained model can be. Another relevant application where we envisage such a setting is in search-and-rescue operations, where data is collected on a mobile drone, and the segmentor network is adapted based on only the data collected, without having the need to access the original la-beled dataset. Thus the problem of domain adaptation in the absence of source data, termed model adaptation [16], is of practical signiﬁcance.
+In this work, we study the problem of model adaptation for semantic segmentation. To the best of our knowledge, ours is the ﬁrst work to do so.
+In the absence of source labeled data that has been effectively exploited by previ-ous works, we enforce auxiliary properties that are desir-able in a system, namely conﬁdent predictions for the tar-get data, and noise resilience, and thereby increased stabil-ity of classiﬁcation to parameter choices. To this end, we propose a method that uses feature corruption [16, 47, 54], and entropy regularization [29, 69]. We ﬁnd that having ac-cess only to the source classiﬁer, along with unlabeled tar-get data, can result in performance comparable to the case where source data is also available. 2. Handling the absence of labeled source data 2.1. A toy problem
+To motivate our method, we consider the ideal case de-picted on Figure 1. Let us consider a simple case of binary classiﬁcation of Y = {0, 1} for a scalar input feature x ∈ R.
+The probability of classiﬁcation is deﬁned using a sigmoid function of the input x and a threshold t p(Y = 1|X = x; t) = 1 1 + e−(x−t) (1)
+For illustration in Figure 1, we show the class conditional distributions, though we do not use class information. With only the information of the feature distribution µX (x), our goal is to reason about scenarios that are likely to generalize better. If the labels are available, traditional wisdom tells us that Figure 1c is likely the ideal scenario to attain in terms of generalization [62]. We make it a little more concrete here, in the case where the labels are not available.
+In Figure 1a, the feature x is given by a source trained feature extractor, and tS is the threshold learned. It is ap-parent that such a threshold is quite likely ill-suited for the target domain, as it places the decision boundary in a high density region of the feature space, contradicting the tradi-tional cluster & continuity assumptions [7, 41, 6]. However, if we change the threshold to t∗, we expect better general-ization performance. Note that this is also the classiﬁer for which the entropy of output probability predictions over the distribution µX (x) is the lowest. We mathematically deﬁne this idea and show numerical simulations for these cases in
+Appendix B.
+We would like to modify the feature extractor itself such that the class conditional distributions overlap lesser than in Figure 1a. This can be achieved by imposing an en-tropy penalty on output posterior predictions, and using that penalty to train the feature extractor too. We show this in
+Figure 1b. As the overlap of the class-conditional data dis-tributions decreases, we expect the generalization perfor-mance to improve.
+The ideal scenario is shown in Figure 1c, where a large number of thresholds can separate the two classes, and we choose one that results in the least uncertain predictions of target data. One can draw parallels to max-margin methods like the SVM, where one is interested in ﬁnding a separator that is optimally distant from all classes. In a nutshell, we see that a classiﬁer that has stable predictions for a range of parameter choices is likely to generalize better. This is, of course, in our context where we do not have access to labeled training data. In order to accomplish this, we need to go beyond entropy quantiﬁcation of the predicted labels; we enforce stability of predictions over noisy features x ± ǫ. 2.2. Proposed method
+We, ﬁrst, formally deﬁne the problem. Let X ∈ RD be the input, and Y ∈ {1 . . . K} the labels. Let S with density µS(x) be the source domain and T with density
+µT (x) be the target one, where we do not have access to the labels of T while training. Let XS = {(xi, yi) i = 1 . . . Ns, xi ∼ µS(x), yi ∼ pS(y)} be the source data, and
+XT = {(xi, ) i = 1 . . . Nt, xi ∼ µT (x)} be the target data.
+Let pT (y) be the target domain label prior that is unknown to us. Here µS 6= µT . We do not have direct access to
+XS, but have access to a network trained on XS. Let us denote that network by f (x, θS) ≡ fS(x) where θS de-notes the parameters of the network trained on the source data. Let g and h denote the feature extractor and classiﬁer respectively, whose composition is f i.e., f = h ◦ g. Let also θg and θh be their corresponding parameters. In our case, the network g refers to the ResNet-101 backbone, and h refers to the ASPP [10] decoder, which we describe in
+Section 3.3. For convenience, h also subsumes the softmax layer, and thus f (x; θ) = p(y|x; θ), where y is a vector of probabilities from which the predicted label is sampled.
+Summarizing, we have fS and XT , and our goal is to mod-ify fS such that its performance is improved on T data. 2.2.1 Optimizing the feature extractor to generate ro-bust features
+The likelihood of predictions y for an input of x ∈ T is computed by f (x; θ), on which an entropy penalty can be imposed [29]. However with a trivial application of this, for the illustration in Figure 1b, the network can learn to separate the distribution by placing the threshold t∗ at any arbitrary point and shearing the feature distributions around 9614
+µ(X|Y = 0)
+µ(X|Y = 1) tSt∗ (a) x −→ x −→ t∗ (b) t∗ (c) x −→
+Figure 1: Given only the feature distributions in 1a to 1c in a two-class scenario, which one generalizes the best? In 1a, we show the distribution of features extracted by source trained network and the corresponding source threshold on the target data. Tuning the threshold to t∗ from tS is expected to result in better generalization. If we can modify the feature extractor itself, reducing the uncertainty of classiﬁcation over the domain gives us 1b. This can be achieved by penalizing the entropy of predictions of each of the data points. We argue that while entropy is seemingly sufﬁcient, we need to reduce the uncertainty in the predictions of the network over a wide range of parameter choices obtain better separation of the data like in 1c, and thereby better generalization. Details in Section 2.1. it, thereby being stable to the choice of the threshold instead of attaining separation of features as in Figure 1c. For sim-ple problems like the one in Figure 1, it can be achieved by enforcing stability to input perturbations. However in deep networks, the network can learn to denoise the inputs in the initial few layers of processing. Using stronger aug-mentations like the ones in Chen et al. [13] are ill-suited for segmentation, as classiﬁcation networks are expected to be invariant to such noise, whereas segmentation networks are expected to be equivariant. This can be remedied by adding structured noise to inputs such that the layout of the input objects is preserved (for example, modifying the colors of objects). We achieve this by adding noise to the feature rep-resentation using dropout, similar to Ouali et al. [54], that acts as a structured noise in the input space.
+Let ˆyi = f (x; ˆθi) be the output of the network using the ith instantiation of dropout, and y = f (x; θ) the output for
+Shared Backbone--ResNet101 t u o p o r
+D t u o p o r
+D t u o p o r
+D t u o p o r
+D
+Aux Decoder
+ASPP
+Aux Decoder
+ASPP
+Main Decoder
+ASPP
+Aux Decoder
+ASPP
+Aux Decoder
+ASPP
+Figure 2: An illustration of the proposed method. The main decoder is trained with Equations (3) and (5), whereas the backbone feature extractor is trained with a combination of
+Equations (2), (3) and (5). At test time, we discard the aux-iliary branches, and thus there is no additional computation at inference. the network without dropout. In such a case, we propose to compute the uncertainty loss as
+Lun = 1
+N
+N
+ˆyi − y 2 i=1
+X (cid:0) (cid:1) (2)
+To implement Equation (2), we introduce dropout only between g and h.
+In the context of Bayesian neural net-works, such a method has been termed LastLayer-Dropout elsewhere [55]. Instead of using a single branch that pre-dicts the output with dropout-weights, we use multiple de-coders ˆh that takes in dropped out features predicted by g.
+Thus y = f (x; θ) = h(g(x; θg); θh) and ˆy = f (x; ˆθ) =
+ˆh(g(x; θg); ˆθh). Thus, each auxiliary decoder ˆh sees only partial feature tensor, and is required to come as close to reconstructing the original label tensor. We, experimen-tally, ﬁnd that freezing the main decoders’ weights θh while training the auxiliary decoders’ parameters ˆθh results in bet-ter performance. Our full method is shown in Figure 2.
+The use of multiple auxiliary decoders has been pro-posed before in Meyerson and Miikkulainen [49] for deﬁn-ing pseudo-tasks for deep multi-task learning, and in Ouali et al. [54] for semi-supervised learning. Meyerson and Mi-ikkulainen [49], however, use ground-truth labels to train each of the auxiliary classiﬁers. We note the similari-ties to several previous works that focus on generating ro-bust representations using various kinds of feature corrup-tions [11, 28] that are class agnostic, and ones that are class speciﬁc like guided cutout [20]. However, we experimen-tally ﬁnd that advanced forms of feature noising (like class dependent noising or targeted cutout) do not work as well, and we hypothesize that it is due to the unreliable predic-tions of the source trained network on target images.
+The proposed uncertainty loss in Equation (2) improves the noise resilience of the network. In addition to that we use an entropy regularizer that minimizes the entropy of the 9615
+network’s predictions, that results in better empirical per-formance.
+Lent = H{f (x; θ)} (3) where, H{} is the entropy of the probability distribution over all K classes for an input x. We hypothesize that this is because the dropout noise modiﬁes the decision bound-ary given by the optimizer itself, and thus is beneﬁcial to explicitly regularize the predictions given that estimate of weights. We ﬁnd that we do not need a diversity enforcing loss, as speciﬁed in [37, 44], to prevent degeneracies. 2.2.2 Regularizing using the source trained model
+We note that the losses in Equations (2) and (3) do not use the information in the source trained classiﬁer, but enforce certain properties to be satisﬁed by the network on the target domain. In Figure 1c, an interchanged labeling i.e., where class-0 is predicted class-1 and vice-versa, results in the same loss value for Equations (2) and (3). To avoid such issues, and to infuse plausible class structure to the data, we use pseudo-labeling.
+Pseudo-labeling or self-training has been a mainstay method in the semi-supervised problems, prior to the deep learning era. However, owing to the availability of large-scale datasets, it has been used to great success [1, 41, 71] for several classiﬁcation problems. Traditional methods use the class with the highest predicted probability as the ground-truth for each unlabeled sample. However, in the case of a domain change, the accuracy of such predicted pseudo-labels is low. So we use the following modiﬁcation to the standard deﬁnition yP L = ( arg max f (x, θ)
+IGNORE if max(f (x, θ)) ≥ τ otherwise (4) i.e., we only consider as pseudo-labels the samples that are at least τ conﬁdent. The samples with the IGNORE label do not contribute to the loss. However choosing τ is a non-trivial task, as too low a threshold will result in wrong la-bels, and too high a threshold will result in no target data being bootstrapped for training. In this work we adopt the strategy of class balanced thresholding [81], where τ is var-ied per class, such that a certain proportion of points per class are always selected. We deﬁne the pseudo labeling loss to be the cross-entropy loss with the pseudo labels as deﬁned in Equation (4)
+LP L = −1T yP L log(y) (5) where 1yP L is one-hot encoded vector of yP L, and log is applied element-wise.
+Thus, the overall loss function being optimized is the combination of Equations (2), (3) and (5):
+L = LP L + λentLent + λunLun (6) where λent, λun are the weights of the individual loss terms.
+Our work is connected to recent work in interesting if Equation (2) is construed to be a form of self-ways: supervision, our method can be interpreted as a form of test-time training [65]. Test-time training proposes to use an auxiliary task at test-time that helps combat domain shift from the training set. We differ from them in that we do not update the network at test time, but do so when given target domain data. Similarly, our work, conceptually, uses self-supervision for domain adaptation, similar to [64], but doesn’t need access to source labeled data. Additionally, our method can be interpreted as a form of making the net-work a bit Bayesian [38], where instead of placing Gaussian posterior on the weights of the penultimate layer’s weights, we use dropout distribution. As previously mentioned, our method has similarities to pseudo-tasks, in multi-task learn-ing [49], which uses labeled data for training. 3. Experiments 3.1. A toy problem
+To elucidate the utility of each of the terms in Equa-tion (6), we use a toy problem as shown in Figure 3.
+In
+Figure 3 a & b we show the source and target datasets; we use a rotated version of the source data as the target data.
+As it is in our case, we do not use the labels of the tar-get data. We train a small two layer neural network with batchnorm and ReLU activations. We provide the exact ar-chitecture in Table 5 in the appendix. We take the outputs before the last classiﬁer layer as the features of the network, and use the techniques that we described in Section 2.2 to train the network, except we do not use pseudo labeling for this problem. We use a feature dimensionality of 2 and plot the target features in Figure 3c with the source classiﬁer. It is very apparent that the source network extracts features that do not transfer well. In Figure 3d, with a simple en-tropy regularization on the target data, we see that the per-formance improves tremendously. However, some of the blue points are very close to the separating line. To remedy this, our proposed feature noise decoder (detailed in Sec-tion 2.2) pushes the points away from the separating line.
+This can be interpreted as a form of increasing the stabil-ity of the classiﬁcation, and thereby reducing uncertainty, which we hypothesize to be the key to better generalization. 3.2. Datasets and Evaluation
+We demonstrate the efﬁcacy of our method on the standard domain adaptation tasks of GTA [58]→
+Cityscapes [17] (GTA-CS) and Synthia [60]→ Cityscapes (SYN-CS) and Cityscapes→NTHU Crosscity[15] (CS-CC), a standard test setting used in several previous works (Sec-tion 4). Cityscapes consists 2975 annotated images, each
+It has of size 2048 × 1024, that act as our training set. 9616
+Figure 3: A toy example in R2 to illustrate our algorithm. The target data is unlabeled, however we shade it for illustration.
+The thick line in all the ﬁgures is the separator. In (a) we show the source data and the classiﬁer trained on that, and in (b) the classiﬁer unmodiﬁed on the target data. In (c) we visualize the features extracted by the source trained classiﬁer on target data.
+With a simple entropy penalty on the target data, we get substantially better performance (d). With the additional uncertainty loss, we see that the features extracted are pulled further away from the separating line in (e). Details in Section 3.1. 500 images as the validation set, which we use to bench-mark our method. It consists of 19 semantic classes for seg-mentation. The GTA dataset consists of 24966 frames, of size 1914 × 1052 grabbed from the famous game Grand
+Theft Auto. The ground truth is generated by the game renderer itself. It shares the same 19 semantic classes as
+Cityscapes. Synthia has 9400 images of size 1280 × 760 synthetic images, and shares 16 classes with Cityscapes.
+For our method, we use a network trained on Synthia or
+GTA, and adapt it to Cityscapes using the 2975 training im-ages without their ground-truth labels. Crosscity dataset has been recorded in four cities: Rome, Rio, Taipei, and Tokyo with each image of resolution 2048×1024. Following [12], we use their experimental setup of 3200 unlabeled images as target training data, and 100 labeled images as target test data. This adaptation task has 13 shared classes. We use the pretrained models provided by Chen et al. [12] for the source trained model.
+To evaluate our method, we use Intersection-over-Union (IoU) for each class, and its average mean-Intersection-over-Union (mIoU) over all classes. We report the metrics for all the 19 classes of GTA-CS adaptation, for the 16 com-mon classes for the SYN-CS experiments, and for the 13 common classes in the CS-CC experiments. In accordance with some recent papers, we also report a mIoU* compar-ing only 13 classes for the Synthia to Cityscapes adaptation task. 3.3. Implementation details
+To facilitate a fair comparison with relevant works, we use a DeepLab V2 network [10] with a ResNet-101 back-bone [31]. Using the notation deﬁned in Section 2, g is the ResNet-101 based feature extractor, and h is the Atrous
+Spatial Pyramidal Pooling (ASPP) decoder. The ResNet 101 backbone is pre-trained on ImageNet. ASPP [10] is a multi-scale decoder, that is used to aggregate multi-scale in-formation for segmentation. It has 4 parallel atrous convolu-tions of various rates, which capture long-range contextual information from extracted features. We train the model on the source domain with stochastic gradient descent with a learning rate of 2.5 × 10−4 with a weight decay of 0.0005, momentum of 0.9. We use a poly learning rate decay sched-uler with power of 0.9. For the adaptation experiments, we use a lower learning rate of 5 × 10−5, with other parame-ters staying the same, with no learning rate decay. We also use a 10× the learning rate for ASPP decoders [10] in our experiments. For all our experiments, we use λent = 1.0,
+λun = 0.1. We use the defaults prescribed by Zou et al.
+[80] to extract class-balanced pseudo labels. For the CS-CC experiments, we run the adaptation for only 2 epochs, and for GTA-CS, SYN-CS for 6 epochs. Code will be available at https://git.io/JthPp. 3.4. Results
+We show the performance of our proposed method on the tasks of GTA-CS adaptation in Table 1a, SYN-CS adaptation in Table 1b and CS-CC adaptation in Table 1c. We obtain re-sults that are at-par or better than some of the classic works on unsupervised domain adaptation (with source data). This work is, however, not a claim that source data is not neces-sary for domain adaptation. The utility of source data has been exploited effectively by recent methods through style transfer techniques [72, 35], thus they obtain higher perfor-mance than us. Our proposed method improves substan-tially on the larger background classes, and we hypothe-size this is because the source classiﬁer can make reliable predictions for these classes. The perceptual domain gap seems to inﬂuence the transfer performance too, as we get very comparable performance for GTA-CS and CS-CC ex-periments, compared to the results we obtain for SYN-CS experiments. 9617
+k l a w e d i
+S 36.0 33.1
+-53.5 55.4 53.5 19.2 55.2 g n i d l i u
+B 79.9 81.0
+-80.5 80.0 80.5 69.1 81.6 d a o
+R 86.5 89.4
+-91.8 91.0 91.8 71.3 92.3 l l a
+W 23.4 26.6
+-32.7 33.7 32.7 18.4 30.8 e c n e
+F 23.3 26.8
+-21.0 21.4 21.0 10.0 18.8 e l o
+P 23.9 27.2
+-34.0 37.3 34.0 35.7 37.1 t h g i l
+. a r
+T 35.2 33.5
+-28.9 32.9 29.0 27.3 17.7 n g i
+S
+. a r
+T 14.8 24.7
+-20.4 24.5 20.3 6.8 12.1
+Method
+AdaptSegNet [66]
+AdvEnt [69]
+FCAN [76]
+CBST [81]
+MRKLD [80]
+LRENT [80]
+Source
+Our method n i a r r e
+T 33.3 36.7
+-34.2 34.1 34.2 24.8 35.9
+. g e
+V 83.4 83.9
+-83.9 85.0 83.9 79.6 84.2 n o s r e
+P 58.5 58.7
+-53.1 57.7 53.1 57.6 57.7 y k
+S 75.6 78.8
+-80.9 80.8 80.9 72.1 83.8 r e d i
+R 27.6 30.5
+-24.0 24.6 23.9 19.5 24.1 r a
+C 73.7 84.8
+-82.7 84.1 82.7 55.5 81.7 k c u r
+T 32.5 38.5
+-30.3 27.8 30.2 15.5 27.5 s u
+B 35.4 44.5
+-35.9 30.1 35.6 15.1 44.3 n i a r
+T 3.9 1.7
+-16.0 26.9 16.3 11.7 6.9 e k i b r o t o
+M 30.1 31.6
+-25.9 26.0 25.9 21.1 24.1 e k i
+B 28.1 32.4
+-42.8 42.3 42.8 12.0 40.4 mIoU 42.4 45.5 46.6 45.9 47.1 45.9 33.8 45.1 (a) Results of GTA5 → Cityscapes (GTA-CS) domain adaptation. k l a w e d i
+S 42.7 42.2 29.9 32.2 30.3 21.3 24.6 g n i d l i u
+B 77.5 79.7 76.3 73.9 74.6 73.1 77.0 d a o
+R 84.3 85.6 68.0 67.7 65.6 64.3 59.3
+* l l a
+W
+− 8.7 10.8 10.7 13.8 2.4 14.0
+* e c n e
+F
+− 0.4 1.4 1.6 1.5 1.1 1.8
+* e l o
+P
+− 25.9 33.9 37.4 35.8 31.4 31.5 t h g i
+L
+. a r
+T 4.7 5.4 22.8 22.2 23.1 7.0 18.3 n g i s
+. a r
+T 7.0 8.1 29.5 31.2 29.1 27.7 32.0
+. g e
+V 77.9 80.4 77.6 80.8 77.0 63.1 83.1 y k
+S 82.5 84.1 78.3 80.5 77.5 67.6 80.4 n o s r e
+P 54.3 57.9 60.6 60.8 60.1 42.2 46.3 r e d i
+R 21.0 23.8 28.3 29.1 28.5 19.9 17.8 r a
+C 72.3 73.3 81.6 82.8 82.2 73.1 76.7 s u
+B 32.2 36.4 23.5 25.0 22.6 15.3 17.0 e k i b r o t o
+M 18.9 14.2 18.8 19.4 20.1 10.5 18.5 e k i
+B 32.3 33.0 39.8 45.3 41.9 38.9 34.6 mIoU mIoU*
+− 41.2 42.6 43.8 42.7 34.9 39.6 46.7 48.0 48.9 50.1 48.7 40.3 45.0
+Method
+AdaptSegNet [66]
+AdvEnt [69]
+CBST [81]
+MRKLD [80]
+LRENT [80]
+Source
+Our method e c r u o s s e s
+U a t a d s e
+Y
+
+
+
+No e c r u o s s e s
+U a t a d s e
+Y
+
+
+No (b) Results of Synthia → Cityscapes (SYN-CS) domain adaptation. s e s
+City U e c r u o s a t a d
+Rome
+Rio
+Tokyo
+Taipei
+Yes
+No
+Yes
+No
+Yes
+No
+Yes
+No
+Method
+Cross city [15]
+MaxSquare [12]
+Source
+Our Method
+Cross city [15]
+MaxSquare [12]
+Source
+Our Method
+Cross city [15]
+MaxSquare [12]
+Source
+Our Method
+Cross city [15]
+MaxSquare [12]
+Source
+Our Method k l a w e d i
+S 29.3 32.6 34.7 39.1 43.9 48.8 42.2 57.0 35.4 30.1 28.4 38.3 28.6 32.5 33.0 34.6 g n i d l i u
+B 84.5 86.7 86.4 87.6 79.0 85.2 84.0 84.8 72.8 77.0 78.1 77.2 80.0 85.5 86.3 84.6 t h g i
+L
+. a r
+T 0.0 20.7 17.5 14.3 2.4 13.8 12.1 17.4 12.3 12.3 14.5 13.7 13.1 32.7 16.0 22.4 n g i
+S
+. a r
+T 22.2 41.6 39.0 37.8 7.5 18.9 20.4 24.0 12.7 27.3 19.6 24.4 7.6 15.1 16.5 9.9 d a o
+R 79.5 82.9 85.0 86.2 74.2 76.9 74.2 82.8 83.4 81.2 81.4 87.1 78.6 80.7 82.6 86.4
+. g e
+V 80.6 85.0 84.9 85.5 77.8 81.7 78.3 80.5 77.4 82.8 81.4 82.6 68.2 78.1 78.3 76.2 y k
+S 82.8 93.0 85.4 88.5 69.5 88.1 87.9 86.0 64.3 89.5 86.5 86.9 82.1 91.3 83.3 88.3 n o s r e
+P 29.5 47.2 43.8 49.9 39.3 54.9 50.1 54.2 42.7 58.2 51.9 54.1 16.8 32.9 26.5 32.8 r e d i
+R 13.0 22.5 15.5 21.9 10.3 34.0 25.6 27.7 21.5 32.7 22.0 28.0 9.4 7.6 8.4 15.1 r a
+C 71.7 82.2 81.8 81.6 67.9 76.8 76.6 78.2 64.1 71.5 70.4 69.6 60.4 69.5 70.7 74.8 s u
+B 37.5 53.8 46.3 56.3 41.2 39.8 40.0 43.8 20.8 5.5 18.2 18.5 34.0 44.8 36.1 45.8 e k i b r o t o
+M 25.9 50.5 38.4 40.4 27.9 44.1 27.6 38.3 8.9 37.4 22.3 19.2 26.5 52.4 47.9 53.3 e k i
+B 1.0 9.9 4.8 10.4 10.9 29.7 17.0 21.5 40.3 48.9 46.4 48.0 9.9 34.9 15.7 26.7 mIoU 42.9 54.5 51.0 53.8 42.5 53.3 48.9 53.5 42.8 50.5 47.8 49.8 39.6 50.6 46.3 50.1 (c) Results of Cityscapes → Cross-City (CS-CC) experiments.
+Table 1: For all the experiments in Tables 1a to 1c we compare our proposed method with methods that use source data for adaptation. We ﬁnd that our method is comparable, and in some cases better than the methods that use the source data for adaptation. In underline, we compare our results to the source trained classiﬁer, and with an bold the best performance over all methods. We omit the underline if our proposed method, or the source classiﬁer out performs the methods that use the source data for adaptation. 3.4.1
+Importance of loss terms
+In order to correctly attribute performance to each of the terms in Equation (6), we ablate over the loss terms in Ta-ble 2. Broadly summarizing, we ﬁnd that the ﬁrst choice of using pseudo-labeling results in a substantial improvement of performance over the source classiﬁer. With each term we see that the performance increases, however as described in Section 3.4.2, our method also suffers higher variance. 9618
+Loss function LP L
+Eq 5
+Lent
+Eq 3
+Lent + LP L Lun + LP L
+Eq 2 + Eq 5
+Eq 3 + Eq 5
+LDT
+Eq 6
+L
+Eq 6
+Method
+Performance Min Reproduced Previously
+Reported estimate
+Results
+% mIoU 42.24 19.85 42.39 42.72 44.52 45.07
+Table 2: Importance of each of the loss terms proposed.
+LDT refers to training with loss in Equation (6) without freezing the decoders, and the last column L shows the per-formance on freezing the main decoder. We see that each of the loss terms gives a consistent improvement over the previous loss values.
+Thus, for a new use case one might expect a small but con-sistent improvement with pseudo-labeling, and other loss terms are useful if the method can be tuned carefully. We show various additional ablations in Appendix D, and some qualitative results in Appendix E. 3.4.2 Variance analysis
+In order to obtain a better estimate of performance, we run some of the baseline methods that we use in Table 1a with
+ﬁve random seeds and show the performance. We use the publicly available codes from the authors. The codes were executed for a maximum of 72 hours, a limitation imposed by our computation resources. For each method, we change only the random seed for each run, and leave the rest of the hyperparameters to the default values set by the authors in their codes. In Table 3, we show various statistics com-puted over the obtained runs. We see that the common trend in publications on UDA is to report the best obtained per-formance. While it is a pragmatic choice to use the best obtained model as benchmarked on a validation set, for deployments, it induces a systemic bias in the assessment of the true performance of the system. Thus, we believe that better characterization of the system’s performance is through computing the average performance and the stan-dard deviation, in addition to the best performance obtained.
+In Table 3, we ﬁnd that merely changing the random seed can have a noticeable effect on the performance of some of the standard systems, an observation made before [48, 3].
+The discrepancy between the maximum results in Table 3 and the reported numbers can be attributed to hardware and software discrepancies, or budget used. Vu et al. [69] also remark that one needs to run the experiments a few times to reach comparable performance 1. Keeping in line with the standards of the domain, we report the best obtained per-formance in Tables 1a to 1c, and show results of variance analysis in Tables 3 and 4. Examining the mean and stan-dard deviation obtained for our GTA-CS and CS-CC experi-ments, we ﬁnd that while our method achieves higher maxi-mum performance, it has a higher variance compared to the 1https://github.com/valeoai/ADVENT#training
+AdaptSegnet [66] 39.68 ± 1.49 37.70
+ADVENT [69] (90K)
+ADVENT [69] (Best) 41.57 ± 0.73 42.56 ± 0.64 40.73 41.60
+CBST [81] 44.04 ± 0.88 42.80
+Proposed Method 42.44 ± 2.18 39.71 42.20 42.73 42.39 45.03 45.06 42.40 43.80 45.90 –
+Table 3: Variance of the methods examined for the GTA→
+Cityscapes. We show the mean, standard deviation, min-imum and reproduced (maximum) performance obtained over ﬁve runs with different random seeds, and the ofﬁcial reported metrics from the paper. For ADVENT we show two rows to indicate the two testing strategies in their code:
+The ﬁrst one is after 90K iterations, and the second is the best attained performance. We see that the common strat-egy is to report the best obtained result.
+Rome
+Rio
+Tokyo
+Taipei
+Performance estimate 53.2± 0.8 52.37± 1.08 49.2± 0.71 49.48±0.76
+Table 4:
+Cityscapes→NTHU Crosscity adaptation.
+Variance of proposed method for the methods that use source data for adaptation process. We hy-pothesize this is due to the unavailability of source data for adaptation; the proxy tasks used cannot act as suitable re-placements for labeled data, in controlling and guiding the optimization process. We leave this analysis to future work. 4.

@@ -1,0 +1,98 @@
+Abstract
+Running nonlinear RNNs for T steps takes Ω(T ) time. Our construction, called
+LDStack, approximately runs them in O(log T ) parallel time, and obtains arbitrarily low error via repetition. First, we show nonlinear RNNs can be approximated by a stack of multiple-input, multiple-output (MIMO) LDS. This replaces nonlinearity across time with nonlinearity along depth. Next, we show that MIMO LDS can be approximated by an average or a concatenation of single-input, multiple-output (SIMO) LDS. Finally, we present an algorithm for running (and differentiating)
+SIMO LDS in O(log T ) parallel time. On long sequences, LDStack is much faster than traditional RNNs, yet it achieves similar accuracy in our experiments.
+Furthermore, LDStack is amenable to linear systems theory. Therefore, it improves not only speed, but also interpretability and mathematical tractability. 1
+
+Introduction
+Nonlinear RNNs have two crucial shortcomings. The ﬁrst is computational: running an RNN for
+T steps is a sequential operation which takes Ω(T ) time. The second is analytical: it is challenging to gain intuition about the behavior of a nonlinear RNN, and even harder to prove this behavior is desirable. These shortcomings have motivated practitioners to abandon RNNs altogether and to model time series by other means. These include hierarchies of (dilated) convolutions [Oord et al., 2016, Gehring et al., 2017] and attention mechanisms which are differentiable analogues of key-value lookups [Bahdanau et al., 2014, Vaswani et al., 2017]. In these models, the underlying parallel primitives are convolution and matrix multiplication, respectively.
+This paper addresses both of these shortcomings. We present a method to approximately run and differentiate nonlinear RNNs in O(log T ) parallel time, by rebuilding them from linear dynamical systems (LDS). In these, the next state st+1 = Ast + Bxt is a linear function of the current state st and input xt. They are a mainstay of control theory and many engineering applications because their behavior can be understood and regulated [Zhou et al., 1996]. Single-input, multiple-output (SIMO)
+LDS, which map a sequence of input numbers to a sequence of output vectors, are our core primitive: we present an algorithm to run and differentiate them in O(log T ) parallel time.
+Summary of Main Ideas. Our approach is to (1) approximate the RNN by a stack of multiple-input, multiple output (MIMO) LDS, then (2) approximate the MIMO LDS by an aggregation of single-input, multiple-output (SIMO) LDS, and ﬁnally (3) run the SIMO LDS in O(log T ) parallel time using scans and reductions. In step (1), we take the LDS, measure the deviations of its linear steps from desired nonlinear ones, and add those as corrections to the LDS in the subsequent layer. This scheme is naturally parallel, since the corrections are based on only local information; surprisingly, it is provably consistent. A multiplicative variant has already been extensively used to analyze nonlinear, continuous-time dynamical systems [Tomás-Rodríguez and Banks, 2010]. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+For step (2), we consider two kinds of aggregation: averaging and concatenation. The averaging approach uses a standard technique in randomized numerical linear algebra: the d-dimensional inputs xt are repeatedly, randomly projected to a single dimension. The concatenation approach pre-applies a d × d transformation to the inputs. Then, the inputs are given to d coupled SIMO LDS, each of size n/d. This approach builds upon the canonical form of Luenberger [1967], which decomposes the
+MIMO LDS into smaller SIMO LDS, whose sizes are called the controllability indices of the MIMO system. Unfortunately, these quantities are onerous to estimate or to even compute. Using a perturbed
+Luenberger form, we show that a uniform size n/d may be used with essentially no loss in generality. t+1 = λ ◦ s(cid:48)
+Finally, step (3) exploits the linear-algebraic structure of SIMO LDS. It is known that linear recur-rences s(cid:48) t + bt, which involve entrywise multiplication ◦, can be run in O(n log T ) parallel time via scans and reductions. A SIMO LDS can be taken to this form via diagonalization, i.e. by running the LDS in the basis of its eigenvectors. When the SIMO LDS is in a canonical form, its eigenvectors have closed-form expressions in terms of its eigenvalues. Accordingly, the set of SIMO
+LDS is exactly parameterized by just n numbers, which are provided to the recurrence solver.
+Outline. We present our approach in a bottom-up fashion. Then, we empirically evaluate it on artiﬁcial and real datasets. LDS achieve state-of-the-art performance on the copy memory problem.
+LDStack can be substantially faster than traditional RNNs, while achieving competitive accuracy.
+Finally, we offer guidance on how our constructions could be improved in future work. 2 Linear Dynamical Systems
+Linear dynamical systems have enjoyed a renaissance in machine learning theory. There have been many recent advances in algorithms for learning LDS from input-output data [Hardt et al., 2016,
+Oymak and Ozay, 2019, Simchowitz et al., 2019, Sarkar and Rakhlin, 2019]. The sample complexity of this task is well-studied [Simchowitz et al., 2018, Jedra and Proutiere, 2019]. As analytical testbeds, they capture the behavior of optimization algorithms [Lessard et al., 2016] and establish baseline performance for reinforcement learning [Recht, Matni et al., 2019] and online learning [Hazan et al., 2017, Kozdoba et al., 2019, Ghai et al., 2020]. Efﬁcient and robust algorithms have recently been developed for controlling LDS [Dean et al., 2019, Hazan et al., 2020].
+This section reviews some basic material about LDS. At time t ∈ [T ], let the input be xt ∈ Rd.
+Starting from an initial state s0 ∈ Rn, an LDS produces subsequent states st+1: st+1 = Ast + Bxt = At+1s0 + t−1 (cid:88)
+τ =0
+Aτ +1Bxt−τ yt = Cst + Dxt + D0 (1) where A ∈ Rn×n and B ∈ Rn×d. By recursively unrolling the ﬁrst equality, we see the states are a convolution of the inputs (with an inﬁnite kernel size and only one stride dimension). Outputs yt ∈ Rm may be optionally produced, using C ∈ Rm×n, D ∈ Rm×d, and D0 ∈ Rm. 2.1 SIMO Canonical Form
+An LDS is reachable, roughly speaking, if we can take it to any state by supplying the right input.
+Deﬁnition 1 (Reachability). A state s ∈ Rn is reachable if there is a sequence of inputs x1, . . . , xT which leads to sT = s. An LDS is reachable if every state s ∈ Rn is reachable. 1
+Lemma 1 (Hautus). An LDS is reachable iff A is nonsingular and, for all γ ∈ C, the n × (n + d) matrix [γI − A; B] has full rank n.
+A reachable SIMO LDS ( ˜A, ˜B, ˜C, D) is placed in canonical form (A, B, C, D) by T ∈ Rn×n:
+A = T ˜AT −1 =
+
+
+
+ 0
+. . . 0 0 0 0 −a0
+... 0 1 0 −an−2 0 1 −an−1 0
+
+
+
+
+B = T ˜B =
+
+
+
+
+
+
+
+ 1 0
+... 0
+C = ˜CT −1 (2) 1In continuous time, reachability and controllability are equivalent. In discrete time, they are equivalent when A is nonsingular. 2
+T −1 is the controllability matrix of ( ˜A, ˜B) [Ding, 2010], which will be deﬁned in (4). a0, . . . , an−1 are the coefﬁcients of A’s characteristic polynomial t (cid:55)→ tn + (cid:80)n−1 i=0 aiti. A is determined by its eigenvalues λ, since ai = (−1)n−ien−i(λ), where ei is the ith elementary symmetric polynomial.
+Equation (2) is called the Frobenius companion form, and is one of many similar companion forms
+[Fiedler, 2003, Eastman et al., 2014]. We also consider the transpose form, which replaces (A, B) by (AT , [0, . . . , 0, 1]T ). In these forms, the number of parameters reduces from n2 + n to just n, for λ. 2.2 Diagonalization
+A = V −1ΛV where Λ is a diagonal matrix of the eigenvalues λ. V is the Vandermonde matrix in λ with entries Vi,j = λj−1
+. Its rows are the (row) eigenvectors of A. Since A is not symmetric, the eigenvectors are neither real nor orthonormal. However, since A is real, any complex eigenvalues come in conjugate pairs: if λj = αj − βji is an eigenvalue, then so too is λj = αj + βji. Deﬁning t = V st, B(cid:48) = V B and C (cid:48) = CV −1, we diagonalize the system to a modal form: s(cid:48) i t+1 = V Ast + V Bxt = λ ◦ s(cid:48) s(cid:48) t + B(cid:48)xt yt = C (cid:48)s(cid:48) t + Dxt + D0 (3)
+The transpose form is often factored in a slightly different way, for analytical purposes.
+Lemma 2. A = U ΛU −1 where the jth column of U is uj =
+[1964]; see the appendix for a self-contained proof.) (cid:105) (cid:104) 1 n−i
+λj 1≤i≤n. (Leslie [1945], Brand
+Multiplication by V and V −1 are equivalent to polynomial evaluation and interpolation, respectively.
+That is, V c evaluates a univariate polynomial, with coefﬁcients c in the monomial basis, at points
+λ1, . . . , λn; V −1y recovers the coefﬁcients. Naively performing these operations may be numerically unstable, due to high-degree powers of λ. These operations may be more accurately performed in
+O(n2) time by Horner’s method and the algorithm of Björck and Pereyra [1970], respectively. 2.3 MIMO Luenberger Form
+Let bi be the ith column of B. The controllability matrix of a MIMO LDS has dimensions n × (n · d):
+C = [b1, . . . , bd, Ab1, . . . , Abd, . . . , An−1b1, . . . , An−1bd] (4)
+From left to right, take n columns, but skip a column if it is linearly dependent on the columns taken so far. If this procedure skips Aubi, it will also skip the higher powers Au+1bi. For i ∈ [d], the controllability index µi is the ﬁrst power of A skipped for bi. For reachable LDS, (cid:80)
+The Luenberger form (A∗d, B∗dE, C, D) expresses any reachable, multiple-input LDS as the con-catenation of d coupled, reachable, single-input LDS, whose sizes equal the controllability indices
+[Luenberger, 1967]. Visual examples of A∗d and B∗d are given in Figure 3. A∗d has, along the block diagonal, d transpose-form SIMO LDS transition matrices of sizes µi. It has off-diagonal entries which couple the SIMO LDS at their inputs. Similarly, B∗d is the block diagonal matrix of d transpose-form B vectors, each of dimension µi × 1. E is an invertible, upper triangular matrix which depends on the original system parameters. It is pre-applied to the inputs. i µi = n. 3 SIMO LDS in O(n log T ) Parallel Time and n Parameters
+The following result makes reachable SIMO LDS our key computational primitive.
+Proposition 1. Reachable, SIMO, n-state LDS are exactly represented by their distinct, nonzero, complex eigenvalues λ ∈ Cn, without further constraints. These eigenvalues can be concretely parameterized by n (or fewer) real numbers. Given the parameters and a length-T sequence of inputs x, it is possible to compute the LDS outputs, and their gradients with respect to the parameters, in
+O(n log T + n2) time on O(T ) parallel processors.
+It is underpinned by the following algorithm for parallel linear recurrences (PLR).
+Proposition 2. Let λ1, . . . , λT and b1, . . . , bT be sequences of n-dimensional vectors. Let ◦ denote entrywise product between vectors. For t ∈ [T ], the recurrence s(cid:48) t+1 = λt ◦ s(cid:48) t + bt, and its gradients, depth (aka parallel time) on p parallel processors. This is p + log p can be computed in O
+O(n log T ) parallel time when p = O(T ) . [Martin and Cundy, 2018] (cid:16) T (cid:17)(cid:17) n (cid:16) 3
+1. Initialize real variables and use them to deﬁne eigenvalues λ. In the standard parameterization (left), the variables are α and β, whose total length is n. In the unit parameterization (right), the variables are θ, whose length is n/2. a ∼ Normal(0, 1/n)n (cid:16)
+λ = roots t (cid:55)→ tn + aiti(cid:17) n−1 (cid:88) i=0
+α, β satisfy λ = [α + βi, α − βi]
+θ ∼ Uniform(−2π, 2π)n/2
+λ = [exp(θi), exp(−θi)] 2. Given a sequence of inputs x ∈ RT , compute the sequence of states s(cid:48) their gradients ∇s(cid:48)
+Proposition 2 on the recurrence s(cid:48) t+1, and t+1 with respect to the underlying real parameters. Use the algorithm of t +B(cid:48)xt given in (3), where B(cid:48) is the all-ones vector. t+1 = λ◦s(cid:48) 3. (Optional). Convert st = V −1s(cid:48) t using the algorithm of Björck and Pereyra [1970]. Finally, compute the outputs yt using an additional dense layer, as in Equation (1). Alternatively, compute yt = Re(C (cid:48)s(cid:48) t) + Dxt + D0 using a relaxation C (cid:48) ∈ Cm×n.
+Figure 1: Summary of how reachable SIMO LDS, with spectral parameterizations, can be used as a fast layer in a neural network. Also consider the “hinge” parameterization in the appendix. Martin and Cundy [2018] implemented the PLR algorithm in CUDA; we extend it for complex inputs.
+Proposition 1 involves three steps. First, the complex LDS eigenvalues λ must be concretely parameterized by real numbers, which in turn must be reasonably initialized. Then, the LDS must be diagonalized according to (3). At ﬁrst glance, it seems more straightforward to directly parameterize
+λ and B(cid:48) in the diagonal form (3). Unfortunately, this does not exactly capture the set of reachable
+SIMO LDS, unless additional constraints are imposed. If λ and B(cid:48) are taken to be real, then only a subset is expressed; if they are complex, then a superset is expressed, and the number of parameters doubles. For analytical and practical reasons, it is desirable to exactly use reachable LDS. (For example, if LDS are stacked in a neural network, then reachability would ensure each layer can supply a full spectrum of input to the subsequent layer.)
+Parameterization. The standard approach is to separately parameterize the real and imaginary (if present) parts of λ. Since the complex eigenvalues present in conjugate pairs, this requires only n real parameters (α, β) in total. More speciﬁcally, the complex pairs are λj = αj − βji and ¯λj = αj + βji.
+The real eigenvalues just have αj. For long-term dependencies, it is useful to constrain |λj| = 1, as in orthogonal or unitary A [Arjovsky et al., 2016]. This constraint is trivial in our framework.
+Suppose λj has polar representation (rj, θj). Then a zero real part of ln λj = ln rj + θji corresponds to magnitude rj = 1. Parameterize ln λ with 0 real part and ±θ imaginary part, then exponentiate.
+Initialization. For the previously deﬁned real variables, typical random initialization, such as sampling from a truncated normal, lead to numerical instability. In the standard parameterization, we found it useful to initialize near unit eigenvalues. It is known that a monic polynomial with random coefﬁcients has roots λ of magnitude close to 1 [Hughes and Nikeghbali, 2008]. These may be obtained by randomly initializing the coefﬁcients a in (2), and then computing the eigenvalues of A
+[Aurentz et al., 2015]. For the unit parameterization, the coordinates θj must be kept numerically distinct. For moderate n, uniform random initialization is suitable. For large n, a low-discrepancy sequence, such as the van der Corput sequence, may be preferable.
+Diagonalization. The two computational tasks are computing B(cid:48) (for use in PLR) and converting t. For the standard form, B(cid:48) = V [1, 0, . . . , 0]T = [1, . . . , 1] since that is the ﬁrst between st and s(cid:48) column of V . As reviewed in Section 2, conversion between st and s(cid:48) t may be accomplished by polynomial evaluation and interpolation algorithms. For the transpose form expressed in terms of U ,
+B(cid:48) is the last column of U −1. For completeness, this is derived in the appendix.
+Lemma 3. Given the (unnormalized) deﬁnition of U in Lemma 2, the complex conjugate of the last (cid:105) column of U −1 is B(cid:48) =
+/ (cid:81) j(cid:54)=i (λi − λj) (cid:104)
+λn−1 i 1≤i≤n 4
+Figure 2: Illustration of a MISO LDS (black), of state size n = 16, operating on inputs of d = 32 dimensions over T = 1024 timesteps, approximated by SISO LDS. In light gray (nearly ﬁlling the background) are 512 SISO LDS, induced by random projections per Proposition 6. These have very high variance and do not approximate the MISO LDS. The two blue lines represent the average of two independent subsamples of 16 SISO LDS. These small averages still do not approximate the
+MISO LDS. The red line is the average of all 512 SISO LDS. This is fairly close to the MISO LDS.

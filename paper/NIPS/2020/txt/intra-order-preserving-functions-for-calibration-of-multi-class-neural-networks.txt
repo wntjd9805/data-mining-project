@@ -1,0 +1,236 @@
+Abstract
+Predicting calibrated conﬁdence scores for multi-class deep networks is important for avoiding rare but costly mistakes. A common approach is to learn a post-hoc calibration function that transforms the output of the original network into cal-ibrated conﬁdence scores while maintaining the network’s accuracy. However, previous post-hoc calibration techniques work only with simple calibration func-tions, potentially lacking sufﬁcient representation to calibrate the complex function landscape of deep networks. In this work, we aim to learn general post-hoc cal-ibration functions that can preserve the top-k predictions of any deep network.
+We call this family of functions intra order-preserving functions. We propose a new neural network architecture that represents a class of intra order-preserving functions by combining common neural network components. Additionally, we introduce order-invariant and diagonal sub-families, which can act as regulariza-tion for better generalization when the training data size is small. We show the effectiveness of the proposed method across a wide range of datasets and classiﬁers.
+Our method outperforms state-of-the-art post-hoc calibration methods, namely temperature scaling and Dirichlet calibration, in several evaluation metrics for the task. 1
+
+Introduction
+Deep neural networks have demonstrated impressive accuracy in classiﬁcation tasks, such as image recognition [8, 28] and medical research [10, 3]. These exciting results have recently motivated engineers to adopt deep networks as default components in building decision systems; for example, a multi-class neural network can be treated as a probabilistic predictor and its softmax output can provide the conﬁdence scores of different actions for the downstream decision making pipeline [6, 2, 21]. While this is an intuitive idea, recent research has found that deep networks, despite being accurate, can be overconﬁdent in their predictions, exhibiting high calibration error [20, 7, 11]. In other words, trusting the network’s output naively as conﬁdence scores in system design could cause undesired consequences: a serious issue for applications where mistakes are costly, such as medical diagnosis and autonomous driving.
+A promising approach to address the miscalibration is to augment a given network with a pa-rameterized calibration function, such as extra learnable layers. This additional component is tuned post-hoc using a held-out calibration dataset, so that the effective full network becomes cali-brated [7, 14, 16, 15, 27, 35]. In contrast to usual deep learning, the calibration dataset here is typically
+∗Equal Contribution. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+(a) Intra Order-preserving (b) Order-invariant (c) Unconstrained
+Figure 1: Comparing instances of intra order-preserving and order-invariant family deﬁned on the 2-dimensional unit simplex. Points C1 = [1, 0, 0](cid:62), C2 = [0, 1, 0](cid:62), C3 = [0, 0, 1](cid:62) are the simplex corners. Arrows depict how an input is mapped by each function. Unconstrained function freely maps the input probabilities, intra order-preserving function enforces the outputs to stay within the same colored region as the inputs, and order-invariant function further enforces the vector ﬁelds to be the same among all the 6 colored regions as reﬂected in the symmetry in the visualization. small. Therefore, learning an overly general calibration function can easily overﬁt and actually reduce the accuracy of the given network [7, 14]. Careful design regularization and parameterization of calibration functions is imperative.
+A classical non-parametric technique is isotonic regression [36], which learns a monotonic staircase calibration function with minimal change in the accuracy. But the complexity of non-parametric learning can be too expensive to provide the needed generalization [16, 15]. By contrast, Guo et al. [7] proposed to learn a scalar parameter to rescale the original output logits, at the cost of being suboptimal in calibration [20]; see also Section 6. Recently, Kull et al. [14] proposed to learn linear transformations of the output logits. While this scheme is more expressive than the temperature scaling above, it does not explore non-linear calibration functions.
+In general, a preferable hypothesis space needs to be expressive and, at the same time, provably preserve the accuracy of any given network it calibrates. Limiting the expressivity of calibration functions can be an issue, especially when calibrating deep networks with complicated landscapes.
+∈
+→
+The main contribution of this paper is introducing a learnable space of functions, called intra order-preserving family. Informally speaking, an intra order-preserving function f : Rn
+Rn is a vector-valued function whose output values always share the same ordering as the input values across
+Rn is increasing from coordinate 1 to n, then so is f (x). In the n dimensions. For example, if x addition, we introduce order-invariant and diagonal structures, which utilize the shared characteristics between different input dimensions to improve generalization. For illustration, we depict instances of 3-dimensional intra order-preserving and order-invariant functions deﬁned on the unit simplex and compare them to an unconstrained function in Fig. 1. We use arrows to show how inputs on the simplex are mapped by each function. Each colored subset in the simplex denotes a region with the same input order; for example, we have x3 > x2 > x1 inside the red region where the subscript i denotes the ith element of a vector. For the intra order-preserving function shown in Fig. 1a arrows stay within the same colored region as the inputs, but the vector ﬁelds in two different colored region are independent to each other. Order-invariant function in Fig. 1b further keeps the function permutation invariant, enforcing the vector ﬁelds to be the same among all the 6 colored regions (as reﬂected in the symmetry in Fig. 1b). This property of order-preserving functions signiﬁcantly reduce the hypothesis space in learning, from the functions on whole simplex to functions on one colored region, for better generalization.
+We identify necessary and sufﬁcient conditions for describing intra order-preserving functions, study their differentiability, and propose a novel neural network architecture that can represent complex intra order-preserving function through common neural network components. From practical point of view, we devise a new post-hoc network conﬁdence calibration technique using different intra order-invariant sub-families. Because a post-hoc calibration function keeps the top-k class prediction if and only if it is an intra order-preserving function, learning the post-hoc calibration function within the intra order-preserving family presents a solution to the dilemma between accuracy and ﬂexibility faced in the previous approaches. We conduct several experiments to validate the beneﬁts of learning 2
+with these new functions for post-hoc network calibration. The results demonstrate improvement over various calibration performance metrics, compared with the original network, temperature scaling [7], and Dirichlet calibration [14]. 2 Problem Setup
+Y
+,
+}
+Z ⊆
+Rd be the domain,
+= [n] be the label space, and let ∆n denote the n
+→ c of i.i.d. samples drawn from an unknown distribution π on
+We address the problem of calibrating neural networks for n-class classiﬁcation. Let deﬁne [n] := 1, . . . , n 1
+{
+− dimensional unit simplex. Suppose we are given a trained probabilistic predictor φo : Rd
+∆n and a small calibration dataset
+.
+Z × Y
+For simplicity of exposition, we assume that φo can be expressed as the composition φo =: sm g,
+◦ with g : Rd
+∆n being the softmax
+→
+→ operator2, i.e. smi(x) =
+, where the subscript i denotes the ith element (cid:80)n
+, the probabilistic predictor φo returns arg maxi φo,i(z) as the of a vector. When queried at z predicted label and maxi φo,i(z) as the associated conﬁdence score. (The top-k prediction is deﬁned similarly.) We say g(z) is the logits of z with respect to φo.
+Rn being a non-probabilistic n-way classiﬁer and sm : Rn exp(xi) j=1 exp(xj ) , for i
+∈ Y
+∈ Z
+D f
+◦
+◦
+D c, our goal is to learn a post-hoc calibration function f : Rn
+Rn such that the
+Given φo and g is better calibrated and keeps the accuracy (or similar new probabilistic predictor φ := sm performance concepts like top-k accuracy) of the original network φo. That is, we want to learn new logits f (g(z)) of z. As we will discuss, this task is non-trivial, because while learning f might improve calibration, doing so could also risk over-ﬁtting to the small dataset c and damaging accuracy. To make this statement more precise, below we ﬁrst review the deﬁnition of perfect calibration [7] and common calibration metrics and then discuss challenges in learning f with
+D and a probabilistic predictor ψ : Rd
+Deﬁnition 1. For a distribution π on
+∆n, let random variables z be distributed according to π, and deﬁne random variables
+ˆy := arg maxi ψi(z) and ˆp := ψˆy(z). We say ψ is perfectly calibrated with respect to π, if for any p
+[0, 1], it satisﬁes Prob(ˆy = y
+Z × Y
+∈ Z
+∈ Y
+, y
+→
+→
+D c.
+ˆp = p) = p.
+|
+∈
+Note that z, y, ˆy and ˆp are correlated random variables. Therefore, Deﬁnition 1 essentially means that, if ψ is perfectly calibrated, then for any p
+[0, 1], the true label y and the predicted label ˆy match, with a probability exactly p in the events where z satisﬁes maxi ψi(z) = p.
+∈ m=1
+|Bm|
+N |
+− c are partitioned into M equally spaced bins
+D
+In practice, learning a perfectly calibrated predictor is unrealistic, so we need a way to measure the calibration error. A common calibration metric is called Expected Calibration Error (ECE) [23]:
+ECE = (cid:80)M conf(Bm) acc(Bm)
+. This equation is calculated in two steps: First the
+|
+M m=1. Second the conﬁdence scores of samples in (cid:80)
+} weighted average of the differences between the average conﬁdence conf(Bm) = 1 i∈Bm ˆpi
+|Bm| 1(yi = ˆyi) in each bin is computed as the ECE metric, and the accuracy acc(Bm) = 1 denotes the size of bin Bm, 1 is the indicator function, and the superscript i indexes the where sampled random variable. In addition to ECE, other calibration metrics have also been proposed [7, 25, 1, 17]; e.g., Classwise-ECE [14] and Brier score [1] are proposed as measures of classwise-calibration. All the metrics for measuring calibration have their own pros and cons. Here, we consider the most commonly used metrics for measuring calibration and leave their analysis for future work.
+Bm
+{
+Bm
+| i∈Bm
+|Bm| (cid:80)
+|
+While the calibration metrics above measure the deviation from perfect calibration in Deﬁnition 1, they are usually not suitable loss functions for optimizing neural networks, e.g., due to the lack of continuity or non-trivial computation time. Instead, the calibration function f in φ = sm g is often optimized indirectly through a surrogate loss function (e.g. the negative log-likelihood) deﬁned on the held-out calibration dataset c [7].
+◦
+◦ f
+D
+Importance of Inductive Bias 2.1
+Unlike regular deep learning scenarios, here the calibration dataset c is relatively small. Therefore, controlling the capacity of the hypothesis space of f becomes a crucial topic [7, 15, 14]. There is typically a trade-off between preserving accuracy and improving calibration: Learning f could
+D 2The softmax requirement is not an assumption but for making the notation consistent with the literature.
+The proposed algorithm can also be applied to the output of general probabilistic predictors. 3
+improve the calibration performance, but it could also change the decision boundary of φ from φo decreasing the accuracy. While using simple calibration functions may be applicable when φo has a simple function landscape or is already close to being well calibrated, such a function class might not be sufﬁcient to calibrate modern deep networks with complex decision boundaries as we will show in the experiments in Section 6.
+The observation above motivates us to investigate the possibility of learning calibration functions within a hypothesis space that can provably guarantee preserving the accuracy of the original network
+φo. The identiﬁcation of such functions would address the previous dilemma and give precisely the needed structure to ensure generalization of calibration when the calibration datatset c is small.
+D 3
+Intra Order-Preserving Functions
+In this section, we formally describe this desirable class of functions for post-hoc network calibration.
+We name them intra order-preserving functions. Learning within this family is both necessary and sufﬁcient to keep the top-k accuracy of the original network unchanged. We also study additional function structures on this family (e.g. limiting how different dimensions can interact), which can be used as regularization in learning calibration functions. Last, we discuss a new neural network architecture for representing these functions. 3.1 Setup: Sorting and Ranking 0, 1
+} y2 n×n denote the set of n
+We begin by deﬁning sorting functions and ranking in preparation for the formal deﬁnition of intra order-preserving functions. Let Pn n permutation matrices.
+⊂ {
+Pn is a
+Rn, we say S : Rn
+Sorting can be viewed as a permutation matrix; Given a vector x sorting function if y = S(x)x satisﬁes y1 yn. In case there are ties in the input vector x, the sorting matrix can not be uniquely deﬁned. To resolve this, we use a pre-deﬁned tie breaker
+Rn is a tie breaker if t = P r, for vector which is used as a tie breaking protocol. We say a vector t
+Rn. Tie breaker pre-assigns priorities to indices of the input some P vector and is used to resolve ties. For instance, S1 = (cid:2) 1 0 (cid:3) are the unique sorting matrices of input x = [0, 0](cid:62) with respect to tie breaker t1 = [1, 2](cid:62) and t2 = [2, 1](cid:62), respectively.
+We say two vectors u, v
+Rn share the same ranking if S(u) = S(v) for any tie breaker t.
+∈ (cid:3) and S2 = (cid:2) 0 1
+Pn, where r = [1, . . . , n](cid:62)
+≥ · · · ≥
+→
+≥
+× 1 0 0 1
+∈
+∈
+∈
+∈ 3.2
+Intra Order-Preserving Functions
+We deﬁne the intra order-preserving property with respect to different coordinates of a vector input.
+Rn, both x
+Deﬁnition 2. We say a function f : Rn and f (x) share the same ranking.
+Rn is intra order-preserving, if, for any x
+→
+∈
+The output of an intra order-preserving function f (x) maintains all ties and strict inequalities between elements of the input vector x. Namely, for all i, j
+[n], we have xi > xj (or xi = xj) if and only if fi(x) > fj(x) (or fi(x) = fj(x)). For example, a simple intra order-preserving function is the temperature scaling f (x) = x/t for some t > 0. Another common instance is the softmax operator.
+∈
+Clearly, applying an intra order-preserving function as the calibration function in φ = sm does not change top-k predictions between φ and φo = sm g. g f
+◦
+◦
+Next, we provide a necessary and sufﬁcient condition for constructing continuous, intra order-invariant functions. This theorem will be later used to design neural network architectures for learning
+Rn and an upper-triangular matrix of ones U , U v is calibration functions. Note that for a vector v the reverse cumulative sum of v (i.e. (U v)i = (cid:80)n
+Theorem 1. A continuous function f : Rn
+S(x)−1U w(x) with U being an upper-triangular matrix of ones and w : Rn continuous function such that
+Rn is intra order-preserving, if and only if f (x) =
+Rn being a j=i vi).
+→
+→
+∈
+◦ wi(x) = 0, if yi = yi+1 and i < n, wi(x) > 0, if yi > yi+1 and i < n, wn(x) is arbitrary,
+•
+•
+• where y = S(x)x is the sorted version of x. 4
+≥
+The proof is deferred to Appendix. Here we provide as sketch as to why Theorem 1 is true. Since wi(x) 0 for i < n, applying the matrix U on w(x) results in a sorted vector U w(x). Thus, applying S(x)−1 further on U w(x) makes sure that f (x) has the same ordering as the input vector x.
+The reverse direction can be proved similarly. For the continuity, observe that the sorting function
+S(x) is piece-wise constant with discontinuities only when there is a tie in the input x. This means that if the corresponding elements in U w(x) are also equally valued when a tie happens, the discontinuity of the sorting function S does not affect the continuity of f inherited from w. 3.3 Order-invariant and Diagonal Sub-families
+Different classes in a classiﬁcation task typically have shared characteristics. Therefore, calibration functions sharing properties across different classes can work as a suitable inductive bias in learning.
+Here we use this idea to deﬁne two additional structures interesting to intra order-preserving functions: order-invariant and diagonal properties. Similar to the purpose of the previous section, we will study necessary and sufﬁcient conditions for functions with these properties.
+First, we study the concept of order-invariant functions.
+Deﬁnition 3. We say a function f : Rn and permutation matrices P
+Pn.
+→
+∈
+Rn is order-invariant, if f (P x) = P f (x) for all x
+Rn
+∈
+For an order-invariant function f , when two elements xi and xj in the input x are swapped, the corresponding elements fi(x) and fj(x) in the output f (x) are also swapped. In this way, the mapping learned for the ith class can also be used for the jth class. Thus, the order-invariant family shares the calibration function between different classes while allowing the output of each class be a function of all other class predictions.
+We characterize in the theorem below the properties of functions that are both intra order-preserving and order-invariant (an instance is the softmax operator). It shows that, to make an intra order-preserving function also order-invariant, we just need to feed the function w in Theorem 1 with the sorted input y = S(x)x instead of x. This scheme makes the learning of w easier since it always sees sorted vectors (which are a subset of Rn).
+Theorem 2. A continuous, intra order-preserving function f : Rn
+→ only if f (x) = S(x)−1U w(y), where U , w, and y are in Theorem 1.
+Rn is order-invariant, if and
+Another structure of interest here is the diagonal property.
+Deﬁnition 4. We say a function f : Rn fi : R
+R with i
+[n].
+→
+→
+∈
+Rn is diagonal, if f (x) = [f1(x1), . . . , fn(xn)] for
+In the context of calibration, a diagonal calibration function means that different class predictions do not interact with each other in f . Deﬁning diagonal family is mostly motivated by the success of temperature scaling method [7], which is a linear diagonal intra order-preserving function. There-fore, although diagonal intra order-preserving functions may sound limiting in learning calibration functions, they still represent a useful class of functions.
+The next theorem relates diagonal intra order-preserving functions to increasing functions.
+Theorem 3. A continuous, intra order-preserving function f : Rn f (x) = [ ¯f (x1), . . . , ¯f (xn)] for some continuous and increasing function ¯f : R
+Rn is diagonal, if and only if
+R.
+→
+→
+Compared with general diagonal functions, diagonal intra order-preserving automatically implies that the same function ¯f is shared across all dimensions. Thus, learning with diagonal intra order-preserving functions beneﬁts from parameter-sharing across different dimensions, which could drastically decrease the number of parameters.
+Finally, below we show that functions in this sub-family are also order-invariant and inter order-preserving. Note that inter and intra order-preserving are orthogonal deﬁnitions.
+Inter order-preserving is also an important property for calibration functions, since this property guarantees that fi(x) increases with the original class logit xi. The set diagram in Fig. 2 depicts the relationship among different intra order-preserving families.
+Deﬁnition 5. We say a function f : Rm that x
+Rn is inter order-preserving if, for any x, y denotes elementwise comparison. f (y), where
+Rm such y, f (x)
+→
+∈
+≥
+≥
+≥ 5
+Figure 2: Relationship between different function families. Theorem 1 speciﬁes the intra order-preserving functions A. Theorem 2 speciﬁes the intra order-preserving and order-invariant functions
+A
+B. Theorem 3 speciﬁes the diagonal intra order-preserving functions D. By Corollary 1, these functions are also order-invariant and inter order-preserving i.e. D
+C.
+A
+∩
+B
+⊆
+∩
+∩
+Corollary 1. A diagonal, intra order-preserving function is order-invariant and inter order-preserving 3.4 Practical Considerations
+Theorems 1 and 2 describe general representations of intra order-preserving functions through a function w that satisﬁes certain non-negative constraints. Inspired by these theoretical results, we propose a neural network architecture, Fig. 3, to represent exactly a family of intra order-preserving functions.
+− yi+1)mi(x), where σ : R
+The main idea in Fig. 3 is to parameterize w through a composition of smaller functions. For i < n,
+R is a positive function such that σ(a) = 0 only we set wi(x) = σ(yi
+→ when a = 0, and mi is a strictly positive function. It is easy to verify that this parameterization of w satisﬁes the requirements on w in Theorem 1. However, we note that this class of functions cannot represent all possible w stated in Theorem 1. In general, the speed wi(x) converges to 0 can be a function of x, but in the proposed factorization above, the rate of convergence to zero is a function of only two elements yi and yi+1. Fortunately, such a limitation does not substantially decrease the expressiveness of f in practice, because the subspace where wi vanishes has zero measure in Rn (i.e.
+Rn). subspaces where there is at least one tie in x
+By Theorem 1 and Theorem 2, the proposed architecture in Fig. 3 ensures f (x) is continuous in x as yi+1) and mi(x) are continuous in x. In the appendix, we show that this is true when long as σ(yi
+σ and mi are continuous functions. Additionally, we prove that when σ and m are continuously differentiable, f (x) is also directionally differentiable with respect to x. Note that the differentiability to the input is not a requirement to learn the parameters of m with a ﬁrst order optimization algorithm which only needs f to be differentiable with respect to the parameters of m. The latter condition holds in general, since the only potential sources of non-differentiable f , S(x)−1 and y are constant with respect to the parameters of m. Thus, if m is differentiable with respect to its parameters, f is also differentiable with respect to the parameters of m.
+−
+∈ 4
+Implementation
+{
+D
+Rn c = (zi, yi) (cid:80)N
+R is a classiﬁcation cost function, and λ
+N i=1 and a calibration function f parameterized by some
+Given a calibration dataset
+} vector θ, we deﬁne the empirical calibration loss as 1 2, where xi = g(zi),
+N
+|| 0 is the regularization weight. Here (cid:96) :
+Y × we follow the calibration literature [30, 7, 14] and use the negative log likelihood (NLL) loss, i.e., (cid:96)(y, f (x)) = log(smy(f (x))), where sm is the softmax operator and smy is its yth element. We use the NLL loss in all the experiments to study the beneﬁt of learning f with different structures.
+The study of other loss functions for calibration [29, 33] is outside the scope of this paper. i=1 (cid:96)(yi, f (xi))+ λ
+θ 2 ||
+→
+≥
+−
+To ensure f is within the intra order-preserving family, we restrict f to have the structure in Theorem 1 and set wi(x) = σ(yi yi+1)m(x), as described in Section 3.4. We parameterize function m by a generic multi-layer neural network and utilize the softplus activation s+(a) = log(1 + exp(a))
+− 6
+Figure 3: Flow graph of the intra order-preserving function. The vector x ∈ Rn is the input to the graph.
+Function m is estimated using a generic multi-layer neural network with non-linear activation for the hidden layers. The input to the network is sorted for learning order-preserving functions. We employ softplus activation function s+ to impose strict positivity constraints. on the last layer when strict positivity is desired and represent σ as σ(a) = mi(x) is constant, our architecture recovers the temperature scaling scheme [7]. a
+|
+. For example, when
+|
+The order-invariant version in Theorem 2 can be constructed similarly. The only difference is that the neural network that parameterizes m receives instead the sorted input. Fig. 3 illustrates the architecture of these models.
+The diagonal intra order-preserving version in Theorem 3 is formed by learning an increasing function shared across all logit dimensions. We use the ofﬁcial implementation of proposed architecture in [31] that learns monotonic functions with unconstrained neural networks. 5

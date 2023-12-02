@@ -1,0 +1,88 @@
+Abstract
+During typical gradient-based training of deep neural networks, all of the model’s parameters are updated at each iteration. Recent work has shown that it is possible to update only a small subset of the model’s parameters during training, which can alleviate storage and communication requirements. In this paper, we show that it is possible to induce a ﬁxed sparse mask on the model’s parameters that selects a subset to update over many iterations. Our method constructs the mask out of the k parameters with the largest Fisher information as a simple approximation as to which parameters are most important for the task at hand. In experiments on parameter-efﬁcient transfer learning and distributed training, we show that our approach matches or exceeds the performance of other methods for training with sparse updates while being more efﬁcient in terms of memory usage and communication costs. We release our code publicly to promote further applications of our approach.2 1
+
+Introduction
+Stochastic gradient descent (SGD) is a vital component of the modern pipeline for training deep neural networks. Along with the back-propagation algorithm, gradient descent allows for the efﬁcient minimization of a loss function by gradually updating a model’s parameters. SGD minimizes the loss over a small random subset of the dataset at each training iteration, which allows training over large datasets. In practice, minimizing a large neural network’s training loss using SGD often results in models that generalize well to new data [3, 17, 27], making SGD an invaluable tool.
+While effective, standard SGD requires that all model parameters are updated at every iteration of training. As a result, communicating changes to the model requires communicating the updated value of every parameter. Since modern neural networks often have millions or billions of parameters
+[9, 7, 40], this communication can become excessively expensive. A concrete example of the negative impacts of these costs arises in the setting of transfer learning. In transfer learning, a model’s parameters are initialized from an existing pre-trained model before being ﬁne-tuned (i.e. trained) on a task of interest. Pre-trained models can be ﬁne-tuned a huge number of times – for example, the Hugging Face model repository3 has thousands of ﬁne-tuned variants of the BERT model [12].
+Each of these ﬁne-tuned variants requires a unique copy of the model’s parameters, each of which takes up around 500MB of disk space. Relatedly, in distributed training [11] and federated learning
+[35], workers compute updates for a centralized model in parallel on different subsets of data. After a certain number of updates, the workers each communicate the newly-computed parameter values back to the centralized model. The communication step can cause a signiﬁcant amount of overhead (particularly when the model is large) since the workers must communicate the updated values of all parameters when using standard SGD.
+∗Equal contribution. 2Code for our work can be found at https://github.com/varunnair18/FISH. 3https://huggingface.co/models 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: Diagram comparing our proposed method to standard SGD. In traditional gradient-based training (left), all of a model’s parameters are updated at every iteration. We propose FISH Mask, a method for precomputing a sparse subset of parameters to update over many subsequent training iterations. To construct the FISH Mask, we ﬁnd the k parameters with the largest Fisher information (right, top). Then, we train the model with traditional gradient descent, but only update those parameters chosen by the mask (right, bottom).
+These issues could be mitigated if it was possible to only update a few parameters during training while still maintaining performance close to that of training all parameters. This has led to various work on parameter-efﬁcient training of neural networks. For example, Adapters [19, 41, 5] introduce additional parameters into a pre-trained model in the form of small task-speciﬁc modules that are
+ﬁne-tuned while the rest of the model’s parameters are kept ﬁxed. Diff Pruning [16] and BitFit
+[6] demonstrate that it is possible to ﬁne-tune a model while only updating a small subset of the existing parameters. In distributed and federated learning settings, Aji and Heaﬁeld [2] and Koneˇcn`y et al. [23] have shown that it is possible for each worker to only update a sparse subset of a model’s parameters, thereby reducing communication costs.
+Existing methods for training with sparse updates typically work in one of three ways: they either add parameters to the model (Adapters), choose a hand-deﬁned and heuristically-motivated subset of parameters (BitFit), or allow the subset of parameters to change over the course of training (Diff
+Pruning and methods in distributed and federated training). In this paper, we argue for pre-computing a sparse subset of existing parameters to update and keeping the subset ﬁxed over many iterations of training. This approach yields various beneﬁts: First, by updating a subset of existing parameters instead of adding parameters (as is done in Adapters), we avoid any increase in the total size of the model. Second, by avoiding hand-deﬁning the mask, we can ensure that our procedure is model-agnostic. Third, by pre-computing a mask, we avoid the computational and memory overhead that are apparent when updating the mask over the course of training. It also allows workers in the distributed training setup to operate on strictly complementary subsets of parameters. Finally, keeping the mask
+ﬁxed over many iterations, we can ensure that only a speciﬁc ﬁxed number of parameters are updated.
+We are not aware of any existing techniques that satisfy these desiderata.
+Motivated by these beneﬁts, we introduce a new method for pre-computing ﬁxed sparse masks.
+Our approach ﬁrst estimates the importance of each parameter using an empirical approximation of its Fisher information. Then, we construct the mask by choosing the k parameters with the largest Fisher information. The resulting mask, which we deem a “FISH (Fisher-Induced Sparse uncHanging) mask”, can be re-used for many subsequent training iterations. We demonstrate the effectiveness of using a FISH Mask in a wide variety of settings, including parameter-efﬁcient transfer learning, distributed training with long delays across workers, and reducing checkpoint size. Broadly speaking, FISH Mask training can dramatically reduce storage and communication requirements, while sacriﬁcing minimal performance compared to standard gradient descent and outperforming relevant prior methods for training with sparse updates. 2 The Fisher-Induced Sparse uncHanging (FISH) Mask
+The main contribution of this paper is a method for pre-computing a sparse subset of a model’s parameters to update over many subsequent training iterations. To construct such a subset, we use an approximation of each parameter’s Fisher information as a signal of how important the parameter is for a given task. We refer to the resulting mask (i.e. binary array indicating which parameters are 2
+included in the subset) as a FISH (Fisher-Induced Sparse uncHanging) mask. In this section, we provide the necessary background and detail the steps necessary for computing a FISH Mask. This process is diagrammed in ﬁg. 1. 2.1 Fisher Information
+Our goal is to select the subset of parameters that are (in some sense) the most important to update.
+One way to measure a parameter’s importance is to consider how much changing the parameter will change the model’s output. We denote pθ(y x) as the output distribution over y produced by a model
+|
+R|θ| given input x. One way to measure how much a change in parameters with parameter vector θ
+R|θ| would change a model’s prediction would be to compute DKL(pθ(y is a small perturbation. It can be shown [34, 37] that as δ x)), where δ pθ+δ(y
+||
+| 0, to second order, x)
+|
+∈
+∈ where Fθ
+∈
+ExDKL(pθ(y x) pθ+δ(y
+|
+||
+R|θ|×|θ| is the Fisher information matrix [14, 4], deﬁned as (cid:2)
+Ey∼pθ(y|x)∇
+Fθ = Ex∼p(x)
+θ log pθ(y x)
+∇
+|
+θ log pθ(y x)) = δTFθδ + O(δ3)
+| x)T(cid:3)
+|
+→ (1) (2)
+Given this relation, it can be seen that the Fisher information matrix is closely connected to how much each parameter affects the model’s predictions. Indeed, this has led the Fisher information matrix to be widely used in modern machine learning, e.g. as a measure of parameter importance [21], as a preconditioner in gradient descent [4, 37, 34], as a way to measure the amount of “information” in each parameter of a neural network [1], or as a way to decide which parameters to prune when performing model compression [43, 10, 47].
+θ
+|
+When applied to large neural networks, the size of the Fisher information matrix makes it
+θ
+| × | intractable to compute. Prior work therefore frequently approximates Fθ as a diagonal matrix, or equivalently, as a vector in R|θ|. Separately, when training machine learning models we seldom have p(x); instead, we are given a ﬁnite training set of such samples. the ability to draw samples x
+Furthermore, it is rarely necessary to compute the expectation over x in eq. (2) over the full training set; instead, it can often be well-approximated over N samples x1, . . . , xN . These constraints result in the following common approximation:
+∼
+|
+ˆFθ = 1
+N
+N (cid:88) i=1
+Ey∼pθ(y|xi)(
+θ log pθ(y
+∇ xi))2
+| (3)
+∈ where ˆFθ
+R|θ|. This approximation also has an intuitive interpretation: A given entry in ˆFθ relates to the average of the square gradient of the model’s output with respect to a given parameter. If a given parameter heavily affects the model’s output, then its corresponding entry in ˆFθ will be large, so we can reasonably treat ˆFθ as an approximation of the importance of each parameter.
+Note that both eq. (2) and eq. (3) include an expectation over y x). When the number of
+| classes is small, this expectation can be computed exactly. For tasks with many possible classes, it is common to approximate the expectation with a few samples from pθ(y x). In supervised learning
+| settings, we have access to the ground-truth label yi for each sample xi in our training set. This leads xi))2. to the possibility of replacing Ey∼pθ(y|xi)(
+|
+Performing this approximation is referred to as the “empirical Fisher”. It has been shown that using the empirical Fisher can lead to degenerate behavior when used as a preconditioner in an optimizer
+[34, 26]. Since our use of the Fisher information is largely based on a heuristically-motivated notion of parameter importance, we experimented with both the empirical and standard (eq. (3)) Fisher approximations and found that they produced similar performance. Furthermore, the Empirical Fisher is faster to compute than the standard Fisher as long as more than one sample is used to approximate the expectation Ey∼pθ(y|xi). We discuss this further in section 4.4.1. xi))2 in eq. (3) with (
+|
+θ log pθ(yi
+θ log pθ(y pθ(y
+∇
+∇
+∼ 2.2 Computing Fixed Sparse Masks
+Recall that our goal is to select a subset of parameters (or, equivalently, a sparse mask over parameters) to update over many iterations of training while keeping the remainder of the parameters ﬁxed. Having established the Fisher information as a useful tool for estimating the importance of a given parameter, we therefore ﬁrst compute the approximate Fisher information (as described in the previous section) 3
+for all of a model’s parameters. Then, to construct the FISH Mask, we simply choose the k parameters with the largest Fisher information, where k is set according to the desired mask sparsity level.4
+Speciﬁcally, a FISH Mask comprises the parameters
+. Computing the FISH
+}
+Mask is cheap because ˆFθ can be computed efﬁciently using backpropagation, and (as we will show in section 4.4.2) we can obtain a reliable mask for relatively small values of N . Further, the fact that we re-use the mask for many iterations prevents us from having to compute ˆFθ frequently. As we will show in section 4, we ﬁnd that this simple procedure is sufﬁcient to produce a mask that can be reused for many iterations (over 100,000 iterations in some cases) in a wide variety of settings without sacriﬁcing substantial performance compared to standard gradient-based training. sort( ˆFθ)k
+ˆFθi ≥
+θi
+{
+|
+Note that in some applications of transfer learning, a new linear classiﬁer layer must be added to the model to make it applicable to the downstream task. Since the FISH Mask depends on pθ(y x)
+| and is computed before training begins, this means that we must compute the FISH Mask using the randomly-initialized classiﬁer before any training has begun. We ﬁnd that computing the Fisher information through the randomly-initialized classiﬁer layer still provides a good signal of parameter importance. When applying FISH Mask in transfer learning settings where a new classiﬁer layer is added, we always include the parameters of the classiﬁer in the mask. 3

@@ -1,0 +1,92 @@
+Abstract
+Episodic training is a core ingredient of few-shot learning to train models on tasks with limited labelled data. Despite its success, episodic training remains largely understudied, prompting us to ask the question: what is the best way to sample episodes? In this paper, we ﬁrst propose a method to approximate episode sampling distributions based on their difﬁculty. Building on this method, we perform an extensive analysis and ﬁnd that sampling uniformly over episode difﬁculty out-performs other sampling schemes, including curriculum and easy-/hard-mining.
+As the proposed sampling method is algorithm agnostic, we can leverage these insights to improve few-shot learning accuracies across many episodic training algorithms. We demonstrate the efﬁcacy of our method across popular few-shot learning datasets, algorithms, network architectures, and protocols. 1
+
+Introduction
+Large amounts of high-quality data have been the key for the success of deep learning algorithms.
+Furthermore, factors such as data augmentation and sampling affect model performance signiﬁcantly.
+Continuously collecting and curating data is a resource (cost, time, storage, etc.) intensive process.
+Hence, recently, the machine learning community has been exploring methods for performing transfer-learning from large datasets to unseen tasks with limited data.
+A popular genre of these approaches is called meta-learning few-shot approaches, where, in addition to the limited data from the task of interest, a large dataset of disjoint tasks is available for (pre-)training.
+These approaches are prevalent in the area of computer vision [31] and reinforcement learning [6].
+A key component of these methods is the notion of episodic training, which refers to sampling tasks from the larger dataset for training. By learning to solve these tasks correctly, the model can generalize to new tasks.
+However, sampling for episodic training remains surprisingly understudied despite numerous methods and applications that build on it. To the best of our knowledge, only a handful of works [69, 55, 33] explicitly considered the consequences of sampling episodes. In comparison, stochastic [46] and mini-batch [4] sampling alternatives have been thoroughly analyzed from the perspectives of optimization [17, 5], information theory [27, 9], and stochastic processes [68, 66], among many others. Building a similar understanding of sampling for episodic training will help theoreticians and practitioners develop improved sampling schemes, and is thus of crucial importance to both.
+In this paper, we explore many sampling schemes to understand their impact on few-shot methods.
+Our work revolves around the following fundamental question: what is the best way to sample episodes? Our focus will be restricted to image classiﬁcation in the few-shot learning setting – where
+“best” is taken to mean “higher transfer accuracy of unseen episodes” – and leave analyses and applications to other areas for future work.
+∗Equal contributions; work done while at Amazon Web Services. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Contrary to prior work, our experiments indicate that sampling uniformly with respect to episode difﬁculty yields higher classiﬁcation accuracy – a scheme originally proposed to regularize metric learning [62]. To better understand these results, we take a closer look at the properties of episodes and what makes them difﬁcult. Building on this understanding, we propose a method to approximate different sampling schemes, and demonstrate its efﬁcacy on several standard few-shot learning algorithms and datasets.
+Concretely, we make the following contributions:
+• We provide a detailed empirical analysis of episodes and their difﬁculty. When sampled randomly, we show that episode difﬁculty (approximately) follows a normal distribution and that the difﬁculty of an episode is largely independent of several modeling choices including the training algorithm, the network architecture, and the training iteration.
+• Leveraging our analysis, we propose simple and universally applicable modiﬁcations to the episodic sampling pipeline to approximate any sampling scheme. We then use this scheme to thoroughly compare episode sampling schemes – including easy/hard-mining, curriculum learning, and uniform sampling – and report that sampling uniformly over episode difﬁculty yields the best results.
+• Finally, we show that sampling matters for few-shot classiﬁcation as it improves transfer accuracy for a diverse set of popular [53, 20, 15, 41] and state-of-the-art [64] algorithms on standard and cross-domain benchmarks. 2 Preliminaries 2.1 Episodic sampling and training
+We deﬁne episodic sampling as subsampling few-shot tasks (or episodes) from a larger base dataset [7].
+Assuming the base dataset admits a generative distribution, we sample an episode in two steps2. First, we sample the episode classes Cτ from class distribution p(Cτ ); second, we sample the episode’s data from data distribution p(x, y | Cτ ) conditioned on Cτ . This gives rise to the following log-likelihood for a model lθ parameterized by θ:
+L(θ) = E
+τ ∼q(·)
+[log lθ(τ )] , (1) where q(τ ) is the episode distribution induced by ﬁrst sampling classes, then data. In practice, this expectation is approximated by sampling a batch of episodes B each with their set τQ of query samples. To enable transfer to unseen classes, it is also common to include a small set τS of support samples to provide statistics about τ . This results in the following Monte-Carlo estimator: 1
+|τQ| log lθ(y | x, τS),
+L(θ) ≈ 1
+|B| (cid:88) (cid:88) (2)
+τ ∈B (x,y)∈τQ where the data in τQ and τS are both distributed according to p(x, y | Cτ ). In few-shot classiﬁcation, the n-way k-shot setting corresponds to sampling n = |Cτ | classes, each with k = |τS | n support data points. The implicit assumption in the vast majority of few-shot methods is that both classes and data are sampled with uniform probability – but are there better alternatives? We carefully examine these underlying assumptions in the forthcoming sections. 2.2 Few-shot algorithms
+We brieﬂy present a few representative episodic learning algorithms. A more comprehensive treatment of few-shot algorithms is presented in Wang et al. [59] and Hospedales et al. [24]. A core question in few-shot learning lies in evaluating (and maximizing) the model likelihood lθ. These algorithms can be divided in two major families: gradient-based methods, which adapt the model’s parameters to the episode; and metric-based methods, which compute similarities between support and query samples in a learned embedding space.
+Gradient-based few-shot methods are best illustrated through Model-Agnostic Meta-Learning [15] (MAML). The intuition behind MAML is to learn a set of initial parameters which can quickly 2We use the notation for a probability distribution and its probability density function interchangeably. 2
+specialize to the task at hand. To that end, MAML computes lθ by adapting the model parameters
+θ via one (or more) steps of gradient ascent and then computes the likelihood using the adapted parameters θ(cid:48). Concretely, we ﬁrst compute the likelihood pθ(y | x) using the support set τS, adapt the model parameters, and then evaluate the likelihood: lθ(y | x, τS) = pθ(cid:48)(y | x) s.t.
+θ(cid:48) = θ + α∇θ (cid:88) (x,y)∈τS log pθ(y | x), where α > 0 is known as the adaptation learning rate. A major drawback of training with MAML lies in back-propagating through the adaptation phase, which requires higher-order gradients. To alleviate this computational burden, Almost No Inner Loop [41] (ANIL) proposes to only adapt the last classiﬁcation layer of the model architecture while tying the rest of the layers across episodes.
+They empirically demonstrate little classiﬁcation accuracy drop while accelerating training times four-fold.
+Akin to ANIL, metric-based methods also share most of their parameters across tasks; however, their aim is to learn a metric space where classes naturally cluster. To that end, metric-based algorithms learn a feature extractor φθ parameterized by θ and classify according to a non-parametric rule. A representative of this family is Prototypical Network [53] (ProtoNet), which classiﬁes query points according to their distance to class prototypes – the average embedding of a class in the support set:
+θ)) (cid:88) exp (−d(φθ(x), φy (cid:16) (cid:80) exp y(cid:48)∈Cτ
+−d(φθ(x), φy(cid:48)
+θ ) (cid:17) s.t. φc
+θ = 1 k lθ(y | x, τS) =
+φθ(x), (x,y)∈τS y=c where d(·, ·) is a distance function such as the Euclidean distance or the negative cosine similarity, and
+φc
+θ is the class prototype for class c. Other classiﬁcation rules include support vector clustering [32], neighborhood component analysis [30], and the earth-mover distance [67]. 2.3 Episode difﬁculty
+Given an episode τ and likelihood function lθ, we deﬁne episode difﬁculty to be the negative log-likelihood incurred on that episode:
+Ωlθ (τ ) = − log lθ(τ ), which is a surrogate for how hard it is to classify the samples in τQ correctly, given lθ and τS. By deﬁnition, this choice of episode difﬁculty is tied to the choice of the likelihood function lθ.
+Dhillon et al. [11] use a similar surrogate as a means to systematically report few-shot performances.
+We use this deﬁnition because it is equivalent to the loss associated with the likelihood function lθ on episode τ , which is readily available at training time. 3 Methodology
+In this section, we describe the core assumptions and methodology used in our study of sampling methods for episodic training. Our proposed method builds on importance sampling [21] (IS) which we found compelling for three reasons: (i) IS is well understood and solidly grounded from a theoretical standpoint, (ii) IS is universally applicable thus compatible with all episodic training algorithms, and (iii) IS is simple to implement with little requirement for hyper-parameter tuning.
+Why should we care about episodic sampling? A back-of-the-envelope calculation3 suggests that there are on the order of 10162 different training episodes for the smallest-scale experiments in Section 5.
+Since iterating through each of them is infeasible, we ought to express some preference over which episodes to sample. In the following, we describe a method that allows us to specify this preference. 3.1
+Importance sampling for episodic training
+Let us assume that the sampling scheme described in Section 2.1 induces a distribution q(τ ) over episodes. We call it the proposal distribution, and assume knowledge of its density function. We wish 3For a base dataset with N classes and K input-output pairs per class, there are a total of (cid:0)N (cid:1)n (cid:1)(cid:0)K k possible n episodes that can be created when sampling k pairs each from n classes. 3
+Algorithm 1: Episodic training with Importance Sampling
+Input: target (p) and proposal (q) distributions, likelihood function lθ, optimizer OPT.
+Randomly initialize model parameters θ. repeat
+Sample a mini-batch B of episodes from q(τ ). for each episode τ in mini-batch B do
+Compute episode likelihood: lθ(τ ).
+Compute importance weight: w(τ ) = p(τ ) q(τ ) . end for
+Aggregate: L(θ) ← (cid:80)
+Compute effective sample size ESS(B).
+Update model parameters: θ ← OPT( L(θ)
+τ ∈B w(τ ) log lθ(τ ).
+ESS(B) ). until parameters θ have converged. to estimate the expectation in Eq. (1) when sampling episodes according to a target distribution p(τ ) of our choice, rather than q(τ ). To that end, we can use an importance sampling estimator which simply re-weights the observed values for a given episode τ by w(τ ) = p(τ ) q(τ ) , the ratio of the target and proposal distributions:
+E
+τ ∼p(·)
+[log lθ(τ )] = E
+τ ∼q(·)
+[w(τ ) log lθ(τ )] .
+The importance sampling identity holds whenever q(τ ) has non-zero density over the support of p(τ ), and effectively allows us to sample from any target distribution p(τ ).
+A practical issue of the IS estimator arises when some values of w(τ ) become much larger than others; in that case, the likelihoods lθ(τ ) associated with mini-batches containing heavier weights dominate the others, leading to disparities. To account for this effect, we can replace the mini-batch average in the Monte-Carlo estimate of Eq. (2) by the effective sample size ESS(B) [29, 34]:
+E
+τ ∼p(·)
+[log lθ(τ )] ≈ 1
+ESS(B) (cid:88)
+τ ∈B w(τ ) log lθ(τ ) s.t. ESS(B) = ((cid:80) (cid:80)
+τ ∈B w(τ ))2
+τ ∈B w(τ )2 , (3) where B denotes a mini-batch of episodes sampled according to q(τ ). Note that when w(τ ) is constant, we recover the standard mini-batch average setting as ESS(B) = |B|. Empirically, we observed that normalizing with the effective sample size avoided instabilities. This method is summarized in Algorithm 1. 3.2 Modeling the proposal distribution
+A priori, we do not have access to the proposal distribution q(τ ) (nor its density) and thus need to estimate it empirically. Our main assumption is that sampling episodes from q(τ ) induces a normal distribution over episode difﬁculty. With this assumption, we model the proposal distribution by this induced distribution, therefore replacing q(τ ) with N (Ωlθ (τ ) | µ, σ2) where µ, σ2 are the mean and variance parameters. As we will see in Section 5.2, this normality assumption is experimentally supported on various datasets, algorithms, and architectures.
+We consider two settings for the estimation of µ and σ2: ofﬂine and online. The ofﬂine setting consists of sampling 1, 000 training episodes before training, and computing µ, σ2 using a model pre-trained on the same base dataset. Though this setting seems unrealistic, i.e. having access to a pre-trained model, several meta-learning few-shot methods start with a pre-trained model which they further build upon. Hence, for such methods there is no overhead. For the online setting, we estimate the parameters on-the-ﬂy using the model currently being trained. This is justiﬁed by the analysis in Section 5.2 which shows that episode difﬁculty transfers across model parameters during training.
+We update our estimates of µ, σ2 with an exponential moving average:
+µ ← λµ + (1 − λ)Ωlθ (τ ) and σ2 ← λσ2 + (1 − λ)(Ωlθ (τ ) − µ)2, where λ ∈ [0, 1] controls the adjustment rate of the estimates, and the initial values of µ, σ2 are computed in a warm-up phase lasting 100 iterations. Keeping λ = 0.9 worked well for all our 4
+experiments (Section 5). We opted for this simple implementation as more sophisticated approaches like West [61] yielded little to no beneﬁt. 3.3 Modeling the target distribution
+Similar to the proposal distribution, we model the target distribution by its induced distribution over episode difﬁculty. Our experiments compare four different approaches, all of which share parameters
+µ, σ2 with the normal model of the proposal distribution. For numerical stability, we truncate the support of all distributions to [µ − 2.58σ, µ + 2.58σ], which gives approximately 99% coverage for the normal distribution centered around µ.
+The ﬁrst approach (HARD) takes inspiration from hard negative mining [51], where we wish to sample only more challenging episodes. The second approach (EASY) takes a similar view but instead only samples easier episodes. We can model both distributions as follows:
+U(Ωlθ (τ ) | µ, µ + 2.58σ) and
+U(Ωlθ (τ ) | µ − 2.58σ, µ) where U denotes the uniform distribution. The third (CURRICULUM) is motivated by curriculum learning [2], which slowly increases the likelihood of sampling more difﬁcult episodes: (HARD) (EASY)
+N (Ωlθ (τ ) | µt, σ2) where µt is linearly interpolated from µ − 2.58σ to µ + 2.58σ as training progresses. Finally, our fourth approach, UNIFORM, resembles distance weighted sampling [62] and consists of sampling uniformly over episode difﬁculty: (CURRICULUM)
+U(Ωlθ (τ ) | µ − 2.58σ, µ + 2.58σ). (UNIFORM)
+Intuitively, UNIFORM can be understood as a uniform prior over unseen test episodes, with the intention of performing well across the entire difﬁculty spectrum. This acts as a regularizer, forcing the model to be equally discriminative for both easy and hard episodes. 4

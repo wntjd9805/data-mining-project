@@ -1,0 +1,344 @@
+Abstract
+It’s widely acknowledged that deep learning models with
+ﬂatter minima in its loss landscape tend to generalize bet-ter. However, such property is under-explored in deep long-tailed recognition (DLTR), a practical problem where the model is required to generalize equally well across all classes when trained on highly imbalanced label distribu-tion. In this paper, through empirical observations, we ar-gue that sharp minima are in fact prevalent in deep long-tailed models, whereas na¨ıve integration of existing ﬂatten-ing operations into long-tailed learning algorithms brings little improvement. Instead, we propose an effective two-stage sharpness-aware optimization approach based on the decoupling paradigm in DLTR. In the ﬁrst stage, both the feature extractor and classiﬁer are trained under param-eter perturbations at a class-conditioned scale, which is theoretically motivated by the characteristic radius of ﬂat
+In the sec-minima under the PAC-Bayesian framework. ond stage, we generate adversarial features with class-balanced sampling to further robustify the classiﬁer with the backbone frozen. Extensive experiments on multiple long-tailed visual recognition benchmarks show that, our pro-posed Class-Conditional Sharpness-Aware Minimization (CC-SAM), achieves competitive performance compared to the state-of-the-arts. Code is available at https:// github.com/zzpustc/CC-SAM . 1.
+
+Introduction
+Modern deep learning models, composed of multiple neural network layers with millions of parameters, have achieved remarkable successes in computer vision [24, 33,
+† Equal contribution. (cid:2) Corresponding authors. Work was primarily done when Z. Zhou worked as L. Li’s intern at Tencent AI Lab, Shenzhen. 41, 48]. A key enabler of deep learning is the collection of large-scale datasets [29, 42, 64], which are normally split into training and testing sets with presumably i.i.d. sam-ples. However, such scenario provides relatively trivial tests for the generalization of machine learning models. In prac-tice, label [17, 25, 56] and domain [14, 18, 23] distribution shifts are prevalent, due to the disparity between the data preparation and evaluation protocols. A classical example is imbalanced [15] or long-tailed recognition [60], where a model is trained on highly imbalanced source label dis-tribution ps(y) while evaluated on a uniform target label distribution pt(y).
+In this paper, we focus on the practical yet challeng-ing deep long-tailed recognition (DLTR) problem, which is inherent in the visual world [32, 60] with fundamen-tal connections to many disciplines such as the power-law scaling in network science [2] and the Pareto prin-ciple in economics [39].
+In computer vision, numerous deep long-tailed learning studies have emerged in recent years, which mainly belong to 5 categories: class re-balancing [7, 10, 28, 40, 45, 52, 54], information augmenta-tion [22, 27, 31, 50, 55], decoupled training [20, 58, 62], rep-resentation learning [9, 32, 51, 59, 65] and ensemble learn-ing [6, 53, 63].
+In this work, we propose a novel approach to DLTR from a distinct angle, by seeking out ﬂat minima in the loss landscape of modern neural networks to ensure model ro-bustness under parameter perturbation. Such optimization strategy, termed ﬂattening in our context, have been shown in a myriad of literature to effectively improve generaliza-tion of deep learning models in terms of supervised learn-ing [13, 21, 35, 43], self-supervised learning [30] and con-tinual learning [11, 44]. However, application and adap-tion of ﬂattening in the context of DLTR remain under-explored. To ﬁll this gap, we ﬁrst show later in this paper
+(Section 2.2.2) that existing ﬂattening methods are ineffec-tive for long-tailed learning, consistent with the observation from a very recent paper [49], due to severe label distribu-tion shifts. Accordingly, we present a new efﬁcient variant of the sharpness-aware minimization (SAM) [13] technique based on the Decoupling paradigm [20] of DLTR, which leverages the invariance of the class conditional distribution between the source and the target domain. In a nutshell, our contributions are three-fold:
+• Through the lens of ﬂattening, we corroborate a very recent observation [49] that existing sharpness-aware minimization techniques are suboptimal for deep long-tailed learning, justifying the need of more effective approaches to this important and practical issue.
+• We introduce Class-Conditional Sharpness-Aware
+Minimization (CC-SAM), a novel algorithm tailored for DLTR that improves model generalization by ro-bust training against class-conditioned parameter per-turbation. This technique is motivated by the char-acteristic radius of ﬂat minima we derive under the
+PAC-Bayesian framework and can be implemented ef-ﬁciently.
+• We integrate CC-SAM with the two-stage decoupling paradigm of DLTR. Extensive experiments demon-strate that our method can achieve competitive perfor-mance on multiple public DLTR benchmarks, with re-markable robustness to out-of-distribution samples for open long-tailed recognition [32]. 2. Preliminaries 2.1. Problem Setup (cid:3) (cid:2)n
+Throughout the paper, we denote scalars as s, vectors as s, sets as S and equality by deﬁnition as :=. For a typical d-way classiﬁcation task in DLTR, suppose we are given a i=1{(xi, yi)} , where n is the to-training dataset S = tal number of samples. Let’s denote {n1, n2, ..., nd} as the i ni. With-sample number of each class, where n = out loss of generality, we assume ni < nj if i < j, and usually nd (cid:2) n1, following a highly imbalanced class dis-tribution. We further write the training (source) distribution as ps(x, y) = ps(x|y)ps(y) and the testing (target) dis-tribution as pt(x, y) = pt(x|y)pt(y). Consider a family of models parameterized by w ∈ W ⊆ Rk; given a loss function l: W × X × Y → R+, we deﬁne the empirical (cid:3)n training loss LS (w) := 1 i=1 l(w, xi, yi) and the pop-n ulation testing loss LT (w) := E(x,y)∼pt(x,y)[l(w, x, y)].
+Having observed only S, the goal is to optimize for model parameters w having lowest risk LT (w) at test time.
+In DLTR, a key challenge is the label distribution shift between the training and testing sets, i.e., ps(y) (cid:6)= (a) 1D global loss landscape. (b) 1D local loss landscape.
+Figure 1. Loss value vs. noise norm ratio ||(cid:2)||2/||θ||2. All ex-periments are conducted on the CIFAR-10-LT with an imbalance ratio of 100, implemented with the same backbone ResNet-32 and averaged over 5 random seeds. pt(y) [17]. However, it’s logical to assume no distribu-tion shift within each individual class. That is, the train-ing and testing samples are drawn i.i.d. from the same class-conditional distribution, which indicates ps(x|y) = pt(x|y). Here, we build our ﬂattening algorithm upon the decoupling paradigm of DLTR [20], where the feature ex-tractor f (x; ϕ) and classiﬁer h(z; θ) are trained by dis-tinct sampling strategies in a two-stage manner, with w := (ϕ, θ). 2.2. Motivation
+Previous studies have shown strong connection between the geometry of the loss landscape and generalization of deep learning models [1, 16, 19, 21]. In this section, we ﬁrst empirically demonstrate that many deep long-tailed mod-els exhibit sharp minima, and then show that na¨ıve appli-cation of classical ﬂattening operations results in limited improvement. Motivated by these observations, we theo-retically analyze the characteristic radius of ﬂat minima in
+DLTR to show that a class-conditional ﬂattening procedure is required. 2.2.1 Sharpness in Deep Long-Tailed Models
+To show the pervasive sharpness in current DLTR mod-els, we select two baselines (empirical risk minimization of cross-entropy (CE), LDAM-DRW [7]) and two advanced methods (MiSLAS [62], GCL [26]) from recent literature to conduct experiments1. By perturbing the parameter θ of the classiﬁer h with increasing noise (cid:4), we observe the loss of each model on CIFAR-10-LT in Figure 1.
+Figure 1(a) shows that, at global scale, the loss of CE is the sharpest across a wide noise range. However, due to the fact that DLTR methods usually employ distinct loss func-tions, it’s hard to compare the sharpness of their loss land-scapes in a fair and meaningful way. Moreover, large noise ratio can easily ﬂip the sign of parameters and deteriorate 1We re-implement all models via their publicly released code.
+SWA SN.1 SN.2 SN.1.2 GP.1 GP.2 GP.1.2 MP.1 MP.2 MP.1.2
+)
+% ( y c a r u c c
+A 5 3 1
+-1
+-3
+-5
+-7
+-9
+-11 cRT cRT
+M2m
+M2m
+LDAM-DRW
+LDAM-DRW
+MiSLAS
+MiSLAS
+GCLGCL
+Figure 2. Performance gain of na¨ıve integration of ﬂattening op-erations with DLTR algorithms. The number represents the stage where ﬂattening applies. For example, “SN.1.2” means we apply spectral normalization on both stages. Only the ﬁrst-stage result of LDAM is reported since it’s a one-stage approach. All exper-iments are conducted on CIFAR-100-LT with imbalance ratio of 100. the classiﬁer decision boundary. Therefore in this paper, we only consider locally ﬂat minima, i.e., in the perturba-tive (||(cid:4)||2 (cid:7) ||w||2) regime shown in Figure 1(b). From this local view, only MiSLAS is observed to have a compa-rable or ﬂatter minimum than CE, suggesting that the exist-ing DLTR methods have poor generalization and robustness against model parameter perturbation. More detailed 2D loss landscapes covering overall, head and tail classes are depicted in Appendix E, and corroborate our observation in 1D. 2.2.2 Na¨ıve Integration of Flattening Procedures
+To improve the generalization of deep long-tailed models, we experiment to navigate ﬂatter minima by integrating the existing ﬂattening operations (stochastic weight averaging (SWA) [16], spectral normalization (SN) [4], gradients pe-nalization (GP) [61], and model perturbation (MP) [44]) into ﬁve representative deep long-tailed learning baselines to see if they are generally beneﬁcial for DLTR. Illustrated in Figure 2, these ﬂattening methods bring little or nega-tive gains in most cases. Even though in some cases they are beneﬁcial, the corresponding baselines (mainly LDAM-DRW) are too weak so that the ﬁnal performance are still sub-optimal, which calls for more effective ﬂattening proce-dures for DLTR. More implementation details are provided in the Appendix C. 2.2.3 Characteristic Radius of Flat Minima
+Let’s re-consider ﬂattening operations in DLTR from a the-oretical perspective. The empirical loss LS (w) is typically non-convex for deep neural network models, whose land-scape may exhibit multiple local or global minima with sim-ilar values of LS (w) while having drastically different gen-eralization performance (i.e., signiﬁcantly different values of LT (w)). In order to ﬁnd a more effective approach for generalization in DLTR, motivated by the high correlation between sharpness of the loss landscape and model gener-alization [19], we follow the sharpness-aware minimization (SAM) framework [13] by optimizing an upper bound of
+LT (w) derived from the PAC-Bayesian framework [34].
+Given a prior over the parameters before observing any data and a posterior over the parameters dependent on the train-ing set and learning algorithm, the PAC-Bayesian frame-work bounds the generalization error of any model in terms of the KL divergence between the two probability distribu-tions. Assuming a Gaussian prior and posterior, we arrive at the following generalization bound (formal proof in Ap-pendix D):
+Theorem 1 (Perturbative PAC-Bayesian Generalization
+Bound). For any ρ > 0, 0 < δ < 1, number of samples n ∈ N+, k := dim(w), with probability at least 1 − δ over a training set S sampled i.i.d. from distribution T ,
+LT (w) ≤ max
+√
+||(cid:2)||2≤ kρ
+LS (w+(cid:4))+ (cid:4)
+||w||2 4ρ2 + log( n 2 n − 1
+δ ) + O(1)
+.
+Intuitively, optimizing the perturbative bound as a sur-rogate function effectively seeks out parameter solutions whose neighborhoods have uniformly low empirical train-ing loss, thus achieving a ﬂat minimum. Now, our key in-sight is that the bound is convex with respect to the radius ρ of the ﬂat minima, hence there exists an optimal ρ∗ which gives the tightest generalization bound:
+⎡
+ρ∗ := arg min
+ρ
+⎣ max
+√
+||(cid:2)||2≤ kρ
+LS (w + (cid:4)) + (cid:4)
+||w||2 4ρ2 + log( n
+δ ) 2 n − 1
+⎤
+⎦ . (1)
+We denote ρ∗ as the characteristic radius of the ﬂat min-ima centered at w. It’s worth mentioning that such opti-mal perturbation radius is overlooked by previous literature on sharpness-aware optimization, mainly due to arguments that the PAC-Bayesian bound is too loose to capture the real generalization error [35]. However, our Theorem 1 inspired from [8, 12] ensures a non-vacuous bound (i.e., the square root term falls below 1, see empirical evidence in Appendix
+B) in the over-parameterized ”deep learning” regime, ren-dering the characteristic radius relevant for optimization.
+Moreover, the perturbative bound can be approximated by a ﬁrst-order Taylor expansion, yielding max
+√
+||(cid:2)||2≤ kρ
+LS (w + (cid:4)) ≈ max
+√
+||(cid:2)||2≤
+= LS (w) + kρ (cid:10) (cid:9)
+LS (w) + (cid:4)T ∇wLS (w)
+√ kρ||∇wLS (w)||2 (2)
+(cid:2185)(cid:2778) (cid:2234)(cid:2259)(cid:2168)(cid:2175) (cid:2016)(cid:3004)(cid:3117) (cid:2030) (cid:2185)(cid:2779) (cid:2234)(cid:2259)(cid:2168)(cid:2175) (cid:2016)(cid:3004)(cid:3118) (cid:2016) (cid:2185)(cid:2780) (cid:2234)(cid:2259)(cid:2168)(cid:2175) (cid:2016)(cid:3004)(cid:3119) (cid:1829)(cid:2869) (cid:1829)(cid:2870) (cid:1829)(cid:2871)
+Mini-batch (cid:3030)(cid:3117) (cid:2033) (cid:3397) (cid:3548)(cid:2261)(cid:2185)(cid:2778) (cid:3552)(cid:1838)(cid:2286) (cid:3397) (cid:3552)(cid:1838)(cid:2286) (cid:3397) (cid:3552)(cid:1838)(cid:2286) (cid:1499) (cid:2259) (cid:3030)(cid:3118) (cid:2033) (cid:3397) (cid:3548)(cid:2261)(cid:2185)(cid:2779) (cid:3030)(cid:3119) (cid:2033) (cid:3397) (cid:3548)(cid:2261)(cid:2185)(cid:2780) (cid:1499) (cid:2259) (cid:1499) (cid:2259) (cid:1829)(cid:2869) (cid:1829)(cid:2870) (cid:1829)(cid:2871)
+Mini-batch (cid:2016) (cid:1838)(cid:3020) (cid:1838)(cid:3002) (cid:2030) (cid:2208) (cid:2234)(cid:2208)(cid:2168)(cid:2175) (cid:2208)(cid:2183)(cid:2186)(cid:2204) (a) Stage 1: Class-conditional sharpness-aware minimization. We take three classes and classiﬁer perturbation as examples for illustration. (b) Stage 2: Robust training of the classiﬁer by progressively gener-ating adversarial features.
+Figure 3. The overall framework of CC-SAM. and the optimal perturbation vector (cid:9)
+LS (w) + (cid:4)T ∇wLS (w) (cid:10)
+√
+ˆ(cid:4)∗(w) ≈ arg max kρ
+∇wLS (w)
+||∇wLS (w)||2
+||(cid:2)||2≤
+√ kρ
+=
+. (3)
+Substitute Eqn 2 into 1, and ignore log( n
+||w||2 as we discussed in Sec 2.2.1, obtaining
+δ ) by assuming ρ (cid:7) training data S are drawn i.i.d. from the target distribution
+T . However, as we explained in Sec 2.1, such assumption is invalid due to the severe label distribution shift between training and testing sets in DLTR. To resolve this funda-mental conﬂict, we turn to the class conditional distribution ps(x|y) and pt(x|y) instead, for which the i.i.d. assump-tion reasonably holds. Accordingly, we decompose the to-tal loss LT (w) and derive a generalization bound for each class separately, obtaining
+LT (w) = k(cid:14) c=1
+Lc
+T (w) = k(cid:14) c=1 (4)
+Ex∼pt(x|c) [l(w, x, c)] , (6) (cid:11)
+ρ∗ ≈ (cid:12) 1 2
+||w||2 2||∇wLS (w)||2 k− 1 4 (n − 1)− 1 4 with the approximated optimal generalization bound (cid:13)LT (w) ≈ max
+√
+||(cid:2)||2≤ kρ∗
+LS (w + (cid:4)) +
+√ 1 n − 1 2
+·
+||w||2
+ρ∗
+. (5)
+The ﬁrst term captures the sharpness of LS at w, and the second term serves as a regularizer on the magnitude of w, akin to the L2 regularization in SAM [13]. A key differ-ence here is that our regularization term is well motivated by theoretic interpretation from the PAC-Bayesian bound. 3. Methodology
+In this section, we introduce our two-stage sharpness-aware optimization algorithm based on Decoupling [20] in detail. In the ﬁrst stage of the decoupled training, both the feature extractor and classiﬁer are trained under parameter
+In the second perturbations at a class-conditioned scale. stage, we generate adversarial features to further robustify the classiﬁer while freezing the backbone. The complete pseudo-code is shown in Algorithm 1. 3.1. Stage 1: Class-Conditional Sharpness-Aware
+Minimization (CC-SAM)
+Note that a key assumption we made in Theorem 1 when deriving the characteristic radius of ﬂat minima is that the (cid:13)Lc
+T (w) = max
+√
+||(cid:2)||2≤ kρ∗ c
+Lc
+S (w + (cid:4)) +
+≈ (2||w||2||∇wLc
+S (w)||2) (cid:12) 1 2
+||w||2 (cid:11)
+ρ∗ c =
+ˆ(cid:4)∗ c (w) ≈
+√ kρ∗ c 2||∇wLc
+S (w)||2
+S (w)
+S (w)||2
+∇wLc
+||∇wLc
+.
+√
+·
+||w||2 1
+ρ∗ n − 1 c 4 (nc − 1)− 1 4 2 2 k 1 1 k− 1 4 (nc − 1)− 1 4 ,
+, (7) (8) (9)
+An immediate observation of Eqn 8 is that the charac-teristic radius ρ∗ c is class-dependent, more speciﬁcally, neg-atively correlated with the label frequency nc. One pos-sible interpretation is that the model is more conﬁdent re-garding the majority classes with higher nc, due to non-asymptotic estimation error given limited samples, hence it requires a smaller perturbative region in the parameter space to ensure ﬂat loss landscape with respect to that class. Ad-ditionally, the class-wise generalization bound (cid:13)Lc
+T (w) in
+Eqn 7 is positively related to the class-wise gradient norm
+||∇wLc
+S (w)||2, which effectively enforces hard example mining.
+It follows that optimizing the approximated general-(cid:3)k ization bound (cid:13)LT (w) =
+T (w) yields an effec-tive algorithm in the ﬁrst stage, namely Class-Conditional (cid:13)Lc c=1
+Algorithm 1: Training Paradigm of CC-SAM
+Input: Training Dataset
+S ∼ ps(x, y) = ps(x|y)ps(y)
+Output: Model trained with CC-SAM
+Stage 1:
+Initialize w = {ϕ, θ} randomly while not converged do foreach batch Bi in S do
+Compute empirical loss LS with Bi
+Estimate the class-speciﬁc gradient set
+G = {g1, g2, ..., gk} with respect to LS
+Perturb w with G according to Eqn 8 and
+Eqn 9
+Update w via Eqn 10 and Eqn 11
+Stage 2:
+Freeze ϕ while not converged do m} ∼ ps(x|y)·Uniform(y) 1, B(cid:6) 2, ..., B(cid:6)
+Sample batches via class-balanced sampler
+S (cid:6) = {B(cid:6) foreach batch B(cid:6) i in S (cid:6) do
+Computing empirical loss LS with B(cid:6) i
+Obtain the adversarial feature via Eqn 12
+Evaluate overall loss according to Eqn 13 and Eqn 14
+Update θ accordingly
+Sharpness-Aware Minimization (CC-SAM):
+Given learning rate η, w ← w − η∇wLCC-SAM
+S (w)
+≈ w − η k(cid:14) c=1
+∇w (cid:13)Lc
+T (w)|w+ˆ(cid:2)∗ c (w), (10) (11) which is computationally efﬁcient since it only involves
+ﬁrst-order gradients. Even when w is close to the optimal w∗, where ∇wLS (w)|w∗ ≈ 0, the gradient for each class
+∇wLc
+S (w)|w∗ for estimating the optimal perturbation vec-tor ˆ(cid:4)∗ c (w) in Eqn 9 is most likely far from zero, circumvent-ing the need for computing high-order terms. 3.2. Stage 2: Robust Training of the Classiﬁer
+For the second stage, we freeze the backbone to maintain feature representation and concentrate on reﬁning the deci-sion boundary of the classiﬁer. Following Decoupling, we adopt the class-balanced sampling strategy in this stage, to rectify the classiﬁer with uniform label distribution. As de-picted in the Figure 3(b), when taking original feature z as the input of classiﬁer h(z; θ), we can generate adversarial features in forward pass as follows: zadv = z + λ
+∇zLS (z; θ)
+||∇zLS (z; θ)||2
+LA = h(zadv; θ) (12) (13) where λ is the hyper-parameter to scale the adversarial gra-dient ∇zLS (z; θ)/||∇zLS (z; θ)||2. Moreover, we employ a progressive strategy to balance LS and LA. At epoch t,
+L = (1 − t
+T
+)LS + t
+T
+LA (14) where T is the total number of epochs in this stage, and LA dominates the training progressively. 4. Evaluation
+In this section, we evaluate our method on multiple mainstream DLTR datasets and compare it with popular baselines including the state-of-the-art (SOTA) methods.
+Moreover, we also report the result on open-set recogni-tion [32, 47] tasks to demonstrate the excellent robustness of CC-SAM to out-of-distribution samples. In the end, an ablation study is presented to verify the effectiveness of our design choices. 4.1. Datasets and Baselines
+Following the mainstream evaluation protocol [7, 63], we conduct experiments on ﬁve major long-tailed datasets,
+CIFAR-10-LT, CIFAR-100-LT, Places-LT [32], ImageNet-LT [32], and iNaturalist 2018 [46].
+CIFAR-10-LT/CIFAR-100-LT: These two datasets are sampled from the original CIFAR with different imbal-ance ratios β = Nmax/Nmin, where Nmax and Nmin are the corresponding number of the most and least frequent classes. Following [26], we set the imbalance ratio as {200, 100, 50} for evaluation.
+Places-LT & ImageNet-LT: Both datasets were ﬁrst pro-posed by OLTR [32]. Places-LT contains 62.5K training images spanning 365 classes in total, with imbalance ra-tio 996. ImageNet-LT has 115.8K training images covering 1000 categories, with imbalance ratio being 256. iNaturalist 2018: As a naturally long-tailed classiﬁcation dataset, iNaturalist 2018 contains 437.5K trainin images from 8142 categories, and its imbalance ratio is 512. We follow the ofﬁcial spilt in our evaluations.
+For fair comparison, we exclude ensemble or pre-training models in our experiments. The baselines and state-of-the-art methods evaluated include (1) class re-balancing: LDAM-DRW [7], LDAM-DRW + SAM [38],
+De-confound-TDE [45], Lifted Loss [36], Focal Loss [28],
+OpenMax [3], BBN [63], LADE [17], DisAlign [58],
+CIFAR-10-LT
+CIFAR-100-LT
+Imbalance Ratio 200 100 50 200 100 50
+CE
+CE + Mixup [57]
+LDAM-DRW [7]
+De-confound-TDE [45]
+CE + Mixup + cRT [20]
+BBN [63]
+Contrastive Learning [51]
+BGP [49]
+MiSLAS [62]
+VS + SAM [38]
+GCL [26] 65.68 65.84 73.52
+-73.06 73.47
+--77.31
+-79.03 70.70 72.96 77.03 80.60 79.15 79.82 81.40
+-82.06 82.40 82.68 74.81 79.48 81.03 83.60 84.21 81.18 85.36
+-85.16
+-85.46 34.84 35.84 38.91
+-41.73 37.21
+-41.20 42.33
+-44.88 38.43 40.01 42.04 44.15 45.12 42.56 46.72 45.20 47.50 46.60 48.71 43.90 45.16 47.62 50.31 50.86 47.02 51.87 50.50 52.62
+-53.55
+CC-SAM 80.94 83.92 86.22 45.66 50.83 53.91
+Table 1. Top-1 Accuracy on CIFAR-10-LT and CIFAR-100-LT. All methods take ResNet-32 as the backbone. All baseline results except
+BGP are directly adopted from [26]. “-” means the original paper didn’t report the corresponding results. cRT
+Stage 1 + dir
+Stage 1 + mag
+Stage 2 Acc (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) (cid:2) 37.8 38.9 37.5 40.1 40.6
+Table 2. Ablation studies on Places-LT. “Stage 1 + dir” en-forces parameter perturbation along the recommended direction (∇wLc
+S (w)||2 in Eqn 9) with magnitude of 1, whereas “Stage 1 + mag” enforces perturbation with the recom-mended magnitude (ρ∗ c in Eqn 9) in a random direction.
+S (w)/||∇wLc
+LUNA [5], BGP [49], VS+SAM [38] (2) information aug-mentation: RSG [50], (3) decoupled training: Decouple-τ -norm [20], cRT [20], MisLAS [62], GCL [26], (4) repre-sentation learning: Range Loss [59], OLTR [32], IEM [65],
+Contrastive Learning [51], ResLT [9].
+Our code is implemented with Pytorch 1.4.0 and all ex-periments are carried out on Tesla V100 GPUs. We train each model with batch size of 64 (for CIFAR-10-LT and
+CIFAR-100-LT) / 128 (for Places-LT) / 256 (for ImageNet-LT) / 512 (for iNaturalist 2018), SGD optimizer with mo-mentum of 0.9. We apply similar tricks in Balanced Soft-max [40] as the mainstream methods have done. Although we implemented CC-SAM under a two-stage framework, it serves as a general technique to improve the existing DLTR methods without model perturbation (Appendix A.3).
+Intuitively, CC-SAM brings more computation overhead due to additional gradient descents. But we only perturbed the last several layers as an efﬁcient version of CC-SAM in our evaluation. A simple training time comparison is pre-sented in Appendix A.5. 4.2. Main Results
+We evaluate CC-SAM on the ﬁve mainstream public benchmarks mentioned above, and the corresponding re-sults are reported in Table 1 and Table 3. The best method is bolded and the second best is underlined. Accord-ing to the evaluations, we observe that CC-SAM unani-mously attains the best ranking on CIFAR-LT datasets. On large scale datasets (Places-LT, ImageNet-LT, and iNatural-ist 2018), CC-SAM shows competitive performance com-pared to other advanced methods, too. Speciﬁcally, it con-sistently brings better gains to the medium and tail classes, demonstrating the effectiveness of class-conditional ﬂatten-ing for deep long-tailed recognition. 4.3. Open Long-Tailed Recognition
+The ability to detect out-of-distribution samples from the open world, namely open-set recognition [47], pro-vides a unique dimension for evaluating the robustness of deep learning models. Open-set long-tailed recognition, or OLTR [32], combines the open-set problems with deep long-tailed learning to offer even more challenging tasks for model generalization. Following the setting of OLTR [32], we enable CC-SAM to distinguish the close-set and open-set samples by applying a simple, non-learnable prototype-based metric. Results are presented in Table 4. We ﬁnd that CC-SAM achieves the top F-measure performance and outperforms LUNA [5] on Places-LT, a SOTA with a so-phisticated open-set detection method based on hierarchical metrics. The experiments demonstrate the remarkable gen-Dataset
+Method
+Backbone
+Many Medium Few Overall
+ImageNet-LT
+Places-LT iNaturalist 2018
+CE
+Decouple-τ -norm [20]
+Balanced Softmax [40]
+LADE [17]
+RSG [50]
+DisAlign [58]
+ResNeXt-50
+ResNet-50
+ResNeXt-50
+ResNeXt-50
+ResNeXt-50
+ResNet-50
+ResNeXt-50
+ResLT [9]
+ResNeXt-50
+BGP [49]
+ResNet-50
+ResNet-50
+MiSLAS [62]
+LDAM-DRW + SAM [38] ResNet-50
+ResNet-50
+GCL [26]
+ResNet-50
+CC-SAM
+ResNeXt-50
+CE
+Decouple-τ -norm [20]
+Balanced Softmax [40]
+LADE [17]
+RSG [50]
+DisAlign [58]
+ResLT [9]
+MiSLAS [62]
+GCL [26]
+CC-SAM
+ResNet-152
+ResNet-152
+ResNet-152
+ResNet-152
+ResNet-152
+ResNet-152
+ResNet-152
+ResNet-152
+ResNet-152
+ResNet-152
+ResNet-50
+CE
+Decouple-τ -norm [20]
+ResNet-50
+ResNet-50
+Balanced Softmax [40]
+ResNet-50
+LADE [17]
+ResNet-50
+RSG [50]
+ResNet-50
+DisAlign [58]
+ResNet-50
+ResLT [9]
+ResNet-50
+BGP [49]
+MiSLAS [62]
+ResNet-50
+LDAM-DRW + SAM [38] ResNet-50
+ResNet-50
+GCL [26]
+ResNet-50
+CC-SAM 65.9 56.6 64.1 64.4 63.2 61.3 62.7 63.0
+--62.0
+-61.4 63.1 45.7 37.8 42.0 42.8 41.9 40.4 39.8
+--41.2 72.2 65.6
+-----70.0
+-64.1
+-65.4 37.5 44.2 48.2 47.7 48.2 52.2 52.1 53.3
+--52.1
+-49.5 53.4 27.3 40.7 39.3 39.0 41.4 42.4 43.6
+--42.1 63.0 65.3
+-----69.9
+-70.5
+-70.9 7.7 27.4 33.4 34.3 32.2 31.4 31.4 35.5
+--34.8
+-37.1 41.1 8.2 31.8 30.5 31.2 32.0 30.1 31.4
+--36.4 57.2 65.9
+-----69.6
+-71.2
+-72.2 44.4 46.7 52.3 52.3 51.8 52.9 53.4 52.9 51.5 52.7 53.1 54.9 52.4 55.4 30.2 37.9 38.6 38.8 39.3 39.3 39.8 40.2 40.6 40.6 61.7 65.6 70.6 70.0 70.3 70.6 70.2 70.5 71.6 70.1 72.0 70.9
+Table 3. Top-1 Accuracy on Places-LT, ImageNet-LT and iNaturalist 2018. As for Places-LT, we take a pre-trained ResNet-152 as the backbone for a fair comparison. eralization of CC-SAM due to its capacity to learn highly robust representations. design choices of each individual stage, and the integration of both stages shows the best performance. 4.4. Ablation Study
+Since CC-SAM consists of multiple components, here we provide an ablation study to demonstrate their effective-ness. The result of experiments conducted on Places-LT are shown in Table 2. In particular, CC-SAM degrades to cRT without any of our proposed operations, which we take as a baseline. It is observed that CC-SAM beneﬁts from the
+S (w)/||∇wLc
+S (w)||2 and the right magnitude ρ∗
+We also study the class-conditional perturbation by dif-ferentiating the impacts of choosing the right direction
+∇wLc c in
+Eqn 9, shown as ”stage 1 + dir” and ”stage 1 + mag” in Ta-ble 2 respectively. For the former, we choose a perturbation scale of 1. For the latter, we perturb the model parameters by a random direction sampled from a zero-mean Gaussian.
+It turns out the perturbation direction contributes more, and
+Method
+Many Medium Few F-measure Many Medium Few F-measure
+ImageNet-LT
+Places-LT
+CE
+Lifted Loss [36]
+Focal Loss [28]
+Range Loss [59]
+OpenMax [3]
+OLTR [32]
+IEM [65]
+LUNA [5]
+CC-SAM 40.1 34.8 35.7 34.7 35.8 41.9 46.1 48.2 61.4 10.4 29.3 29.3 29.4 30.0 33.9 42.3 44.7 49.5 0.4 17.4 15.6 17.2 17.6 17.4 20.1 23.6 37.1 0.295 0.374 0.371 0.373 0.368 0.474 0.525 0.579 0.552 45.9 41.0 41.0 41.0 41.1 44.6 48.8 48.1 41.2 22.4 35.2 34.8 35.3 35.4 36.8 42.4 41.6 41.8 0.4 23.8 22.3 23.1 23.2 25.2 28.9 29.0 36.4 0.366 0.459 0.453 0.457 0.458 0.464 0.486 0.491 0.510
+Table 4. Open long-tail performance of top-1 accuracy on ImageNet-LT and Places-LT. F-measure is a balanced treatment of precision and recall. The backbone of CC-SAM is ResNet-50 for ImageNet-LT, while other compared methods are equipped with ResNet-10. applying both attains the best improvement. For more abla-tion studies, please refer to Appendix A.1. 5.

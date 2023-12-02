@@ -1,0 +1,71 @@
+Abstract
+Large scale image classiﬁcation datasets often contain noisy labels. We take a principled probabilistic approach to modelling input-dependent, also known as heteroscedastic, label noise in these datasets. We place a multivariate Nor-mal distributed latent variable on the ﬁnal hidden layer of a neural network classiﬁer. The covariance matrix of this latent variable, models the aleatoric uncertainty due to label noise. We demonstrate that the learned covariance structure captures known sources of label noise between semantically similar and co-occurring classes. Compared to standard neural network training and other baselines, we show signif-icantly improved accuracy on Imagenet ILSVRC 2012 79.3% (+ 2.6%), Imagenet-21k 47.0% (+ 1.1%) and JFT 64.7% (+ 1.6%). We set a new state-of-the-art result on WebVision 1.0 with 76.6% top-1 accuracy. These datasets range from over 1M to over 300M training examples and from 1k classes to more than 21k classes. Our method is simple to use, and we provide an implementation that is a drop-in replacement for the ﬁnal fully-connected layer in a deep classiﬁer. 1.
+
+Introduction
+Image classiﬁcation datasets with many classes and large training sets often have noisy labels [2, 30]. For example,
+Imagenet contains many visually similar classes that are hard for human annotators to distinguish [10, 2]. Datasets such as
+WebVision where labels are generated automatically by look-ing at co-occuring text to images on the Web, contain label noise as this automated process is not 100% reliable [30].
+A wide range of techniques for classiﬁcation under label noise already exist [29, 23, 16, 37, 24, 6, 9, 36, 18]. When an image is mis-labeled it is more likely that it gets confused with other related classes, rather than a random class [2].
+Therefore it is important to take inter-class correlation into account when modelling label noise in image classiﬁcation.
+Figure 1: Spot the difference? An Appenzeller (left) and
+EntleBucher (right). Two visually similar Imagenet classes our method learns have highly correlated label noise (aver-age validation set covariance of -0.24) given only the stan-dard Imagenet ILSVRC12 training labels.
+We take a principled probabilistic approach to modelling label noise. We assume a generative process for noisy labels with a multivariate Normal distributed latent variable at the
+ﬁnal hidden layer of a neural network classiﬁer. The mean and covariance parameters of this Normal distribution are input-dependent (aka heteroscedastic), being computed from a shared representation of the input image. By modelling the inter-class noise correlations our method can learn which class pairs are substitutes or commonly co-occur, resulting in noisy labels. See Fig. (1) for an example of two Imagenet classes which our model learns have correlated label noise.
+We evaluate our method on four large-scale image clas-siﬁcation datasets, Imagenet ILSVRC12 and Imagenet-21k [10], WebVision 1.0 [30] and JFT [21]. These datasets range from over 1M training examples (ILSVRC12) to 300M training examples (JFT) and from 1k classes (ILSVRC12 &
+WebVision) to over 21k classes (Imagenet-21k). We demon-strate improved accuracy and negative log-likelihood on all datasets relative to (a) standard neural network training, (b) methods which only model the diagonal of the covariance matrix and (c) methods from the noisy labels literature.
+We evaluate the effect of our probabilistic label noise model on the representations learned by the network. We show that our method, when pre-trained on JFT, learns image 1551
+representations which transfer better to the 19 datasets from the Visual Task Adaptation Benchmark (VTAB) [47].
+Contributions.
+In summary our contributions are: 1. A new method which models inter-class correlated label noise and scales to large-scale datasets. 2. We evaluate our method on four large-scale image clas-siﬁcation datasets, showing signiﬁcantly improved per-formance compared to standard neural network training and diagonal covariance methods. 3. We demonstrate that the learned covariance matrices model correlations between semantically similar or commonly co-occurring classes. 4. On VTAB our method learns more general representa-tions which transfer better to 19 downstream tasks. 2. Method
+In many datasets label noise is not uniform across the input space, some types of examples have more noise than others. We build upon prior work on probabilistic modelling of noisy labels [25, 9] by assuming a heteroscedastic latent variable generative process for our labels. This generative process leads to two main challenges while computing its resulting likelihood: (a) the intractable marginalization over the latent variables which we estimate via Monte Carlo inte-gration and (b) an arg max in the generative process which we approximate with a temperature parameterized softmax.
+Generative process. Suppose there is some latent vector of utility u(x) 2 RK, where K is the number of classes associated with each input x. This utility is the sum of a deterministic reference utility µ(x) and an unobserved stochastic component ✏. A label is generated by sampling from the utility and taking the arg max, i.e. class c is the label if its associated utility is greater than the utility for all other classes () y = arg maxj∈[K] uj(x): u(x) = µ(x) + ✏ pc = P (y = c|x) = P (arg max j∈[K] uj(x) = c) (1)
+= 1
+Z n arg max j∈[K] uj(x) = c p(✏)d✏ o
+This generative process follows prior work in the econo-metrics, noisy labels and Gaussian Processes literature [42, 25, 9, 20, 45], discussed further in §3. First note that if we choose each stochastic component to be distributed standard
+Gumbel independently, ✏j ⇠ i.i.d. G(0, 1) 8j, then the pre-dictive probabilities pc have a closed form solution that is precisely the popular softmax cross-entropy model used in training neural network classiﬁcation models [42, 9]: pc = P (arg max uj(x) = c) j∈[K] exp(µc)
+K j=1 exp(µj)
+= (2) () ✏j ⇠ i.i.d. G(0, 1) 8j
+P
+In other words, this generative process with Gumbel noise distribution is already an implicit standard assumption when training neural network classiﬁers. In (2), the independence and identical assumptions on the noise component is however too restrictive for applications with noisy labels: 1. Identical: for a particular input x some classes may have more noise than others, e.g., given an Imagenet image of a dog there may be high levels of noise on various different dog breeds but we may have high conﬁdence that elephant classes are not present. Hence we need the level of noise to vary per class. 2. Independence: if one class has a high level of noise other related classes may have high/low levels of noise.
+In the above example there may be correlations in the noise levels between different dog breeds.
+Our method breaks both the independence and identical assumptions by assuming that the noise term ✏(x) is dis-tributed multivariate Normal, ✏(x) ⇠ N (0, Σ(x)). Comput-ing an input-dependent covariance matrix enables modelling of inter-class label noise correlations on a per image basis.
+We discuss more formally in Appendix C how going beyond an independent and identical noise model can lead to im-proved predictions in the presence of label noise. However it also raises a number of challenges;
+First there is now no closed form solution for the pre-dictive probabilities, Eq. (1). In order to address this, we transform the computation into an expectation and approxi-mate using Monte Carlo estimation, Eq. (3).
+Second, notice that the Monte Carlo estimate of Eq. (1) involves computing an arg max which makes gradient based optimization infeasible. We approximate the arg max with a temperature parameterized softmaxτ , Eq. (3). uj(x) = c) pc = P (arg max j∈[K]
+= E✏∼N (0,Σ(x)) 1
+" ( arg max j∈[K] uj(x) = c
+)#
+= E✏∼N (0,Σ(x)) ( lim
+τ →0 softmax
+τ u(x))c
+⇡ E✏∼N (0,Σ(x)) h (softmax
+τ u(x))c i
+, ⌧ > 0
+⇡ 1
+S
+S h (softmax
+τ i=1
+X i u(i)(x))c, u(i)(x) ⇠ N (µ(x), Σ(x)). (3) 1552
+The notation (u(x))c denotes the cth entry of u(x) and S is the number of MC samples.
+In the zero temperature limit this approximation is exact, but for non-zero temperatures ⌧ controls a bias-variance trade-off. At lower temperatures the approximation is closer to the assumed generative process but the gradient variance is higher and vice versa. In practice ⌧ is a hyperparameter that must be selected on a validation set. This approximation is similar to the Gumbel-softmax/Concrete distribution [22, 31]. A similar derivation can be given in the multilabel classiﬁcation case in which a temperature parameterized sigmoid is used as a smooth approximation to the hard 1 function for each class, see Appendix A. We analyze the effect of modelling inter-class correlations by taking a Taylor series approximation to Eq. 3 in Appendix C. the covariance matrix.
+Efﬁcient parametrization of
+Σ(x) is a K ⇥ K matrix which is a function of input x.
+The memory and computational resources required to com-pute the full Σ(x) matrix are impractical for the large-scale image classiﬁcation datasets used in this paper (with K up to 21k classes). We make a low-rank approximation to Σ(x) = V (x)V (x)| where V (x) is a K ⇥ R matrix,
+R << K. To ensure the positive semi-deﬁniteness of the covariance matrix, we compute a K dimensional vec-tor d2(x) which we add to the diagonal of V (x)V (x)|.
+In order to sample from our noise distribution we ﬁrst sample ✏K ⇠ N (0K, IK×K), ✏R ⇠ N (0R, IR×R), then
+✏ = d(x)   ✏K + V (x)✏R, where   denotes element-wise multiplication.
+In practice we typically compute V (x) as an afﬁne trans-formation of a shared representation of x computed by a deep neural network. Suppose that the dimension of this representation is D, then the number of parameters required to compute V (x) is O(DKR). For some datasets with many classes this is still impractically large. For example
+Imagenet-21k has 21,843 classes and in the below experi-ments we use R = 50 and a ResNet-152 which has a ﬁnal layer representation with D = 2048. So computing V (x) re-quires over 2.2B parameters, which dwarfs the total number of parameters in the rest of the network.
+In order to further reduce the parameter and computa-tional requirements of our method we introduce a parameter-efﬁcient version which we use for datasets where the number of classes is too large (Imagenet-21k and JFT). We param-eterize V (x) = v(x)1|
+  V where v(x) is a vector of
+R dimension R, 1R is a vector of ones of dimension R and V is a K ⇥R matrix of learnable parameters which is not a func-tion of x. Sampling the correlated noise component can be simpliﬁed, V (x)✏R = (v(x)1|
+  V )✏R = v(x)   (V ✏R).
+K
+The total parameter count of this parameter-efﬁcient ver-sion is O(DK + KR) which typically reduces the memory and computational requirements dramatically for large-scale
+Algorithm 1: Computing pc
+Input: Boolean is-parameter-efﬁcient = { true/false}; compute shared representation r(x) := f θ(x); compute mean parameter µ(x) := Wµr(x) + bµ; compute diagonal correction d(x) := Wdr(x) + bd; generate S standard normal samples
+✏K ⇠ N (0K, IK×K), ✏R ⇠ N (0R, IR×R); if is-parameter-efﬁcient then compute heteroscedastic low-rank component v(x) := Wvr(x) + bv; load homoscedastic low-rank component V ;
+U (x) := µ(x) + d(x)   ✏K + v(x)   V ✏R; else compute low-rank parameters
+V (x) = WV r(x) + bV ;
+V (x) := reshape(V (x), [K, R]);
+U (x) := µ(x) + d(x)   ✏K + V (x)✏R; end pc = mean(softmaxτ U (x), axis = 1)[c] image classiﬁcation datasets. For example, for Imagenet-21k the number of parameters required to compute V (x) is 44.8M , a 50⇥ reduction. See Algorithm 1 for a full speciﬁcation of our method. 3.

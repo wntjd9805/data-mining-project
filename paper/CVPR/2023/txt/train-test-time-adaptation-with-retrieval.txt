@@ -1,0 +1,49 @@
+Abstract
+Source data from S
+Pre-trained decision  boundary
+We introduce Train/Test-Time Adaptation with Re-trieval (T3AR), a method to adapt models both at train and test time by means of a retrieval module and a searchable pool of external samples. Before inference, T3AR adapts a given model to the downstream task using reﬁned pseudo-labels and a self-supervised contrastive objective function whose noise distribution leverages retrieved real samples to improve feature adaptation on the target data manifold.
+The retrieval of real images is key to T3AR since it does not rely solely on synthetic data augmentations to com-pensate for the lack of adaptation data, as typically done by other adaptation algorithms. Furthermore, thanks to the retrieval module, our method gives the user or service provider the possibility to improve model adaptation on the downstream task by incorporating further relevant data or to fully remove samples that may no longer be available due to changes in user preference after deployment. First, we show that T3AR can be used at training time to im-prove downstream ﬁne-grained classiﬁcation over standard
+ﬁne-tuning baselines, and the fewer the adaptation data the higher the relative improvement (up to 13%). Second, we apply T3AR for test-time adaptation and show that exploit-ing a pool of external images at test-time leads to more ro-bust representations over existing methods on DomainNet-126 and VISDA-C, especially when few adaptation data are available (up to 8%). 1.
+
+Introduction
+While Deep Learning models are evolving rapidly, ma-chine learning systems used in production are updated rarely, as each deployment requires the provider to engage in a complex process of scaling, securitization, certiﬁcation of new model and dataset cards, bias evaluation, and re-*Work done during an internship at AWS AI Labs.
+Test samples from T
+Retrieved samples 
+Decision boundary  after adaptation
+SS
+T
+A
+Source dataset
+Target dataset
+External dataset
+Figure 1. Adaptation with retrieval from an external data pool.
+Illustration of how T3AR exploits target data T and the external data pool A to adapt the decision boundary after pre-training on the source datasets S. For new test queries from the target dataset,
+T3AR approximates the local data manifold around T by retriev-ing similar unlabelled examples from A. Then, it updates the de-cision boundary with a contrastive self-supervised objective. gression tests. It is now common for users to adapt trained models to their speciﬁc use cases, or to the changed con-text as time goes by [16, 39, 60]. Such adaptation can be performed by ﬁne-tuning on a speciﬁc dataset S owned by the user [1, 18]. However, on an even ﬁner time-scale, users may want to adapt their models based on data they observe at test time, bypassing the time-consuming annotation pro-cess [8, 35, 53, 57]. Test-Time Adaptation (TTA) refers to the problem of adapting a source model to a target task T represented by test data, for which no ground-truth labels are given.
+This trend is exacerbated by the advent of Foundation
+Models [2, 10, 38, 59], at least in the visual domain where tasks can be antagonistic and models are sensitive to even subtle changes in the data distribution. At the same time, both users and providers typically have access to ever-growing pools of auxiliary data, albeit often heterogeneous (pertaining to concepts other than the one of interest at test-time), and without annotations. Yet it seems plausible that, somewhere within these large pools of data, there may be information useful for the task at hand.
+In this paper, we tackle the problem of performing test-time adaptation by retrieving information from a large, un-labeled, heterogeneous, and evolving dataset. The same procedure could also be followed by the provider, if they have access to auxiliary internal data and wish to adapt the production model based on trends observed in test data. We refer to our method as Train/Test-Time Adaptation with Re-trieval, or T3AR.
+T3AR, if solved, would enable a number of real-world tasks that have thus far frustrated practitioners. For in-stance, it would allow a user to select, among a vast data lake A, which samples to use for a training, based on la-beled and unlabeled samples [61]. It would also enable nim-ble inference, by adapting a modest-size model to speciﬁc tasks, rather than relying on an unwieldy model to master all trades. Finally, it would enable reversible adaptation:
+While in the case of language models tasks are generally synergistic [44], in vision tasks can be antagonistic.1 There-fore, a model adapted to one task may behave poorly on another, and a model that encompasses both would require signiﬁcantly higher capacity [2, 10, 38, 59], to the detriment of inference efﬁciency. In T3AR, changing the target data
+T changes the subset of the data pool A that is retrieved, with no impact on other models, instantiating smaller inde-pendent models for antagonistic tasks, rather than coercing them into a larger one, likely multiplying inference costs.
+T3AR can be used in a continual setting, where at each time t one has a different target Tt, and the auxiliary task A is composed of the union of all prior targets T0, . . . , Tt. The retrieval system should automatically determine what infor-mation from whatever past targets is relevant to the present, and what information is redundant in A and can be elimi-nated. The important difference compared to ordinary con-tinual learning is that each step starts with the base model, so there is no catastrophic forgetting, and what is updated is the auxiliary task. In other words, the integration of infor-mation occurs in A, not in the trained model f . 1.1. Related problems
+T3AR relates to unsupervised domain adaptation (UDA)
+[26, 28, 45], since the target dataset is not annotated. How-ever, in UDA one assumes that the source dataset S is avail-able along with the target T , which is not necessarily the case in T3AR since users may want to bypass annotation altogether, and directly adapt the pre-trained model using the auxiliary dataset A, based on the target task T , without having direct access to S. 1E.g., localization requires marginalizing identity, whereas recognition requires marginalizing location, making the features that are informative for one detrimental to the other [2, 38].
+T3AR also relates to semi-supervised learning (SSL)
+[32, 34, 51], since the target dataset T and the auxiliary dataset A are not annotated. However, in SSL one assumes that labeled S and unlabeled data are drawn from the same joint distribution, which is not the case for T and A in
+T3AR , and, in any case we do not aim to infer labels of
+A, and just use it to improve the model on the target task.
+T3AR is also related to open-set domain adaptation [6, 49], since the auxiliary dataset A is heterogeneous and does not share the same label space as the source and target task.
+It is also related to out-of-distribution detection (OOD) [20, 62], since one needs to decide whether to add samples from the auxiliary dataset, and to active learning [50], since one needs to decide what samples to add.
+Naturally, T3AR closely relates to test-time adaptation (TTA) [8, 35, 53, 57, 65], and to memory-augmented or retrieval-based architectures [3, 11, 36], widely developed in the language domain [4, 33, 63], where the hypotheses live in the same space of the data and nuisance variability is limited to paraphrasing.
+In summary, T3AR lies at the intersection of UDA, SSL,
+OOD, TTA, Active Learning, and Retrieval, yet it does not
+ﬁt neatly into any of them, making both the survey of related literature (Sect. 2) and experimental assessment (Sect. 4) non-straightforward. 1.2. Key ideas and contributions
+We propose a method to solve T3AR, based on a target unlabeled dataset T , that selects samples from an auxiliary dataset A, using a retrieval model R.
+Starting from any model fS pre-trained by the provider on a dataset D and later ﬁne-tuned by the user on a labelled dataset S, our method ﬁnds subsets of an auxiliary dataset
+A that are relevant for the target dataset T , using nearest neighbors in A to samples in T , measured in a representa-tion space computed by a retrieval model R (in our case, a
+CLIP embedding [48]).
+|
+The key technical contribution is a contrastive loss used for updating the model fS to a new model fA
+T , whereby negative pairs are selected by retrieving samples from the external dataset A that are informative of T using the re-triever R. Furthermore, to improve training stability, we exclude same-class negatives pairs from T by exploiting as-signed pseudo-labels obtained by averaging predicted log-its on different data augmentations. Our method can be thought of as a form of contrastive “dataset augmentation” by enlarging the user data with samples drawn from a dif-ferent (unlabeled) dataset A, based on guidance provided by a retriever R. This procedure can be followed by both the user and the provider, thus empowering them to adapt the core model (train-time adaptation) or a sequence of disjoint custom models (test-time adaptation).
+We show that applying T3AR improves downstream
+classiﬁcation accuracy over the paragon supervised ﬁne-tuning [1, 18] for train-time and test-time adaptation meth-ods [8, 35, 57] for test-time. In particular, as the number of data available during adaptation decreases, T3AR improves by up to 13% and 8% in relative Top1 accuracy at train and test time, respectively. 2.

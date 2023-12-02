@@ -1,0 +1,209 @@
+Abstract
+Can Transformer perform 2D object- and region-level recognition from a pure sequence-to-sequence perspective with minimal knowledge about the 2D spatial structure? To answer this question, we present You Only Look at One Sequence (YOLOS), a series of object detection models based on the vanilla Vision Trans-former with the fewest possible modiﬁcations, region priors, as well as induc-tive biases of the target task. We ﬁnd that YOLOS pre-trained on the mid-sized
+ImageNet-1k dataset only can already achieve quite competitive performance on the challenging COCO object detection benchmark, e.g., YOLOS-Base directly adopted from BERT-Base architecture can obtain 42.0 box AP on COCO val. We also discuss the impacts as well as limitations of current pre-train schemes and model scaling strategies for Transformer in vision through YOLOS. Code and pre-trained models are available at https://github.com/hustvl/YOLOS. 1
+
+Introduction
+Transformer [58] is born to transfer. In natural language processing (NLP), the dominant approach is to ﬁrst pre-train Transformer on large, generic corpora for general language representation learning, and then ﬁne-tune or adapt the model on speciﬁc target tasks [18]. Recently, Vision Transformer (ViT) 1 [21] demonstrates that canonical Transformer encoder architecture directly inherited from
+NLP can perform surprisingly well on image recognition at scale using modern vision transfer learning recipe [33]. Taking sequences of image patch embeddings as inputs, ViT can successfully transfer pre-trained general visual representations from sufﬁcient scale to more speciﬁc image classiﬁcation tasks with fewer data points from a pure sequence-to-sequence perspective.
+Since a pre-trained Transformer can be successfully ﬁne-tuned on sentence-level tasks [7, 19] in NLP, as well as token-level tasks [48, 52], where models are required to produce ﬁne-grained output at the token-level [18]. A natural question is: Can ViT transfer to more challenging object- and region-level target tasks in computer vision such as object detection other than image-level recognition?
+ViT-FRCNN [6] is the ﬁrst to use a pre-trained ViT as the backbone for a Faster R-CNN [50] object detector. However, this design cannot get rid of the reliance on convolutional neural networks (CNNs)
+∗Yuxin Fang and Bencheng Liao contributed equally. †Xinggang Wang is the corresponding author. This work was done when Yuxin Fang was interning at Horizon Robotics mentored by Rui Wu. 1There are various sophisticated or hybrid architectures termed as “Vision Transformer”. For disambiguation, in this paper, “Vision Transformer” and “ViT” refer to the canonical or vanilla Vision Transformer architecture proposed by Dosovitskiy et al. [21] unless speciﬁed. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+and strong 2D inductive biases, as ViT-FRCNN re-interprets the output sequences of ViT to 2D spatial feature maps and depends on region-wise pooling operations (i.e., RoIPool [23, 25] or RoIAlign [27]) as well as region-based CNN architectures [50] to decode ViT features for object- and region-level perception. Inspired by modern CNN design, some recent works [39, 59, 62, 65] introduce the pyramidal feature hierarchy, spatial locality, equivariant as well as invariant representations [24] to canonical Vision Transformer design, which largely boost the performance in dense prediction tasks including object detection. However, these architectures are performance-oriented and cannot reﬂect the properties of the canonical or vanilla Vision Transformer [21] directly inherited from Vaswani et al. [58]. Another series of work, the DEtection TRansformer (DETR) families [10, 72], use a random initialized Transformer to encode & decode CNN features for object detection, which does not reveal the transferability of a pre-trained Transformer.
+Intuitively, ViT is designed to model long-range dependencies and global contextual information instead of local and region-level relations. Moreover, ViT lacks hierarchical architecture as modern
+CNNs [26, 35, 53] to handle the large variations in the scale of visual entities [1, 37]. Based on the available evidence, it is still unclear whether a pure ViT can transfer pre-trained general visual representations from image-level recognition to the much more complicated 2D object detection task.
+To answer this question, we present You Only Look at One Sequence (YOLOS), a series of object detection models based on the canonical ViT architecture with the fewest possible modiﬁcations, region priors, as well as inductive biases of the target task injected. Essentially, the change from a pre-trained ViT to a YOLOS detector is embarrassingly simple: (1) YOLOS replaces one [CLS] token for image classiﬁcation in ViT with one hundred [DET] tokens for object detection. (2) YOLOS replaces the image classiﬁcation loss in ViT with the bipartite matching loss to perform object detection in a set prediction manner following Carion et al. [10], which can avoid re-interpreting the output sequences of ViT to 2D feature maps as well as prevent manually injecting heuristics and prior knowledge of object 2D spatial structure during label assignment [71]. Moreover, the prediction head of YOLOS can get rid of complex and diverse designs, which is as compact as a classiﬁcation layer.
+Directly inherited from ViT [21], YOLOS is not designed to be yet another high-performance object detector, but to unveil the versatility and transferability of pre-trained canonical Transformer from image recognition to the more challenging object detection task. Concretely, our main contributions are summarized as follows:
+• We use the mid-sized ImageNet-1k [51] as the sole pre-training dataset, and show that a vanilla ViT [21] can be successfully transferred to perform the complex object detection task and produce competitive results on COCO [36] benchmark with the fewest possible modiﬁcations, i.e., by only looking at one sequence (YOLOS).
+• For the ﬁrst time, we demonstrate that 2D object detection can be accomplished in a pure sequence-to-sequence manner by taking a sequence of ﬁxed-sized non-overlapping image patches as input. Among existing object detectors, YOLOS utilizes the minimal 2D inductive biases.
+• For the vanilla ViT, we ﬁnd the object detection results are quite sensitive to the pre-train scheme and the detection performance is far from saturating. Therefore the proposed YOLOS can be also used as a challenging benchmark task to evaluate different (label-supervised and self-supervised) pre-training strategies for ViT. 2 You Only Look at One Sequence
+As for the model design, YOLOS closely follows the original ViT architecture [21], and is optimized for object detection in the same vein as Carion et al. [10]. YOLOS can be easily adapted to various canonical Transformer architectures available in NLP as well as in computer vision. This intentionally simple setup is not designed for better detection performance, but to exactly reveal characteristics of the Transformer family in object detection as unbiased as possible. 2.1 Architecture
+An overview of the model is depicted in Fig. 1. Essentially, the change from a ViT to a YOLOS detector is simple: (1) YOLOS drops the [CLS] token for image classiﬁcation and appends one 2
+Figure 1: YOLOS architecture overview. “Pat-Tok” refers to [PATCH] token, which is the embedding of a
+ﬂattened image patch. “Det-Tok” refers to [DET] token, which is a learnable embedding for object binding.
+“PE” refers to positional embedding. During training, YOLOS produces an optimal bipartite matching between predictions from one hundred [DET] tokens and ground truth objects. During inference, YOLOS directly outputs the ﬁnal set of predictions in parallel. The ﬁgure style is inspired by Dosovitskiy et al. [21]. hundred randomly initialized learnable detection tokens ([DET] tokens) to the input patch embeddings ([PATCH] tokens) for object detection. (2) During training, YOLOS replaces the image classiﬁcation loss in ViT with the bipartite matching loss to perform object detection in a set prediction manner following Carion et al. [10].
+Stem. The canonical ViT [21] receives an 1D sequence of embedded tokens as the input. To handle 2D image inputs, we reshape the image x ∈ RH×W ×C into a sequence of ﬂattened 2D image patches xPATCH ∈ RN ×(P 2·C). Here, (H, W ) is the resolution of the input image, C is the number of input channels, (P, P ) is the resolution of each image patch, and N = HW is the resulting number of
+P 2 patches. Then we map xPATCH to D dimensions with a trainable linear projection E ∈ R(P 2·C)×D. We refer to the output of this projection xPATCHE as [PATCH] tokens. Meanwhile, one hundred randomly initialized learnable [DET] tokens xDET ∈ R100×D are appended to the [PATCH] tokens. Position embeddings P ∈ R(N +100)×D are added to all the input tokens to retain positional information. We use the standard learnable 1D position embeddings following Dosovitskiy et al. [21]. The resulting sequence z0 serves as the input of YOLOS Transformer encoder. Formally: (cid:3) + P. z0 = (cid:2)x1
+PATCHE; · · · ; xN
+DET; · · · ; x100
+DET
+PATCHE; x1 (1)
+Body. The body of YOLOS is basically the same as ViT, which consists of a stack of Transformer encoder layers only [58]. [PATCH] tokens and [DET] tokens are treated equally and they perform global interactions inside Transformer encoder layers.
+Each Transformer encoder layer consists of one multi-head self-attention (MSA) block and one MLP block. LayerNorm (LN) [2] is applied before every block, and residual connections [26] are applied after every block [3, 61]. The MLP contains one hidden layer with an intermediate GELU [29] non-linearity activation function. Formally, for the (cid:96)-th YOLOS Transformer encoder layer: z(cid:48) (cid:96) = MSA (LN (z(cid:96)−1)) + z(cid:96)−1, z(cid:96) = MLP (LN (z(cid:48) (cid:96))) + z(cid:48) (cid:96). (2)
+Detector Heads. The detector head of YOLOS gets rid of complex and heavy designs, and is as neat as the image classiﬁcation layer of ViT. Both the classiﬁcation and the bounding box regression heads are implemented by one MLP with separate parameters containing two hidden layers with intermediate ReLU [41] non-linearity activation functions. 3
+Detection Token. We purposefully choose randomly initialized [DET] tokens as proxies for object representations to avoid inductive biases of 2D structure and prior knowledge about the task injected during label assignment. When ﬁne-tuning on COCO, for each forward pass, an optimal bipartite matching between predictions generated by [DET] tokens and ground truth objects is established. This procedure plays the same role as label assignment [10, 71], but is unaware of the input 2D structure, i.e., YOLOS does not need to re-interpret the output sequence of ViT to an 2D feature maps for label assignment. Theoretically, it is feasible for YOLOS to perform any dimensional object detection without knowing the exact spatial structure and geometry, as long as the input is always ﬂattened to a sequence in the same way for each pass.
+Fine-tuning at Higher Resolution. When ﬁne-tuning on COCO, all the parameters are initialized from ImageNet-1k pre-trained weights except for the MLP heads for classiﬁcation & bounding box regression as well as one hundred [DET] tokens, which are randomly initialized. During ﬁne-tuning, the image has a much higher resolution than pre-training. We keep the patch size P unchanged, i.e.,
+P × P = 16 × 16, which results in a larger effective sequence length. While ViT can handle arbitrary input sequence lengths, the positional embeddings need to adapt to the longer input sequences with various lengths. We perform 2D interpolation of the pre-trained position embeddings on the ﬂy2.
+Inductive Bias. We carefully design the YOLOS architecture for the minimal additional inductive biases injection. The inductive biases inherent from ViT come from the patch extraction at the network stem part as well as the resolution adjustment for position embeddings [21]. Apart from that,
+YOLOS adds no non-degenerated (e.g., 3 × 3 or other non 1 × 1) convolutions upon ViT 3. From the representation learning perspective, we choose to use [DET] tokens to bind objects for ﬁnal predictions to avoid additional 2D inductive biases as well as task-speciﬁc heuristics. The performance-oriented design inspired by modern CNN architectures such as pyramidal feature hierarchy, 2D local spatial attention as well as the region-wise pooling operation is not applied. All these efforts are meant to exactly unveil the versatility and transferability of pre-trained Transformers from image recognition to object detection in a pure sequence-to-sequence manner, with minimal knowledge about the input spatial structure and geometry.
+Comparisons with DETR. The design of YOLOS is deeply inspired by DETR [10]: YOLOS uses
+[DET] tokens following DETR as proxies for object representations to avoid inductive biases about 2D structures and prior knowledge about the task injected during label assignment, and YOLOS is optimized similarly as DETR.
+Meanwhile, there are some key differences between the two models: (1) DETR adopts a Transformer encoder-decoder architecture, while YOLOS chooses an encoder-only Transformer architecture. (2)
+DETR only employs pre-training on its CNN backbone but leaves the Transformer encoder & decoder being trained from random initialization, while YOLOS naturally inherits representations from any pre-trained canonical ViT. (3) DETR applies cross-attention between encoded image features and object queries with auxiliary decoding losses deeply supervised at each decoder layer, while YOLOS always looks at only one sequence for each encoder layer, without distinguishing [PATCH] tokens and
+[DET] tokens in terms of operations. Quantitative comparisons between the two are in Sec. 3.4. 3 Experiments 3.1 Setup
+Pre-training. We pre-train all YOLOS / ViT models on ImageNet-1k [51] dataset using the data-efﬁcient training strategy suggested by Touvron et al. [57]. The parameters are initialized with a truncated normal distribution and optimized using AdamW [40]. The learning rate and batch size are 1 × 10−3 and 1024, respectively. The learning rate decay is cosine and the weight decay is 0.05.
+Rand-Augment [14] and random erasing [69] implemented by timm library [64] are used for data augmentation. Stochastic depth [32], Mixup [68] and Cutmix [66] are used for regularization. 2The conﬁgurations of position embeddings are detailed in the Appendix. 3We argue that it is imprecise to say Transformer do not have convolutions. All linear projection layers in
+Transformer are equivalent to point-wise or 1 × 1 convolutions with sparse connectivity, parameter sharing, and equivalent representations properties, which can largely improve the computational efﬁciency compared with the
+“all-to-all” interactions in fully-connected design that has even weaker inductive biases [5, 24]. 4
+Fine-tuning. We ﬁne-tune all YOLOS models on COCO object detection benchmark [36] in a similar way as Carion et al. [10]. All the parameters are initialized from ImageNet-1k pre-trained weights except for the MLP heads for classiﬁcation & bounding box regression as well as one hundred [DET] tokens, which are randomly initialized. We train YOLOS on a single node with 8 × 12G GPUs. The learning rate and batch sizes are 2.5 × 10−5 and 8 respectively. The learning rate decay is cosine and the weight decay is 1 × 10−4.
+As for data augmentation, we use multi-scale augmentation, resizing the input images such that the shortest side is at least 256 and at most 608 pixels while the longest at most 864 for tiny models.
+For small and base models, we resize the input images such that the shortest side is at least 480 and at most 800 pixels while the longest at most 1333. We also apply random crop augmentations during training following Carion et al. [10]. The number of [DET] tokens are 100 and we keep the loss function as well as loss weights the same as DETR, while we don’t apply dropout [54] or stochastic depth during ﬁne-tuning since we ﬁnd these regularization methods hurt performance.
+Model Variants. With available computational resources, we study several YOLOS variants. De-tailed conﬁgurations are summarized in Tab. 1. The input patch size for all models is 16 × 16.
+YOLOS-Ti (Tiny), -S (Small), and -B (Base) directly correspond to DeiT-Ti, -S, and -B [57]. From the model scaling perspective [20, 56, 60], the small and base models of YOLOS / DeiT can be seen as performing width scaling (w) [30, 67] on the corresponding tiny model.
+Model
+YOLOS-Ti
+YOLOS-S
+YOLOS-B
+YOLOS-S (dwr)
+YOLOS-S (dwr)
+DeiT [57]
+Model
+DeiT-Ti
+DeiT-S
+DeiT-B – –
+Layers Embed. Dim. (Depth) (Width) 192 384 768 240 330
+Pre-train
+Resolution Heads
+Params. FLOPs 224 272 240 3 6 12 6 6 5.7 M 22.1 M 86.4 M 13.7 M 19.0 M 1.2 G 4.5 G 17.6 G 4.6 G 4.6 G f (Lin.) f (Att.) 5.9 11.8 23.5 5.0 8.8 12 19 14
+Table 1: Variants of YOLOS. “dwr” and “dwr” refer to uniform compound model scaling and fast model scaling, respectively. The “dwr” and “dwr” notations are inspired by Dollár et al. [20]. Note that all the numbers listed are for pre-training, which could change during ﬁne-tuning, e.g., the resolution and FLOPs.
+Besides, we investigate two other model scaling strategies which proved to be effective in CNNs.
+The ﬁrst one is uniform compound scaling (dwr) [20, 56]. In this case, the scaling is uniform w.r.t.
+FLOPs along all model dimensions (i.e., width (w), depth (d) and resolution (r)). The second one is fast scaling (dwr) [20] that encourages primarily scaling model width (w), while scaling depth (d) and resolution (r) to a lesser extent w.r.t. FLOPs. During the ImageNet-1k pre-training phase, we apply dwr and dwr scaling to DeiT-Ti (∼ 1.2G FLOPs) and scale the model to ∼ 4.5G FLOPs to align with the computations of DeiT-S. Larger models are left for future work.
+For canonical CNN architectures, the model complexity or FLOPs (f ) are proportional to dw2r2 [20].
+Formally, f (CNN) ∝ dw2r2. Different from CNN, there are two kinds of operations that contribute to the FLOPs of ViT. The ﬁrst one is the linear projection (Lin.) or point-wise convolution, which fuses the information across different channels point-wisely via learnable parameters. The complexity is f (Lin.) ∝ dw2r2, which is the same as f (CNN). The second one is the spatial attention (Att.), which aggregates the spatial information depth-wisely via computed attention weights. The complexity is f (Att.) ∝ dwr4, which grows quadratically with the input sequence length or number of pixels.
+Note that the available scaling strategies are designed for architectures with complexity f ∝ dw2r2, so theoretically the dwr as well as dwr model scaling are not directly applicable to ViT. However, during pre-training phase the resolution is relatively low, therefore f (Lin.) dominates the FLOPs ( f (Lin.) f (Att.) > 5). Our experiments indicate that some model scaling properties of ViT are consistent with CNNs when f (Lin.) f (Att.) is large. 3.2 The Effects of Pre-training
+We study the effects of different pre-training strategies (both label-supervised and self-supervised) when transferring ViT (DeiT-Ti and DeiT-S) from ImageNet-1k to the COCO object detection benchmark via YOLOS. For object detection, the input shorter size is 512 for tiny models and is 800 for small models during inference. The results are shown in Tab. 2 and Tab. 3. 5
+Model
+Pre-train Method
+Pre-train
+Epochs
+Fine-tune
+Epochs
+Pre-train pFLOPs
+YOLOS-Ti
+YOLOS-S
+Rand. Init.
+Label Sup. [57]
+Label Sup. [57]
+Label Sup. (C) [57]
+Rand. Init.
+Label Sup. [57]
+Label Sup. [57]
+Label Sup. [57]
+Label Sup. (C) [57] 0 200 300 300 0 100 200 300 300 600 300 250 150 0 3.1 × 102 4.7 × 102 4.7 × 102 0 0.6 × 103 1.2 × 103 1.8 × 103 1.8 × 103 7.1 × 102
+Fine-tune pFLOPs
+Total pFLOPs 14.2 × 102 14.2 × 102 10.2 × 102 11.8 × 102 11.8 × 102 5.9 × 103 4.1 × 103 4.7 × 103 5.3 × 103 5.3 × 103 3.5 × 103 5.9 × 103 –
+ImNet
+Top-1 AP 19.7 71.2 26.9 72.2 28.7 74.5 29.7 20.9 74.5 32.0 78.5 36.1 79.9 36.1 81.2 37.2 –
+Table 2: The effects of label-supervised pre-training. “pFLOPs” refers to petaFLOPs (×1015). “ImNet” refers to
+ImageNet-1k. “C” refers to the distillation method from Touvron et al. [57].
+Model
+YOLOS-S
+Self Sup. Pre-train Method
+MoCo-v3 [13]
+DINO [11]
+Pre-train Epochs 300 800
+Fine-tune Epochs 150 150
+Linear Acc. 73.2 77.0
+AP 33.6 36.2
+Table 3: Study of self-supervised pre-training on YOLOS-S.
+Necessity of Pre-training. At least under prevalent transfer learning paradigms [10, 57], the pre-training is necessary in terms of computational efﬁciency. For both tiny and small models, we
+ﬁnd that pre-training on ImageNet-1k saves the total theoretical forward pass computations (total pre-training FLOPs & total ﬁne-tuning FLOPs) compared with training on COCO from random initialization (training from scratch [28]). Models trained from scratch with hundreds of epochs still lag far behind the pre-trained ViT even if given more total FLOPs budgets. This seems quite different from canonical modern CNN-based detectors, which can catch up with pre-trained counterparts quickly [28].
+Label-supervised Pre-training. For supervised pre-training with ImageNet-1k ground truth labels, we ﬁnd that different-sized models prefer different pre-training schedules: 200 epochs pre-training for YOLOS-Ti still cannot catch up with 300 epochs pre-training even with a 300 epochs ﬁne-tuning schedule, while for the small model 200 epochs pre-training provides feature representations as good as 300 epochs pre-training for transferring to the COCO object detection benchmark.
+With additional transformer-speciﬁc distillation (“C”) introduced by Touvron et al. [57], the detection performance is further improved by ∼ 1 AP for both tiny and small models, in part because exploiting a CNN teacher [47] during pre-training helps ViT adapt to COCO better. It is also promising to directly leverage [DET] tokens to help smaller YOLOS learn from larger YOLOS on COCO during
+ﬁne-tuning in a similar way as Touvron et al. [57], we leave it for future work.
+Self-supervised Pre-training. The success of Transformer in NLP greatly beneﬁts from large-scale self-supervised pre-training [18, 44, 45]. In vision, pioneering works [12, 21] train self-supervised
+Transformers following the masked auto-encoding paradigm in NLP. Recent works [11, 13] based on siamese networks show intriguing properties as well as excellent transferability to downstream tasks.
+Here we perform a preliminary transfer learning experiment on YOLOS-S using MoCo-v3 [13] and
+DINO [11] self-supervised pre-trained ViT weights in Tab. 3.
+The transfer learning performance of 800 epochs DINO self-supervised model on COCO object detection is on a par with 300 epochs DeiT label-supervised pre-training, suggesting great potentials of self-supervised pre-training for ViT on challenging object-level recognition tasks. Meanwhile, the transfer learning performance of MoCo-v3 is less satisfactory, in part for the MoCo-v3 weight is heavily under pre-trained. Note that the pre-training epochs of MoCo-v3 are the same as DeiT (300 epochs), which means that there is still a gap between the current state-of-the-art self-supervised pre-training approach and the prevalent label-supervised pre-training approach for YOLOS.
+YOLOS as a Transfer Learning Benchmark for ViT. From the above analysis, we conclude that the ImageNet-1k pre-training results cannot precisely reﬂect the transfer learning performance on
+COCO object detection. Compared with widely used image recognition transfer learning benchmarks such as CIFAR-10/100 [34], Oxford-IIIT Pets [43] and Oxford Flowers-102 [42], the performance of 6
+YOLOS on COCO is more sensitive to the pre-train scheme and the performance is far from saturating.
+Therefore it is reasonable to consider YOLOS as a challenging transfer learning benchmark to evaluate different (label-supervised or self-supervised) pre-training strategies for ViT. 3.3 Pre-training and Transfer Learning Performance of Different Scaled Models
+We study the pre-training and the transfer learning performance of different model scaling strategies, i.e., width scaling (w), uniform compound scaling (dwr) and fast scaling (dwr). The models are scaled from ∼ 1.2G to ∼ 4.5G FLOPs regime for pre-training. Detailed model conﬁgurations and descriptions are given in Sec. 3.1 and Tab. 1.
+We pre-train all the models for 300 epochs on ImageNet-1k with input resolution determined by the corresponding scaling strategies, and then ﬁne-tune these models on COCO for 150 epochs. Few literatures are available for resolution scaling in object detection, where the inputs are usually oblong in shape and the multi-scale augmentation [10, 27] is used as a common practice. Therefore for each model during inference, we select the smallest resolution (i.e., the shorter size) ranging in [480, 800] producing the highest box AP, which is 784 for dwr scaling and 800 for all the others. The results are summarized in Tab. 4.
+Image Classiﬁcation @ ImageNet-1k
+Object Detection @ COCO val
+Scale – w dwr dwr
+FLOPs 1.2 G 4.5 G 4.6 G 4.6 G f (Lin.) f (Att.) 5.9 11.8 5.0 8.8
+FPS 1315 615 386 511
+Top-1
+FLOPs 72.2 79.9 80.5 80.4 81 G 194 G 163 G 172 G f (Lin.) f (Att.) 0.28 0.55 0.35 0.49
+FPS 12.0 5.7 4.5 5.7
+AP 29.6 36.1 36.2 37.6
+Table 4: Pre-training and transfer learning performance of different scaled models. FLOPs and FPS data of object detection are measured over the ﬁrst 100 images of COCO val split during inference following Carion et al. [10]. FPS is measured with batch size 1 on a single 1080Ti GPU.
+Pre-training. Both dwr and dwr scaling can improve the accuracy compared with simple w scaling, i.e., the DeiT-S baseline. Other properties of each scaling strategy are also consistent with
+CNNs [20, 56], e.g., w scaling is the most speed friendly. dwr scaling achieves the strongest accuracy. dwr is nearly as fast as w scaling and is on a par with dwr scaling in accuracy. Perhaps the reason why these CNN model scaling strategies are still appliable to ViT is that during pre-training the linear projection (1 × 1 convolution) dominates the model computations. f (Att.) ∝ w
+Transfer Learning. The picture changes when transferred to COCO. The input resolution r is much higher so the spatial attention takes over and linear projection part is no longer dominant in terms of FLOPs ( f (Lin.) r2 ). Canonical CNN model scaling recipes do not take spatial attention computations into account. Therefore there is some inconsistency between pre-training and transfer learning performance: Despite being strong on ImageNet-1k, the dwr scaling achieves similar box
+AP as simple w scaling. Meanwhile, the performance gain from dwr scaling on COCO cannot be clearly explained by the corresponding CNN scaling methodology that does not take f (Att.) ∝ dwr4 into account. The performance inconsistency between pre-training and transfer learning calls for novel model scaling strategies for ViT considering spatial attention complexity. 3.4 Comparisons with CNN-based Object Detectors
+In previous sections, we treat YOLOS as a touchstone for the transferability of ViT. In this section, we consider YOLOS as an object detector and we compare YOLOS with some modern CNN detectors.
+Comparisons with Tiny-sized CNN Detectors. As shown in Tab. 5, the tiny-sized YOLOS model achieves impressive performance compared with well-established and highly-optimized CNN object detectors. YOLOS-Ti is strong in AP and competitive in FLOPs & FPS even though Transformer is not intentionally designed to optimize these factors. From the model scaling perspective [20, 56, 60],
+YOLOS-Ti can serve as a promising model scaling start point.
+Comparisons with DETR. The relations and differences in model design between YOLOS and
+DETR are given in Sec. 2.1, here we make quantitative comparisons between the two. 7
+Method
+YOLOv3-Tiny [49]
+YOLOv4-Tiny [60]
+YOLOS-Ti
+CenterNet [70]
+YOLOv4-Tiny (3l) [60]
+Def. DETR [72]
+YOLOS-Ti
+Backbone
+DarkNet [49]
+COSA [60]
+DeiT-Ti (C) [57]
+ResNet-18 [26]
+COSA [60]
+FBNet-V3 [15]
+DeiT-Ti (C) [57]
+Size 416 × 416 416 × 416 256 × ∗ 512 × 512 320 × 320 800 × ∗ 432 × ∗
+AP 16.6 21.7 23.1 28.1 28.7 27.9 28.6
+Params. (M) 8.9 6.1 6.5 – – 12.2 6.5
+FLOPs (G) 5.6 7.0 3.4 – – 12.3 11.7
+FPS 330 371 114 129 252 35 84
+Table 5: Comparisons with some tiny-sized modern CNN detectors. All models are trained to be fully converged.
+“Size” refers to input resolution for inference. FLOPs and FPS data are measured over the ﬁrst 100 images of
+COCO val split during inference following Carion et al. [10]. FPS is measured with batch size 1 on a single 1080Ti GPU.
+Backbone
+FBNet-V3 [15]
+DeiT-Ti [57]
+DeiT-Ti (C) [57]
+DeiT-Ti (C) [57]
+ResNet-18-DC5 [26]
+DeiT-S [57]
+DeiT-S (C) [57]
+Method
+Def. DETR [72]
+YOLOS-Ti
+YOLOS-Ti
+YOLOS-Ti
+DETR [10]
+YOLOS-S
+YOLOS-S
+YOLOS-S (dwr) DeiT-S [57] (dwr Scale [20])
+YOLOS-S (dwr) DeiT-S [57] (dwr Scale [20])
+DETR [10]
+YOLOS-B
+ResNet-101-DC5 [26]
+DeiT-B (C) [57]
+Epochs 150 300 300 300 150 150
+Size 800 × ∗ 27.5 512 × ∗ 28.7 432 × ∗ 28.6 528 × ∗ 30.0 800 × ∗ 36.9 800 × ∗ 36.1 800 × ∗ 37.2 704 × ∗ 37.2 784 × ∗ 37.6 42.5 42.0
+AP Params. (M) FLOPs (G) FPS 35 60 84 51 7.4 5.7 5.7 7.7 5.7 5.3 2.7 12.2 6.5 6.5 6.5 29 31 31 28 28 60 127 12.3 18.8 11.7 20.7 129 194 194 123 172 253 538 800 × ∗
+Table 6: Comparisons with different DETR models. Tiny-sized models are trained to be fully converged. “Size” refers to input resolution for inference. FLOPs and FPS data are measured over the ﬁrst 100 images of COCO val split during inference following Carion et al. [10]. FPS is measured with batch size 1 on a single 1080Ti
+GPU. The “ResNet-18-DC5” implantation is from timm library [64].
+As shown in Tab. 6, YOLOS-Ti still performs better than the DETR counterpart, while larger YOLOS models with width scaling become less competitive: YOLOS-S with more computations is 0.8 AP lower compared with a similar-sized DETR model. Even worse, YOLOS-B cannot beat DETR with over 2× parameters and FLOPs. Even though YOLOS-S with dwr scaling is able to perform better than the DETR counterpart, the performance gain cannot be clearly explained as discussed in Sec. 3.3.
+Interpreting the Results. Although the performance is seemingly discouraging, the numbers are meaningful, as YOLOS is not purposefully designed for better performance, but designed to precisely reveal the transferability of ViT in object detection. E.g., YOLOS-B is directly adopted from the
+BERT-Base architecture [18] in NLP. This 12 layers, 768 channels Transformer along with its variants have shown impressive performance on a wide range of NLP tasks. We demonstrate that with minimal modiﬁcations, this kind of architecture can also be successfully transferred (i.e., AP = 42.0) to the challenging COCO object detection benchmark in computer vision from a pure sequence-to-sequence perspective. The minimal modiﬁcations from YOLOS exactly reveal the versatility and generality of
+Transformer. 3.5
+Inspecting Detection Tokens
+Figure 2: Visualization of all box predictions on all images from COCO val split for the ﬁrst ten [DET] tokens.
+Each box prediction is represented as a point with the coordinates of its center normalized by each thumbnail image size. The points are color-coded so that blue points corresponds to small objects, green to medium objects and red to large objects. We observe that each [DET] token learns to specialize on certain regions and sizes. The visualization style is inspired by Carion et al. [10]. 8
+Figure 3: The statistics of all ground truth object categories (the red curve) and the statistics of all object category predictions from all [DET] tokens (the blue curve) on all images from COCO val split. The error bar of the blue curve represents the variability of the preference of different tokens for a given category, which is small. This suggests that different [DET] tokens are category insensitive.
+Qualitative Analysis on Detection Tokens. As an object detector, YOLOS uses [DET] tokens to represent detected objects. In general, we ﬁnd that [DET] tokens are sensitive to object locations and sizes, while insensitive to object categories, as shown in Fig. 2 and Fig. 3.
+Quantitative Analysis on Detection Tokens. We give a quantitative analysis on the relation be-tween X = the cosine similarity of [DET] token pairs, and Y = the corresponding predicted bounding
+E[(X−µX )(Y −µY )] box centers (cid:96)2 distances. We use the Pearson correlation coefﬁcient ρX,Y =
+σX σY as a measure of linear correlation between variable X and Y , and we conduct this study on all predicted object pairs within each image in COCO val set averaged by all 5000 images. The result is ρX,Y = −0.80. This means that [DET] tokens that are close to each other (i.e., with high cosine similarity) also lead to mostly nearby predictions (i.e., with short (cid:96)2 distances, given ρX,Y < 0).
+We also conduct a quantitative study on the relation between X = the cosine similarity of [DET] token pairs, and Y = the corresponding cosine similarity of the output features of the classiﬁer. The result is ρX,Y = −0.07, which is very close to 0. This means that there is no strong linear correlation between these two variables.
+Detaching Detection Tokens. To further under-stand the role [DET] tokens plays, we study impacts caused by detaching the [DET] tokens of YOLOS dur-ing training, i.e., we don’t optimize the parameters of the one hundred randomly initialized [DET] tokens.
+As shown in Tab. 7, detaching the [DET] tokens has a minor impact to AP. These results imply that [DET] tokens mainly serve as the information carrier for the [PATCH] tokens. Similar phenomena are also ob-served in Fang et al. [22]. 4

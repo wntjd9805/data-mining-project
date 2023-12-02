@@ -1,0 +1,312 @@
+Abstract
+Nested networks or slimmable networks are neural net-works whose architectures can be adjusted instantly dur-ing testing time, e.g., based on computational constraints.
+Recent studies have focused on a “nested dropout” layer, which is able to order the nodes of a layer by impor-tance during training, thus generating a nested set of sub-networks that are optimal for different conﬁgurations of re-sources. However, the dropout rate is ﬁxed as a hyper-parameter over different layers during the whole training process. Therefore, when nodes are removed, the perfor-mance decays in a human-speciﬁed trajectory rather than in a trajectory learned from data. Another drawback is the generated sub-networks are deterministic networks without well-calibrated uncertainty. To address these two prob-lems, we develop a Bayesian approach to nested neural net-works. We propose a variational ordering unit that draws samples for nested dropout at a low cost, from a proposed
+Downhill distribution, which provides useful gradients to the parameters of nested dropout. Based on this approach, we design a Bayesian nested neural network that learns the order knowledge of the node distributions.
+In exper-iments, we show that the proposed approach outperforms the nested network in terms of accuracy, calibration, and out-of-domain detection in classiﬁcation tasks. It also out-performs the related approach on uncertainty-critical tasks in computer vision. 1.
+
+Introduction
+Modern deep neural networks (DNNs) have achieved great success in ﬁelds of computer vision and related ar-eas. In the meantime, they are experiencing rapid growth in model size and computation cost, which makes it dif-ﬁcult to deploy on diverse hardware platforms. Recent works study how to develop a network with ﬂexible size during test time [20, 50, 49, 4, 6, 47], to reduce the cost in designing [44], training [21], compressing [13] and de-ploying [36] a DNN on various platforms. As these net-works are often composed of a nested set of smaller sub-networks, we refer to them as nested nets in this paper.
+As many problems are safety-critical, such as object recog-nition [9, 12], medical-image segmentation [24, 18] and crowd counting [33, 45], the adopted DNNs are required to provide well-calibrated uncertainty in addition to high pre-diction performance, as erroneous predictions could result in disastrous consequences. However, the measure of un-certainty was not considered in previous designs of nested nets, which leads to over- or under-conﬁdent predictions.
+One basis for creating nested nets is to order the network components (e.g., convolution channels) such that less im-portant components can be removed ﬁrst when creating the sub-network. A unit for neural networks, nested dropout, was developed to order the latent feature representation for the encoder-decoder models [37, 1]. Speciﬁcally, a discrete distribution is assigned over the indices of the representa-tions, and the operation of nested dropout samples an index then drops the representations with larger indices. Recent studies show that the nested dropout is able to order the network components during training such that nested nets can be obtained [6, 7]. The ordering layout is applicable to different granularity levels of network components: single weights, groups of weights, convolutional channels, resid-ual blocks, network layers, and even quantization bits. We refer to the partitions of the network components as nodes in this paper. However, the probability that an index is sam-pled is speciﬁed by hand as a hyperparameter, and does not change during training. Thus, the importance of a node is pre-determined by hand rather than learned from data.
+To enhance predictive uncertainty and to allow the dropout rate to be learned, in this paper, we propose a fully
+Bayesian treatment for constructing nested nets. We pro-pose a new nested dropout, based on a chain of interdepen-dent Bernoulli variables. The chain simulates the Bernoulli trials and can be understood as a special case of a two-state
+Markov chain, which intuitively generates order informa-tion. To save the time cost for sampling during training, we propose a variational ordering unit that approximates 2392
+4(/|7)
+Density 1 0 0 0 1 1 0 0 1 1 1 0 1 1 1 1
+Sampling
+Ordered	mask
+/
+!!!| #!
+!!"| #" !!#| ##
+!!$| #$
+!"
+!#
+Sampling
+&(()
+$
+%
+Figure 1: Sampling process in a layer for calculating the data log-likelihood (Eq. 8). A fully connected layer f (·) takes H as an input and outputs F. The variational ordering unit q(z|β) generates ordered mask z = [zj ]j . Nodes wij ’s with the same color share an element zj . The gra-dient through stochastic nodes ∂F
+∂β can be estimated efﬁciently, to update the importance β. the chain, and an approximate posterior based on a novel
+Downhill distribution built on Gumbel Softmax [17, 29].
+This allows efﬁcient sampling of the multivariate ordered mask, and provides useful gradients to update the impor-tance of the nodes.
+Based on the proposed ordering units, a Bayesian Nested
+Neural Network (BN3) is constructed, where the indepen-dent distributions of nodes are interconnected with the or-dering units. A mixture model prior is placed over each node, while the model selection is determined by the order-ing units (Fig. 1). A variational inference problem is for-mulated and resolved, and we propose several methods to simplify the sampling and calculation of the regularization term. Experiments show that our model outperforms the deterministic nested models in any sub-network, in terms of classiﬁcation accuracy, calibration and out-of-domain de-tection.
+It also outperforms other uncertainty calibration methods on uncertainty-critical tasks, e.g., probabilistic U-Net [24] on medical segmentation with noisy labels.
+In summary, the contributions of this paper are:
+• We propose a variational nested dropout unit with a novel pair of prior and posterior distributions.
+• We propose a novel Bayesian nested neural network that can generate large sets of uncertainty-calibrated sub-networks. The formulation can be viewed as a generalization of ordered `0-regularization over the sub-networks.
+• To our knowledge, this is the ﬁrst work that considers uncertainty calibration and learned the importance of network components in nested neural networks.
+The code1 and supplemental2 are publicly available. 1https://github.com/ralphc1212/variational nested dropout 2http://visal.cs.cityu.edu.hk/static/pubs/conf/cvpr2021-bnnn-supp.pdf
+[37] and Cui et al.
+Figure 2: The probability of tail index being sampled in different nested dropout realizations. Rippel et al.
+[6] adopt Geo-metric and Categorical distributions, which are static over different layers and the learning process. The proposed variational nested dropout (VND) learns the importances of nodes from data. The two examples are from two different layers in a Bayesian nested neural network. 2. Variational Nested Dropout
+We ﬁrst review nested dropout, and then propose our
+Bayesian ordering unit and variational approximation. 2.1. A review of nested dropout
+The previous works [37] that order the representations use either Geometric or Categorical distributions to sample the last index of the kept units, then drop the neurons with indices greater than it. Speciﬁcally, the distribution pI(·) is assigned over the representation indices 1, . . . , K. The nested/ordered dropout operation proceeds as follows: 1. Tail sampling: A tail index is sampled I represents the last element be kept. pI(·) that
+∼ 2. Ordered dropping:
+The elements with indices
+I + 1, . . . , K are dropped.
+We also refer to this operation as an ordering unit as the representations are sorted in order.
+In [37], which focuses on learning ordered representa-tions, this operation is proved to exactly recover PCA with a one-layer neural network. Cui et al. [6] shows this op-eration, when applied to groups of neural network weights or quantization bits, generates nested sub-networks that are optimal for different computation resources. They further prove that increasing from a smaller sub-network to a larger one maximizes the incremental information gain. A large network only needs to be trained once with nested dropout, yielding a set of networks with varying sizes for deploy-ment. However, the above methods treat the nested dropout rate as a hyper-parameter, and hand-tuning the dropout rate is tedious and may lead to suboptimal performance of the sub-networks, as compared to learning this hyperparameter from the data. As illustrated in Fig. 2, the previous works use hand-speciﬁed parameters for nested dropout, which freezes the importance of the network components over dif-ferent layers during training.
+A common practice for regular Bernoulli dropout is to treat the dropout rate as a variational parameter in Bayesian neural networks [8]. To ﬁnd the optimal dropout rate, grid-search is ﬁrst adopted [9], whose complexity grows expo-nentially with the number of dropout units. To alleviate the cost of searching, a continuous relaxation of the discrete 2393
+dropout is proposed by which the dropout rate can be op-timized directly [10], improving accuracy and uncertainty, while keeping a low training time. However, for nested dropout, two aspects are unclear: 1) how to take a full
+Bayesian treatment with nested dropout units; 2) how the relaxation can be done for these units or how the gradients can be back-propagated to the parameters of pI(·). 2.2. Bayesian Ordering Unit
+∈
+−
+The conventional nested dropout uses a Geometric dis-⇡)i⇡, for tribution to sample the tail I, pI(I = i) = (1 i
+{1, . . . , K}. By deﬁnition, the Geometric distribution models the probability that the i-th trial is the ﬁrst “success” in a sequence of independent Bernoulli trials. In the context of slimming neural networks, a “failure” of a Bernoulli trial indicates that node is kept, while a “success” indicates the tail index, where this node is kept and all subsequent nodes are dropped. Thus, ⇡ is the conditional probability of a node being a tail index, given the previous node is kept. ordered mask, which can be directly multiplied on the nodes to realize ordered dropping. Another beneﬁt is that applying a continuous relaxation [10] of the Bernoulli variables in the chain allows its parameters ⇡ to be optimized.
+However, the sampling of z requires stepping through each element zi, which has complexity O(K), and is thus not scalable in modern DNNs where K is large. Thus we apply the variational inference framework, while treating p(z) as the prior of the ordered mask in our Bayesian treat-ment. One challenge is to ﬁnd a tractable variational dis-tribution q(z) that approximates the true posterior and is easy to compute. Another challenge is to deﬁne a q(z) that allows efﬁcient re-parameterization, so that the gradient of the parameter of q(z) can be estimated with low variance. 2.3. Variational Ordering Unit
+We propose a novel Downhill distribution based on
+Gumbel Softmax distribution [17, 29] that generates the or-dered mask z.
+Sampling from the Geometric only generates the tail in-dex of the nodes to be kept. A hard selection operation of ordered dropping is required to drop the following nodes.
+The ordered dropping can be implemented using a set of or-dered mask vectors V = {v1, · · · , vK}, where vj consists of j ones followed by K
+, 0, . . . , 0
+]. j zeros, vj = [1, . . . , 1
+− j
+K j
+Given the sampled tail index I pI(·), the appropriate
+| {z } mask vI is selected and applied to the nodes (e.g., mul-tiplying the weights). However, as the masking is a non-differentiable transformation and does not provide a well-deﬁned probability distribution, the nested dropout param-eters cannot be learned using this formulation.
+| {z }
+∼
+To ﬁnd a more natural prior for the nodes, we propose to use a chain of Bernoulli variables to directly model the distribution of the ordered masks. Let the set of binary variables z = [z1, . . . , zK] represent the random ordered mask. Speciﬁcally, we model the conditional distributions with Bernoulli variables, p(z1 = 1) = ⇡1, p(zi = 1|zi 1 = 1) = ⇡i, p(zi = 0|zi 1 = 1) = 1 p(zi = 0|zi 1 = 0) = 1, p(zi = 1|zi 1 = 0) = 0, p(z1 = 0) = 1
+⇡1,
+−
+− (1)
+⇡i, where ⇡i is the conditional probability of keeping the node given the previous node is kept, and ⇡1 = 1 (the ﬁrst node is always kept). Note that we also allow different probabilities
+⇡i for each zi. The marginal distribution of zi is i p(zi = 1) =
+⇡k, p(zi = 0) = 1 k=1
+Y i
+− k=1
+Y
+⇡k. (2)
+A property of this chain is that if 0 occurs at the i-th position, the remaining elements with indices i + 1, . . . , K become 0. That is, sampling from this chain generates an
+Deﬁnition 1 Downhill Random Variables (r.v.). Let the
+). An r.v. z has a Down-temperature parameter ⌧ (0, hill distribution z
+Downhill( , ⌧ ), if its density is:
+∞
+∈
+∼ q(z1, . . . , zK) (3)
+=Γ(K)⌧ K 1
+K
+" i=1
+X
+ i (zi 1 −
+ K K zi)⌧
+# i=1
+Y
+ i (zi 1 − zi)⌧ +1
+, where   = [ 1, . . . ,  K] are the probabilities for each di-mension.
+Two important properties of Downhill distributions are:
+• Property 1. If c
+∼ cumsum0 zi = 1 vector of ones, and cumsum0
+✏z is a standard uniform variable.
+Gumbel softmax(⌧,  , ✏z)3, then i(c), where e is a K-dimensional i 1 j=0 cj. c0 := 1. i(c) =
+−
+→
+• Property 2. When ⌧ 0, sampling from the Down-hill distribution reduces to discrete sampling, where the sample space is the set of ordered mask vectors V.
+The approximation of the Downhill distribution to the
+Bernoulli chain can be calculated in closed-form.
+Property 1 shows the sampling process of the Downhill dis-tribution. We visualize the Downhill samples in Fig. 3. As each multivariate sample has a shape of a long descent from left to right, we name it Downhill distribution. The tempera-ture variable ⌧ controls the sharpness of the downhill or the smoothness of the step at the tail index. When ⌧ is large, the slope is gentle in which case no nodes are dropped, but the less important nodes are multiplied with a factor less than
+P 3For Gumbel-softmax sampling, we ﬁrst draw g1 . . . gK from
+Gumbel(0, 1), then calculate ci = softmax( log(βi)+gi
+). The samples of Gumbel(0, 1) can be obtained by ﬁrst drawing ✏z ∼ Uniform(0, 1) then computing g = − log(− log(✏z)).
+τ 2394
+evidence lower bound (ELBO):
+Lφ = LD( )
+KL[qφ(u)||p(u)],
+− where the expected data log-likelihood is
+N
+LD( ) =
+Eqφ(u)[log p(yi|xi, u)]. (4) (5)
+Figure 3: The multivariate Downhill samples under different temperatures
+⌧ . When ⌧ → 0, a clear cliff is observed as the dimension increases, which is beneﬁcial for differentiating important or unimportant nodes. As
+⌧ increases, the shape becomes a slope where the gaps between impor-tant/unimportant nodes are smoother, which is beneﬁcial for training.
+→ 1. When ⌧ 0, the shape of the sample becomes a cliff which is similar to the prior p(z) on ordered masks, where the less important nodes are dropped (i.e., multiplied by 0).
+Ez⇠qβ(z)[⇣(z)]
+Property 1 further implies the gradient @
+@β can be estimated with low variance, for a cost function
+⇣(z). Because the samples of z are replaced by a dif-Ez⇠qβ(z)[⇣(z)] = ferentiable function t( , ✏z),
+@
+@t
+@β ], where t(·, ·) represents the
+@β whole transformation process in Prop. 1.
+E✏z⇠Uniform(0,1)[ @⇣
+@t then @
+@β
+Recall that our objective is to approximate the chain of
+Bernoulli variables p(z) with qβ(z). Property 2 shows why the proposed distribution is consistent with the chain of
+Bernoullis in essence, and provides an easy way to derive the evidence lower bound for variational inference. The proof for the two properties is in Appx. 7.1. This simple transformation of Gumbel softmax samples allows fast sam-pling of an ordering unit. Compared with p(z), the com-plexity decreases from O(K) to O(1), as the sequential sampling of the Bernoulli chain is no longer necessary. 3. Bayesian Nested Neural Network
+In this section, we present the Bayesian nested neu-ral network based on the fundamental units proposed in
+Sec. 2. 3.1. Bayesian Inference and SGVB
+Consider a dataset D constructed from N pairs of in-stances {(xi, yi)}N i=1. Our objective is to estimate the pa-rameters u of a neural network p(y|x, u) that predicts y given input x and parameters u.
+In Bayesian learning, a prior p(u) is placed over the parameters u. After data D is observed, the prior distribution is transformed into a poste-rior distribution p(u|D).
+For neural networks, computing the posterior distribu-tion using the Bayes rule requires computing intractable integrals over u. Thus, approximation techniques are re-quired. One family of techniques is variational inference, with which the posterior p(u|D) is approximated by a parametric distribution qφ(u), where   are the variational qφ(u) is approximated by minimizing the parameters.
+Kullback-Leibler (KL) divergence with the true posterior,
+KL[qφ(u)||p(u|D)], which is equivalent to maximizing the i=1
+X
+The integration LD is not tractable for neural networks.
+An efﬁcient method for gradient-based optimization of the variational bound is stochastic gradient variational Bayes (SGVB) [23, 22]. SGVB parameterizes the random vari-qφ(u) as u = t(✏,  ) where t(·) is a differ-ables (r.v.) u entiable function and ✏ p(✏) is a noise variable with ﬁxed parameters. With this parameterization, an unbiased dif-ferentiable minibatch-based Monte Carlo estimator of the expected data log-likelihood is obtained:
+∼
+∼
+LD( ) ' LSGVB
+D ( ) =
+N
+M
+M
+X i=1 log p(yi|xi, u = t(✏,  )), (6) i=1 is a minibatch of data with M random where {(xi, yi)}M instances (xi, yi) 3.2. Bayesian Nested Neural Network
+D, and ✏ p(✏).
+∼
+∼
+In our model, the r.v. u = (W, z) consists of two parts: weight matrix W and ordering units z. The or-dering units order the network weights and generate sub-models that minimize the residual loss of a larger sub-model [37, 6]. We deﬁne the corresponding variational pa-rameters   = (✓,  ), where ✓ and   are the variational parameters for the weights and ordering units respectively.
+We then have the following optimization objective,
+θ,β ' LSGVB
+D (✓,  )   KL[qθ,β(W, z)||p(W, z)], (7)
+LSGVB
+LSGVB
+D (✓,  ) =
+N
+M
+M
+X i=1 log p(yi|xi, W = tw(✏w, ✓), z = tz(✏z,  )), (8) where ✏z and ✏w are the random noise, and tw(·) and tz(·) are the differentiable functions that transform the noises to the probabilistic weights and ordered masks.
+∈
+Next, we focus on an example of a fully-connected (FC) layer. Assume the FC layer in neural network takes in acti-RM ⇥d as the input, and outputs F = f (H) = vations H
+Rd⇥D, d and D are
+HW, where the weight matrix W the input and output size, and M is the batch size. The el-ements are indexed as hmi, fmj and wij respectively. We omit the bias for simplicity, and our formulation can easily be extended to include the bias term. We have the ordering
+RD with each element zj applied on the column of unit z
+W, by which the columns of W are given different levels of importance. Note that z is ﬂexible, and can be applied to
+W row-wise or element-wise as well.
+∈
+∈
+The prior for W assumes each weight is independent, ij p(wij), where i p(W) =
+∈
+{1, . . . , D}. We choose to place a mixture of two univari-ate variables as the prior over each element of the weight
+{1, . . . , d} and j
+Q
+∈ 2395
+ij,  1 ij,  0 ij ij,  0 2), where (µ0 matrix wij. For example, if we use the univariate normal distribution, then each wij is a Gaussian mixture, where the 2), and 2 components are: p(wij|zj = 0) = N (wij|µ0 ij,  1 p(wij|zj = 1) = N (wij|µ1 ij) and ij (µ1 ij) are the means and standard deviations for the two components. We ﬁx µ0 ij = 0 and  0 ij to be a small value, resulting in a spike at zero for the component when zj = 0.
+The variable zj follows the chain of Bernoulli distributions proposed in (32). Using (2), the marginal distribution of 2) + wij is then p(wij) = (1 i k=1 ⇡k)N (wij|µ1 ij,  1 (
+Q ij
+To calculate the expected data log-likelihood, our Down-Q hill distribution allows efﬁcient sampling and differentiable transformation for the ordering units (Sec. 2.3). The repa-rameterization of weight distributions has been widely stud-ied [22, 27, 23] to provide gradient estimate with low vari-ance. Our framework is compatible with these techniques, which will be discussed in Sec. 3.4. An overview of sam-pling is shown in Fig. 1. i k=1 ⇡k)N (wij|µ0 ij,  0 ij
+− 2). 3.3. Posterior Approximation
+Next, we introduce the computation of the KL diver-gence. We assume the posterior qθ(W) takes the same form as the prior, while qβ(z) takes the Downhill distribution z 0 for simplicity, while ⌧ can be adjusted in the training process as annealing. For this layer, the KL divergence in (7) is
+Downhill( , ⌧ ). We consider the case that ⌧
+→
+∼
+KL[qβ,θ(W, z)||p(W, z)]
+= Eqβ(z)[log qβ(z) p(z)
+]
++ Eqβ(z)
+Eqθ (W|z)[log (9) qθ(W|z) p(W|z)
+]
+.
+Term Φ1 of (9) is
+Φ1
+{z
+|
+Φ1 = qβ(z) log
+}
+| qβ(z) p(z)
+Φ2
+{z
+D
+}
+=
+KL[qβ(vi)||p(vi)], z2V
+X j=1
+X where V = {v1, . . . , vD} is the set of ordered masks. The number of components in the z space is reduced from D2 to D, because there are only D possible ordered masks. By deﬁnition, the probabilities are qβ(vj) =  j, p(vj) = (1 j
+⇡j+1)
+⇡k, (10)
+− k=1
+Y where we deﬁne ⇡D+1 = 0. Then we can write
+Φ1 =  T (log( ) (11) where log(·) is an element-wise log function, ⇡ =
+[⇡1, . . . , ⇡D] and ˜⇡ = [⇡2, . . . , ⇡D+1].
+˜⇡)T J L⇡)), log((e
+−
+−
+We deﬁne K k ij(✓) as the KL of wij for component k
+∈
+Rd⇥D
+{0, 1}. Consider the matrices K0
+Rd⇥D, which are easily computed and K1 ij(✓)]ij by applying the KL function element-wise. The term Φ2 is
+θ = [K 0
+θ = [K 1 ij(✓)]ij
+∈
+∈ j
+X then expressed as
+Φ2 = eT K0 (12) where e is a vector of 1s, J is a matrix of 1s and JL is a lower triangular matrix with each element being 1.
+JL)T   + eT K1
+θJT
+L ,
+θ(J
+−
+Ordered `0-Regularization. We show that, if given the spike-and-slab priors, our KL term in (9) has an interpreta-tion as a generalization of an ordered `0 regularization over the sub-networks. The corresponding reduced objective for deterministic networks is
+Eq(z|β)LD(✓,  ) +   j j (13)
+D min
+θ,β
+Note that larger sub-networks have greater penalization.
+The derivations and proofs for p(vj), Φ2 and regularization are in Appx. 7. 3.4. Implementation
+For efﬁcient sampling of the weight distributions, we put multiplicative Gaussian noise ⌘ij
+N (1, ↵) on the weight wij, similar to [22, 31, 26]. We take wij for zj = 1 as an example.
+∼
+∼
+∼
+N (0, 1), (14) wij = ✓ij⌘ij = ✓ij(1 + √↵ij✏w), ✏w wij
+N (wij|✓ij, ↵ij✓2 ij).
+We also assume a log-uniform prior [22, 31, 26], p(log |wij| ative KL term parameter ✓1 (15) i.e.,
+| zj = 1) = const. With this prior, the neg-Kij(✓)1 does not depend on the variational ij [22], when the parameter ↵ij is ﬁxed, ij, ↵ij, zj = 1)||p(|wij| |zj = 1)]
+−
+−
+KL[q(wij|✓1 1 2
+= log ↵ij
+−
+E✏w⇠N (1,↵ij ) log |✏w| + C, (16) where C is a constant. Note that the prior can be ﬂexi-bly replaced by other distributions like Gaussian, while we choose log-uniform for simplicity of optimization, as ✓ij’s are eliminated from the computation of KL.
+≤
+As the second term in (16) cannot be computed ana-lytically and should be estimated by sampling, Kingma et al. [22] propose to sample ﬁrst and design a function to ap-proximate it. But their approximation of K 1 ij(✓) does not encourage ↵ij > 1 as the optimization would be difﬁcult.
+They truncate ↵ij 1 corresponding to a small variance, which is not ﬂexible. Molchanov et al. [31] use a differ-ent parameterization that pushes ↵ij
+, as illustrated in
+Fig. 4. This means the wij can be pruned, generating a sin-gle sparse neural network. In our model, we want the order or sparsity of weights to be explicitly controlled by the or-dering unit z, otherwise the network would collapse to a sin-gle model rather than generate a nested set of sub-models.
+Kij(✓)1 (16),
+Thus, we propose another approximation to a1e ea4 ·(a2+a3⇤log ↵ij )2 (17)
+− 0.2041, a3 = 0.3492 and where a1 = 0.7294, a2 = a4 = 0.5387. We obtained these parameters by sampling from ✏w to estimate (16) as the ground-truth and ﬁt these
+− 0.5 log(1 + ↵ 1 ij ) + C,
+→ ∞
+− 2396
+Figure 4: Approximation to (16). Our approximation allows ↵ > 1 (c.f.,
+[22]) and does not push ↵ → 0 to generate a collapsed model (c.f., [31]). parameters for 105 epochs. For ﬁtting the curves, the input 5, 0.5]. As shown in Fig. 4, range is limited to log ↵
+[
+∈ our parameterization allows ↵ > 1 and maximizing
+KL does not push ↵ to inﬁnity (c.f. [22] and [31]), providing more ﬂexible choices for the weight variance.
+−
+−
+As the prior of the zero-component wij is assumed a spike at zero with a small constant variance, we let q(wij|zj = 0) be the same spike as in Sec. 3.2 to save com-putation. Also, to speed up the sampling process in Fig. 1, we directly multiply the sampled masks with the output fea-tures of the layer. This saves the cost for sampling from wij|zj = 0 and simpliﬁes (12) to eT K1
+L . Therefore, the KL divergence (9) is simpliﬁed to
+θJT
+KL[qβ,θ(W, z)||p(W, z)] = Φ1 + Φ2
+=  T (log( ) log((e
+θJT
+L ,
+θ is calculated by applying (17) element-wise.
+Using the notation in Sec. 3.2, the output of a fully con-˜⇡)T J L⇡)) + eT K1 (18)
+−
+− where K1 nected layer is fmj = bmjzj, bmj d
+∼
+N ( mj,  mj), d (19)
+ mj = hmi✓ij,
+ mj = mi↵ij✓2 h2 ij. i=1
+X i=1
+X
+The sampling process is similar to that of [22, 31, 26]. This can be easily extended to convolutional layers with the or-dering applied to channels (Appx. 8.1).
+The pseudocode for training the proposed network is shown in Algo. 1. For testing, only line 2 - line 7 execute.
+Algorithm 1: Pseudocode for training BN3. ij , ↵(l)
+H(0) = Xbatch, total KL ¯KL = 0.
+Input: Parameters {✓(l) ij ,  (l) j }(l) ij , data {X, Y}, layer input 1: while the network is not converged do 2: 3: for l = 1 : L do mj ]mj with ↵(l)
+Sample b(l) = [b(l) (41) for convolution layers.
+β(l) (z) and F(l) = [f (l)
+Sample z(l) ⇠ q
+Compute KL using (18), ¯KL   ¯KL + KL.
+H(l+1) = F(l). ij , and (19) for dense layers or mj ]mj = b(l) mj z(l) j . end for
+Compute loss as LD(Ybatch, F(l)), L = LD   ¯KL.
+Compute ∂L
+∂α , update the network.
+∂β , ∂L
+∂θ , ∂L 4: 5: 6: 7: 8: 9: 10: end while 4.

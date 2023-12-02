@@ -1,0 +1,40 @@
+Abstract
+We consider an online prediction problem in the context of network caching.
+Assume that multiple users are connected to several caches via a bipartite network.
+At any time slot, each user may request an arbitrary ﬁle chosen from a large catalog.
+A user’s request at a slot is met if the requested ﬁle is cached in at least one of the caches connected to the user. Our objective is to predict, prefetch, and optimally distribute the ﬁles on the caches at each slot to maximize the total number of cache hits. The problem is non-trivial due to the non-convex and non-smooth nature of the objective function. In this paper, we propose LeadCache - an efﬁcient online caching policy based on the Follow-the-Perturbed-Leader paradigm. We show that
+LeadCache is regret-optimal up to a factor of ˜O(n3/8), where n is the number of users. We design two efﬁcient implementations of the LeadCache policy, one based on Pipage rounding and the other based on Madow’s sampling, each of which makes precisely one call to an LP-solver per iteration. Furthermore, with a
+Strong-Law-type assumption, we show that the total number of ﬁle fetches under
+LeadCache remains almost surely ﬁnite over an inﬁnite horizon. Finally, we derive an approximately tight regret lower bound using results from graph coloring. We conclude that the learning-based LeadCache policy decisively outperforms the state-of-the-art caching policies both theoretically and empirically. 1
+
+Introduction
+We consider an online structured learning problem, called Bipartite Caching, that lies at the core of many large-scale internet services, including Content Distribution Networks (CDN) and Cloud
+Computing. Formally, a set I of n users is connected to a set J of m caches via a bipartite network
+G(I ⊍ J , E). Each cache is connected to at most d users, and each user is connected to at most ∆ caches (see Figure 1 (b)). There is a catalog consisting of N unique ﬁles, and each of the m caches can host at most C ﬁles at a time (in practice, C ≪ N ). The system evolves in discrete time slots.
+Each of the n users may request any ﬁle from the catalog at each time slot. The ﬁle requests could be dictated by an adversary. Given the storage capacity constraints, an online caching policy decides the ﬁles to be cached on different caches at each slot before the requests for that slot arrive. The objective is to maximize the total number of hits by the unknown incoming requests by coordinating the caching decisions among multiple caches in an online fashion. The Bipartite Caching problem is a strict generalization of the online k-sets problem that predicts a set of k items at each round so that the predicted set includes the item chosen by the adversary [Koolen et al., 2010, Cohen and
+Hazan, 2015]. However, unlike the k-sets problem, which predicts a single subset at a time, in this problem, we are interested in sequentially predicting multiple subsets, each corresponding to one of the caches. The interaction among the caches through the non-linear reward function makes this problem challenging.
+∗Work done at the Indian Institute of Technology Madras as a part of the ﬁrst author’s Master’s thesis. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Remote server
+Cache
+User
+Router n users max-degree
+= ∆ max-degree = d m caches (b) (a)
+Figure 1: Reduction of the Network Caching problem (a) to the Bipartite Caching problem (b). In this schematic, we assumed that a cache, located within two hops, is reachable to a user.
+The Bipartite Caching problem is a simpliﬁed abstraction of the more general Network Caching problem central to the commercial CDNs, such as Akamai [Nygren et al., 2010], Amazon Web
+Services (AWS), and Microsoft Azure [Paschos et al., 2020]. In the Network Caching problem, one is given an arbitrary graph G(V, E), a set of users I ⊆ V , and a set of caches J ⊆ V . A user can retrieve a ﬁle from a cache only if the cache hosts the requested ﬁle. If the ith user retrieves the requested ﬁle from the jth cache, the user receives a reward of rij ≥ 0 for that slot. If the requested
+ﬁle is not hosted in any of the caches reachable to the user, the user receives zero rewards for that slot.
+The goal of a network caching policy is to dynamically place ﬁles on the caches so that cumulative reward obtained by all users is maximized. The Network Caching problem reduces to the Bipartite
+Caching problem when the rewards are restricted to the set {0, 1}. It will be clear from the sequel that the algorithms presented in this paper can be extended to the general Network Caching problem as well. 1.1 Problem Formulation tf = 1 if the ith user requests ﬁle f ∈ [N ] at time slot t, or xi
+Denote the ﬁle requested by the ith user by the one-hot encoded N -dimensional vector xi t. In other words, xi tf = 0 otherwise. Since a user may request at most one ﬁle per time slot, we have: ∑N tf ≤ 1, ∀i ∈ I, ∀t. An online caching policy prefetches ﬁles on the caches at every time slot based on past requests. Unlike classical caching policies, such as LRU, LFU, FIFO, Marker, that fetch a ﬁle immediately upon a cache-miss, we do not enforce this constraint in the problem statement. The set of ﬁles placed on the jth cache at time t is represented by the N -dimensional incidence vector yj t ∈ {0, 1}N . In other words, yj tf = 1 if the jth cache hosts ﬁle f ∈ [N ] at time t, or yj tf = 0 otherwise. Due to cache capacity constraints, the following inequality must be satisﬁed at each time slot t: ∑N f =1 xi tf ≤ C, ∀j ∈ J . f =1 yj
+The set of all admissible caching conﬁgurations, denoted by Y ⊆ {0, 1}N m, is dictated by the cache capacity constraints. In principle, the caching policy is allowed to replace all elements of the caches at every slot, incurring a potentially huge downloading cost over an interval. However, in Section 4, we show that the total number of ﬁles fetched to the caches under the proposed LeadCache policy remains almost surely ﬁnite under very mild assumptions on the ﬁle request process.
+The ith user receives a cache hit at time slot t if and only if any of the caches connected to the ith user hosts the ﬁle requested by the user at slot t. In the case of a cache hit, the user obtains a unit reward. On the other hand, in the case of a cache miss, the user receives zero rewards for that slot.
+Hence, for a given aggregate request vector from all users xt = (xi t, i ∈ I) and the aggregate cache conﬁguration vector of all caches yt = (yj t , j ∈ J ), the total reward q(xt, yt) obtained by the users at time t may be expressed as follows: q(xt, yt) ≡ ∑ i∈I xi t ⋅ min {1N ×1, ( ∑ yj t )}, j∈∂+(i) (1) where a ⋅ b denotes the inner-product of the vectors a and b, 1N ×1 denotes the N -dimensional all-one column vector, the set ∂+(i) denotes the set of all caches connected to the ith user, and the “min" operator is applied component wise. The total reward Q(T ) accrued in a time-horizon of length T 2
+is obtained by summing the slot-wise rewards, i.e., Q(T ) = ∑T t=1 q(xt, yt). Following the standard practice in the online learning literature, we measure the performance of any online policy π using the notion of (static) regret Rπ(T ), deﬁned as the maximum difference in the cumulative rewards obtained by the optimal ﬁxed caching-conﬁguration in hindsight and that of the online policy π, i.e.,
+Rπ(T ) (def.)
+= ( sup
+{xt}T t=1
+T
+∑ t=1 q(xt, y∗) −
+T
+∑ t=1 q(xt, yπ t )), (2) where y∗ is the best static cache-conﬁguration in hindsight for the ﬁle request sequence {xt}T t=1, i.e., y∗ = arg maxy∈Y ∑T t=1 q(xt, y). We assume that the ﬁle request sequence is generated by an oblivious adversary, i.e., the entire request sequence {xt}t≥1 is ﬁxed a priori. Note that the problem is non-convex, as we seek binary cache allocations. With an eye towards efﬁcient implementation, later we will also consider the problem of designing efﬁcient policies that guarantee a sub-linear
+α-regret for a suitable value of α < 1 [Garber, 2021, Kakade et al., 2009, Fujita et al., 2013]. 2

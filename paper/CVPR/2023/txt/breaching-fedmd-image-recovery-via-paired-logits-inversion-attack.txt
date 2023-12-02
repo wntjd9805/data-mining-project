@@ -1,0 +1,203 @@
+Abstract
+Federated Learning with Model Distillation (FedMD) is a nascent collaborative learning paradigm, where only output logits of public datasets are transmitted as distilled knowledge, instead of passing on private model parameters that are susceptible to gradient inversion attacks, a known privacy risk in federated learning. In this paper, we found that even though sharing output logits of public datasets is safer than directly sharing gradients, there still exists a sub-stantial risk of data exposure caused by carefully designed malicious attacks. Our study shows that a malicious server can inject a PLI (Paired-Logits Inversion) attack against
+FedMD and its variants by training an inversion neural net-work that exploits the confidence gap between the server and client models. Experiments on multiple facial recogni-tion datasets validate that under FedMD-like schemes, by using paired server-client logits of public datasets only, the malicious server is able to reconstruct private images on all tested benchmarks with a high success rate. 1
+
+Introduction
+Federated Learning (FL) [28] is a distributed learning paradigm, where each party sends the gradients or parame-ters of its locally trained model to a centralized server that learns a global model with the aggregated gradients/param-eters. While this process allows clients to hide their pri-vate datasets, a malicious server can still manage to recon-struct private data (only visible to individual client) from the shared gradients/parameter, exposing serious privacy risks [30, 43, 49].
+One effective solution against such attacks is Federated
+Learning with Model Distillation (FedMD) [21], where each party uses both its private data and a public dataset for local training and sends its predicted logits on the public
+*The University of Tokyo takahashi-hideaki567@g.ecc.u-tokyo.ac.jp
+†Institute for AI jjliu@air.tsinghua.edu.cn
+Industry Research,
+Tsinghua University,
+‡Corresponding Author,
+Tsinghua University, liuy03@air.tsinghua.edu.cn
+Institute
+Shanghai Artificial for AI
+Industry Research,
+Intelligence Laboratory, dataset (termed public knowledge) to the server, who then performs aggregation and sends the aggregated logits back to each party for next iteration. Therefore, in FedMD, the server can only access the predicted logits on public dataset, thus preventing leakage from gradients or parameters and retaining data and model heterogeneity with low commu-nication cost [26]. Prior work [4, 14, 18, 26, 29] suggests that FedMD is a viable defense to the original FL frame-work, and many studies [4, 6, 14, 21, 24] consider FedMD as a suitable solution to solving real-life problems. This has catalyzed a broad application of FedMD-like schemes [5,6] in industrial scenarios [16, 18, 25, 29, 37, 46, 47].
+Despite its popularity, few studies have investigated the safety of sharing public knowledge in FedMD. Contrary to the common belief that FedMD is reliably safe, we found that it is actually vulnerable to serious privacy threats, where an adversary can reconstruct a party’s private data via shared public knowledge only. Such a reconstruction attack is nontrivial, since to guarantee that the adversary recovers its private data strictly from public knowledge only, the attack needs to follow two inherent principles:
+Knowledge-decoupling and Gradient-free. ‘Gradient-free’ means that the adversary can recover private data with-out access to gradients.
+‘Knowledge-decoupling’ means that the attack ‘decouples’ private information from learned knowledge on public data only, and directly recovers private data. However, existing inversion attacks [11, 42, 49] fail to meet the ‘knowledge-decoupling’ requirement as they do not consider the case where the target model is trained on both private and public datasets. Recent TBI [42] proposed a gradient-free method with inversion network, but still re-lied on availability of private data (as shown in Tab. 1).
+In this paper, we propose a novel Paired-Logits Inver-sion (PLI) attack that is both gradient-free and fully decou-ples private data from public knowledge. We observe that a local model trained on private data will produce more con-fident predictions than a server model that has not seen the private data, thus creating a ”confidence gap” between a client’s logits and the server’s logits. Motivated by this, we design a logit-based inversion neural network that ex-ploits this confidence gap between the predicted logits from an auxiliary server model and those from the client model (paired-logits). Specifically, we first train an inversion neu-ral network model based on public dataset. The input of the
+inversion network is the predicted logits of server-side and client-side models on the public data. The output is the orig-inal public data (e.g., raw image pixels in an image classifi-cation task). Then, through confidence gap optimization via paired-logits, we can learn an estimation of server and client logits for the target private data. To ensure the image qual-ity of reconstructed data, we also propose a prior estimation algorithm to regulate the inversion network. Lastly, we feed those estimated logits to the trained inversion model to gen-erate original private data. To the best of our knowledge, this is the first study to investigate the privacy weakness in FedMD-like schemes and to successfully recover private images from shared public knowledge with high accuracy.
+We evaluate the proposed PLI attack on facial recogni-tion task, where privacy risks are imperative. Extensive experiments show that despite the fact that logit inversion attacks are more difficult to accomplish than gradient in-version attacks (logits inherently contain less information than gradients), PLI attack successfully recovers original images in the private datasets across all tested benchmarks.
+Our contributions are three-fold: 1) we reveal a previously unknown privacy vulnerability of FedMD; 2) we design a novel paired-logits inversion attack that reconstructs private data using only the output logits of public dataset; 3) we provide a thorough evaluation with quantitative and qual-itative analysis to demonstrate successful PLI attacks to
+FedMD and its variants.
+Table 1. Comparison between PLI attack and existing inversion attacks. GF: Gradient-free. KD: Knowledge-decoupling.
+Method
+MI-FACE [11]
+TBI [42]
+DLG [49], GS [12] iDLG [45], CPL [40] mGAN-AI [39],
+Secret Revealer [44],
+GAN Attack [13]
+Leak logit/gradient
+GF KD
+✗
+✗ logit gradient parameter
+✓
+✗
+✗
+✓
+✗
+✗
+✗
+✓
+PLI (Ours) logit tion, we first provide a brief overview of FedMD framework with notations. Then, we give a formal definition of image classification task under the federated learning setting. i , yk i , yp i )}Nk i )}Np
+FedMD [21] is a federated learning setting where
+:= each of K clients has a small private dataset Dk
+{(xk i=1, which is used to collaboratively train a clas-sification model of J classes. There is also a public dataset
+Dp := {(xp i=1 shared by all parties. Each client k trains a local model fk with parameters Wk on either Dk, i }Np
+Dp or both, and sends its predicted logits lk := {lk i=1 on Dp to the server, where lk i ). The server aggregates the logits received from all clients to form con-sensus logits lp := {lp i=1. The consensus logits are then sent back to the clients for further local training (See the complete algorithm in Appendix B). i = fk(Wk; xp i }Np
+Several schemes follow FedMD with slight variations.
+For example, FedGEMS [6] proposes a larger server model f0 with parameters w0 to further train on the consensus logits and transfer knowledge back to clients. DS-FL [15] uses unlabeled public dataset and entropy reduction aggre-gation (see Appendix B for details). These frameworks only use public logits to communicate and transfer knowledge, which is the targeted setting of our attack. k=1{yk
+Image Classification task can be defined as follows. Let i , yk (xk i ) denote image pixels and class label ID, respec-tively, and L denote the set of target labels (cid:83)K i }Nk i=1
+.We aim to use public logits lk obtained for Dp to recon-struct private class representation xj for any target label j ∈ L. We further assume that Dp is made up of two disjoint subsets D0 := {(x0 i , y0 i )}, where D0 consists of public data of non-target labels, while
+Da contains images from a different domain for all tar-get and non-target labels. For example, in face recognition tasks, the feature space of Da might include an individual’s insensitive images, such as masked or blurred faces (see
+Fig. 1). We also suppose the server is honest-but-curious, meaning it cannot observe or manipulate gradients, param-eters, or architectures of local models. i )} and Da := {(xa i , ya 2 Problem Definition
+In this study, we investigate the vulnerability of FedMD-like schemes and design successful attacks that can breach
+FedMD to recover private confidential data. As a case study, we choose image classification task, specifically face recog-nition, as our focus scenario. This is because in real applica-tions (e.g., financial services, social networks), the leakage of personal images poses severe privacy risks. In this sec-Figure 1. Examples from three datasets containing private and public data. Public dataset consists of two subsets: Dp =
+D0 ∪ Da. D0 and Dk consist of images of non-target and target labels(Unmasked (LFW), Adult (LAG) and Clean (FaceScrub)), while Da contains images from a different domain (Masked (LFW), Young (LAG), Blurred (FaceScrub)).
+3 Paired Logits Inversion Attack
+In this section, we first describe how to train the inversion neural network for private data recovery (Sec. 3.1), then ex-plain how to estimate private logits by optimizing the con-fidence gap between the logits predictions of server and clients (Sec. 3.2). To prevent too much deviation from real data, we also introduce a prior estimation to regulate the in-version network training (Sec. 3.3). Lastly, we will explain how to recover private data using the trained inversion net-work, the estimated logits and the learned prior (Sec. 3.4). 3.1
+Inversion Neural Network
+Logit-based inversion is a model inversion attack that re-covers the representations of original training data by max-imizing the output logits w.r.t. the targeted label class of the trained model. This inversion typically requires access to model parameters, which is not accessible in FedMD. In order to perform a gradient-free inversion attack, [42] pro-poses a training-based inversion method (TBI) that learns a separate inversion model with an auxiliary dataset, by taking in output logits and returning the original training data. Inspired by this, we insert an inversion attack on the server side of FedMD. However, we show that logit-based inversion is more challenging than gradient-based inversion since logits inherently contain less information about the original data (See Appendix. E). To tackle the challenge, we train a server-side model f0 on the public dataset with parameters W0. The server-side logits are then updated as : i = f0(W0; x0 l0 i ) (1)
+Next, we train an inversion model using client-server paired logits, lk and l0 on the pubic data subset D0 only, denoted as Gθ: min
+θ (cid:88) i
+||Gθ(p0 i,τ , pk i,τ ) − x0 i ||2 (2) i,τ = softmax(l0 p0 i , τ ), i,τ = softmax(lk pk i , τ ) where softmax(, τ ) is the softmax function with tempera-ture τ . Note the distribution gap between l0 and lk is the key driver for successfully designing such a paired-logits inversion attack, as will be demonstrated in Sec 3.2.
+To enhance the quality of reconstruction, we leverage the auxiliary domain features Da to obtain a prior estimation for each data sample ¯xi via a translation algorithm (detailed in Sec. 3.3). The reconstruction objective is therefore sum-marized as: (cid:88) i,τ , pk i,τ ) − x0 i ||2 + γ||Gθ(p0 i,τ , pk i,τ ) − ¯xi||2
+||Gθ(p0 min
+θ i (3)
+Figure 2. Overview of PLI. After receiving the output logits lk on the public data Dp from k-th client, the server applies softmax to the logits corresponding D0 of both client and server models and forwards them to the inversion model Gk
+θ . The inversion model re-constructs the original input. We first optimize the inversion model with Eq. 3, while utilizing the prior data synthesized from Da by transformation model Aϕ. Then, the server recovers the private date of target labels with optimal logits and trains the inversion model with Eq. 10. The final reconstructed class representation will be picked from the set of reconstructed data with Eq. 11.
+The second term enforces the recovered data to be close to the prior estimation.
+Since the server already has access to the pubic dataset and its corresponding output logits, it can train Gk
+θ to mini-mize Eq. 3 via backpropagation (line 6 in Algo 1). The ar-chitecture of the inversion model typically consists of trans-posed convolutional layers [8, 42]. Notice that the inversion model is trained with public data only and did not observe any private data at training time. Once the inversion model is trained, it is able to reconstruct data in the public dataset.
+However, the model cannot be used directly to recon-struct private data with sensitive labels yet, since it has never seen any true logits of the private data, the distribution of which is different from that of public data. Most existing inversion attacks [11–13, 39, 40, 44, 45, 49] require either gradients or parameters, thus not gradient-free. To recon-struct private data without gradients, we propose a new path for estimating the input logits of private data, by exploiting the confidence gap between server and clients, as below. 3.2 Confidence Gap Optimization
+We observe that the server and client models exhibit a con-fidence gap on their predictions of the public data, mani-ger when the client and server are more confident that the recovered data belongs to class j, while the third term pe-nalizes the strong confidence of server’s prediction, which plays an important role in differentiating public and private feature spaces. With Eq. 4, finding the optimal input logits for our inversion attack against FedMD is equivalent to the following maximization problem: arg max j,τ ,p0 pk j,τ
+Q(xk j ) (5)
+Recall that the private and public data domains for the tar-get label j are different. Since the server-side model is not directly trained on the private dataset, we can assume that f0 returns less confident outputs on private data compared to fk, in this sense Q reinforces the knowledge-decoupling principle since Q increases when the reconstructed data of j are similar to the private data, and decreases when too close to the public data. For instance, Q takes a lower value when the reconstructed data is masked, even if its label seems j.
+Analytical Solution We can analytically solve Eq. 5 w.r.t. pk j,τ and p0 j,τ , and the optimal values for target label j that maximizes Q, as follows: (cid:40)
+ˆpk u,τ = 1 0 (u = j) (u ̸= j)
+,
+ˆp0 u,τ = (cid:40) e
+α√
+J−1+ α√ 1
+J−1+ α√ e e (u = j) (u ̸= j) (6)
+Detailed derivation can be found in Appendix A. Given an inversion model Gk
+θ that takes paired logits and returns the original input x, we have the following equation:
+Figure 3. Confidence gap between the server and the client under
+FedMD setting on public and private data. This figure represents the normalized histogram of entropy on public and local datasets and estimated distribution. Lower entropy means that the model is more confident. Client consistently has higher confidence on private dataset than server, indicating a significant confidence gap.
+Algorithm 1 PLI Attack
+Input: The number of communication T , clients K, the set of target labels L, the inversion model Gk
+θ , the transla-tion model Aϕ, the global model f0, softmax tempera-ture τ , and public dataset Dp.
+Output: Class representations in the private dataset of L
+▷ Eq. 9 1: Generate prior ¯xj for each j ∈ L with Aϕ. 2: for t = 1 ← T do 3: i } from k = 1...K
+Receive {lk for k = 1 ← K do
+Train Gk
+Train Gk 4: 5: 6:
+θ with Eq. 3 on D0.
+θ with Eq. 10 for each j ∈ L.
+Update global logits by aggregating {lk i }
+Train f0 and send the global logits to each client. 7: 8: 9: for j ∈ L do 10:
+Reconstruct {ˆxk
+ˆxj ← Pick the best from {ˆxk j ← Gk
+θ (ˆp0 j,τ , ˆpk j }. j,τ )}K k=1 11: 12: return {ˆxj}j∈L
+▷ Eq. 11 arg max xk j
+Q(xk j ) = Gk
+θ (ˆp0 j,τ , ˆpk j,τ ) (7) fested by their predicted logits (Fig. 3). Specifically, the client model is more confident on the private dataset, result-ing in a higher entropy of server logits. To exploit this, we propose a new metric for optimizing private logits, then an-alytically obtain the optimal solution, which is used as the input logits for the inversion model to generate private data.
+Specifically, we adopt the following metric to measure j for the quality of the reconstructed class representation xk arbitrary target label j owned by the k-th client:
+Q(xk j ) := pk j,τ + p0 j,τ + αH(p0 j,τ ) (4) j,τ and p0 j,τ denote the j-th elements of pk where pk j,τ and p0 j,τ respectively. H(·) is the entropy function, and α is a weighting factor. The first and second terms grow big-The empirical impact of feature space gap between public and private data is examined in Appendix E. 3.3 Prior Data Estimation
+To prevent the reconstructed image from being unrealistic, we design a prior estimation component to regulate the in-version network. A naive approach is using the average of
+D0 (public data with the same domain) as the prior data for any target label i:
+¯xi = 1
+|D0| (cid:88) x0 i i∈D0 (8)
+Here the server uses the same prior for all the target labels.
+When the public dataset is labeled, such as for FedMD and FedGEMS, the adversary can generate tuned prior for each label by converting Da with the state-of-the-art
+translation method such as autoencoder [7, 23, 34] and
+GAN [17, 19, 48]. Specifically, the server can estimate the prior data ¯xi for the target label i with translation model Aϕ as follows:
+¯xj = 1
+|Da| (cid:88) i∈Da
+Aϕ(xa i ) (9) 3.4 Reconstruction of Private Data
+Once the inversion model is trained with Eq. 3, the attacker uses the optimal logits (obtained from Sec. 3.2) to estimate the private data with Gθ. To make the final prediction more realistic, the attacker further fine-tunes the inversion model by restricting the distance between the reconstructed image and their prior data (obtained from Sec. 3.3) in the same way as in Eq. 3: min
+θ (cid:88) j∈L
+γ||Gk
+θ (ˆp0 j,τ , ˆpk j,τ ) − ¯xj||2 (10)
+Finally, given a reconstructed image from each client, the j }K attacker needs to determine which of the k images {ˆxk k=1 from k clients is the best estimation for target label j. We design the attacker to pick the most distinct and cleanest im-age as the best-reconstructed data based on: 1) similarity to groundtruth image via SSIM metric [38]; 2) data readabil-ity measured by Total Variation (TV) [35], which is com-monly used as regularizer [12,43]. Specifically, the attacker chooses reconstructed private data ˆxj by: arg min
+ˆxk j
+K (cid:88) k=1,k̸=k′
+SSIM(ˆxk j , ˆxk′ j ) + βTV(ˆxk j ) (11)
+θ (ˆp0 j,τ , ˆpk j = Gk where ˆxk j,τ ). Lower SSIM indicates that the image is not similar to any other reconstructed privat pic-tures, and smaller TV means the image has better visual quality.
+Figure 4. SSIM distribution (left) and Reconstructed Images (right) for LAG.
+The reasoning for choosing Eq. 11 as the criterion is demonstrated in Fig. 4, where the left figure shows the dis-tribution of the first term of Eq. 12 for clients who own the private data for the target label (blue) and clients who don’t (red). Fig. 4 also provides reconstructed examples from all clients, where k = 3 is the ground-truth client, whose re-covered image has the (almost) lowest SSIM. This figure also demonstrates the importance of β (the trade-off weight in Eq. 11, where a highly-noisy image (k=8) results in an even lower SSIM but is penalized by high TV score via a balanced weight (β ≥ 0.1 in this case).
+The complete algorithm is shown in Algo 1. 4 Experiments
+We evaluate our proposed attack on face recognition task, which inherits high privacy risks in practice. We at-FedMD [21], DS-FL [15], and tack three schemes:
+FedGEMS [6] (see pseudo code in Appendix B). First, we describe detailed comparison between our approach and the baseline method TBI on various attacks. Then, we provide a thorough analysis on the impact of the learned prior, as well as the trade-off between image quality and attack accuracy in different attacks. Ablation studies further provide thor-ough analysis and insights on the effect of each PLI compo-nent and its comparison with gradient-based attack. 4.1 Experimental Setup
+Datasets and Metrics Three standard datasets are used in our experiments: Large-Age-Gap (LAG) [3], Masked LFW
+[33], and FaceScrub [31]. LAG [3] contains both youth and adult images of celebrities. Masked LFW [33] is created by automatically adding masks to the faces of images in the
+LFW dataset [20]. For LAG and LFW, we treat adult and non-masked images as sensitive features, and young and masked images as insensitive features. We use the images of 1000 subjects who have the highest numbers of photos, so the number of classes is 1000. Among these, we randomly pick 200 classes as private labels, and treat the remaining classes as public labels. For FaceScrub [31], we randomly select 330 persons and treat all their pictures as the public dataset. Then, we blur half of the images of the remain-ing 200 individuals with box kernel and merge them to the public dataset as auxiliary domain Da. The private datasets consist of the remaining clean photos. All pictures of each dataset are resized to 64x64 and normalized to [-1, 1]. is
+An attack successful when: considered
+SSIM(ˆxj, xj) > max(SSIM(ˆxj, x−j), SSIM(ˆxj, xp)). xj: averaged private image of label j. x−j: averaged private image of each label except j. xp: averaged public image of any label. Assume M is the number of target labels with successful attack, and N is the number of all target labels.
+AttackAccuracy is defined by M/N .
+Attack Targets We target three types of schemes:
+FedMD [21], DS-FL [15], and FedGEMS [6]. For sim-plicity, the server and clients use the same neural network with a convolutional layer, a max-pooling layer, and a linear layer with ReLU (Code. 1 in Appendix B). DS-FL assumes that the public dataset is unlabeled, so the total number of classes in DS-FL equals the number of classes in the lo-cal dataset, 200. Classification loss is cross entropy for all schemes, and distillation loss is L1-loss for FedMD, KL di-vergence for FedGEMS, and cross-entropy for DS-FL (as in original papers). See Appendix C for the detailed hyper parameters.
+For the translation model Aϕ for learned prior, the attacker trains CycleGAN [48] for LAG and LFW, and
+DeblurGAN-v2 [19] for FaceScrub in advance on the pub-lic dataset when it is labeled (Eq. 9). CycleGan is used for facial aging and mask removing in some work [10, 32, 36], and DeblurGAN-v2 is one of the state-of-the-art methods to deblur images. For DS-FL, the server uses the average of public sensitive features as the prior (Eq. 8). For the inver-sion model, we adopt the same architecture used in TBI (see
+Code. 2 in Appendix B). Detailed hyper-parameters can be found in Appendix C. 4.2 Comparison with Baseline
+Tab. 2 reports the attack accuracy of PLI in comparison with TBI. We use τ =3.0 and γ=0.03 here as the empiri-cally optimal setting across schemes and datasets. Results show that PLI outperforms TBI in all settings. Fig. 5 shows some reconstructed images from FedMD. The malicious party tries to recover private images. As the communica-tion goes (higher t), the quality of reconstructed images im-proves (higher similarity to the grounthuth of private im-ages). These images successfully capture the distinct sen-sitive features of the original private data, demonstrating that public logits can leak private information. On the other hand, the reconstructed images from TBI tend to be closer to the insensitive public features. More recovered examples from FedGEMS and DS-FL can be found in Appendix D.
+Figure 5. Examples of reconstructed images during training by our method where t represents the number of communications (FS:
+FaceScrub). ”TBI” represents the reconstructed results from TBI.
+Although TBI generates insensitive images, our PLI successfully reconstructs sensitive images as the learning progresses.
+In general, attack accuracy on FedGEMS is lower than that on the other two schemes. We hypothesize that this is because FedGEMS trains iteratively on both private and hard-labeled public data, compared to FedMD that trains each model on labeled public dataset only. DS-FL does not even use labels on public data. Thus, local models in
+FedGEMS are more affected by the public dataset compared to FedMD and DS-FL, and more difficult to accurately re-cover private data. 4.3 Analysis on Impact of Prior
+We also discuss how the quality of prior data is related to optimal γ, the tunable weight for prior.
+Figure 6. Examples of Prior for the labeld public dataset. While we can obtain relatively good prior images for LFW, the prior pic-tures for LAG fail to estimate the change of the shape of faces. For
+FaceScrub, the prior images are still not sharp enough.
+Fig. 6 shows some qualitative examples of prior synthe-sized from the generator Aϕ with the labeled public data.
+For LFW, CycleGAN successfully replaces the masked re-gion with unmasked mouth. However, some distinct fea-tures under the mask, such as beard or lip color, are still not recovered. For LAG, faces in prior data look older than the public images, but are still more similar to private ones.
+Specifically, CycleGAN renders public images in adult ap-pearances while keeping the original face outline.
+In ad-dition, the recovered image is often too young or too old compared to the private image, since the attacker does not know the true age of the target person. For FaceScrub,
+DeblurGAN-v2 can deblur public images to some extent, but estimated prior data is still closer to public images.
+Fig. 7 reports attack accuracy and SSIM value with var-ious weights of prior γ with fixed τ =3.0. Note that the attacker cannot access GAN-based prior for DSFL, thus uses the average of all sensitive public features as prior (Eq. 8). While PLI can reconstruct private class represen-tations without prior(γ=0.0), using prior as the regulariza-tion improves the attack performance in some cases. On the one hand, when the prior is relatively reliable (such as for
+LFW), higher γ increases both attack accuracy and SSIM.
+On the other hand, for LAG and FaceScrub, lower γ in-creases attack accuracy but damages quality. This effect of
+Dataset
+Scheme
+FaceScrub
+LAG
+LFW
+DS-FL FedGEMS
+FedMD DS-FL FedGEMS
+FedMD DS-FL FedGEMS
+FedMD
+TBI (K = 1)
+PLI (K = 1)
+TBI (K = 10)
+PLI (K = 10) 87.0 91.5 2.0 62.5 1.0 29.0 0.5 20.0 92.5 94.0 7.0 74.5 70.0 71.0 6.5 15.0 0.5 17.0 0.0 26.5 16.5 60.0 0.0 63.5 73.5 99.5 17.5 15.5 2.5 91.0 9.5 71.5 2.0 99.5 10.0 79.0
+Table 2. Results on attack accuracy (%).
+γ is reasonable as increasing γ makes the reconstructed im-ages closer to prior images, which generally decreases the noise but also eliminates some distinctive features (such as beards) that the prior image does not have (see Fig. 8).
+Figure 9. Trade-off between quality and accuracy with various τ .
+Dot size is proportional to the magnitude of τ . Larger τ leads to high accuracy but ruins quality for FedMD and FedGEMS, where the local models can use the labeled public dataset. The appropri-ate τ is lower for DSFL, where the public data is unlabeled and the predicted logits on the public data are more ambiguous.
+Figure 7. Trade-off between quality and accuracy with various γ.
+Dot size corresponds to the magnitude of γ. Larger γ leads to high quality but ruins attack accuracy for LAG and FaceScrub, where the prior images are not close enough to the ground-truth private images. For LFW, the prior sufficiently resemble the private im-ages, and increasing γ improves both accuracy and quality.
+Figure 8. Effect of γ in FedMD (FS: FaceScrub) with fixed τ .
+Higher γ makes the reconstructed images noiseless, but sometimes drops distinctive elements (e.g., beard in the first row). 4.4 Attack Accuracy vs. Image Quality
+Experiments show that temperature τ controls the trade-off between attack accuracy and image quality. Fig. 9 shows the attack performance on various temperature τ with fixed
+γ = 0.1 (see Appendix D for the detailed numerical val-ues). We observe that higher τ improves accuracy but dam-ages quality. The influence of τ is consistent with previous
+Figure 10. Effect of τ in FedMD with fixed γ (FS: FaceScrub).
+Higher τ preserves the characteristic features but damages read-ability (e.g., skin color in the second row). work [15], suggesting that a higher τ amplifies non-highest scores of predicted logits while losing class information.
+We also find that the best temperature for DS-FL is lower in some cases. It is natural because the predicted logit on public data is more vague when the trained model has not observed actual public labels. Fig. 10 shows some qualita-tive examples, and we can observe that increasing τ leads to reconstructed images being created by compositing mul-tiple classes, which preserves distinctive elements but re-duces the quality of image. The same pattern occurs with
+TBI (more results can be found in Appendix D).
+In summary, these experiments exhibit a trade-off be-tween accuracy and quality, as optimizing attack accuracy
+does not guarantee improved quality. By finding a sweet spot (via γ and τ ), we can empirically learn an optimal set-ting with high accuracy and acceptable quality. 4.5 Ablation Study pk j j + αH(p0)
++p0
+FaceScrub LAG LFW 71.5 76.5 57.0 65.5 55.5 70.0
+Table 3. Ablation studies on Q (FedMD with K=10) in terms of attack accuracy. PLI (second row) outperforms using only client-side logits pk j in terms of accuracy.
+Figure 11. Qualitative analysis: eliminating αH(p0) and p0 j from
+Q leads to reconstructed images with featureless faces or higher noise. (FS: FaceScrub)
+We further investigate the influence of each term of Q.
+Tab. 3 shows the results of ablation studies on FedMD of
+K = 10, τ = 3.0 and γ = 0, by gradually adding server and local logits of Eq. 4. Note that the second row is PLI, and the optimal logits for the first row is (ˆpk j ) = (1, −). The results show that it is effective to add both p0 j and αH(p0).
+This phenomenon validates the importance of taking into consideration the confidence gap between the server and client logits. The effects of public dataset size and mag-nitude of feature domain gap are reported in Appendix D.
+Appendix E and F also show that gradients lead to more severe privacy violations than public logits. j , ˆp0
+Limitations One limitation of our method is that it gen-erates representative data of each class, not pixel-wise ac-curate image within the private dataset. Since the attacker cannot obtain anything directly calculated from the private dataset, reconstructing the exact image is still challenging. 5

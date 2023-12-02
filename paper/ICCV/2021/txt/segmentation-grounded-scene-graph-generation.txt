@@ -1,0 +1,388 @@
+Abstract
+Scene graph generation has emerged as an important problem in computer vision. While scene graphs provide a grounded representation of objects, their locations and relations in an image, they do so only at the granularity of proposal bounding boxes. In this work, we propose the ﬁrst, to our knowledge, framework for pixel-level segmentation-grounded scene graph generation. Our framework is ag-nostic to the underlying scene graph generation method and address the lack of segmentation annotations in target scene graph datasets (e.g., Visual Genome [24]) through transfer and multi-task learning from, and with, an auxiliary dataset (e.g., MS COCO [29]). Speciﬁcally, each target object be-ing detected is endowed with a segmentation mask, which is expressed as a lingual-similarity weighted linear combi-nation over categories that have annotations present in an auxiliary dataset. These inferred masks, along with a Gaus-sian masking mechanism which grounds the relations at a pixel-level within the image, allow for improved relation prediction. The entire framework is end-to-end trainable and is learned in a multi-task manner. Code is available at github.com/ubc-vision/segmentation-sg. 1.
+
+Introduction
+Scene graph generation, has emerged as a dominant problem in computer vision literature over the last couple of years [36, 44, 50, 51, 53]. The task involves producing a graph-based grounded representation of an image, which characterizes objects and their relationships. A scene graph representation, ﬁrst introduced in [50], encodes a scene as a graph where nodes correspond to objects (encoding ob-ject instances with corresponding class labels and spatial lo-cations) and directed edges corresponding to relationships.
+The ultimate goal of scene graph generation is to produce such representation from a raw image [24] or video [18].
+Scene graph representations have proved to be important
+⇤Denotes equal contribution
+Lady
+Jacket wearing
+Plate
+Building holding behind in front of
+Bag
+Car has
+Window
+Lady wearing
+Jacket holding
+Building carrying behind
+Plate in front of
+Bag
+Car has
+Window
+Figure 1. Segmentation-grounded scene graph generation. The image on top is the output of an existing scene graph generation method [45]. The bottom image is the output of augmenting our approach to [45]. The effective grounding of objects to pixel-level regions within the image leads to better relation predictions. for a variety of higher level tasks (e.g., VQA[16, 45], image captioning [10, 52] and others). Most approaches to date have focused on appropriate modeling of context [51, 55], data imbalance in labels [30, 44] and, most recently, struc-tural dependencies among the output variables [42].
+One of the dominant limitations of all existing scene graph generation techniques, mentioned above, is the fact that both the nodes (objects) and edges (relations) are grounded to (rectangular) bounding boxes produced by the object proposal mechanism directly (e.g., pre-trained as part of R-CNN) or by taking a union of bounding boxes of ob-jects involved in a relation. A more granular and accu-rate pixel-level grounding would naturally be more valu-able. This has been shown to be the case in other visual and visual-lingual tasks (e.g., referring expression comprehen-sion [15, 31], video segmentation with referring expression
+[22] and instance segmentation with Mask-RCNN [11]).
+In addition, grounding to segmentations could improve the overall performance of the scene graph generation by focus-ing node and edge features on irregular regions correspond-ing to objects or interface between objects, constituting an interaction. The goal of our approach is to do just that.
+However, pixel-level grounding comes with a number of unique challenges. The foremost of which is that traditional scene graph datasets, such as Visual Genome [24], do not come with instance-level segmentation annotations. This makes it impossible to employ a traditional fully supervised approach. Further, even if we were to collect segmentation annotations, doing so for a large set of object types typ-ically involved in Scene Graph predictions would be pro-hibitively expensive1. To address this, we propose a trans-fer and multi-task learning formulation that uses an exter-nal dataset (e.g., MS COCO [29]) to provide segmentation annotations for some categories; while leveraging standard scene graph dataset (e.g., Visual Genome [24]) to provide graph and bounding box annotations for the target task.
+On a technical level, for a target object that lacks seg-mentation annotations, its mask is expressed as a weighted linear combination over categories for which annotations are present in an external dataset. This transfer is realised by leveraging the linguistic similarities between the target object label and these supervised categories, thus enabling grounding objects to segmentation masks without introduc-ing any annotation cost. For a pair of objects that share a re-lation, our approach additionally employs a Gaussian mask-ing mechanism to assign this relation to a pixel-level region within the image. Through joint optimization over the tasks of scene graph and segmentation generation, our approach achieves simultaneous improvements over both tasks. Our proposed method is end-to-end trainable, and can be easily integrated into any existing scene graph generation method (e.g., [45, 55]).
+Contributions: Our foremost contribution is that we pro-pose the ﬁrst, to our knowledge, framework for pixel-level segmentation-grounded scene graph generation/prediction, which can be integrated with any existing scene graph gen-eration method. For objects, these groundings are realised via segmentation masks, which are computed through a lingual-similarity based zero-shot transfer mechanism over categories in an auxiliary dataset. To effectively ground relations at a pixel level, we additionally propose a novel
+Gaussian masking mechanism over segmentation masks.
+Finally, we demonstrate the ﬂexibility and efﬁcacy of our approach by augmenting it to existing scene graph archi-tectures, and evaluating performance on the Visual Genome
+[24] benchmark dataset, where we consistently outperform baselines by up to 12% on relation prediction. 2. Approach
+We propose a novel multi-task learning framework that leverages instance-level segmentation annotations, obtained 1As per [1], labelling one image in VOC [7] takes 239.7 seconds. via a zero-shot transfer mechanism, to effectively generate pixel-level groundings for the objects within a scene graph.
+Our approach, highlighted in Figure 2, builds on existing scene graph generation methods, but is agnostic to the un-derlying architecture and can be easily integrated with ex-isting state-of-the-art approaches. 2.1. Notation g = i , Gg (xg i ) denote the dataset containing
+}
+{ i for each image xg graph-level annotations Gg i . We repre-sent the scene graph annotation Gg i as a tuple of object and relations, Gg i = (Og dg represents object labels and Rg d0g represents relationship labels; ni is the number of objects in an image xg i ; dg and d0g are the total number of possible object and relation labels, respectively, in the dataset. i ), where Og ni⇥
+Rni⇥ i , Rg i 2
+Rni⇥ i 2
+Let
+D
+In addition, we assume availability of the dataset
+, where each image xm i , Mm i )
+} (xm
+{ instance-level segmentation annotations Mm are the total number of possible object labels in m = i has corresponding i . Finally, dm m.
+D
+D
+As is the case with existing scene graph datasets like Vi-g does not contain any instance-level sual Genome [24], m can be any dataset (like MS segmentation masks. Also,
+D
+COCO [29]). Note, that in general, the images in the two m, are disjoint and the object classes in datasets, the two datasets may have minimal overlap (e.g., MS COCO provides segmentations for 80, while Visual Genome pro-vides object bounding boxes for 150 object categories2). g and
+D
+D
+D
+For brevity, we drop subscript i for the rest of the paper. 2.2. Scene Graph Generation
+Given an image xg g, a typical scene graph model deﬁnes the distribution over the scene graph Gg as follows, 2D
+Pr (Gg
+| xg) = Pr (Bg xg)
+|
+·
+Pr (Og
+|
+Bg, xg)
+·
+Pr (Rg
+Og, Bg, xg) (1)
+|
+|
+D bg 1, . . . , bg n}
+{ xg) extracts a set of
+The bounding box network Pr (Bg boxes Bg = corresponding to regions of in-terest. This can be achieved using standard object detectors such as Faster R-CNN [39] or Detectron [46]. Speciﬁcally, g with the objective to these detectors are pretrained on generate accurate bounding boxes Bb and object probabili-ties Lg = for an input image xg. Note that this only requires access to the object (node) annotations in Gg.
+Bg, xg), for each bounding box bg j is computed as RoIAlign(xg, bg j ), which extracts features from the area within the image corresponding to the bound-ing box bg j . These features, alongside object label proba-bilities lg j , are fed into a context aggregation layer such as
+Bg, utilizes feature representation zg
+The object network Pr (Og lg 1, . . . , lg n}
+{ j , where zg j 2
+| 2Visual Genome has a 47% image overlap with MS-COCO. How-ever, they have differing object categories and annotations. We make no use of this implicit image overlap in our formulation.
+⇠
+OBJECT DETECTION
+SCENE GRAPH
+PREDICTION
+SEGEMENTATION
+REFINEMENT
+OBJECT FEATURES
+DETECTOR
+ZERO-SHOT
+SEGMENTATION
+RELATION FEATURES
+CONTEXT
+ENCODING
+,
+,
+,
+,
+,
+,
+SEGMENTATION
+LOSS 
+SCENE GRAPH
+LOSS
+SCENE GRAPH 
+PREDICTION
+Person
+On
+W e a r i n g
+Snow
+Helmet
+Figure 2. Model Architecture. For an image, the object detector provides a set of bounding boxes, and for each box, additionally generates instance-level segmentations via a zero-shot transfer mechanism. These inferred segmentation masks are incorporated into the nodes and edges of the underlying graph, before passing it into an existing scene graph prediction architecture like [55, 45]. The inferred segmentation masks are additionally reﬁned by leveraging the global context captured by the context aggregation step of the scene graph prediction method. The proposed method is end-to-end trainable, and can be augmented to any existing scene graph method.
+Bi-directional LSTM [55], Tree-LSTM [45], or Graph At-tention Network [51], to obtain reﬁned features zo,g
+. These reﬁned features are used to obtain the object labels Og for the nodes within the graph Gg. Similarly, for the rela-Og, Bg, xg), features corresponding to tion network Pr (Rg union of object bounding boxes are reﬁned using message passing layers and subsequently classiﬁed to produce pre-dictions for relations.
+| j
+Existing models ground the objects in the scene graph to rectangular regions in the image. While bounding boxes provides an approximate estimate of the object locations, having a more granular pixel-level grounding achievable through segmentation masks is much more desirable. A major challenge is the lack of segmentation annotation in scene graph datasets like Visual Genome [24]. Further-more, manually labelling segmentation masks for such large datasets is both time consuming and expensive. As a solu-tion, we derive segmentation masks via a zero-shot transfer mechanism from a segmentation head trained on an external m(e.g. MSCOCO [29]). This inferred segmenta-dataset tion mask is then used as additional input to the object and relation networks to generate better scene graphs. Our ap-proach factorizes the distribution over Gg as,
+D
+Pr (Gg
+| xg) = Pr (Bg xg)
+|
+·
+·
+Pr (Mg
+Pr (Rg
+Pr (Og xg)
+|
+Og, Bg, Mg, xg)
+·
+|
+Bg, Mg, xg)
+| (2) mg
+{ where Mg = 1, . . . , mg are the inferred segmentation n} masks corresponding to the bounding boxes Bg. Such a fac-torization enables grounding scene graphs to segmentation masks and affords easy integration to existing architectures. 2.3. Segmentation Mask Transfer
+For each image xg g, we derive segmentation masks
+Mg using annotations learned over classes in an external m. To facilitate this, like described in Section 2.2, dataset 2D
+D
+D
+D
+D
+D
+D we pretrain a standard object detector (like Faster R-CNN g. However, instead of
+[39]) on the scene graph dataset g, we additionally training the detector just on images in m. jointly learn a segmentation head fM on images in
+Note that when training the object detector jointly on im-m, the same backbone and proposal gen-ages in erators are used, thus reducing the memory overhead. g and g, let zg 2D j 2
+Rdm⇥
+For an image xg j be the feature representa-j = fM(zg tion for a bounding box bg mg
+Bg. Let, j ), mg m, dm represents the number of where j 2 m, and m is the spatial resolution of the mask. classes in
+D
+Per class segmentation masks mg m are then de-e mg j using a zero-shot transfer mechanism3. Let rived from dm be a matrix that captures linguistic similari-Rdg⇥
+S 2 m. For a pair of classes ties between classes in e
+[1, dm], the element Scg,cm is deﬁned as,
+[1, dg], cm 2 cg 2
+Rdg⇥ e m
+⇥ g and j 2
+D
+D m
+⇥
+Scg,cm = g>cg gcm (3) where gcg and gcm are 300-dimensional GloVe [37] vector embeddings for classes cg and cm respectively4. mg j is then j as follows, obtained as a linear combination over mg mg j = S> mg j e (4)
+Note that such a transfer doesn’t require any additional la-m. belling cost as we rely on a publicly available dataset e
+D 2.4. Grounding Nodes to Segmentation Masks
+As mentioned in Equation 2, we incorporate the in the object network inferred segmentation masks 3Note that dg >> dm in our case. 4For class names that contain multiple words, individual GloVe word embeddings are averaged.
+Bg, Mg, xg) to ground objects in
+Pr (Og regions within the image.
+| g to pixel-level
+D
+Speciﬁcally, for a particular image xg, the model xg) outputs a set of bounding boxes Bg. For each
+Pr (Bg
+| bounding box bg
+Bg, it additionally computes a feature representation zg
+Rdg+1.
+Following the procedure described in Section 2.3, per-class segmentation masks mg j are inferred for each bounding box j . We deﬁne a segmentation aware representation ˆzg bg j as, j 2 j and object label probabilities lg j 2
+ˆzg j = fN
+[zg j , mg j ] (5) where fN is a learned network and [., .] represents concate-  nation. Contrary to existing methods like [45, 55] that use the segmentation agnostic representation zg j and lg j as inputs to the object network Pr (Og 2.5. Grounding Edges to Segmentation Masks j , we feed ˆzg
+Bg, Mg, xg).
+ 
+|
+|
+) 2 bg j0
+To facilitate better relation prediction, we leverage the inferred segmentation masks in the relation network
+Pr (Rg
+Og, Bg, Mg, xg). Speciﬁcally, for a pair of objects, we utilize a Gaussian masking mechanism to identify rela-tion identifying pixel-level regions within an image. j , lg j0 j , bg j0 j , mg j0 j , mg j0
+Given a pair of bounding boxes (bg
+Bg that con-tain a possible edge and their corresponding object label probabilities (lg
+), their respective segmentation masks (mg
+) are computed via the procedure described in
+Section 2.3. We deﬁne zg as the segmentation agnos-j,j0 tic feature representation representing the union of boxes
+), which is computed as RoIAlign(xg, bg (bg j , bg
+)5. j0
+Contrary to existing works that rely on this coarse rect-angular union box, our approach additionally incorporates a intersection of the segmentation masks (mg
+) to pro-vide more granular information. To this end, we deﬁne the union segmentation mask mg j,j0 (Kj0 ~ mg
+= (Kj ~ mg j ) j0 where ~ is the convolution operation, and computes an element-wise product. Kj, Kj0 are  
+  sized Gaus-sian smoothing spatial convolutional ﬁlters parameterized by variances  2 y and correlation ⇢x,y. These parameters are obtained by learning a transformation over the object label probabilities lg j . Speciﬁcally,  2
+, is a learned network. Kj0 is computed analo-where f
+ 
+N gously using lg
+. The attended union segmentation mask j0 mg affords the computation of a segmentation aware rep-resentation ˆzg y,⇢ x,y = f as follows, x,  2 x,  2 mg j [ (6) as, lg j j,j0 j,j0
+ 
+ 
+⇥
+N
+ 
+) j,j0
+ˆzg j,j0
+= fE
+[zg j,j0 where fE is a learned network. ˆzg to the relation network Pr (Rg
+⇣ j,j0
+, mg j,j0
+] (7)
+⌘ is then used as an input
+Og, Bg, Mg, xg).
+| computes the convex hull of the union of the two boxes. 5bg j [ bg j0 2.6. Reﬁning Segmentation Masks
+As described previously, our proposed approach incor-porates segmentation masks to improve relation prediction.
+However, we posit that the tasks of segmentation and re-lation prediction are indelibly connected, wherein an im-provement in one leads to an improvement in the other. j 2
+To this end, for each object bg
+Bg, in addition to pre-dicting the object labels Og, we learn a segmentation reﬁne-ment head fM0 to reﬁne the inferred segmentation masks mg g does not con-tain any instance-level segmentation annotations, training fM0 in a traditionally supervised manner is challenging. j . However, as the scene graph dataset
+D
+D 2D
+To alleviate this issue, we again leverage the auxiliary m, which contains segmentation annotations. For dataset an image xm m we compute the bounding boxes Bm.
+Note that this does not require any additional training as the m as g and object detector is jointly trained using both
+Bm, described in Section 2.3. For a bounding box bm the corresponding per class masks are computed as, mm j = is the feature representation for bm fM j , and fM is the segmentation head deﬁned in Section 2.3.
+The reﬁned mask ˆmm j is then computed as,
+, where zm j
+D j 2 zm j
+D
+ 
+ 
+ˆmm j = mm j + fM0 zo,m j (8)
+ 
+  j
+| is where zo,m the representation computed by the context aggregation layer within the object network
+Pr (Om
+Bm, Mm, xm). Note that this network is identical to the one deﬁned in Equation 2. The segmentation reﬁne-ment head fM0 is a zero-initialized network that learns a residual update over the mask mm j . As ground-truth seg-mentation annotations are available for all objects Bm, fM0 is trained using a pixel-level cross entropy loss. fM0 is trained alongside the scene graph generation model, and the reﬁned masks are used during inference to improve relation prediction performance. Speciﬁcally, for a particular image xg g, we follow the model described in Equation 2 to generate predictions. However, instead of directly using the inferred masks obtained using the zero-shot formulation in Section 2.3, we additionally reﬁne it using fM0 . For a particular mask mg j corresponding to a bounding box bg j as, j , we compute ˆmg 2D
+ˆmg j = mg j + fM0 zo,g j (9) j
+  where zo,g is the representation computed by the context aggregation layer. The reﬁned mask is used in the object and relation networks as described in Sections 2.4 and 2.5.
+  2.7. Training
+Our proposed approach is trained in two stages. The
+ﬁrst stage involves pre-training the object detector to enable bounding box proposal generation for a given image. Given
+datasets
+D minimize the following objective,
+D g and m, the object detector is jointly trained to obj =
+L
+L rcnn + seg
+L (10)
+L rcnn is the Faster R-CNN [39] objective, and where is the pixel-level binary cross entropy loss [11] applied over g do not con-segmentation masks. Note that images in tribute to seg due to lack of segmentation annotations. seg
+D
+L
+The second stage of training involves training the scene graph generation network to accurately identify relations m, the between pairs of objects. Given datasets scene graph generation network is jointly trained to mini-mize the following objective, g and
+D
+D
+L
+= sg + seg (11)
+L
+L
+L
+L sg depends on the architecture of the underlying where scene graph method our approach is augmented to. For sg consists of two example, in the case of MOTIF [55], cross-entropy losses, one to reﬁne the object categorization obtained from the pretrained detector, and the other to aide seg is identical to the with accurate relation prediction. segmentation loss described in Equation 10, and is used to learn the reﬁnement network fM0 (Section 2.6). As images m do not contain scene graph annotations, they only in sg. contribute to seg. Similarly, images in m only affect
+D
+L
+L
+D
+L
+L 3. Experiments
+We perform experiments using two datasets: the Visual
+Genome Dataset [24] and the COCO dataset [29].
+Visual Genome. For training and evaluating the scene graph generation performance, we use the Visual Genome dataset [24]. We use the widely adopted prepossessed ver-sion of Visual Genome from [50]. This subset contains 108k images across 150 object categories and 50 relation labels. Images with more that 40 object bounding boxes are
+ﬁltered out from the test set due to memory constraints.
+MS-COCO For training and evaluating the segmentation masks, we use the MSCOCO 2017 dataset [29], which con-tains 123k images, split into 118k training and 5k validation images, across 80 categories. As the ground-truth annota-tions for the test set are not available, as is common practice, results are reported on the validation set.
+D
+Note that our approach is agnostic to the choice of the m. The choice of using MS-COCO is auxiliary dataset motivated by its popularity in the community. As MS-COCO has images in common with Visual Genome, there is a possibility of information leakage across the two datasets.
+However, due to the differences in annotation types, such leakage is not observed in practice. A further analysis is presented in Section B of the supplementary. For simplic-ity, this image overlap is not removed when computing the results described in Section 4 (performance without overlap is reported in supplementary Tables A4, A5). 3.1. Scene Graph Generation Model
+Our proposed framework is generic and can be easily in-tegrated with various scene graph generation models. In this work we experiment with two scene graph architectures, namely MOTIF [55] and VCTree [45]. j 2D
+In MOTIF [55], the object and relation networks (Equa-tion 1) are each instantiated by bidirectional LSTMs [12].
+For an image xg g, the extracted bounding boxes
+Bg are arranged based on their x-coordinate position, and passed through the bidirectional LSTM networks. Instead of assuming a linear ordering between the objects, VCTree
+[45] generates a dynamic binary tree, with the aim of explic-itly encoding the parallel and hierarchical relationships be-tween objects. The object and relation networks are instan-tiated as bidirectional TreeLSTMs [43]. When augmenting our approach with MOTIF [55] and VCTree [45], we iden-tically replicate the object and relation networks proposed in the respective works. Additional details are provided in
+Section A of the supplementary. 3.2. Evaluation
+Relationship Recall (RR). To measure the performance of models we use the mean Recall @K (mR@K) metric introduced in [4, 45]. The mean Recall metric calculates the recall for predicate label independently across all images and then averages the result. We report the mean Recall instead of the conventional Regular Recall(R@K) due to the long-tail nature of relation labelling in Visual Genome that leads to reporting bias [44]. Mean Recall reduces the inﬂuence of dominant relationships such as on and has, and gives equal weight to all the labels in the dataset.
+Zero-Shot Recall (zsR@K). Introduced in [33], zsR@K subject-predicate-object the Recall@K for computes triplets that are not present in the training data.
+These evaluation metrics are computed for three differ-ent sub-tasks: 1) Predicate Classiﬁcation (PredCls): predict the relation labels given the ground truth objct bounding boxes and labels; 2) Scene Graph Classiﬁcation (SGCls): predict the object and relation labels given the ground truth object bounding boxes; 3) Scene Graph Detection (SGDet): given an image, predict the entire scene graph.
+Segmentation Precision. As the Visual Genome dataset
+[24] does not contain any instance-level segmentation an-notations, as a proxy we use the MSCOCO dataset [29] to measure the performance of the segmentation reﬁnement procedure described in Section 2.6. To make the evaluation similar to scene graph generation, we analogously deﬁne three sub-tasks to measure the improvement in the quality of segmentation masks. These sub-tasks, namely (Pred-Cls), (SGCls), and (SGDet), are identical to the ones de-ﬁned earlier. For each of these sub-tasks, the standard eval-uation metrics on COCO are reported [11].
+Model
+Detector
+Method
+Predicate Classiﬁcation
+Scene Graph Classiﬁcation
+Scene Graph Generation mR@20 mR@50 mR@100 mR@20 mR@50 mR@100 mR@20 mR@50 mR@100
+VGG-16 [41]
+IMP [50]
+MOTIF [55]
+VGG-16 [41]
+VCTree [45] VGG-16 [41]
+---MOTIF†
+VCTree†
+VGG-16 [41]
+ResNeXt-101-FPN [34, 49]
+VGG-16 [41]
+ResNeXt-101-FPN [34, 49]
+Baseline
+Seg-Grounded
+Baseline
+Seg-Grounded
+Baseline
+Seg-Grounded
+Baseline
+Seg-Grounded
+-10.8 14.0 13.7 14.6 14.1 14.5 14.4 14.8 13.7 15.0 9.8 14.0 17.9 17.5 18.7 18.0 18.5 18.4 18.9 17.4 19.2 10.5 15.3 19.4 18.9 20.3 19.4 20.2 19.8 20.5 19.0 21.1
+-6.3 8.2 7.5 7.9 8.0 8.9 8.1 8.7 8.1 9.3 5.8 7.7 10.1 9.2 9.8 9.9 11.2 9.9 10.8 9.9 11.6 6.0 8.2 10.8 9.8 10.5 10.6 12.1 10.7 11.6 10.6 12.3
+-4.2 5.2 5.2 5.6 5.8 6.4 4.4 5.3 5.3 6.3 3.8 5.7 6.9 6.8 7.3 7.7 8.3 5.7 7.0 6.9 8.1 4.8 6.6 8.0 7.9 8.1 9.0 9.2 6.4 7.8 7.9 9.0
+Table 1. Scene Graph Prediction on Visual Genome. Mean Recall (mR) is reported for three tasks, across two detector backbones. Our approach is augmented to and contrasted against MOTIF [55] and VCTree [45]. denotes our re-implementation of the methods.
+†
+Detector
+Method
+Predicate Classiﬁcation
+Scene Graph Classiﬁcation
+Scene Graph Generation
+AP AP50 AP75 APS APM APL
+AP AP50 AP75 APS APM APL
+AP AP50 AP75 APS APM APL
+VGG-16 [41]
+No Reﬁne
+MOTIF† + Reﬁne
+VCTree† + Reﬁne 31.5 63.8 28.1 21.8 36.4 43.9 42.4 78.1 40.9 33.0 46.6 55.8 41.9 77.6 40.3 32.8 46.1 55.2 32.5 58.9 31.8 17.0 35.3 42.3 37.5 63.5 38.8 21.0 40.7 48.4 37.4 63.4 38.6 20.9 40.5 48.4 23.2 44.7 21.6 8.1 24.7 45.8 23.9 8.6 24.9 46.1 24.1 8.6 26.0 35.1 27.9 38.1 28.1 38.4
+ResNeXt-101-FPN [34, 49]
+No Reﬁne
+MOTIF† + Reﬁne
+VCTree† + Reﬁne 54.8 87.6 58.3 46.3 57.8 68.1 59.3 90.6 64.7 52.0 62.2 70.6 59.0 90.4 64.2 51.7 62.0 70.4 51.6 76.7 56.9 37.9 53.7 62.2 54.6 78.2 61.1 41.1 56.8 64.1 54.3 77.9 60.4 41.0 56.4 63.8 39.2 61.2 42.4 20.0 42.3 55.7 39.2 61.2 42.4 19.9 42.3 55.8 39.2 61.2 42.4 19.9 42.3 55.7
+Table 2. Segmentation Reﬁnement on MSCOCO. Standard COCO precision metrics are reported across three tasks and two detector backbones. Task formulation is identical to Table 1. ‘No Reﬁne’ is the baseline where the segmentation masks are obtained from the pre-trained detector. As ground truth masks are unavailable in Visual Genome, evaluation on MSCOCO serves as a proxy. 3.3. Implementation Details
+Detector. For our detector architecture, we use the two-stage Faster-RCNN [39] framework. To demonstrate the
+ﬂexibility of our approach, we experiment with two dif-ferent backbones within the Faster-RCNN framework: 1)
+VGG-16 [41] pre-trained on the ImageNet [40] dataset, and 2) ResNeXt-101-FPN [34, 49] backbone pre-trained on the MSCOCO [29] dataset. We ﬁrst ﬁne-tune the detector jointly on the Visual Genome and MSCOCO datasets, reﬁn-ing the classiﬁers and regressors, and simultaneously learn-ing a segmentation network on images in MSCOCO. When training the scene graph generators, the detector parame-ters are freezed. Note that for the baselines, the detector is
+ﬁne-tuned only on the Visual Genome, and hence no seg-mentation is learned.
+Scene Graph Models. For training the scene graph mod-els we use an SGD optimizer with an initial learning rate 2. Following prior works, we integrate the frequency of 10  bias [55] into the training and inference procedure. During inference, in SGDet task, we ﬁlter pairs of objects that do not have any bounding box overlap for relation prediction. 4. Results
+Relationship Recall. We report the mean Recall values comparing the baseline and proposed method in Table 1. To ensure a fair comparison, we additionally report the num-bers obtained via re-implementing the baselines. Note that in case of MOTIF [55], our re-implementation provides signiﬁcantly higher performance compared to the reported numbers in [55]. For both the MOTIF [55] and VCTree
+[45], irrespective of the backbone architecture, we observe a consistent improvements in the recall rate across all three tasks when incorporating our proposed approach.
+For MOTIF [55], we observe an improvement of 7.0% on average at mR@20, 50 and 100 across all settings and backbones. Speciﬁcally, on the VGG backbone [41], we obtain a relative improvement of 6.5%, 5.3%, and 7.7% on mr@20 across the three tasks. Similarly, for the ResNeXt-101-FPN [34, 49] backbone, we observe relative improve-ments of 2.8%, 11.2%, and 10.3% on mr@20. Similarly for VCTree [45], an average improvement of 12.6% is ob-served across tasks and backbones. We attribute the per-formance improvement to the ability of our model to effec-tively ground objects and relations to pixel-level regions, thus providing more discriminative features. We provide additional results and individual relation recall comparisons in Section C of the supplementary.
+Zero-Shot Recall. We report the Zero-Shot Recall value zsR@20 and zsR@100 in Table 3. We observe an consis-tent improvement in zero-shot recall when using the pro-Man on under behind ridin g
+Surfboard
+Man standing on
+Surfboard
+Cat above
+Sign
+Cat
+Cat under
+Sign on on
+Wave under behind ridin g in-front-of behind in behind on in under behind between mounted on behind behind
+Wave
+Post
+Pole
+Sign
+Post
+Pole
+Figure 3. Qualitative Results. Visualizations of scene graphs generated by using VCTree [45] (in purple) and our approach augmented to
+VCTree (in green). The left two images contrast performance on relation retrieval. The right two images contrast performance on zero-shot relation retrieval, with the zero-shot triplet shown in yellow. Our approach additionally generates pixel-level object groundings.
+Model
+Detector Method
+PredCls
+SGCls
+SGDet zsr@20/100 zsr@20/100 zsr@20/100
+MOTIF†
+VCTree†
+VGG-16 [41]
+ResNeXt-101-FPN [34, 49]
+VGG-16 [41]
+ResNeXt-101-FPN [34, 49]
+BL
+SG
+BL
+SG
+BL
+SG
+BL
+SG 1.7/6.7 3.2/9.3 1.9/7.2 4.1/10.5 1.8/7.3 3.5/10.2 1.8/7.1 4.3/10.6 0.2/1.1 0.4/1.6 0.3/1.2 0.8/2.5 0.6/1.8 0.7/2.4 0.4/1.2 0.8/2.5 0.0/0.4 0.1/0.5 0.0/0.5 0.1/1.0 0.1/0.5 0.3/0.9 0.1/0.7 0.3/1.5
+Table 3. Zero-Shot Recall on Visual Genome. Results are re-ported for three tasks across two detector backbones. Our ap-proach is augmented to and contrasted against MOTIF [55] and
+VCTree [45]. denotes our re-implementation of the methods.
+† posed scene graph generation framework. Our method out-performs the baselines by an average of 94.5% and 97.9% on MOTIF and VCTree respectively.
+Segmentation Accuracy. As segmentation annotations are not present in Visual Genome [24], we evaluate our pro-posed segmentation reﬁnement on the MSCOCO dataset
+[29]. This provides a suitable proxy, wherein segmentation improvements on the MSCOCO dataset can be translated, to some degree, on Visual Genome. We report the stan-dard COCO evaluation metrics, namely AP (averaged over
+IoU thresholds), AP50, AP75, and APS, APM , APL (AP at different scales), on three different scene graph evalua-tion tasks in Table 2. ‘No Reﬁne’ acts as a strong baseline, wherein the segmentation masks are generated from the pre-trained detector. It is evident that our proposed segmenta-tion reﬁnement improves on mask quality across tasks and detector backbones. As the ground truth bounding boxes and labels are available for the Predicate Classiﬁcation task, the observed improvement here is the largest (34.6% higher
+AP on VGG). Analogously, the observed improvement on the Scene Graph Generation (SGDet) task is the lowest (7.3% higher AP on VGG) as any errors made by the pre-trained detector are forwarded to the scene graph network.
+To further highlight the effectiveness of our joint training approach, we report per-class improvement on AP in Sec-Scene Graph Classiﬁcation
+Ablation mR@20 mR@50 mR@100 zsr@20/100
+Base
+Joint
+Joint + OG
+Joint + OG + EGavg
+Joint + OG + EGunion
+Joint + OG + EGGaussian
+Final Model 8.1 8.5 9.0 9.1 9.1 9.3 9.4 9.9 10.5 11.1 11.4 11.3 11.5 11.6 10.6 11.1 11.8 12.2 12.2 12.2 12.3 0.3/1.2 0.4/1.5 0.6/2.1 0.8/2.4 0.7/2.4 0.7/2.3 0.8/2.5
+Table 4. Ablation. Mean Recall (mr) and Zero-shot Recall (zsr) are reported. VCTree [45] is the base architecture for all methods.
+Please refer Section 4 for model deﬁnitions. tion C of the supplementary. Note that no noticeable im-provement is observed for the SGDet task when using the
+ResNeXt-101-FPN [34, 49] backbone. We believe this is a direct consequence of the backbone using feature pyramid networks (FPNs) [28] to extract features. As FPNs effec-tively capture global context using lateral connections, the detector provides much richer object representations. This makes the context aggregation in the scene graph network redundant, making reﬁning segmentation masks harder.
+Ablation. We conduct an ablation study over the various components in our model using VCTree. All models are trained with the ResNeXt-101-FPN [34, 49] backbone. The results on the SGCls task are shown in Table 4. ‘Base’ is deﬁned as the vanilla VCTree model learned over the de-tector trained only on the Visual Genome dataset. To un-derstand the effect our joint detector pre-training has on the overall performance, we deﬁne ‘Joint’ as the VCTree model learned over this jointly pre-trained detector. It can be seen that just the joint pre-training of the detector provides con-siderable improvements (5% on mR@20).
+We incrementally add components of our proposed ap-proach to the ‘Joint’ detector to better highlight their im-portance.
+‘Joint + OG’ is deﬁned as the model that uses the jointly trained detector and the object grounding mech-anism described in Section 2.4. Similarly, ‘Joint + OG +
+EGx’ describes the model that additionally uses our pro-posed relation grounding mechanism deﬁned in Section 2.5.
+The subscript x in EGx refers to the type of masking mech-anism used to combine the segmentation masks for a pair of objects. We experiment with averaging (avg), taking the logical or (union), and the proposed Gaussian mask-ing (Gaussian). Finally, our complete model with the ad-ditional segmentation mask reﬁnement (Section 2.6) is de-noted as ‘Final Model’. From Table 4 it can be seen that using both object and relation grounding helps with perfor-mance, and using a Gaussian masking mechanism is supe-rior to other alternatives. Additionally, ﬁne-tuning the seg-mentation masks not only helps improve its quality, but also provides better scene graph generation performance.
+Qualitative Results. We qualitatively contrast the per-formance of the VCTree model [45] augmented with our proposed approach against its vanilla counterpart in Figure 3. The two images on the left show results from the relation retrieval task. Our approach (in green) predicts more granu-lar and spatially informative relationships standing on and behind, as opposed to the baseline (in purple) which is heavily biased towards the more common and less in-formative relation on. The two images on the right high-light the ability of our approach to generalize in zero-shot scenarios. As the triplets of cat with sign are absent from the training dataset, the baseline approach (in pur-ple) defaults to predicting incorrect relations of above and in-front-of. On the contrary, our approach accurately predicts the correct relation under. 5.

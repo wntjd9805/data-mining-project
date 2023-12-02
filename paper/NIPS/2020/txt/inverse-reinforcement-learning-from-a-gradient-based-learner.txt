@@ -1,0 +1,197 @@
+Abstract
+Inverse Reinforcement Learning addresses the problem of inferring an expert’s reward function from demonstrations. However, in many applications, we not only have access to the expert’s near-optimal behaviour, but we also observe part of her learning process. In this paper, we propose a new algorithm for this setting, in which the goal is to recover the reward function being optimized by an agent, given a sequence of policies produced during learning. Our approach is based on the assumption that the observed agent is updating her policy parameters along the gradient direction. Then we extend our method to deal with the more realistic scenario where we only have access to a dataset of learning trajectories. For both settings, we provide theoretical insights into our algorithms’ performance.
+Finally, we evaluate the approach in a simulated GridWorld environment and on the MuJoCo environments, comparing it with the state-of-the-art baseline. 1
+
+Introduction
+Inverse Reinforcement Learning (IRL) [20] aims to infer an expert’s reward function from her demonstrations [21]. In the standard setting, an expert shows behaviour by repeatedly interacting with the environment. This behaviour, encoded by its policy, is optimizing an unknown reward function. The goal of IRL consists of ﬁnding a reward function that makes the expert’s behaviour optimal [20]. Compared to other imitation learning approaches [3, 15], which output an imitating policy (e.g, Behavioral Cloning [3]), IRL explicitly provides a succinct representation of the expert’s intention. For this reason, it provides a generalization of the expert’s policy to unobserved situations.
+However, in some cases, it is not possible to wait for the convergence of the demonstrator’s learning process. For instance, in multi-agent environments, an agent has to infer the unknown reward functions that the other agents are learning, before actually becoming “experts”; so that she can either cooperate or compete with them. On the other hand, in many situations, we can learn something useful by observing the learning process of an agent. These observations contain important information about the agent’s intentions and can be used to infer her interests. Imagine a driver who is learning a new circuit. During her training, we can observe how she behaves in a variety of situations (even dangerous ones) and this is useful for understanding which states are good and which should be avoided. Instead, when expert behaviour is observed, only a small sub-region of the state space could be explored, thus leaving the observer unaware of what to do in situations that are unlikely under the expert policy. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Inverse Reinforcement Learning from not expert agents, called Learning from a Learner (LfL), was recently proposed by Jacq et al. in [17]. LfL involves two agents: a learner who is currently learning a task and an observer who wants to infer the learner’s intentions. In [17] the authors assume that the learner is learning under an entropy-regularized framework, motivated by the assumption that the learner is showing a sequence of constantly improving policies. However many Reinforcement
+Learning (RL) algorithms [35] do not satisfy this and also human learning is characterized by mistakes that may lead to a non-monotonic learning process.
+In this paper we propose a new algorithm for the LfL setting called Learning Observing a Gradient not-Expert Learner (LOGEL), which is not affected by the violation of the constantly improving assumption. Given that many successful RL algorithms are gradient-based [22] and there is some evidence that the human learning process is similar to a gradient-based method [32], we assume that the learner is following the gradient direction of her expected discounted return. The algorithm learns the reward function that minimizes the distance between the actual policy parameters of the learner and the policy parameters that should be obtained if she were following the policy gradient using that reward function.
+After a formal introduction of the LfL setting in Section 3, we provide in Section 4 a ﬁrst solution of the LfL problem when the observer has full access to the learner’s policy parameters and learning rates. Then, in Section 5 we extend the algorithm to the more realistic case in which the observer can identify the optimized reward function only by analyzing the learner’s trajectories. For each problem setting, we provide a ﬁnite sample analysis to give to the reader an intuition on the correctness of the recovered weights. Finally, we consider discrete and continuous simulated domains to empirically compare the proposed algorithm with state-of-the-art baselines in this setting [17, 7]. The proofs of all the results are reported in Appendix A. In the appendix we report preliminary results on a simulated autonomous driving task B.3. 2 Preliminaries
+A Markov Decision Process (MDP) [27, 35] is a tuple M = (S, A, P, γ, µ, R) where S is the state space, A is the action space, P : S × A × S → R 0 is the transition function, which deﬁnes the density P (s(cid:48)|s, a) of state s(cid:48) ∈ S when taking action a ∈ A in state s ∈ S, γ ∈ [0, 1) is the discount factor, µ : S → R 0 is the initial state distribution and R : S → R is the reward function. An
+RL agent follows a policy π : S × A → R
+≥ 0, where π(·|s) speciﬁes for each state s a distribution over the action space A, i.e., the probability of taking action a in state s. We consider stochastic differentiable policies belonging to a parametric space ΠΘ = {πθ : θ ∈ Θ ⊆ Rd}. We evaluate the performance of a policy πθ as its expected cumulative discounted return:
+≥
+≥
+J(θ) =
+E
+S0∼
+πθ (
+P (
+µ,
+St),
+·|
+St,At)
+·|
+At∼
+St+1∼
++
+∞ (cid:34) t=0 (cid:88)
+γtR(St, At) (cid:35)
+.
+To solve an MDP, we must ﬁnd a policy πθ∗ that maximizes the performance θ∗ ∈ arg maxθ J(θ).
+Inverse Reinforcement Learning [21, 20, 2] addresses the problem of recovering the unknown reward function optimized by an expert given demonstrations of her behavior. The expert plays a policy πE which is (nearly) optimal for some unknown reward function R : S × A → R. We are given a dataset D = {τ1, . . . , τn} of trajectories from πE, where we deﬁne a trajectory as a sequence of states and actions τ = (s0, a0, . . . , sT 1, sT ), where T is the trajectory length. The goal of an IRL agent is to ﬁnd a reward function that explains the expert’s behavior. As commonly done in the Inverse Reinforcement Learning literature [24, 41, 2], we assume that the expert’s reward function can be represented by a linear combination with weights ω of q basis functions φ: 1, aT
+−
+−
+Rω(s, a) = ωT φ(s, a), ω ∈ Rq, (1) where φ : S × A → [−Mr, Mr]q is a bounded feature vector function.
+We deﬁne the feature expectations of a policy πθ as:
++
+ψ(θ) =
+E
+S0∼
+πθ (
+P (
+At∼
+St+1∼
+µ,
+St),
+·|
+St,At)
+·| (cid:34) t=0 (cid:88)
+∞
+γtφ(St, At)
+. (cid:35) 2
+The expected discounted return, under the linear reward model, is deﬁned as:
+J(θ, ω) =
+E
+S0∼
+πθ (
+P (
+µ,
+St),
+·|
+St,At)
+·|
+At∼
+St+1∼
++
+∞ (cid:34) t=0 (cid:88)
+γtRω(St, At) (cid:35)
+= ωT ψ(θ). (2) 3
+Inverse Reinforcement Learning from learning agents
+The Learning from a Learner Inverse Reinforcement Learning setting (LfL), proposed in [17], involves two agents:
+• a learner which is learning a task deﬁned by the reward function RωL,
+• and an observer which wants to infer the learner’s reward function.
+More formally, the learner is an RL agent which is learning a policy πθ ∈ ΠΘ in order to maximize its discounted expected return J(θ, ωL). The learner is improving its own policy by an update function f (θ, ω) : Rd × Rq → Rd, i.e., at time t, θt+1 = f (θt, ω). The observer, instead, perceives a sequence of learner’s policy parameters {θ1, · · · , θm+1} and a dataset of trajectories for each policy
+D = {D1, · · · , Dm+1}, where Di = {τ i n}. Her goal is to recover the reward function RωL that explains πθi → πθi+1 for all 1 ≤ i ≤ m, i.e the updates of the learner’s policy.
+Remark 3.1. It is easy to notice that this problem has the same intention as Inverse Reinforcement
+Learning since the demonstrating agent is motivated by some reward function. On the other hand, in classical IRL the learner agent is an expert, and not a non-stationary agent. For this reason, we cannot simply apply standard IRL algorithms to this problem or use Behavioral Cloning [26, 3, 21] algorithms, which mimic a suboptimal behavior. 1, · · · , τ i 4 Learning from a learner following the gradient
+Many algorithms that are the state of the art of reinforcement learning are policy-gradient methods [22, 36], i.e. approaches which optimize the expected discounted return with gradient updates of the policy parameters. Recently it has been proved that even standard RL algorithms such as Value Iteration or
+Q-learning have strict connections with policy gradient methods [13, 30]. For the above reasons, we assume that the learner is optimizing the expected discounted return using gradient descent.
+For the sake of presentation, we start by considering the simpliﬁed case in which we assume that the observer can perceive the sequence of the learner’s policy parameters (θ1, · · · , θm+1), the associated gradients of the feature expectations (∇θψ(θ1), . . . , ∇θψ(θm)), and the learning rates (α1, · · · , αm). Then, we will replace the exact knowledge of the gradients with estimates built on a set of demonstrations Di for each learner’s policy πθi (Section 4.2). Finally, we introduce our algorithm LOGEL, which, using behavioral cloning and an alternate block-coordinate optimization
+[37], is able to estimate the reward’s parameters without requiring as input the policy parameters and the learning rates (Section 5). 4.1 Exact gradient
+We express the gradient of the expected return as [36, 23]:
+∇θJ(θ, ω) =
+E
+S0∼
+πθ (
+P (
+µ,
+St),
+·|
+St,At)
+·|
+At∼
+St+1∼
+γtRω(St, At)
++
+∞ (cid:20) t=0 (cid:88) t (cid:88)l=0
+∇θ log πθ(Al|Sl)
+= ∇θψ(θ)ω, (cid:21) where ∇θψ(θ) = (∇θψ1(θ)| . . . |∇θψq(θ)) ∈ Rd q is the Jacobian matrix of the feature expecta-tions ψ(θ) w.r.t the policy parameters θ. In the rest of the paper, with some abuse of notation, we will indicate ψ(θt) with ψt.
+We deﬁne the gradient-based learner updating rule at time t as:
+× t+1 = θL
+θL t + αt∇θJ(θL t , ω) = θL t + αt∇θψL t ωL, (3) 3
+where αt is the learning rate. Given a sequence of consecutive policy parameters (θL m+1), and of learning rates (α1, · · · , αm) the observer has to ﬁnd the reward function Rω such that the improvements are explainable by the update rule in Eq. (3). This implies that the observer has to solve the following minimization problem: 1 , · · · , θL min
+Rq
+ω
+∈ m t=1 (cid:88) (cid:107)∆t − αt∇θψtω(cid:107)2 2 , (4) where ∆t = θt+1 − θt. This optimization problem can be easily solved in closed form under the 1 is invertible. assumption that
+−
+Lemma 4.1. If the matrix solved in closed form by (cid:0)(cid:80) m t=1 α2 t ∇θψT t ∇θψt m t=1 α2 (cid:0)(cid:80) m t ∇θψT (cid:1) t ∇θψt 1 is full-rank than optimization problem (4) is
+−
+ω = t ∇θψT
+α2 t ∇θψt (cid:32) t=1 (cid:88) (cid:98) (cid:1) (cid:33) 1
+− m (cid:32) t=1 (cid:88)
+αt∇θψT t ∆t
+. (cid:33) (5)
+When problem (4) has no unique solution or when the matrix to be inverted is nearly singular, in order to avoid numerical issues, we can resort to a regularized version of the optimization problem.
+In the case we add an L2-norm penalty term over weights ω we can still compute a closed-form solution (see Lemma A.5 in Appendix A). 4.2 Approximate gradient
+In practice, we do not have access to the Jacobian matrix ∇θψ, but the observer has to estimate it using the dataset D and some unbiased policy gradient estimator, such as REINFORCE [40] or
+G(PO)MDP [5]. The estimation of the Jacobian will introduce errors on the optimization problem (4).
+Obviously the estimation of the reward weights ω becomes more accurate when more data are available [25]. On the other hand during the learning process, the learner will produce more than one policy improvement, and the observer can use these improvements to get better estimates of the reward weights.
+In order to have an insight on the relationship between the amount of data needed to estimate the gradient and the number of learning steps, we provide a ﬁnite sample analysis on the norm of the difference between the learner’s weights ωL and the recovered weights
+ω. The analysis takes into account the learning steps data and the gradient estimation data, without having any assumption on the policy of the learner. We denote with Ψ = [∇θψ1, · · · , ∇θψm]T the concatenation of the
+Jacobians and the concatenation of the estimated Jacobians.
+Ψ = (cid:98)
+T (cid:91)∇θψ1, · · · , (cid:91)∇θψm (cid:104) (cid:105)
+Theorem 4.1. Let Ψ be the real Jacobians and
+{τ1, · · · , τn}. Assume that Ψ is bounded by a constant M and λmin(
+Ψ the estimated Jacocobian from n trajectories
+Ψ) ≥ λ > 0. Then w.h.p.:
+Ψ (cid:98)
+T
+ωL −
+ω
+≤ O 2 (cid:13) (cid:13) (cid:13) (cid:13) (cid:98) 1
+λ
+M (cid:115)
+
+ log dq m (cid:98)
++ (cid:98) dq (cid:112) (cid:32)(cid:114)
+. (cid:33)
+ (cid:98) dq log( 2
+δ ) 2n
+We have to underline that a ﬁnite sample analysis is quite important for this problem. In fact, the number of policy improvement steps of the learner is ﬁnite as the learner will eventually achieve an optimal policy. So, knowing the ﬁnite number of learning improvements m, we can estimate how much data we need for each policy to get an estimate with a certain accuracy. More information about the proof of the theorem can be found in appendix A.
+Remark 4.1. Another important aspect to take into account is that there is an intrinsic bias [18] due to the gradient estimation error that cannot be solved by increasing the number of learning steps, but only with a more accurate estimation of the gradient. However, we show in Section 7 that, experimentally, the component of the bound that does not depend on the number of learning steps does not inﬂuence the recovered weights. 4
+5 Learning from improvement trajectories
+In a realistic scenario, the observer has access only to a dataset D = (D1, . . . , Dm+1) of trajectories generated by each policy, such that Di = {τ1, · · · , τn} ∼ πθi. Furthermore, the learning rates are unknown and possibly the learner applies an update rule other than (3). The observer has to infer the policy parameters Θ = (θ1, . . . , θm+1), the learning rates A = (α1, . . . , αm), and the reward weights ω. If we suppose that the learner is updating its policy parameters with gradient ascent on the discounted expected return, the natural way to see this problem is to maximize the log-likelihood of p(θ1, ω, A|D): m+1 log πθ1(a|s) + log πθt(a|s), max
+θ1,ω,A (cid:88)(s,a) 1 + αt
+∈D1 where θt = θt 1. Unfortunately, solving this problem directly is not practical as it involves evaluating gradients of the discounted expected return up to the m-th order. To deal with this, we break down the inference problem into two steps: the ﬁrst one consists in recovering the policy parameters Θ of the learner and the second in estimating the learning rates A and the reward weights ω (see Algorithm 1). 1∇θψt
+∈Dt
+−
+−
+− t=2 (cid:88) (cid:88)(s,a) 5.1 Recovering learner policies
+Since we assume that the learner’s policy belongs to a parametric policy space ΠΘ made of differen-tiable policies, as explained in [24], we can recover an approximation of the learner’s parameters Θ through behavioural cloning, exploiting the trajectories in D = {D1, · · · , Dm+1}. For each dataset
+Di ∈ D of trajectories, we cast the problem of ﬁnding the parameter θi to a maximum-likelihood estimation. Solving the following optimization problem we obtain an estimate
+θi of θi: n
+T 1
+− log πθi(al,t|sl,t). (cid:98) (6) 1 n max
+Θ
+θi∈ (cid:88)l=1 t=0 (cid:88)
+It is known that the maximum-likelihood estimator is consistent under mild regularity conditions on the policy space ΠΘ and assuming the identiﬁability property [8]. Some ﬁnite-sample guarantees on
+θi − θi(cid:107)p were also derived under stronger assumptions, e.g., in [34]. the concentration of distance (cid:107) 5.2 Recovering learning rates and reward weights (cid:98)
+θ1, . . . ,
+θm+1), if the learner is updating her policy with a constant learning
+Given the parameters ( rate we can simply apply Eq. (4). On the other hand, with an unknown learner, we cannot make this assumption and it is necessary to estimate also the learning rates A = (α1, . . . , αm). The optimization problem in Eq. (4) becomes: (cid:98) (cid:98) min
+Rq,A
+∈
+ω
+∈
+Rm m
+∆t − αt (cid:91)∇θψtω 2 2 (cid:13) (cid:13) s.t. αt ≥ (cid:15) 1 ≤ t ≤ m. (cid:13) t=1 (cid:13) (cid:88) (cid:13) (cid:13) (cid:98) (7) (8)
+∆t =
+θt+1 −
+θt and (cid:15) is a small constant. To optimize this function we use alternate block-where coordinate descent [37]. We alternate the optimization of parameters A and the optimization of parameters ω. Furthermore, we can notice that these two steps can be solved in closed form. When we optimize on ω, the optimization can be done using Lemma 4.1. When we optimize on A we can solve for each parameter αt, with 1 ≤ t ≤ m, in closed form.
+Lemma 5.1. The minimum of (7) with respect to αt is equal to: (cid:98) (cid:98) (cid:98)
+ˆαt = max (cid:15), (cid:18) ((cid:91)∇θψtω)T ((cid:91)∇θψtω) (cid:17) (cid:16) 1
+− ((cid:91)∇θψtω)T ˆ∆t
+. (cid:19) (9)
+The inner matrix cannot be inverted only if the vector (cid:91)∇θψω is equal to 0. This would happen only if the expert is at a stationary point, so (cid:91)∇θψ is 0. The optimization converges under the assumption that there exists a unique minimum for each variable A and ω [37]. 5
+Algorithm 1 LOGEL
+Require: Dataset D = {D1, . . . , Dm+1} with Dj = {(τ1, . . . , τnj ) | τi ∼ πθj }
+Ensure: Reward weights ω ∈ Rq 1: Estimate policy parameters ( ˆθ1, . . . , ˆθm+1) with Eq. (6) 2: Initialize A and ω 3: Compute learning rates A and reward weights ω by alternating (9) and (5) up to convergence 5.3 Theoretical analysis
+In this section, we provide a ﬁnite-sample analysis of LOGEL when only one learning step is observed, assuming that the Jacobian matrix (cid:91)∇θψ is bounded and the learner’s policy is a Gaussian policy π ∼ N (θT ϕ(s), σ2). The analysis evaluates the norm of the difference between the learner’s weights ωL and the recovered weights ˆω. Without loss of generality, we consider the case where the learning rate α = 1. The analysis takes into account the bias introduced by the behavioural cloning and the gradient estimation.
+Theorem 5.1. Let πθ1, πθ2 be two Gaussian policies πθi(·|s) ∼ N (θT such that πθ2 is the improvement of πθ1 . Let i ∈ [1, 2]. Given datasets Di = {τ i trajectories generated by πi, such that Si ∈ Rn let the minimum singular value of σmin(ST features bounded by MS, and the reward features bounded by MR. Then with probability 1 − δ: i ϕ(s), σ2) with i ∈ {1, 2}, n} of d is the matrix of corresponding states features, i Si) ≥ η > 0, (cid:92)∇θ1 ψ uniformly bounded by M , the state 1, . . . , τ i t
+×
+×
+ωL −
+ω
+≤ O 2 (M + M 2
+σmin(∇θ1 ψ) (cid:115)
+SMR) log( 2
+δ ) nη 
+
+ where ωL are the real reward parameters and (cid:98)
+ω are the parameters recovered using Lemma 4.1.
+ (cid:13) (cid:13) (cid:13) (cid:13)
+The theorem, that relies on perturbation analysis [39] and least squares with ﬁxed design [29], underlines how LOGEL, with a sufﬁcient number of samples to estimate the policy parameters and the gradients, succeeds in recovering the correct reward parameters. (cid:98) 6

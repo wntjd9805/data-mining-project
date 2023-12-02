@@ -1,0 +1,172 @@
+Abstract
+Hyperparameter (HP) tuning in deep learning is an expensive process, prohibitively so for neural networks (NNs) with billions of parameters. We show that, in the recently discovered Maximal Update Parametrization (µP), many optimal HPs remain stable even as model size changes. This leads to a new HP tuning paradigm we call µTransfer: parametrize the target model in µP, tune the HP indirectly on a smaller model, and zero-shot transfer them to the full-sized model, i.e., without directly tuning the latter at all. We verify µTransfer on Transformer and ResNet.
+For example, 1) by transferring pretraining HPs from a model of 13M parameters, we outperform published numbers of BERT-large (350M parameters), with a total tuning cost equivalent to pretraining BERT-large once; 2) by transferring from 40M parameters, we outperform published numbers of the 6.7B GPT-3 model, with tuning cost only 7% of total pretraining cost. A Pytorch implementation of our technique can be found at github.com/microsoft/mup.2 1
+
+Introduction
+Hyperparameter (HP) tuning is critical to deep learning. Poorly chosen HPs result in subpar performance and training instability. Many pub-lished baselines are hard to compare to one another due to varying degrees of HP tuning.
+These issues are exacerbated when training ex-tremely large deep learning models, since state-of-the-art networks with billions of parameters become prohibitively expensive to tune.
+Recently, [45] showed that different neural net-work parametrizations induce different inﬁnite-width limits and proposed the Maximal Update
+Parametrization (abbreviated µP) (summarized in Table 3) that enables “maximal” feature learn-ing in the limit. Intuitively, it ensures that each layer is updated on the same order during train-ing regardless of width.3 In contrast, while the standard parametrization (SP) ensures activations are of unit order at initialization, it actually causes
+Figure 1: Training loss against learning rate on
+Transformers of varying dmodel trained with Adam.
+Conventionally and in contrast with our technique, different widths do not share the same optimal hy-perparameter; wider networks do not always per-form better than narrower ones; in fact they under-perform the same-width networks in our technique even after tuning learning rate. See Sections 3 and 4 for experimental setup.
+†Work done partly during Microsoft AI Residency Program.
+∗Equal contribution. Order is random. Correspondence to {gregyang, edwardhu}@microsoft.com 2See arxiv.org for the full, up-to-date version of this work. 3i.e., the updates’ effect on activations becomes roughly independent of width in the large width limit. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Algorithm 1 Tuning a Large Target Model via µTransfer 1: Parametrize target model in Maximal Update Parametrization (µP) 2: Tune a smaller version (in width and/or depth) of target model 3: Copy tuned hyperparameters to target model
+Table 1: Hyperparameters That Can Be µTransferred, Not µTransferred, or µTransferred
+Across, with a few caveats discussed in Section 5.1. * means empirically validated only on Trans-formers, while all others additionally have theoretical justiﬁcation.
+µTransferable
+Not µTransferable
+µTransferred Across optimization related, init, parameter multipliers, etc regularization (dropout, weight decay, etc) width, depth*, batch size*, training time*, seq length* them to blow up in wide models during training [45] essentially due to an imbalance of per-layer learning rate (also see Fig. 8). We leverage µP to zero-shot transfer HPs from small models to large models in this work – that is, we obtain near optimal HPs on a large model without directly tuning it at all! While practitioners have always guessed HPs of large models from those of small models, the results are hit-or-miss at best because of incorrect parametrization. For example, as shown in
+Fig. 1, in a Transformer, the optimal learning rate is stable with width in µP (right) but far from so in standard parametrization (left). In addition to width, we empirically verify that, with a few caveats, HPs can also be transferred across depth (in Section 5.1) as well as batch size, language model sequence length, and training time (in Appendix I.2.1). This reduces the tuning problem of an (arbitrarily) large model to that of a (ﬁxed-sized) small model. Our overall procedure, which we call µTransfer, is summarized in Algorithm 1 and Fig. 2, and the HPs we cover are summarized in
+Tables 1 and 2.
+There are several beneﬁts to our approach: 1. Better Per-formance: µTransfer is not just about predicting how the optimal learning rate scales in SP. In general, we expect the
+µTransferred model to outperform its SP counterpart with learning rate optimally tuned. For example, this is the case in Fig. 1 with the width-8192 Transformer. We discuss the reason for this in Appendices B and C. 2. Speedup: It pro-vides massive speedup to the tuning of large models. For example, we are able to outperform published numbers of (350M) BERT-large [9] purely by zero-shot HP transfer, with tuning cost approximately equal to 1 BERT-large pre-training. Likewise, we outperform the published numbers of the 6.7B GPT-3 model [6] with tuning cost being only 7% of total pretraining cost. For models on this scale, HP tuning is not feasible at all without our approach. 3. Tune
+Once for Whole Family: For any ﬁxed family of models with varying width and depth (such as the BERT family or the GPT-3 family), we only need to tune a single small model and can reuse its HPs for all models in the family.4 For example, we will use this technique to tune BERT-base (110M parameters) and BERT-large (350M parameters) simultaneously by transferring from a 13M model. 4. Better Compute Utilization: While large model training needs to be distributed across many GPUs, the small model tuning can happen on individual GPUs, greatly increasing the level of parallelism for tuning (and in the context of organizational compute clusters, better scheduling and utilization ratio). 5. Painless Transition from Exploration to Scaling Up: Often, researchers explore new ideas on small models but, when scaling up, ﬁnd their HPs optimized during exploration work poorly on large models. µTransfer would solve this problem.
+Figure 2: Illustration of µTransfer
+Nevertheless, µTransfer still has several limitations. For example, while it is very effective for pretraining, it cannot transfer regularization HPs,5 so it’s generally not applicable to the ﬁnetuning of pretrained models. We discuss other limitations carefully in Section 5.1. 4but possibly not for different data and/or tasks. 5It can transfer regularization HPs to the extent they help training but it may not transfer their effect on testing. 2
+Table 2: Examples of µTransferable Hyperparameters. All of the below can also be specialized to per-layer hyperparameters.
+Optimizer Related
+Initialization
+Parameter Multipliers learning rate (LR), momentum,
+Adam beta, LR schedule, etc per-layer init. variance multiplicative constants after weight/biases, etc
+Our Contributions
+• We demonstrate it is possible to zero-shot transfer near optimal HPs to a large model from a small version via the Maximal Update Parametrization (µP) from [45].
+• While [45] only covered SGD, here we derive µP for Adam as well (Table 3).
+• We propose a new HP tuning technique, µTransfer, for large neural networks based on this observation that provides massive speedup over conventional methods and covers both SGD and Adam training;
+• We thoroughly verify our method on machine translation and large language model pretrain-ing (in Section 6.3) as well as image classiﬁcation (in Appendix I.1);
+• We release a PyTorch [27] package for implementing µTransfer painlessly. A sketch of this package is given in Appendix J.
+Terminologies Sometimes, to be less ambiguous, we often refer to the “large model” as the target model, as it is the model we wish to ultimately tune, while we refer to the “small model” as the proxy model, as it proxies the HP tuning process. We follow standard notation dmodel, dhead = dk, dv, nhead, df f n regarding dimensions in a Transformer; one can see Fig. 11 for a refresher.
+Tensor Programs Series This paper is the 5th installment of the Tensor Programs series. While the target audience here are practitioners and empirical researchers, this paper presents the ﬁrst major practical payoff of the theoretical foundation built in previous works [41–46]. 2 Parametrization Matters: A Primer
+In this section, we give a very basic primer on why the correct parametrization can allow HP transfer across width, but see Appendices L.1 to L.3 for more (mathematical) details.
+The Central Limit Theorem (CLT) says that, if x1, . . . , xn are iid samples from a zero-mean, unit-variance distribution, then 1√ n (x1 + · · · + xn) converges to a standard Gaussian N (0, 1) as n → ∞.
+Therefore, we can say that 1√ n is the right order of scaling factor cn such that cn(x1 + · · · + xn) converges to something nontrivial. In contrast, if we set cn = 1/n, then cn(x1 + · · · + xn) → 0; or if cn = 1, then cn(x1 + · · · + xn) blows up in variance as n → ∞.
+Now suppose we would like to minimize the function
+Fn(c) def= E x1,...,xn f (c(x1 + · · · + xn)) (1) over c ∈ R, for some bounded continuous function f : R → R. If we reparametrize c = α/ n for
+α ∈ R, then by CLT, Gn(α) def= Fn(c) → E f (N (0, α2)) stabilizes into a function of α as n → ∞.
+Then for sufﬁciently large n, the optimal α∗
+N for any n
+N > n, and indeed, for N = ∞ — this precisely means we can transfer the optimal c∗ n or α∗ n for a smaller problem (say Fn) to a larger problem (say FN ): GN is approximately minimized by α∗ n and (cid:112)n/N . Because the transfer algorithm is simply copying α,
+FN is approximately minimized by c∗ n n is the correct parametrization for this problem. we say the parametrization c = α/ def= arg minα Gn(α) should be close to α∗
+√
+√
+In the scenario studied in this paper, x1, . . . , xn are akin to randomly initialized parameters of a width-n neural network, c is akin to a HP such as learning rate, and f is the test-set performance of the network after training, so that Fn gives its expectation over random initializations. Just as in this example, if we parametrize the learning rate and other HPs correctly, then we can directly copy the optimal HPs for a narrower network into a wide network and expect approximately optimal 3
+performance — this is the hyperparameter transfer we propose here. It turns out the Maximal Update
+Parametrization (µP) introduced in [45] is correct (akin to the parametrization in α above), while the standard parametrization (SP) is incorrect (akin to the parametrization in c). We will review both parametrizations shortly. Theoretically, a µP network has a well-deﬁned inﬁnite-width limit — akin to (x1 + · · · + xn)/ n having a N (0, 1) limit by CLT — while a SP network does not (the limit will blow up) [45].6 In fact, based on the theoretical foundation laid in [45], we argue in Appendix L.3 that µP should also be the unique parametrization that allows HP transfer across width.
+√
+We emphasize that, to ensure transferability of any hyperparameter (such as learning rate), it’s not sufﬁcient to reparametrize only that hyperparameter, but rather, we need to identify and correctly reparametrize all hyperparameters in Table 2. For example, in Fig. 1, the wide models in SP still underperform their counterparts in µP, even with learning rate tuned optimally. This is precisely because SP does not scale parameter multipliers and input/output layer learning rates correctly in contrast to µP (see Table 3). See Appendix C for more intuition via a continuation of our example here. We shall also explain this more concretely in the context of neural networks in Appendix B. 3 Hyperparameters Don’t Transfer Conventionally
+In the community there seem to be conﬂicting assumptions about HP stability. A priori, models of different sizes don’t have any reason to share the optimal HPs. Indeed, papers aiming for state-of-the-art results often tune them separately. On the other hand, a nontrivial fraction of papers in deep learning ﬁxes all HPs when comparing against baselines, which reﬂects an assumption that the optimal HPs should be stable — not only among the same model of different sizes but also among models of different designs — therefore, such comparisons are fair. Here, we demonstrate HP instability across width explicitly in MLP and Transformers in the standard parametrization. We will only look at training loss to exclude the effect of regularization.
+MLP with Standard Parametrization We start with a 2-hidden-layer MLP with activation func-tion φ, using the standard parametrization7 with LeCun initialization8 akin to the default in PyTorch: f (ξ) = W 3(cid:62)φ(W 2(cid:62)φ(W 1(cid:62)ξ + b1) + b2) with init. W 1 ∼ N (0, 1/din), W {2,3} ∼ N (0, 1/n), b{1,2} = 0, (2) where W 1 ∈ Rdin×n, b1 ∈ Rn,
+W 2 ∈ Rn×n, b2 ∈ Rn, W 3 ∈
+Rn×dout and din, n, and dout are the input, hidden, and output dimen-sions. The particular MLP we use has
+φ = ReLU and a cross-entropy (xent) loss function. We deﬁne the width of
+MLP as the hidden size n, which is varied from 256 to 8192. The mod-els are trained on CIFAR-10 for 20 epochs, which is more than enough to ensure convergence.
+Figure 3: MLP width different hidden sizes trained for 20 epoch on CIFAR-10 using SGD. Left uses stan-dard parametrization (SP); right uses maximal update parametrization (µP). µP networks exhibit better learning rate stability than their SP counterparts.
+As shown on the left in Fig. 3, the optimal learning rate shifts by roughly an order of magnitude as the width increases from 256 to 8192; using the optimal learning of the smallest model on the largest model gives very bad performance, if not divergence.
+Transformer with Standard Parametrization This perhaps unsurprising observation holds for more complex architectures such as Transformer as well, as shown in Fig. 1 (left). We deﬁne width 6The more theoretically astute reader may observe that SP with a Θ(1/width) learning rate induces a well-deﬁned inﬁnite-width limit exists as well. Nevertheless, this does not allow HP transfer because this limit is in kernel regime as shown in [45]. See Appendix L.3 for more discussions. 7i.e. the default parametrization offered by common deep learning frameworks. See Table 3 for a review. 8The key here is that the init. variance ∝ 1/fan_in, so the same insights here apply with e.g. He initialization. 4
+Table 3: µP[45] and SP for General Neural Networks, Basic Form. This basic form emphasizes the scaling with width (fan_in or fan_out); in practice, we may insert tunable multipliers in front of fan_in and fan_out as in Eq. (4). Notations: 1) η is the “master” learning rate. 2) The fan_out of a bias vector is its dimension (whereas fan_in is 1). 3) Purple text highlights key differences from standard parametrization (SP); Gray text recalls the corresponding SP. SGD (resp. Adam) here can be replaced by variants such as SGD with momentum (resp. Adagrad, Adadelta, etc). In general, the three columns here can be interpreted as linear layers that have {ﬁnite, inﬁnite, inﬁnite} input dimension and {inﬁnite, ﬁnite, inﬁnite} output dimension in an inﬁnite-width network; this description generalizes more readily to other parameters such as those of layernorm. Transformer µP d); see Deﬁnition 4.1. This version of requires one more modiﬁcation (1/d attention instead of 1/
+µP gets rid of parameter multipliers; for the version similar to that in [45], see Table 13. Also see
+Table 12 for a µP formulation that is easier to implement (and compatible with input/output weight sharing).
+√
+Input weights & all biases
+Output weights
+Hidden weights
+Init. Var.
+SGD LR
+Adam LR
+η · fan_out 1/fan_in (η)
+η 1/fan_in2
+η/fan_in
+η/fan_in (1/fan_in) (η) (η) 1/fan_in
+η
+η/fan_in (η) as dmodel, with dk = dq = dv = dmodel/nhead and df f n = 4dmodel. The models are trained on wikitext-2 for 5 epochs. In Fig. 18 in the appendix we also show the instability of initialization scale and other HPs. 4 Unlocking Zero-Shot Hyperparameter Transfer with µP
+We show that µP solves the problems we see in Section 3.
+MLP with µP For the MLP in Section 3, to switch to µP, we just need to modify Eq. (2)’s initialization of the last layer and its learning rates of the ﬁrst and last layer as well as of the biases.
+The basic form is9 initialize W 1 ∼ N (0, 1/din), W 2 ∼ N (0, 1/n), W 3 ∼ N (0, 1/n2), b{1,2} = 0 with SGD learning rates
+ηW 1 = ηb1 = ηb2 = ηn, ηW 2 = η, ηW 3 = ηn−1. (3)
+Here, η speciﬁes the “master” learning rate, and we highlighted in purple the differences in the two parametrizations. This basic form makes clear the scaling with width n of the parametrization, but in practice we will often insert (possibly tune-able) multiplicative constants in front of each appearance of n. For example, this is useful when we would like to be consistent with a SP MLP at a base width n0. Then we may insert constants as follows: For ˜n def= n/n0, initialize W 1 ∼ N (0, 1/din), W 2 ∼ N (0, 1/n), W 3 ∼ N (0, 1/n·˜n), b{1,2} = 0 with SGD learning rates
+ηW 1 = ηb1 = ηb2 = η˜n, ηW 2 = η, ηW 3 = η˜n−1. (4)
+Then at width n = n0, all purple factors above are 1, and the parametrization is identical to SP (Eq. (2)) at width n0. Of course, as n increases from n0, then Eq. (4) quickly deviates from Eq. (2).
+In other words, for a particular n, µP and SP can be identical up to the choice of some constants (in this case n0), but µP determines a different “set" of networks and optimization trajectory than SP as one varies n. As we will see empirically in the next section, this deviation is crucial for HP transfer.
+Indeed, in Fig. 3(right), we plot the CIFAR10 performances, over various learning rates and widths, of µP MLPs with n0 = 128. In contrast to SP, the optimal learning rate under µP is stable. This means that, the best learning rate for a width-128 network is also best for a width-8192 network in µP
+— i.e. HP transfer works — but not for SP. In addition, we observe performance for a ﬁxed learning rate always weakly improves with width in µP , but not in SP.
+This MLP µP example can be generalized easily to general neural networks trained under SGD or
+Adam, as summarized in Table 3, which is derived in Appendix L. 9While superﬁcially different, this parametrization is equivalent to the µP deﬁned in [45]. 5
+Figure 4: Empirical validation of the stability of four representative hyperparameters on pre-LN Transformers in µP: learning rate, last layer weight multiplier αoutput, weight initialization standard deviation, and learning rate schedule. We use the following learning rate schedules: (a) linear decay; (b) StepLR @ [5k, 8k] with a decay factor of 0.1; (c) StepLR @ [4k, 7k] with a decay factor of 0.3; (d) cosine annealing; (e) constant; (f) inverse square-root decay. All models are trained on wikitext-2 for 10k steps. When not speciﬁed in the legend, the width used is 256, depth 2, batch size 20, sequence length 256, and LR schedule constant. We sweep a particular HP, corresponding to each column, while ﬁxing all others constant. See Section 5.1 for discussion of these results.
+Transformers with µP We repeat the experiments with base width n0 = 128 for Transformers:
+Deﬁnition 4.1. The Maximal Update Parametrization (µP) for a Transformer is given by Table 3 and 1/d attention instead of 1/ d where query q and key k have dimension d.10 d, i.e. the attention logit is calculated as q(cid:62)k/d instead of q(cid:62)k/
+√
+√
+The results are shown on the right in Fig. 1, where the optimal learning rate is stable, and the performance improves monotonically as width increases. 5 Which Hyperparameters Can Be µTransferred?
+In this section, we explore how common HPs ﬁt into our framework. In general, they can be divided into three kinds, summarized in Table 1: 1. those that can transfer from the small to the large model, such as learning rate (Table 2); 2. those that primarily control regularization and don’t work well with our technique; and 3. those that deﬁne training scale, such as width as discussed above as well as others like depth and batch size, across which we transfer other HPs.
+Those in the ﬁrst category transfer across width, as theoretically justiﬁed above in Section 2. To push the practicality and generality of our technique, we empirically explore the transfer across the other dimensions in the third category. Note that µTransfer across width is quite general, e.g. it allows varying width ratio of different layers or number of attention heads in a Transformer; see Appendix G.2. This will be very useful in practice. For the second category, the amount of regularization (for the purpose of controlling overﬁtting) naturally depends on both the model size and data size, so we should not expect transfer to work if the parametrization only depends on model size. We discuss these HPs in more detail in Appendix G.1. 10This is roughly because during training, q and k will be correlated so q(cid:62)k actually scales like d due to Law of Large Numbers, in contrast to the original motivation that q, k are uncorrelated at initialization so Central
+Limit applies instead. See Appendix L.2.1 for a more in-depth discussion. 6
+5.1 Empirical Validation and Limitations
+Our empirical investigations focus on Transformers (here) and ResNet (in Appendix I.1.1), the most popular backbones of deep learning models today. We train a 2-layer pre-layernorm µP11
+Transformer with 4 attention heads on Wikitext-2. We sweep one of four HPs (learning rate, output weight multiplier, initialization standard deviation, and learning rate schedule) while ﬁxing the others and sweeping along width and depth (with additional results in Fig. 19 on transfer across batch size, sequence length, and training time). Fig. 4 shows the results averaged over 5 random seeds.
+Empirically, we ﬁnd that for language modeling on Transformers, HPs generally transfer across scale dimensions if some minimum width (e.g. 256), depth (e.g., 4), batch size (e.g., 32), sequence length (e.g., 128), and training steps (e.g., 5000) are met, with some caveats discussed below. While the exact optimum can shift slightly with increasing scale, this shift usually has very small impact on the loss, compared to SP (Figs. 1 and 3(left)). However, there are some caveats. For example, the best initialization standard deviation does not seem to transfer well across depth (2nd row, 3rd column), despite having a stabler optimum across width. In addition, while our results on width, batch size, sequence length, and training time still hold for post-layernorm (Fig. 17),12 the transfer across depth only works for pre-layernorm Transformer. Nevertheless, in practice (e.g. our results in
+Section 6.3) we ﬁnd that ﬁxing initialization standard deviation while tuning other HPs works well when transferring across depth. 6 Efﬁciency and Performance of µTransfer
+Now that the plausibility of µTransfer has been established in toy settings, we turn to more realistic scenarios to see if one can achieve tangible gains. Speciﬁcally, we perform HP tuning only on a smaller proxy model, test the obtained HPs on the large target model directly, and compare against baselines tuned using the target model. We seek to answer the question: Can µTransfer make HP tuning more efﬁcient while achieving performance on par with traditional tuning? As we shall see by the end of the section, the answer is positive. We focus on Transformers here, while experiments on
+ResNets on CIFAR10 and Imagenet can be found as well in Appendix I.1. All of our experiments are run on V100 GPUs. 6.1 Transformer on IWSLT14 De-En
+Setup IWSLT14 De-En is a well-known machine translation benchmark. We use the default IWSLT (post-layernorm) Transformer implemented in fairseq [25] with 40M parameters, which we denote as the 1x model.13 For µTransfer, we tune on a 0.25x model with 1/4 of the width, amounting to 4M parameters. For this experiment, we tune via random search the learning rate η, the output layer parameter multiplier αoutput, and the attention key-projection weight multiplier αattn. See the grid and other experimental details in Appendix H.1.
+We compare transferring from the 0.25x model with tuning the 1x model while controlling the total tuning budget in FLOPs.14 To improve the reproducibility of our result: 1) we repeat the entire HP search process (a trial) 25 times for each setup, with number of samples as indicated in Table 4, and report the 25th, 50th, 75th, and 100th percentiles in BLEU score; 2) we evaluate each selected HP combination using 5 random initializations and report the mean performance.15
+We pick the HP combination that achieves the lowest validation loss16 for each trial. The reported best outcome is chosen according to the validation loss during tuning. We compare against the default in fairseq, which is presumably heavily tuned. The result is shown in Table 4. 11“2 layers” means the model has 2 self-attention blocks. To compare with SP Transformer, see Fig. 18. 12in fact, post-layernorm Transformers are much more sensitive to HPs than pre-layernorm, so our technique is more crucial for them, especially for transfer across width. Fig. 1 uses post-layernorm. 13https://github.com/pytorch/fairseq/blob/master/examples/translation/README.md. 14Ideally we would like to measure the wall clock time used for tuning. However, smaller models such as the proxy Transformer used for IWSLT are not efﬁcient on GPUs, so wall clock time would not reﬂect the speedup for larger models like GPT-3. Thus, we measure in FLOPs, which is less dependent on hardware optimization. 15We do not report the standard deviation over random initializations to avoid confusion. 16We ﬁnd this provides more reliable result than selecting for the best BLEU score. 7
+Table 4: Transformer on IWSLT14 De-En. 1x and 0.25x refers to scaling of width only. Compared to traditional tuning (“Tuning on 1x”), µtransfer from 0.25x provides better and more reliable outcome given ﬁxed amount of compute. On the other hand, naive transfer (i.e. with SP instead of µP) fails completely. The percentiles are over independent trials, with each trial involving the entire tuning process with a new HP random search.
+Setup
+Total Compute
+#Samples fairseq[25] default
+Tuning on 1x
+Naive transfer from 0.25x
+µTransfer from 0.25x (Ours)
+-1x 1x 1x
+-5 64 64
+Val. BLEU Percentiles 25
+-50
+-75
+-33.62 35.27 35.35 35.00 training diverged 35.45 35.33 100 35.40 35.45 35.53
+Performance Pareto Frontier The result above only describes a particular compute bud-get. Is µTransfer still preferable when we have a lot more (or less) compute? To answer this question, we produce the compute-performance
+Pareto frontier in Fig. 5(left), where we repeat the above experiment with different compute budgets. Evidently, our approach completely dominates conventional tuning.
+Sample Quality of Proxy Model vs Target
+Model The Pareto frontier in Fig. 5(right) sug-gests that, given a ﬁxed number of random sam-ples from the HP space, 1) tuning the target model directly yields slightly better results than tuning the proxy model (while taking much more compute of course), but 2) this perfor-mance gap seems to vanish as more samples are taken. This can be explained by the intu-ition that the narrower proxy model is a “noisy estimator” of the wide target model [45].With few samples, this noise can distort the random
+HP search, but with more samples, this noise is suppressed. 6.2 Transformer on WMT14 En-De
+Figure 5: Efﬁciency-performance Pareto fron-tier of µTransfer compared to conventional tuning, on IWSLT Transformer, using random HP search as the base method. We plot the median BLEU score over 25 trials (Left) against relative compute budget in log scale and (Right) against number of HP samples taken. While with the same num-ber of samples, µTransfer slightly underperforms conventional tuning, this gap vanishes with more samples, and in terms of compute, our Pareto fron-tier strongly and consistently dominates that of conventional tuning. Note that, in larger models (e.g. BERT or GPT-3, not shown here), we believe our efﬁciency advantage will only widen as our small proxy model can stay the same size while the target model grows.
+We scale up to WMT14 En-De using the large (post-layernorm) Transformer from [37] with 211M parameters. We tune on a proxy model with 15M parameters by shrinking dmodel, df f n, and nhead.
+For this experiment, we tune via random search the learning rate η, the output layer parameter multiplier αoutput, and the attention key-projection weight multiplier αattn following the grid in
+Appendix H.2. The result is shown in Table 5: While random search with 3 HP samples far underperforms the fairseq default, we are able to match it via transfer using the same tuning budget.
+Table 5: Transformers on WMT14 En-De. 1x and 0.25x refers to scaling of width only. We report
+BLEU ﬂuctuation over 3 independent trials, i.e., 3 independent random HP searches.
+Setup
+Total Compute
+#Samples Worst Median
+Val. BLEU Percentiles
+Best fairseq[25] default
+Tuning on 1x
+Naive transfer from 0.25x
+µTransfer from 0.25x (Ours)
+-1x 1x 1x
+-3 64 64 8
+--26.40 training diverged 25.69 training diverged 26.34 25.94 26.42
+6.3 BERT
+Finally, we consider large-scale language model pretraining where HP tuning is known to be challeng-ing. Using Megatron (pre-layernorm) BERT [32] as a baseline, we hope to recover the performance of the published HPs by only tuning a proxy model that has roughly 13M parameters, which we call
+BERT-prototype. While previous experiments scaled only width, here we will also scale depth, as discussed in Section 5 and validated in Fig. 4. We use a batch size of 256 for all runs and follow the standard ﬁnetuning procedures. For more details on BERT-prototype, what HPs we tune, and how we
+ﬁnetune the trained models, see Appendix H.3.
+During HP tuning, we sample 256 combinations from the search space and train each combination on BERT-prototype for 105 steps. The total tuning cost measured in FLOPs is roughly the same as training 1 BERT-large for the full 106 steps; the exact calculation is shown in Appendix H.3. The results are shown in Table 6. Notice that on BERT-large, we obtain sizeable improvement over the well-tuned Megatron BERT-large baseline.
+Table 6: BERT pretraining. HP transfer outperforms published baselines without tuning the full model directly at all. We tune BERT-base and BERT-large simultaneously via a single proxy model,
+BERT-prototype. The total tuning cost = the cost of pretraining a single BERT-large. Model speedup refers to the training speedup of BERT-prototype over BERT-base or BERT-large. Total speedup in addition includes time saving from transferring across training steps. Both speedups can be interpreted either as real-time speedup on V100s or as FLOPs speedup (which turn out to be empirically very similar in this case).
+Model
+Method
+Model Speedup
+Total Speedup
+Test loss MNLI (m/mm) QQP
+BERTbase Megatron Default
+BERTbase
+BERTbase
+Naive Transfer
+µTransfer (Ours)
+BERTlarge Megatron Default
+BERTlarge
+BERTlarge
+Naive Transfer
+µTransfer (Ours) 1x 4x 4x 1x 22x 22x 1x 40x 40x 1x 220x 220x 1.995 1.970 1.731 1.683 84.2/84.2 training diverged 84.3/84.8 86.3/86.2 training diverged 87.0/86.5 90.6 90.8 90.9 91.4 6.4 GPT-3
+In order to further verify µTransfer at scale, we applied it to GPT-3 6.7B [6]. This Transformer model (the target model) consists of 32 residual blocks with width 4096. We form the small proxy model by shrinking width to 256, resulting in roughly 40 million trainable parameters, 168 times smaller than the target model. HPs were then determined by a random search on the proxy model. The total tuning cost was only 7% of total pretraining cost. Details of the HP sweep can be found in Appendix H.4.
+In order to exclude code difference as a possible confounder, we also re-trained GPT-3 6.7B from scratch using the original HPs from [6]. During training of the µTransfer model we encountered numerical issues that lead to frequent divergences. In order to avoid them, the model was trained using FP32 precision, even though the original 6.7B model and our re-run were trained using FP16.17 18 The resulting µTransfer model outperforms the 6.7B from [6], and is in fact comparable to the twice-as-large 13B model across our evaluation suite (see Table 9). Selected evaluation results can be found in Table 7 and further details are given in Table 8 and Appendix H.4. 7

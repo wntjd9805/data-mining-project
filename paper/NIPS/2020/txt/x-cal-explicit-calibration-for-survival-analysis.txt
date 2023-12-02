@@ -1,0 +1,210 @@
+Abstract
+Survival analysis models the distribution of time until an event of interest, such as discharge from the hospital or admission to the ICU. When a model’s predicted number of events within any time interval is similar to the observed number, it is called well-calibrated. A survival model’s calibration can be measured using, for instance, distributional calibration (D-CALIBRATION) [Haider et al., 2020] which computes the squared difference between the observed and predicted number of events within different time intervals. Classically, calibration is addressed in post-training analysis. We develop explicit calibration (X-CAL), which turns D-CALIBRATION into a differentiable objective that can be used in survival modeling alongside maximum likelihood estimation and other objectives. X-CAL allows practitioners to directly optimize calibration and strike a desired balance between predictive power and calibration. In our experiments, we ﬁt a variety of shallow and deep models on simulated data, a survival dataset based on MNIST, on length-of-stay prediction using MIMIC-III data, and on brain cancer data from The Cancer
+Genome Atlas. We show that the models we study can be miscalibrated. We give experimental evidence on these datasets that X-CAL improves D-CALIBRATION without a large decrease in concordance or likelihood. 1
+
+Introduction
+A core challenge in healthcare is to assess the risk of events such as onset of disease or death. Given a patient’s vitals and lab values, physicians should know whether the patient is at risk for transfer to a higher level of care. Accurate estimates of the time-until-event help physicians assess risk and accordingly prescribe treatment strategies: doctors match aggressiveness of treatment against severity of illness. These predictions are important to the health of the individual patient and to the allocation of resources in the healthcare system, affecting all patients.
+Survival Analysis formalizes this risk assessment by estimating the conditional distribution of the time-until-event for an outcome of interest, called the failure time. Unlike supervised learning, survival analysis must handle datapoints that are censored: their failure time is not observed, but bounds on the failure time are. For example, in a 10 year cardiac health study [Wilson et al., 1998,
+Vasan et al., 2008], some individuals will remain healthy over the study duration. Censored points are informative, as we can learn that someone’s physiology indicates they are healthy-enough to avoid onset of cardiac issues within the next 10 years.
+A well-calibrated survival model is one where the predicted number of events within any time interval is similar to the observed number [Pepe and Janes, 2013]. When this is the case, event
+∗Equal Contribution 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+probabilities can be interpreted as risk and can be used for downstream tasks, treatment strategy, and human-computable risk score development [Sullivan et al., 2004, Demler et al., 2015, Haider et al., 2020]. Calibrated conditional models enable accurate, individualized prognosis and may help prevent giving patients misinformed limits on their survival, such as 6 months when they would survive years.
+Poorly calibrated predictions of time-to-event can misinform decisions about a patient’s future.
+Calibration is a concern in today’s deep models. Classical neural networks that were not wide or deep by modern standards were found to be as calibrated as other models after the latter were calibrated (boosted trees, random forests, and SVMs calibrated using Platt scaling and isotonic regression)
+[Niculescu-Mizil and Caruana, 2005]. However, deeper and wider models using batchnorm and dropout have been found to be overconﬁdent or otherwise miscalibrated [Guo et al., 2017]. Common shallow survival models such as the Weibull Accelerated Failure Times (AFT) model may also be miscalibrated [Haider et al., 2020]. We explore shallow and deep models in this work.
+Calibration checks are usually performed post-training. This approach decouples the search for a good predictive model and a well-calibrated one [Song et al., 2019, Platt, 1999, Zadrozny and Elkan, 2002]. Recent approaches tackle calibration in-training via alternate loss functions. However, these may not, even implicitly, optimize a well-deﬁned calibration measure, nor do they allow for explicit balance between prediction and calibration [Avati et al., 2019]. Calibration during training has been explored recently for binary classiﬁcation [Kumar et al., 2018]. Limited evaluations of calibration in survival models can be done by considering only particular time points: this model is well-calibrated for half-year predictions. Recent work considers D-CALIBRATION [Haider et al., 2020], a holistic measure of calibration of time-until-event that measures calibration of distributions.
+In this work, we propose to improve calibration by augmenting traditional objectives for survival modeling with a differentiable approximation of D-CALIBRATION, which we call explicit calibration (X-CAL). X-CAL is a plug-in objective that reduces obtaining good calibration to an optimization problem amenable to data sub-sampling. X-CAL helps build well-calibrated versions of many existing models and controls calibration during training. In our experiments 2, we ﬁt a variety of shallow and deep models on simulated data, a survival dataset based on MNIST, on length-of-stay prediction using MIMIC-III data, and on brain cancer data from The Cancer Genome Atlas. We show that the models we study can be miscalibrated. We give experimental evidence on these datasets that X-CAL improves D-CALIBRATION without a large decrease in concordance or likelihood. 2 Deﬁning and Evaluating Calibration in Survival Analysis
+Survival analysis models the time t > 0 until an event, called the failure time. t is often assumed to be conditionally distributed given covariates x. Unlike typical regression problems, there may also be censoring times c that determine whether t is observed. We focus on right-censoring in this work, with observations (u, δ, x) where u = min(t, c) and δ = 1 [t < c]. If δ = 1 then u is a failure time. Otherwise u is a censoring time and the datapoint is called censored. Censoring times may be constant or random. We assume censoring-at-random: t ⊥⊥ c | x.
+We denote the joint distribution of (t, x) by P and the conditional cumulative distribution function (CDF) of t | x by F (sometimes denoting the marginal CDF by F when clear). Whenever distributions or CDFs have no subscript parameters, they are taken to be true data-generating distributions and when they have parameters θ they denote a model. We give more review of key concepts, deﬁnitions, and common survival analysis models in Appendix A. 2.1 Deﬁning Calibration
+We ﬁrst establish a common deﬁnition of calibration for binary outcome. Let x be covariates and let d be a binary outcome distributed conditional on x. Let them have joint distribution P (d, x). Deﬁne riskθ(x) as the modeled probability Pθ(d = 1 | x), a deterministic function of x. Pepe and Janes
+[2013] deﬁne calibration as the condition that
+P(d = 1 | riskθ(x) = r) =≈ r.
+That is, the frequency of events is r among subjects whose modeled risks are equal to r. For a survival problem with joint distribution P (t, x), we can deﬁne risk to depend on an observed failure time (1) 2Code is available at https://github.com/rajesh-lab/X-CAL 2
+instead of the binary outcome d = 1. With Fθ as the model CDF, the deﬁnition of risk for survival analysis becomes riskθ(t, x) = Fθ(t | x), a deterministic function of (t, x). Then perfect calibration is the condition that, for all sub-intervals I = [a, b] of [0, 1],
+P(riskθ(t, x) ∈ I) = E
+P (t,x) 1 [Fθ(t | x) ∈ I] = |I|. (2)
+This is because, for continuous F (an assumption we keep for the remainder of the text), CDFs transform samples of their own distribution to Unif(0, 1) variates. Thus, when model predictions are perfect and Fθ = F , the probability that Fθ(t | x) takes a value in interval I is equal to |I|. Since the expectation is taken over x, the same holds when Fθ(t | x) = F (t), the true marginal CDF. 2.2 Evaluating Calibration
+Classical tests and their recent modiﬁcations assess calibration of survival models for a particular time of interest t∗ by comparing observed versus modeled event frequencies [Lemeshow and Hosmer Jr, 1982, Grønnesby and Borgan, 1996, D’agostino and Nam, 2003, Royston and Altman, 2013, Demler et al., 2015, Yadlowsky et al., 2019]. They apply the condition in Equation (1) for the classiﬁcation task t < t∗ | x. These tests are limited in two ways 1) it is not clear how to combine calibration assessments over the entire range of possible time predictions [Haider et al., 2020] and 2) they answer calibration in a rigid yes/no fashion with hypothesis testing. We brieﬂy review these tests in
+Appendix A.
+D-CALIBRATION Haider et al. [2020] develop distributional calibration (D-CALIBRATION) to test the calibration of conditional survival distributions across all times. D-CALIBRATION uses the condition in Equation (2) and checks the extent to which it holds by evaluating the model conditional
+CDF on times in the data and checking that these CDF evaluations are uniform over [0, 1]. This uniformity ensures that observed and predicted numbers of events within each time interval match.
+To set this up formally, recall that F denotes the unknown true CDF. For each individual x, let
+Fθ(t | x) denote the modeled CDF of time-until-failure. To measure overall calibration error, D-CALIBRATION accumulates the squared errors of the equality condition in Equation (2) over sets
+I ∈ I that cover [0, 1]:
+R(θ) := (cid:18)
+E
+P (t,x) (cid:88)
+I∈I 1 [Fθ(t | x) ∈ I] − |I| (cid:19)2
+. (3)
+The collection I is chosen to contain disjoint contiguous intervals I ⊆ [0, 1], that cover the whole interval [0, 1]. Haider et al. [2020] perform a χ2-test to determine whether a model is well-calibrated, replacing the expectation in Equation (3) with a Monte Carlo estimate.
+Properties Setting aside the hypothesis testing step, we highlight two key properties of D-CALIBRATION. First, D-CALIBRATION is zero for the correct conditional model. This ensures that the correct model is not wrongly mischaracterized as miscalibrated. Second, for a given model class and dataset, smaller D-CALIBRATION means a model is more calibrated. This means that it makes sense to minimize D-CALIBRATION. Next, we make use of these properties and turn
+D-CALIBRATION into a differentiable objective. 3 X-CAL: A Differentiable Calibration Objective
+We measure calibration error with D-CALIBRATION (Equation (3)) and propose to incorporate it into our training and minimize it directly. However, the indicator function 1 [·] poses a challenge for optimization. Instead, we derive a soft version of D-CALIBRATION using a soft set membership function. We then develop an upper-bound to soft D-CALIBRATION that we call X-CAL that supports subsampling for stochastic optimization with batch data. 3.1 Soft Membership D-CALIBRATION
+We replace the membership indicator for a set I with a differentiable function. Let γ > 0 be a temperature parameter. Let σ(x) = (1 + exp[−x])−1. For point u and the set I = [a, b], deﬁne soft 3
+membership ζγ as
+ζγ(u; I) := σ(γ(u − a)(b − u)), (4) where γ → ∞ makes membership exact. This is visualized in Figure 2 in Appendix G. We propose the following differentiable approximation to Equation (3), which we call soft D-CALIBRATION, for use in a calibration objective:
+ˆRγ(θ) := (cid:18) (cid:88)
+I∈I
+E
+P (t,x)
+ζγ (Fθ(t | x); I) − |I|
+. (cid:19)2 (5)
+We ﬁnd that γ = 104 allows for close-enough approximation to optimize exact D-CALIBRATION. 3.2 Stochastic Optimization via Jensen’s Inequality
+Soft D-CALIBRATION squares an expectation over the data, meaning that its gradient includes a product of two expectations over the same data. Due to this, it is hard to obtain a low-variance, unbiased gradient estimate with batches of data, which is important for models that rely on stochastic optimization. To remedy this, we develop an upper-bound on soft D-CALIBRATION, which we call
+X-CAL, whose gradient has an easier unbiased estimator.
+Let Rγ,θ(t, x, I) denote the contribution to soft D-CALIBRATION error due to one set I and a single sample (t, x) in Equation (5): Rγ,θ(t, x, I) := ζγ (Fθ(t | x); I) − |I|. Then soft D-CALIBRATION can be written as:
+ˆRγ(θ) = (cid:18) (cid:88)
+I∈I
+E
+P (t,x) (cid:19)2
+Rγ,θ(t, x, I)
+.
+For each term in the sum over sets I, we proceed by in two steps. First, replace the expectation over data EP with an expectation over sets of samples ES∼P M of the mean of Rγ,θ where S is a set of size M . Second, use Jensen’s inequality to switch the expectation and square.
+ˆRγ(θ) =
+
+ E
+S∼P M 1
+M (cid:88)
+I∈I (cid:88) t,x∈S
+ 2
+Rγ,θ(t, x, I)
+
+≤ E
+S∼P M
+
+ 1
+M (cid:88)
+I∈I (cid:88) t,x∈S
+ 2
+Rγ,θ(t, x, I)
+
+. (6)
+γ (θ). To summarize, limγ→∞ ˆRγ(θ) = R(θ)
+We call this upper-bound X-CAL and denote it by ˆR+ by soft indicator approximation and ˆRγ(θ) ≤ ˆR+
+γ (θ) by Jensen’s inequality. As M → ∞, the slack introduced due to Jensen’s inequality vanishes (in practice we are constrained by the size of the dataset). We now derive the gradient with respect to θ, using ζ (cid:48)(u) = dζ du (u): d ˆR+
+γ dθ
+= E
+S∼P M 2
+M 2 (cid:88)
+I∈I (cid:88) t,x∈S (cid:18)
+Rγ,θ(t, x, I)
+ζ (cid:48)
+γ (Fθ(t | x); I) (cid:19) (t | x)
+. dFθ dθ (7)
+We estimate Equation (7) by sampling batches S of size M from the empirical data.
+Analyzing this gradient demonstrates how X-CAL works. If the fraction of points in bin I is larger than |I|, X-CAL pushes points out of I. The gradient of ζγ pushes points in the ﬁrst half of the bin to have smaller CDF values and similarly points in the second half are pushed upwards.
+While this works well for intervals not at the boundary of [0, 1], some care must be taken at the boundaries. CDF values in the last bin may be pushed to one and unable to leave the bin. Since the maximum CDF value is one, 1 [u ∈ [a, 1]] = 1 [u ∈ [a, b]] for any b > 1. Making use of this property,
+X-CAL extends the right endpoint of the last bin so that all CDF values are in the ﬁrst half of the bin and therefore are pushed to be smaller. The boundary condition near zero is similar. We provide further analysis in Appendix I.
+X-CAL can be added to loss functions such as negative log likelihood (NLL) and other survival modeling objectives such as Survival-CRPS (CRPS) [Avati et al., 2019]. For example, the full
+X-CALIBRATED maximum likelihood objective for a model Pθ and λ > 0 is: min
+θ
+E
+P (t,x)
+− log Pθ(t | x) + λ ˆR+
+γ (θ). (8) 4
+Choosing γ For small γ, soft D-CALIBRATION is a poor approximation to D-CALIBRATION. For large γ, gradients vanish, making it hard to optimize D-CALIBRATION. We ﬁnd that setting γ = 10000 worked in all experiments. We evaluate the choice of γ in Appendix G.
+Bound Tightness The slack in Jensen’s inequality does not adversely affect our experiments in practice. We successfully use small batches, e.g. < 1000, for datasets such as MNIST. We always report exact D-CALIBRATION in the results. We evaluate the tightness of this bound and show that models ordered by the upper-bound are ordered in D-CALIBRATION the same way in Appendix H. 3.3 Handling Censored Data
+In presence of right-censoring, failure times are censored more often than earlier times. So, applying the true CDF to only uncensored failure times results in a non-uniform distribution skewed to smaller values in [0, 1]. Censoring must be taken into account.
+Let x be a censored point with observed censoring time u and unobserved failure time t. Recall that δ = 1 [t < c]. In this case c = u = u and δ = 0. Let Ft = F (t | x), Fc = F (c | x), and
+Fu = F (u | x). We ﬁrst state the fact that, under t ⊥⊥ c | x, a datapoint observed to be censored at time u has Ft ∼ Unif(Fu, 1) for true CDF F (proof in Appendix C). This means that we can compute the probabilty that t falls in each bin I = [a, b]:
+P(Ft ∈ I | δ = 0, u, x) = (b − Fu)1 [Fu ∈ I] 1 − Fu
++ (b − a)1 [Fu < a] 1 − Fu
+, (9)
+Haider et al. [2020] make this observation and suggest a method for handling censoring points: they contribute P(Ft ∈ I | δ = 0, u, x) in place of the unobserved 1 [Ft ∈ I]: (cid:105) (cid:17)2 (cid:16) (cid:104)
+δ1 [Fu ∈ I] + (1 − δ)P(Ft ∈ I | δ, u, x)
+− |I| (10) (cid:88)
+.
+E u,δ,x
+I∈I
+This estimator does not change the expectation deﬁning D-CALIBRATION, thereby preserving the property that D-CALIBRATION is 0 for a calibrated model. We soften Equation (9) with:
+ζγ,cens(Fu; I) := (b − Fu)σ(γ(Fu − a)(b − Fu)) (1 − Fu)
++ (b − a)σ(γ(a − Fu)) (1 − Fu)
+, where we have used a one-sided soft indicator for 1 [Fu < a] in the right-hand term. We use ζγ,cens in place of ζγ for censored points in soft D-CALIBRATION. This gives the following estimator for soft D-CALIBRATION with censoring: (cid:88) (cid:16)
+I∈I
+E u,δ,x (cid:104) (cid:105)
+δζγ(Fθ(u | x); I) + (1 − δ)ζγ,cens(Fθ(u | x); I) (cid:17)2
+.
+− |I| (11)
+The upper-bound of Equation (11) and its corresponding gradient can be derived analogously to the uncensored case. We use these in ours experiments on censored data. 4 Experiments
+We study how X-CAL allows the modeler to optimize for a speciﬁed balance between prediction and calibration. We augment maximum likelihood estimation with X-CAL for various settings of coefﬁcient λ, where λ = 0 corresponds to vanilla maximum likelihood. Maximum likelihood for survival analysis is described in Appendix A (Equation (12)). For the log-normal experiments, we also use Survival-CRPS (CRPS) [Avati et al., 2019] with X-CAL since S-CRPS enjoys a closed-form for log-normal. S-CRPS was developed to produce calibrated survival models but it optimizes neither a calibration measure nor a traditional likelihood. See Appendix B for a description of S-CRPS.
+Models, Optimization, and Evaluation We use log-normal, Weibull, Categorical and Multi-Task
+Logistic Regression (MTLR) models with various linear or deep parameterizations. For the discrete models, we optionally interpolate their CDF (denoted in the tables by NI for not-interpolated and I for interpolated). See Appendix E for general model descriptions. Experiment-speciﬁc model details may be found in Appendix F. We use γ = 10000. We use 20 D-CALIBRATION bins disjoint over 5
+[0, 1] for all experiments except for the cancer data, where we use 10 bins as in Haider et al. [2020].
+For all experiments, we measure the loss on a validation set at each training epoch to chose a model to report test set metrics with. We report the test set NLL, test set D-CALIBRATION and Harrell’s
+Concordance Index [Harrell Jr et al., 1996] (abbreviated CONC) on the test set for several settings of
+λ. We compute concordance using the Lifelines package [Davidson-Pilon et al., 2017]. All reported results are an average of three seeds.
+Data We discuss differences in performance on simulated gamma data, semi-synthetic survival data where times are conditional on the MNIST classes, length of stay prediction in the Medical Information
+Mart for Intensive Care (MIMIC-III) dataset [Johnson et al., 2016], and glioma brain cancer data from
+The Cancer Genome Atlas (TCGA). Additional data details may be found in Appendix D. 4.1 Experiment 1: Simulated Gamma Times with Log-Linear Mean
+Data We design a simulation study to show that a conditional distribution may achieve good concordance and likelihood but will have poor D-CALIBRATION. After adding X-CAL, we are able to improve the exact D-CALIBRATION. We sample x ∈ R32 from a multivariate normal with
+σ2 = 10.0. We sample times t conditionally from a gamma with mean µ that is log-linear in x and constant variance 1e-3. The censoring times c are drawn like the event times, except with a different coefﬁcient for the log-linear function. We experiment with censored and uncensored simulations, where we discard c and always observe t for uncensored. We sample a train/validation/test sets with 100k/50k/50k datapoints, respectively.
+Results Due to high variance in x and low conditional variance, this simulation has low noise. With large, clean data, this experiment validates the basic method on continuous and discrete models in the presence of censoring. Table 1 demonstrates how increasing λ gracefully balances D-CALIBRATION with NLL and concordance for different models and objectives: log-normal trained via NLL and with
+S-CRPS, and the categorical model trained via NLL, without CDF interpolation. For results on more models and choices of λ see Table 9 for uncensored results and Table 10 for censored in Appendix J.
+Table 1: Gamma simulation, censored
+λ 0 1 10 100 500
+Log-Norm NLL
+NLL
+D-CAL
+CONC
+-0.059 0.029 0.981
+-0.049 0.020 0.969
+Log-Norm NLL
+S-CRPS
+D-CAL
+CONC
+Cat-NI
+NLL
+D-CAL
+CONC 0.038 0.017 0.982 0.797 0.009 0.987 0.084 0.007 0.978 0.799 0.006 0.987 0.004 0.005 0.942 0.143 0.001 0.963 0.822 0.002 0.987 0.138 2e-4 0.916 0.201 1e-4 0.950 1.149 2e-4 0.976 0.191 6e-5 0.914 0.343 5e-5 0.850 1.665 6e-5 0.922 1000 0.215 7e-5 0.897 0.436 8e-5 0.855 1.920 6e-5 0.861 4.2 Experiment 2: Semi-Synthetic Experiment: Survival MNIST
+Data Following Pölsterl [2019], we simulate a survival dataset conditionally on the MNIST dataset
+[LeCun et al., 2010]. Each MNIST label gets a deterministic risk score, with labels loosely grouped together by risk groups (Table 5 in Appendix D.2). Datapoint image xi with label yi has time ti drawn from a Gamma with mean equal to risk(yi) and constant variance 1e-3. Therefore ti ⊥⊥ xi | yi and times for datapoints that share an MNIST class are identically drawn. We draw censoring times c uniformly between the minimum failure time and the 90th percentile time, which resulted in about 50% censoring. We use PyTorch’s MNIST with test split into validation/test. The model does not see the MNIST class and learns a distribution over times given pixels xi. We experiment with censored and uncensored simulations, where we discard c and always observe t for uncensored.
+Results This semi-synthetic experiment tests the ability to tune calibration in presence of a high-dimensional conditioning set (MNIST images) and through a typical convolutional architecture. Table 2 6
+demonstrates that the deep log-normal models started off miscalibrated relative to the categorical model for λ = 0 and that all models were able to signiﬁcantly improve in calibration. See Table 11 and Table 12 for more uncensored and censored survival-MNIST results.
+Table 2: Survival-MNIST, censored 100 10 1 0
+λ
+Log-Norm NLL
+NLL
+D-CAL
+CONC
+Log-Norm NLL
+S-CRPS
+D-CAL
+CONC
+Cat-NI
+NLL
+D-CAL
+CONC 4.337 0.392 0.902 4.950 0.215 0.891 1.733 0.018 0.945 4.377 0.074 0.873 4.929 0.122 0.881 1.734 0.014 0.945 4.483 0.020 0.794 4.859 0.051 0.874 1.765 0.004 0.927 4.682 0.005 0.696 4.749 0.010 0.868 1.861 5e-4 0.919 500 4.914 0.005 0.628 4.786 0.002 0.839 2.074 5e-4 0.862 1000 5.151 0.007 0.573 4.877 9e-4 0.815 3.030 4e-4 0.713 4.3 Experiment 3: Length of Stay Prediction in MIMIC-III
+Data We predict the length of stay (in number of hours) in the ICU, using data from the MIMIC-III dataset. Such predictions are important both for individual risk predictions and prognoses and for hospital-wide resource management. We follow the preprocessing in Harutyunyan et al. [2017], a popular MIMIC-III benchmarking paper and repository 3. The covariates are a time series of 17 physiological variables (Table 6 in Appendix D.3) including respiratory rate and glascow coma scale information. There is no censoring in this task. We skip imputation and instead use missingness masks as features. There are 2, 925, 434 and 525, 912 instances in the training and test sets. We split the training set in half for train and validation.
+Results Harutyunyan et al. [2017] discuss the difﬁcult of this task when predicting ﬁne-grained lengths-of-stay, as opposed to simpler classiﬁcation tasks like more/less one week stay. The true conditionals are high in entropy given the chosen covariates Table 3 demonstrates this difﬁculty, as can be seen in the concordances. We report the categorical model with and without CDF interpolation and the log-normal trained with S-CRPS. NLL for the log-normal is not reported because S-CRPS does not optimize NLL and did poorly on this metric. The log-normal trained with NLL was not able to ﬁt this task on any of the three metrics. All three models reported are able to reduce D-CALIBRATION.
+Results for all models and more choices of λ may be found in Table 13. The categorical models with and without CDF interpolation match in concordance for λ = 0 and λ = 1000. However, the interpolated model achieves better D-CALIBRATION. This may be due to the lower-bound (cid:96) > 0 on a discrete model’s D-CALIBRATION (Appendix E).
+Table 3: MIMIC-III length of stay 100 10 0 1
+λ
+Log-Norm D-CAL
+S-CRPS
+CONC
+Cat-NI
+Cat-I
+Test NLL
+D-CAL
+CONC
+NLL
+D-CAL
+CONC 0.859 0.625 3.142 0.002 0.702 3.142 4e-4 0.702 0.639 0.639 3.177 0.002 0.700 3.075 2e-4 0.702 0.155 0.575 3.167 0.001 0.699 3.073 2e-4 0.702 0.046 0.555 3.088 2e-4 0.690 3.073 1e-4 0.695 3https://github.com/YerevaNN/mimic3-benchmarks 7 500 0.009 0.528 3.448 1e-4 0.642 3.364 5e-5 0.638 1000 0.005 0.506 3.665 1e-4 0.627 3.708 4e-5 0.627
+4.4 Experiment 4: Glioma data from The Cancer Genome Atlas
+We use the glioma (a type of brain cancer) dataset 4 collected as part of the TCGA program and studied in [Network, 2015]. We focus on predicting time until death from the clinical data, which includes tumor tissue location, time of pathological diagnosis, Karnofsky performance score, radiation therapy, demographic information, and more. Censoring means they did not pass away. The train/validation/test sets are made of 552/276/277 datapoints respectively, of which 235/129/126 are censored, respectively.
+Results For this task, we study the Weibull AFT model, reduce the deep log-normal model from three to two hidden layers, and study a linear MTLR model (with CDF interpolation) in place of the deep categorical due to the small data size. MTLR is more constrained than linear categorical due to shared parameters. Table 4 demonstrates these three models’ ability to improve D-CALIBRATION.
+MTLR is able to ﬁt well and does not give up much concordance. Results for all models and more choices of λ may be found in Table 14.
+Table 4: The Cancer Genome Atlas, glioma
+λ 100 10 1 0
+Log-Norm NLL
+NLL
+D-CAL
+CONC
+Weibull
+MTLR-NI
+NLL
+D-CAL
+CONC
+NLL
+D-CAL
+CONC 14.187 0.059 0.657 4.436 0.035 0.788 1.624 0.009 0.828 6.585 0.024 0.632 4.390 0.028 0.785 1.620 0.007 0.829 4.639 0.010 0.703 4.292 0.009 0.777 1.636 0.005 0.824 4.181 0.003 0.805 4.498 0.003 0.702 1.658 0.003 0.818 500 4.403 0.002 0.474 4.475 0.004 0.608 1.748 0.002 0.788 1000 4.510 0.004 0.387 4.528 0.007 0.575 1.758 0.002 0.763 5

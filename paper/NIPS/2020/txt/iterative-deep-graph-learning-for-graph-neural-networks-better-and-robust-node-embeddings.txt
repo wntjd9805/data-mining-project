@@ -1,0 +1,474 @@
+Abstract
+In this paper, we propose an end-to-end graph learning framework, namely Iterative
+Deep Graph Learning (IDGL), for jointly and iteratively learning graph structure and graph embedding. The key rationale of IDGL is to learn a better graph structure based on better node embeddings, and vice versa (i.e., better node embeddings based on a better graph structure). Our iterative method dynamically stops when the learned graph structure approaches close enough to the graph optimized for the downstream prediction task. In addition, we cast the graph learning problem as a similarity metric learning problem and leverage adaptive graph regularization for controlling the quality of the learned graph. Finally, combining the anchor-based approximation technique, we further propose a scalable version of IDGL, namely IDGL-ANCH, which signiﬁcantly reduces the time and space complexity of
+IDGL without compromising the performance. Our extensive experiments on nine benchmarks show that our proposed IDGL models can consistently outperform or match the state-of-the-art baselines. Furthermore, IDGL can be more robust to adversarial graphs and cope with both transductive and inductive learning. 1
+
+Introduction
+Recent years have seen a signiﬁcantly growing amount of interest in graph neural networks (GNNs), especially on efforts devoted to developing more effective GNNs for node classiﬁcation [29, 36, 17, 52], graph classiﬁcation [60, 43] and graph generation [47, 37, 61]. Despite GNNs’ powerful ability in learning expressive node embeddings, unfortunately, they can only be used when graph-structured data is available. Many real-world applications naturally admit network-structured data (e.g., social networks). However, these intrinsic graph-structures are not always optimal for the downstream tasks.
+This is partially because the raw graphs were constructed from the original feature space, which may not reﬂect the “true" graph topology after feature extraction and transformation. Another potential reason is that real-world graphs are often noisy or even incomplete due to the inevitably error-prone data measurement or collection. Furthermore, many applications such as those in natural language processing [7, 57, 58] may only have sequential data or even just the original feature matrix, requiring additional graph construction from the original data matrix.
+To address these limitations, we propose an end-to-end graph learning framework, namely Iterative
+Deep Graph Learning (IDGL), for jointly and iteratively learning the graph structure and the GNN parameters that are optimized toward the downstream prediction task. The key rationale of our IDGL
+˚Corresponding author. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Figure 1: Overall architecture of the proposed IDGL framework. Dashed lines (in data points on left) indicate the initial noisy graph topology Ap q (if not available we use a kNN graph). 0 framework is to learn a better graph structure based on better node embeddings, and at the same time, to learn better node embeddings based on a better graph structure. In particular, IDGL is a novel iterative method that aims to search for an implicit graph structure that augments the initial graph structure (if not available we use a kNN graph) with the goal of optimizing the graph for downstream prediction tasks. The iterative method adjusts when to stop in each mini-batch when the learned graph structure approaches close enough to the graph optimized for the downstream task.
+Furthermore, we present a graph learning neural network that uses multi-head self-attention with epsilon-neighborhood sparsiﬁcation for constructing a graph. Moreover, unlike the work in [25] that directly optimizes an adjacency matrix without considering the downstream task, we learn a graph metric learning function by optimizing a joint loss combining both task-speciﬁc prediction loss and graph regularization loss. Finally, we further propose a scalable version of our IDGL framework, namely IDGL-ANCH, by combining the anchor-based approximation technique, which reduces the time and memory complexity from quadratic to linear with respect to the numbers of graph nodes.
+In short, we summarize the main contributions as follows:
+•
+•
+•
+We propose a novel end-to-end graph learning framework (IDGL) for jointly and iteratively learning the graph structure and graph embedding. IDGL dynamically stops when the learned graph structure approaches the optimized graph (for prediction). To the best of our knowledge, we are the ﬁrst to introduce iterative learning for graph structure learning.
+Combining the anchor-based approximation technique, we further propose a scalable version of IDGL, namely IDGL-ANCH, which achieves linear complexity in both computational time and memory consumption with respect to the number of graph nodes.
+Experimental results show that our models consistently outperform or match the state-of-the-art baselines on various downstream tasks. More importantly, IDGL can be more robust to adversarial graph examples and can cope with both transductive and inductive learning. 2
+Iterative Deep Graph Learning Framework 2.1 Problem Formulation 0
+ˆ
+P
+P 0 q
+G “ pV n, edges
+ˆ
+Rn be represented as a set of n nodes vi P V
+,
+Eq vi, vjq P E p n, and a degree matrix Dp with an initial node feature matrix
+Let the graph
+Rd
+X (binary or weighted) formulating an initial noisy adjacency matrix 0 q, X
+Ap qij . Given a noisy graph input u n, the deep graph learning problem we consider in this paper is
+Rd or only a feature matrix X
+ˆ
+˚ : and its corresponding graph node embeddings to produce an optimized graph n, with respect to some (semi-)supervised downstream task. It is worth noting
+Z that we assume that the graph noise is only from graph topology (the adjacency matrix) and the node feature matrix X is noiseless. The more challenging scenario where both graph topology and node feature matrix are noisy, is part of our future work. Without losing the generality, in this paper, we consider both node-level and graph-level prediction tasks.
+∞
+Ap˚q, X qii “ j Ap
+“ t
+“ t
+Rh
+˚,✓
+Ap q P pG
+“
+G
+G
+P f u
+ˆ 0
+: 2.2 Graph Learning and Graph Embedding: A Uniﬁed Perspective
+Graph topology is crucial for a GNN to learn expressive graph node embeddings. Most of existing
+GNN methods simply assume that the input graph topology is perfect, which is not necessarily true 2
+in practice since real-world graphs are often noisy or incomplete. More importantly, the provided input graph(s) may not be ideal for the supervised downstream tasks since most of raw graphs are constructed from the original feature space which may fail to reﬂect the “true” graph topology after high-level feature transformations. Some previous works [52] mitigate this issue by reweighting the importance of neighborhood node embeddings using self-attention on previously learned node embeddings, which still assumes that the original graph connectivity information is noiseless.
+To handle potentially noisy input graph, we propose our novel
+IDGL framework that formulates the problem as an itera-tive learning problem which jointly learns the graph structure and the GNN parameters. The key rationale of our IDGL framework is to learn a better graph structure based on better node embeddings, and in the meanwhile, to learn better node embeddings based on a better graph structure, as shown in
+Fig. 2. Unlike most existing methods that construct graphs based on raw node features, the node embeddings learned by
+GNNs (optimized toward the downstream task) could provide useful information for learning better graph structures. On the other hand, the newly learned graph structures could be a better graph input for GNNs to learn better node embeddings.
+Figure 2: A sketch of the proposed
+IDGL framework.
+In particular, IDGL is a novel iterative method that aims to search for an implicit graph structure that augments the initial graph structure (if not available we use a kNN graph) for downstream prediction tasks. The iterative method dynamically stops in each mini-batch when the learned graph structure approaches close enough to the optimized graph (with respect to the downstream task) based on our proposed stopping criterion. Moreover, the process of graph construction can be optimized toward the downstream task in an end-to-end manner. 2.3 Graph Learning as Similarity Metric Learning
+Previous methods (e.g., [15]) that model the graph learning problem as learning a joint discrete probability distribution on the edges of the graph have shown promising performance. However, since they optimize the edge connectivities by assuming that the graph nodes are known, they are unable to cope with the inductive setting (with new nodes during testing). To overcome this issue, we cast the graph structure learning problem as similarity metric learning, which will be jointly trained with the prediction model dedicated to a downstream task.
+Graph similarity metric learning. Common options for metric learning include cosine similar-ity [44, 54], radial basis function (RBF) kernel [59, 34] and attention mechanisms [51, 23]. A good similarity metric function is supposed to be learnable and expressively powerful. Although our framework is agnostic to various similarity metric functions, without loss of generality, we design a weighted cosine similarity as our metric function, sij “ denotes the
+Hadamard product, and w is a learnable weight vector which has the same dimension as the input vectors vi and vj, and learns to highlight different dimensions of the vectors. Note that the two input vectors could be either raw node features or computed node embeddings. w cos p
+, where vjq vi, w d d d
+To stabilize the learning process and increase the expressive power, we extend our similarity metric function to a multi-head version (similar to the observations in [51, 52]). Speciﬁcally, we use m weight vectors (each one representing one perspective) to compute m independent similarity matrices using the above similarity function and take their average as the ﬁnal similarity: sp ij “ wp d cos p vi, wp d
+, vjq sij “ 1 m m sp ij (1) 1 p
+ÿ
+“
+Intuitively, sp perspective, where each perspective considers one part of the semantics captured in the vectors. ij computes the cosine similarity between the two input vectors vi and vj, for the p-th
+Graph sparsiﬁcation via "-neighborhood. Typically an adjacency matrix (computed from a metric) is supposed to be non-negative but sij ranges between
+. In addition, many underlying graph structures are much more sparse than a fully connected graph which is not only computationally expensive but also might introduce noise (i.e., unimportant edges). We hence proceed to extract a symmetric sparse non-negative adjacency matrix A from S by considering only the "-neighborhood 1, 1 r´ s 3
+for each node. Speciﬁcally, we mask off (i.e., set to zero) those elements in S which are smaller than a non-negative threshold ".
+Anchor-based scalable metric learning. The above similarity metric function like Eq. (1) computes similarity scores for all pairs of graph nodes, which requires complexity for both computational time and memory consumption, rendering signiﬁcant scalablity issue for large graphs. To address the scalability issue, inspired by previous anchor-based methods [41, 55], we design an anchor-based s (i.e., requires scalable metric learning technique which learns a node-anchor afﬁnity matrix R
+Op n2 q ns for both time and space complexity where s is the number of anchors) between the node set
+Rn
+ˆ
+P
+. Note that s is a hyperparameter which is tuned on the development set.
+V
+Op and the anchor set q
+U
+Speciﬁcally, we randomly sample a set of s
+, where s is usually much smaller than n in large graphs. The anchor embeddings are thus set to the corresponding node embeddings. Therefore, Eq. (1) can be rewritten as the following: anchors from the node set
+P U
+V ap ik “ wp d cos p vi, wp d
+, ukq aik “ 1 m m 1 p
+ÿ
+“ ap ik (2) where aik is the afﬁnity score between node vi and anchor uk. Similarly, we apply the "-neighborhood sparsiﬁcation technique to the node-anchor afﬁnity scores aik to obtain a sparse and non-negative node-anchor afﬁnity matrix R. 2.4 Graph Node Embeddings and Prediction
+Although the initial graph could be noisy, it typically still carries rich and useful information regarding true graph topology. Ideally, the learned graph structure A could be supplementary to the original graph topology Ap q to formulate an optimized graph for GNNs with respect to the downstream task.
+Therefore, with the mild assumption that the optimized graph structure is potentially a “shift” from the initial graph structure, we combine the learned graph with the initial graph, 0 (3) t
+Ap t q
+“
+ Lp 0 q 1
+` p 2
+ 
+´
+⌘ f q
+! t q
+Ap p 1 q ` p
+⌘ q
+Ap f p
+´ 1 q q
+) 0 0 1 q´ 2 r
+{ 0 0 1 q´ q
+{ 1
+“
+Ap
+Dp qDp is the normalized adjacency matrix of the initial graph. Ap q q are the two adjacency matrices computed at the t-th and 1-st iterations (using Eq. (1)), where Lp 1 and Ap
+A respectively. The adjacency matrix is further row normalized, namely, f p q is computed from the raw node features X, whereas Ap 1 qij “ t
+∞
+Note that Ap q is computed from the previously updated node embeddings Zp q that is optimized toward the downstream prediction task. Therefore, we make the ﬁnal learned graph structure as their linear combination weighted by a hyperparameter ⌘, so as to combine the advantages of both. Finally, another hyperparameter   is used to balance the trade-off between the learned graph structure and the initial graph structure. If such an initial graph structure is not available, we instead use a kNN graph constructed based on raw node features X using cosine similarity.
+Aij{ j Aij.
+´ t
+Our graph learning framework is agnostic to various GNN architectures (that take as input a node feature matrix and an adjacency matrix to compute node embeddings) and prediction tasks. In this paper, we adopt a two-layered GCN [29] where the ﬁrst layer (denoted as GNN1) maps the raw node features X to the intermediate embedding space, and the second layer (denoted as GNN2) further maps the intermediate node embeddings Z to the output space.
+Z
+“
+ReLU
+MP p
+X, p
+A
+,
+W1q q y
+ 
+Z,
+MP p p
+A
+,
+W2q q
+“
+Lpred “
+` y, y p q (4) and ` where   p¨q p¨q for a classiﬁcation task,   set of classes, and ` p¨q message passing function, and in GCN, MP normalized adjacency matrix are task-dependent output function and loss function, respectively. For instance, r is a softmax function for predicting a probability distribution over a is a
+AF for a feature/embedding matrix F and is a cross-entropy function for computing the prediction loss. MP
+F, p
+A which we obtain using Eq. (3).
+, p¨ q “ p¨q
+A
+¨q p p r r
+Node-anchor message passing. Note that a node-anchor afﬁnity matrix R serves as a weighted adjacency matrix of a bipartite graph allowing only direct connections between nodes and anchors.
+If we regard a direct travel between a node and an anchor as one-step transition described by R, built
+B r r 4
+upon theories of stationary Markov random walks [42], we can actually recover both the node graph n from R by computing the two-step transition probabilities. Let A and the anchor graph
+G vj| denote a row-normalized adjacency matrix for the node graph p two-step transition probability from node vi to node vj, A can be recovered from R,
+, and Aij “ pp
+Q
+G 2 q viq
+Rn indicate the
+P
+ˆ where ⇤
+“
+Similarly, we can recover the row-normalized adjacency matrix B s (⇤kk “
+Rn
+Rs
+P
+P
+“
+ˆ
+ˆ
+A
+ ´
+“ 1 Rik) and   n i
+∞
+B
+⇤´
+“ 1R⇤´ 1RJ n ( ii “ 1R 1RJ ´ s k
+∞ 1 Rik) are both diagonal matrices. s for the anchor graph
+,
+P
+Rs
+ˆ (5)
+Q (6) n2
+Op n2s
+) and space complexity ( q
+A detailed proof of recovering node and anchor graphs from the afﬁnity matrix is provided in Ap-pendix A.1. While explicitly computing a node adjacency matrix A from R (Eq. (5)) and directly performing message passing over the node graph (Eq. (4)) are expensive in both time complexity
+G
+), one can instead equivalently decompose the above process (
+Op q (denoted as MP12) into two steps: i) node-to-anchor message passing MP1 and ii) anchor-to-node message passing MP2, over the node-anchor bipartite graph
+MP12p q 1RJF aims to pass message F from the nodes
+, and where MP1p q “ 1RF1 aims to further pass the message F1 aggregated on the anchors back to
+F1, R
+MP2p 1R⇤´
+AF where A is the node the nodes. Finally, we can obtain MP12p q “ adjacency matrix recovered from R using Eq. (5). In this way, we reduce both time and space ns
+. Therefore, we can rewrite the regular node embedding and prediction equations complexity to q deﬁned in Eqs. (3) and (4) as follows,
+, formulated as follows,
+MP1p to the anchors
+, F1 q
+MP2p 1RJF
+F1, R
+F, R
+F, R
+F, R
+F, R
+ ´
+ ´ q “
+⇤´ q “
+Op (7)
+“
+“
+B
+U
+V
+ReLU
+Z
+“
+, where MPap¨
+Lp
+MPa t
+F, p
+¨q 0 q, Rp 0 t 1
+Lp
+X,
+MPap
+“ p is a hybrid message passing function with the same spirit of Eq. (3), deﬁned as,
+MPap p
+,
+W1q uq
+W2q uq q, Rp q, Rp q, Rp q, Rp
+Lp
+Z, y
+  t t q q 0 t 1 (8) t q, Rp 1 q
+F, Lp
+ MP p 0 q 1 q ` p
+´ uq “ p
+ 
+⌘MP12 q
+!
+F, Rp p t q 1 q ` p
+⌘
+MP12 q
+F, Rp p
+´ 1 q q
+)(9)
+Note that we use the same MP
+Lp 0
+, p¨
+¨q q which is typically sparse in practice, and F can either be X or Z. function deﬁned in Eq. (4) for performing message passing over 2.5 Graph Regularization
+Although combining the learned graph Ap the optimaized graph, the quality of the learned graph Ap t quality of the ﬁnal graph sparsity of the resulting learned graph Ap to the initial node attributes X and the downstream task. q is an effective way to approach q plays an important role in improving the q. In practice, it is important to control the smoothness, connectivity and q, which faithfully reﬂects the graph topology with respect q with the initial graph Ap
+Ap t t r 0 t
+Let each column of the feature matrix X be considered as a graph signal. A widely adopted assumption for graph signals is that values change smoothly across adjacent nodes. Given an undirected graph with a symmetric weighted adjacency matrix A, the smoothness of a set of n graph signals x1, . . . , xn P
+Rd is usually measured by the Dirichlet energy [2],
+⌦
+A, X p q “ 1 2n2
+Aij|| xi ´ 2 xj||
+“ 1
+XT LX n2 tr p q (10) i,j
+ÿ denotes the trace of a matrix, L where tr
+“ degree matrix. As can be seen, minimizing ⌦ thus enforcing smoothness of the graph signals on the graph associated with A. j Aij is the forces adjacent nodes to have similar features,
+A is the graph Laplacian, and D
+D
+´
+A, X p p¨q
+∞
+“ q
+However, solely minimizing the smoothness loss will result in the trivial solution A 0. Also, it is desirable to have control of how sparse the resulting graph is. Following [25], we impose additional constraints on the learned graph,
+“ f
+A p q “
+ 
+´ n 1T log
+A1 p q `
+  n2 ||
+A 2
+F
+|| (11) 5
+Algorithm 1 General Framework for IDGL and IDGL-ANCH
+, s r s 1 q
+|
+T do 0
+Ap t t t q q q 1 s
+´ qs
+´ –
+Ap q or Rp 2
+F °
+, Ap r y, kNN p –|
+““
+Ap
+X, k p r
+Ap
+ 
+| 1 or StopCond ) and t 1: Input: X, y q 2: Parameters: m, ", ↵,  ,  ,  ,  , T , ⌘, k t 3: Output: ⇥, 0
+Ap 4: q r 5: t 1 – 6: StopCond t 7: while ( p if IDGL then 8: t
+X
+GL 9: q q p 0 t q, Ap
+Ap 10: t
+Ap 11:
+GNN1 p 12: 13: 14: 15: 16:
+Zp or GL p 1 t q, Ap q, X
+X, X
+GL r
+U q p 0
+Ap
+GNN1
+Zp or GL p t q, Rp q, Rp – –t – – –
+GNN2 q, Zp
+´ 1 pt
+§ u q q
+| 1 q q q q q q q t t t t t 1
+Ap p q 17: 18:
+L
+Rp t p y, y
+LOSS1 r p t
+↵⌦
+Ap p p t 1Rp qJ ´ t 19: p q q pred ` L
+L – L 20: end while t 1 21: q i 22: Back-propagate
+∞
+L – L
+“
+L
+` p
+G q p p q q t i q q, X using Eq. (4) f q t
+Ap p q ` q and t 1 t
+` –
+Ap
+Ap t
+Zp r else
+Rp t
+Zp end if y – and (9) t p q pred – t p q
+G – t p
+L
+{kNN-graph if no initial Ap 0 q} 2
+F if IDGL else
+Rp t q
+|
+´ t
+Rp 1
+´ q 2
+F °
+|
+ 
+|
+Rp t q 2
+F
+| using Eq. (1) {Reﬁne adj. matrix}
+´ using Eq. (3) {Combine reﬁned and raw adj. matrices} q using Eq. (4) {Reﬁne node embeddings} t 1 q q, Zp using Eq. (2) {Reﬁne afﬁnity matrix}
+´
+U
+, X using Eqs. (8) and (9) {Reﬁne node embeddings} q u q using Eq. (4) if IDGL else GNN2
+Ap pt 0 q, Rp t q, Rp 1 q t q
+, Zp u q using Eqs. (8) if
+IDGL else ↵⌦ t q, XU
+Bp p q ` t q f
+Bp p q where
+Bp t q
+“ p p p t
+{p 1 2 L to update model weights ⇥ {In training phase only}
+´ q
+|| ¨ ||F denotes the Frobenius norm of a matrix. The ﬁrst term penalizes the formation of where disconnected graphs via the logarithmic barrier, and the second term controls sparsity by penalizing large degrees due to the ﬁrst term.
+We then deﬁne the overall graph regularization loss as the sum of the above losses f
+↵,   and   are all non-negative hyperparameters. q`
+, which is able to control the smoothness, connectivity and sparsity of the learned graph where q
+A, X p
+LG “
+A p
+↵⌦ q in
+Q
+Op ns2
+Anchor graph regularization. As shown in Eq. (6), we can obtain a row-normalized adjacency matrix B for the anchor graph time complexity. In order to control the quality of the learned node-anchor afﬁnity matrix R (which can result in implicit control of the quality of the node adjacency matrix A), we apply the aforementioned graph regularization techniques to the anchor graph. It is worthing noting that our proposed graph regularization loss is only applicable to non-negative and symmetric adjacency matrices [26]. Therefore, instead of applying graph regularization to B which is often not symmetric, we opt to apply graph regularization to its unnormalized version
+, where XU denotes the set of anchor embeddings
+B
+B
+LG “ q p sampled from the set of node embeddings X. p 2.6
+Joint Learning with A Hybrid Loss
+B, XU p
+RJ ´ 1R as q `
+↵⌦
+“ p p f
+Compared to previous works which directly optimize the adjacency matrix based on either graph regularization loss [26], or task-dependent prediction loss [15], we propose to jointly and iteratively learning the graph structure and the GNN parameters by minimizing a hybrid loss function combining both the task prediction loss and the graph regularization loss, namely,
+.
+L “ Lpred ` LG
+The full algorithm of the IDGL framework is presented in Algorithm 1. As we can see, our model repeatedly reﬁnes the adjacency matrix with updated node embeddings (Eq. (1)), and reﬁnes the node embeddings (Eqs. (3) and (4)) with the updated adjacency matrix until the difference between adjacency matrices at consecutive iterations are smaller than certain threshold. Note that compared to using a ﬁxed number of iterations globally, our dynamic stopping criterion is more beneﬁcial, especially for mini-batch training. At each iteration, a hybrid loss combining both the task-dependent prediction loss and the graph regularization loss is computed. After all iterations, the overall loss is back-propagated through all previous iterations to update the model parameters. Notably, Algorithm 1 6
+is also applicable to IDGL-ANCH. The major differences between IDGL and IDGL-ANCH are how we compute adjacency (or afﬁnity) matrix, and perform message passing and graph regularization. 3 Experiments
+In this section, we conduct extensive experiments to verify the effectiveness of IDGL and IDGL-ANCH in various settings. The implementation of our proposed models is publicly available at https://github.com/hugochan/IDGL.
+Datasets and baselines. The benchmarks used in our experiments include four citation network datasets (i.e., Cora, Citeseer, Pubmed and ogbn-arxiv) [48, 21] where the graph topology is available, three non-graph datasets (i.e., Wine, Breast Cancer (Cancer) and Digits) [11] where the graph topology does not exist, and two text benchmarks (i.e., 20Newsgroups data (20News) and movie review data (MRD)) [32, 46] where we treat a document as a graph containing each word as a node.
+The ﬁrst seven datasets are all for node classiﬁcation tasks in the transductive setting, and we follow the experimental setup of previous works [29, 15, 21]. The later two datasets are for graph-level prediction tasks in the inductive setting. Please refer to Appendix C.1 for detailed data statistics.
+Our main baseline is LDS [15] which however is incapable of handling inductive learning problems, we hence only report its results on transductive datasets. In addition, for citation network datasets, we include other GNN variants (i.e., GCN [29], GAT [52], GraphSAGE [18], APPNP [30], H-GCN [20] and GDC [31]) as baselines. For non-graph and text benchmarks where the graph topology is unavailable, we conceive various GNNkNN baselines (i.e., GCNkNN, GATkNN and GraphSAGEkNN) where a kNN graph on the data set is constructed during preprocessing before applying a GNN model.
+For text benchmarks, we include a BiLSTM [19] baseline. The reported results are averaged over 5 runs with different random seeds.
+Experimental results. Table 1 shows the results of transductive experiments. First of all, IDGL outperforms all baselines in 4 out of 5 benchmarks. Besides, compared to IDGL, IDGL-ANCH is more scalable and can achieve comparable or even better results. In a scenario where the graph structure is available, compared to the state-of-the-art GNNs and graph learning models, our models achieve either signiﬁcantly better or competitive results, even though the underlying GNN component of our models is a vanilla GCN. When the graph topology is not available (thus GNNs are not directly applicable), compared to graph learning baselines, IDGL consistently achieves much better results on all datasets. Compared to our main graph learning baseline LDS, our models not only achieve signiﬁcantly better performance, but also are more scalable. The results of inductive experiments are shown in Table 2. Unlike LDS which cannot handle inductive setting, the good performance on 20News and MRD demonstrates the capability of IDGL on inductive learning.
+Table 1: Summary of results in terms of classiﬁcation accuracies (in percent) on transductive benchmarks. The star symbol indicates that we ran the experiments. The dash symbol indicates that reported results were unavailable or we were not able to run the experiments due to memory issue.
+Model
+GCN
+GAT
+GraphSAGE
+APPNP
+H-GCN
+GCN+GDC
+LDS
+GCNkNN˚
+GATkNN˚
+GraphSAGEkNN˚
+LDS*
+IDGL
+IDGL-ANCH
+Cora 81.5 83.0 (0.7) 77.4 (1.0)
+— 84.5 (0.5) 83.6 (0.2) 84.1 (0.4)
+—
+—
+— 83.9 (0.6) 84.5 (0.3) 84.4 (0.2)
+Pubmed
+Citeseer 79.0 70.3 79.0 (0.3) 72.5 (0.7) 67.0 (1.0) 76.6 (0.8) 75.7 (0.3) 79.7 (0.3) 79.8 (0.4) 72.8 (0.5) 78.7 (0.4) 73.4 (0.3)
+— 75.0 (0.4)
+—
+—
+—
+—
+—
+—
+— 74.8 (0.3)
+— 74.1 (0.2) 72.0 (1.0) 83.0 (0.2)
+Digits
+Cancer ogbn-arxiv Wine
+—
+—
+— 71.7 (0.3)
+—
+—
+—
+—
+—
+—
+— 71.5 (0.3)
+—
+—
+—
+—
+—
+—
+—
+—
+—
+—
+—
+— 97.3 (0.4)
+— 92.5 (0.7) 94.4 (1.9) 95.9 (0.9) 94.7 (1.2) 89.5 (1.3)
+— 95.8 (3.1) 88.6 (2.7) 89.8 (0.6)
+— 96.5 (1.1) 92.8 (1.0) 88.4 (1.8)
+— 93.4 (2.4) 96.9 (1.4)
+— 90.8 (2.5) 95.1 (1.0) 93.1 (0.5) 97.8 (0.6)
+— 94.8 (1.4) 93.2 (0.9) 98.1 (1.1) 72.0 (0.3)
+Ablation study. Table 3 shows the ablation study results on different modules in our models. we can see a signiﬁcant performance drop consistently for both IDGL and IDGL-ANCH on all datasets by turning off the iterative learning component (i.e., iterating only once), indicating its effectiveness.
+Besides, we can see the beneﬁts of jointly training the model with the graph regularization loss. 7
+Table 2: Summary of results in terms of classiﬁcation accuracies or regression scores (R2) (in percent) on inductive benchmarks.
+Methods
+BiLSTM
+GCNkNN
+IDGL
+IDGL-ANCH 20News 80.0 (0.4) 81.3 (0.6) 83.6 (0.4) 82.9 (0.3)
+MRD 53.1 (1.4) 60.1 (1.5) 63.7 (1.8) 62.9 (0.4)
+Table 3: Ablation study on various node/graph classiﬁcation datasets.
+Methods
+IDGL w/o graph reg. w/o IL
+IDGL-ANCH w/o graph reg. w/o IL
+Cora 84.5 (0.3) 84.3 (0.4) 83.5 (0.6) 84.4 (0.2) 83.2 (0.8) 83.6 (0.2)
+Citeseer Wine 74.1 (0.2) 71.5 (0.9) 71.0 (0.8) 72.0 (1.0) 70.1 (0.8) 68.6 (0.7) 97.8 (0.6) 97.3 (0.8) 97.2 (0.8) 98.1 (1.1) 97.4 (1.8) 96.4 (1.5)
+Cancer 95.1 (1.0) 94.9 (1.0) 94.7 (0.9) 94.8 (1.4) 94.8 (1.4) 94.0 (2.6)
+Digits 93.1 (0.5) 91.5 (0.9) 92.4 (0.4) 93.2 (0.9) 92.0 (1.3) 93.0 (0.4) 20News 83.6 (0.4) 83.4 (0.5) 83.0 (0.4) 82.9 (0.3) 82.5 (0.7) 82.3 (0.3)
+Model analysis. To evaluate the robustness of IDGL to adversarial graphs, we construct graphs with random edge deletions or additions. Speciﬁcally, for each pair of nodes in the original graph, we randomly remove (if an edge exists) or add (if no such edge) an edge with a probability 25%, 50% or 75%. As shown in Fig. 3, compared to GCN and LDS, IDGL achieves better or comparable results in both scenarios. While both GCN and LDS completely fail in the edge addition scenario,
+IDGL performs reasonably well. We conjecture this is because the edge addition scenario is more challenging than the edge deletion scenario by incorporating misleading additive random noise to the initial graph. And Eq. (3) is formulated as a form of skip-connection, by lowering the value of   (i.e., tuned on the development set), we enforce the model to rely less on the initial noisy graph. (a) Edge deletion (b) Edge addition
+Figure 3: Test accuracy (
+˘ standard deviation) in percent for the edge attack scenarios on Cora. (a) Convergence plot on Cora. (b) Stopping strategy comparison on Cora.
+Figure 4: Convergence and stopping strategy study on Cora (Single run results). 8
+In Fig. 4a (and Appendix B.1), we show the evolution of the learned adjacency matrix and accuracy through iterations in the iterative learning procedure in the testing phase. We compute the difference 2 between adjacency matrices at consecutive iterations as  p
+F which
+|| typically ranges from 0 to 1. As we can see, both the adjacency matrix and accuracy converge quickly. This empirically veriﬁes the analysis we made on the convergence property of IDGL in Appendix A.2. Please note that this convergence property is not due to the oversmoothing effect of GNNs [56, 33], because we only employ a two-layered GCN as the underlying GNN module of
+IDGL in our experiments. qA “ || 2
+F {||
+||
+Ap
+Ap
+Ap
+´
+´ 1 q q q t t t t
+We compare the training efﬁciency of IDGL and IDGL-ANCH with other baselines. As shown in Table 4, IDGL is consistently faster than LDS, but in general, they are comparable. Note that
+IDGL has comparable model size compared to LDS. For instance, on the Cora data, the number of trainable parameters of IDGL is 28,836, and for LDS, it is 23,040. And we see a large speedup of
+IDGL-ANCH compared to IDGL. Note that we were not able to run IDGL on Pubmed because of memory limitation. The theoretical complexity analysis is provided in Appendix A.3.
+We also empirically study the stopping strategy (Fig. 4b and Appendix B.2), visualize the graph structures learned by IDGL (Appendix B.3), and conduct hyperparameter analysis (Appendix B.4).
+Details on model settings are provided in Appendix C.2. 4

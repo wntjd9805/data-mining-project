@@ -1,0 +1,198 @@
+Abstract
+Image distortion by atmospheric turbulence is a stochas-tic degradation, which is a critical problem in long-range optical imaging systems. A number of research has been conducted during the past decades, including model-based and emerging deep-learning solutions with the help of syn-thetic data. Although fast and physics-grounded simulation tools have been introduced to help the deep-learning mod-els adapt to real-world turbulence conditions recently, the training of such models only relies on the synthetic data and ground truth pairs. This paper proposes the Physics-integrated Restoration Network (PiRN) to bring the physics-based simulator directly into the training process to help the network to disentangle the stochasticity from the degrada-tion and the underlying image. Furthermore, to overcome the “average effect” introduced by deterministic models and the domain gap between the synthetic and real-world degradation, we further introduce PiRN with Stochastic Re-finement (PiRN-SR) to boost its perceptual quality. Over-all, our PiRN and PiRN-SR improve the generalization to real-world unknown turbulence conditions and provide a state-of-the-art restoration in both pixel-wise accuracy and perceptual quality. Our codes are available at https:
+//github.com/VITA-Group/PiRN . 1.
+
+Introduction
+Atmospheric turbulence (AT) is one of the major sources of degradation in long-range passive imaging systems. It arises due to random spatiotemporal fluctuations in the in-dex of refraction [19, 61]. When accumulating over the dis-tance, turbulence oftentimes leads to degraded image qual-ity with random pixel displacement and blurring [5]. Such degradation is very common in settings when the object distance is long, and the exposure is short [61], causing a substantial drop in the performance of long-range passive imaging and its downstream tasks, such as human recogni-tion, detection, and tracking. Developing restoration meth-*Equal contribution. ods to mitigate the turbulence effect is important. How-ever, anisoplanatic turbulence has two major properties: 1 the geometric warping and blur are entangled with each other; 2 the point spread function is spatially and tempo-rally varying, which makes the problem harder than other image restoration problems.
+Turbulence mitigation algorithms have been studied for several decades by the image processing community. Since capturing real-world corrupted and clean image pairs is al-most impossible, those conventional methods are model-based [16, 20, 27, 49, 2, 17, 23, 74, 39]. Recently, data-driven approaches have been introduced with synthetic data from various turbulence simulators. Existing deep learning works explored both deterministic and stochastic methods to solve the turbulence mitigation problem. In the determin-istic approaches [41, 72, 1, 28, 34, 47, 45, 26, 51, 18], a tur-bulence mitigation network is trained on a synthetic dataset to minimize pixel-level distortion between the output and ground truth images. The generalization capability of those works is fully limited by the training images. Moreover, the deterministic models learn to “fill up” a probability space that covers all possible clean images, which leads to un-natural output with an average effect. Although adversarial training [28, 34, 51] has been used to alleviate this prob-lem, it could make the model more vulnerable to small per-turbation on the input [10, 11]. The stochastic approaches
+[44, 12] could produce more natural images with certain robustness. However, they are more likely to hallucinate as they do not have a physics-grounded degradation model, and the generative models they used are unconditional dif-fusion models trained on general datasets. The large domain gap between the testing images and the training set distribu-tion and the lack of a good forward model as a connection oftentimes cause the output of generative models unreliable.
+In this work, we propose a two-stage method to improve both the fidelity [43] and perceptual quality [66] for single-frame turbulence mitigation. To improve fidelity, we pro-pose to tightly couple a physics-based turbulence simulator
+[40, 9] in the training paradigm of our turbulence restoration backbone. Specifically, we re-degrade the reconstructed im-age and align it with the original input to enforce the con-Figure 1. The overview of our PiRN with stochastic refinement model. The PiRN (a) training utilizes a physics-based differentiable simulator to map the stored image back to the input to enforce the consistency between the forward and restoration processes. We use the intermediate restoration from PiRN as a reliable condition of a diffusion model at each denoising step (b). We perform 10-20 stochastic iterations (c) to sample a natural image with high perceptual quality from the well-constraint image space. sistency between image formation and restoration. Our con-sistency enforcement could facilitate the separation of im-age semantics and turbulence profiles by injecting the tur-bulence conditions in the training loop. With the physics-integrated restoration network (PiRN), we experimentally found the above strategy significantly improves the gener-alization across multiple real-world datasets with varying turbulence strength.
+To improve perceptual quality, unlike [28, 34, 51], which used the adversarial training, we build a stochastic poste-rior sampler by training a conditional denoising diffusion probabilistic model (DDPM) [25] that takes the output of the PiRN as a reliable condition and generates high-quality natural images within the constraint sample space. Our ex-periments found direct conditioning on the degraded im-ages could destabilize diffusion training due to the failure to capture the complicated degradation. We take advantage of the deterministic reconstructor PiRN and use its restored image as a more constrained condition. Our divide-and-conquer strategy suggests PiRN focus on handling turbu-lence strength variations and facilitating stochastic refine-ment (SR) to mitigate the gap between the rough restoration and real-world image distribution.
+Our overall framework PiRN-SR enjoys the benefit of high fidelity and perceptual quality while adapting to a wide range of physical attributes of turbulence degradation (i.e., generalization). PiRN-SR combines PiRN with stochastic refinement in a plug-and-play fashion.
+It iteratively per-forms 10-20 denoising steps to significantly boost percep-tual quality and robustness to additional perturbation with-out compromising the fidelity. Our primary contributions can be briefly summarized as follows:
+□ We show how a fully differentiable physics-based sim-ulator can be tightly coupled with the DL restoration paradigm. We improve the generalization to multiple physical attributes of turbulence (distance to object, camera settings, etc.) with the help of our diligently curated synthetic data generation strategy.
+□ Our proposed framework PiRN-SR demonstrates how a carefully trained conditional diffusion model can be used as a plug-and-play stochastic refiner to gener-ate high perceptual quality results from turbulence-degraded input images at marginal inference overhead.
+□ Extensive experiments and ablation across synthetic and multiple real-world popular turbulence bench-marks demonstrate our method achieves state-of-the-art reconstruction quality in both pixel-wise accuracy and perceptual quality. 2. Method 2.1. Zernike-based turbulence forward model
+The forward model of the degradation caused by atmo-spheric turbulence to an image I is [24]:
+O = h ⊛ I + n, (1) where I ∈ RH×W is the clean input image, O ∈ RH×W is the captured image degraded by turbulence, ⊛ is the convo-lution, is the 2-D spatial position of pixels and n ∈ RH×W is the Gaussian random noise. Since the point spread func-tion (PSF) h varies with , the degradation is spatially vary-ing. According to [5], may be written as a function of pixel-shifting T (closely associated with “tilt” in the opti-cal literature) and blur B in the strict order:
+O ≈ B ⊛ T (I) + n. (2)
+The recent Zernike-based turbulence simulators [8, 9] model the degradation as a wide sense stationary (WSS)
+random field of the phase distortion, which is represented by Zernike polynomials {i} [48] as a basis, with coeffi-cients ,i, where i ∈ {1, 2, 3, · · · , 36}. Given a set of camera and atmospheric protocol π, the autocorrelation Cπ of the
+Zernike random field can be drawn by this simulator. From
+Cπ and Gaussian white noise ϵ ∈ RH×W ×36, the WSS
+Zernike random field can be generated via Fourier Trans-form. We denote this function by = g(Cπ, π, ϵ)
+Among all 36 coefficients, i = 1 denotes the current component, i = 2, 3 controls the T by a constant scale, and the rest high order Zernike coefficients contribute to the blur effect. The phase distortion corresponding to high-order Zernike coefficients can be efficiently translated to 100 PSFs basis ψ and coefficients β via the phase-to-space (P2S) [40] transform β = fp(,{i≥4}). The spatially varying blur kernel can be finally written as:
+B ≈ 100 (cid:88) k=1
+β,kψk = 100 (cid:88) k=1 fp(,{i≥4})kψk. (3)
+For the detailed expression of g(·) and fp(·), we refer read-ers to read section I of the supplementary material. 2.2. Physics-integrated restoration network (PiRN)
+Since g can be implemented by spectrum decomposition, fp is a small neural network [40], and ψ are fixed basis kernels, the forward model conditioned on the turbulence protocol π and random seed ϵ is differentiable. This prop-erty suggests the forward process can be embedded into the training loop and effectively provide the turbulence prior through gradients, facilitating the invariance of the recon-struction towards the stochasticity of the degradation.
+The degradation profile controlled by ϵ is different for each frame, which makes anisoplanatic turbulence get spa-tially and temporally varying distortions. Conventional
+CNN-based general image restoration methods applying the fixed kernels on all spatial locations may not be adequate to solve the location adaptive problem [41]. Motivated by the necessity of input-adaptive and location-adaptive filtering effect, our physics-integrated restoration network (PiRN) uses a transformer-based network to capture and recover the spatially- and instance-varying turbulence effects.
+Overall, PiRN architecture is composed of a Swin-based deep backbone module, a convolution-based image recon-struction module, and a physics-based differentiable for-ward model, as described in detail in the following. 2.2.1 Phase-to-Space differentiable forward process
+The primary contribution to PiRN design is the integration of the Phase-to-Space differentiable turbulence simulator in the training paradigm. Conventional turbulence mitigation networks [41, 72, 28, 1, 45] trained their models only with the low-quality and reference high-quality pairs, the gen-eralization capability of their networks only relies on their synthetic method and training data, hence inept at adapting to varying turbulence protocols and profiles. [41, 35, 18] proposed to re-map the restored image to the degraded im-age. However, the re-mapping of [41] is based on an em-pirical design without a clear physical meaning. [35, 18] are multi-frame methods, their reconstruction requires min-utes or hours of refinement, and the adaptation to real-world cases is yet highly limited.
+In PiRN, we propose to integrate the well-established physics of turbulence described in section 2.1 and explore its experimental benefits on unseen turbulence protocols in both synthetic and real-world datasets. More specif-ically, we store the degradation protocol π and random seed ϵ along with the degraded image ISyn in the synthetic data generation stage. During training, the degraded image is first restored by the PiRN backbone and reconstruction module, the restored image (cid:101)IRecons is then passed through the simulator with π and ϵ to re-degrade the original input to (cid:101)ISyn. Precisely, the function of this module SIM(·) can be summarized as:
+{(cid:101)IRecons, π, ϵ} (cid:125) (cid:123)(cid:122) (cid:124)
+Reconstructed Clean PiRN Output and Data Synthesis Protocol
+→ SIM(·) → (cid:101)ISyn (cid:124)(cid:123)(cid:122)(cid:125)
+Re-degraded
+Output Image (4)
+We force ISyn and (cid:101)ISyn to be aligned using the ℓ1 loss.
+Since this remapping enforces the restoration to be con-sistent with the degradation process, we call it consistency loss. During training, by gradient descent, the turbulence prior from the simulator can be injected into the network and help enhance the invariance of the turbulence effect.
+Despite its simplicity, we found it significantly improves the adaptability across multiple real-world datasets with vary-ing turbulence strength. 2.2.2 Swin-based deep feature backbone
+Swin Transformer [38] has recently shown great success in modeling long-range dependency with shifted window schemes. Although it has been explored for many image restoration works [36, 69, 64, 7], its potential for turbu-lence mitigation which requires spatially varying operations is still unexplored. As shown in Figure 1, the deep feature backbone of PiRN architecture is a sequence of Swin Trans-former blocks (RSTB). The RSTB utilizes several Swin
+Transformer layers for local attention and cross-window in-teraction. Finally, for feature enhancement, we add a con-volution layer at the end of RSTB blocks for feature en-hancement and use a residual connection to provide a short-cut for feature aggregation [36]. Before RSTB, the input feature extraction uses convolution layers to extract shallow
+features. Those features preserve low-frequency informa-tion of the image, induce convolutional inductive bias in the early stage, and improve the representation learning capa-bility of transformer blocks [67]. The details of the archi-tecture are provided in the supplementary material. 2.2.3 Image Reconstruction Network
+Our upsample image reconstruction module restores the high-quality image by decoding the deep features gener-ated by the Swin-based backbone with reference to shallow features from input feature extraction. With the long skip connection, our network can transmit the low-frequency information directly to the reconstruction network, which can help the deep feature extraction module focus on high-frequency information and stabilize training. Our Image re-construction module is a sequence of convolutional layers with LeakyReLU that projects enriched features back to low dimension feature map corresponding to the reconstructed clean image ˜IRecons. Precisely, the role of the reconstruction module REC(·) can be summarized as:
+{DISyn, SISyn} (cid:123)(cid:122) (cid:125) (cid:124)
+Deep and Shallow Features of
+Input Image ISyn
+→ REC(·) → (cid:101)IRecons (cid:124) (cid:123)(cid:122) (cid:125)
+Reconstructed Clean
+Output Image (5)
+PiRN optimization requires the joint optimization of re-construction loss with ground truth and the consistency loss as shown in Figure 1. We formulate the loss as follows:
+Ltotal = α · ||IGT, (cid:101)IRecons||1 + (1 − α) · ||ISyn, (cid:101)ISyn||1 (6) 2.3. Diffusion-based stochastic refinement
+Although the turbulence simulation tool is physics-grounded, the domain gap still exists between synthetic and real-world turbulence. Besides, the restored images from the PiRN also suffer from the problem of determin-istic methods. In order to overcome this and make the out-put more natural and closer to the target dataset distribution, we use Denoising Diffusion Probabilistic Models (DDPM)
+[57, 25, 60] as a stochastic sampler. DDPMs are generative models with a Markov chain that constructs samples itera-tively from a joint distribution: pθ(0:T ) = p(T )
+θ (T )
+T −1 (cid:89) t=0 p(t)
+θ (t|t+1) (7)
+Where T is random Gaussian noise and 0 is the ground truth.
+In our framework, the high-quality image space follows a posterior distribution conditioned on the pre-restored image (cid:101)= (cid:101)IRecons from our deterministic reconstructor: pθ(0:T |(cid:101)) = p(T )
+θ (T )
+T −1 (cid:89) t=0 p(t)
+θ (t|t+1,(cid:101)) (8)
+This conditional diffusion sampler could have an uncondi-tional variational inference distribution: q(1:T |0) = q(T )(T |0)
+T −1 (cid:89) t=1 q(t)(t|t+1,0 ) (9)
+Whose conditional transition distribution of the forward and backward diffusion process can be modeled by Gaussian pa-rameterization. For p(t) and q(t), we reduce the evidence
+θ lower bound (ELBO) objective by solving the following noise prediction loss [25]:
+L =
+T −1 (cid:88) t=1
+γtE(0,t,(cid:101)) (cid:2)||t −θ (t,(cid:101), t)||2(cid:3) (10)
+√
+√
+αt0 +
+Where t is the noise added to the forward diffusion process 1 − αtt is the noised clean image at time t, t = at denoising step t, and θ(t,(cid:101), t) is a network with learnable parameters to predict the noise t. αt is a fixed scalar to control the diffusion schedule [25].
+We perform gradient descent to train θ(t,(cid:101), t) like [54].
+When θ(t,(cid:101), t) is trained, the restoration can be converted to a diffusion posterior samplerˆ0 ∼ pθ(0|(cid:101)) defined in Eq 8. As shown in Figure 1, along with the ground truth IGT, we pair one restored image from PiRN. Our experiments found di-rect conditioning on the degraded images (ISyn) could desta-bilize diffusion training because the turbulence profiles are random, and the diffusion model can’t capture the compli-cated degradation. During inference with PiRN-SR, we it-eratively perform 10-20 denoising steps with our diffusion sampler upon the restoration output of PiRN to boost its perceptual quality.
+Figure 2. Overview of our synthetic data (PiRN-Syn) simulation. 2.4. PiRN-Syn: Synthetic Data Generation Strategy
+Because of the scarcity of real clean-distortion image pairs, data-driven approaches have to rely on turbulence simulators for synthetic data. Despite there have been some efforts in turbulence simulation in the image processing community [33, 46, 31, 41], they highly overlook the fact that real-world turbulence profile is affected by the aper-ture and focal length of the imaging system, distance to the object, field of view, wavelength, and other environmental conditions (temperature, humidity, wind speed, and so on).
+Scene width (m) C 2
+Distance (m)
+Focal length (m)
+[200, 400]
+[1, 2]
+[400, 600]
+[1, 2.5]
+[600, 800]
+[1, 3]
+F-number
+{8, 11}
+{5.6, 8, 11}
+{8, 11, 16}
+{5.6, 8, 11}
+{11, 16}
+{8, 11}
+[0.2, 0.5]
+[0.5, 1]
+[0.4, 0.8]
+[0.8, 1.5]
+[0.5, 1.2]
+[1.2, 2] n(10−14 × m−2/3)
+[3, 7]
+[6, 30]
+[2, 6]
+[6, 30]
+[2, 5]
+[5, 30]
+Table 1. Parameter range, where [a, b] means uniform sampling from continuous range (a, b), and {} indicates uniform sampling from a discrete set, all rows are chosen with identical probability.
+This ignorance restricted the generalization capabilities of those methods for unknown real-world degradation.
+Following section 2.1, we provide an easy-to-follow syn-thetic data generation strategy capturing a wide variety of camera parameters and atmospheric conditions (repre-sented by the measurable indicators C2 n) using the improved
+Zernike-based simulator [8, 9]. Our synthetic data genera-tion strategy (Table 1) has been curated based on the anal-ysis to cover the potential short-exposure turbulence pro-files observed in around 1000+ hours of video footage of approximately 1,000 subjects within different environmen-tal conditions and camera settings [15]. When setting the parameters, we first select the distance and field of view, then the focal length and f-number ranges could be deter-mined based on real-world camera models. We choose the
+C 2 n range to set the turbulence effect to be neither too strong nor weak. PiRN-Syn consists of 100,000 degraded images for training and 50,000 degraded images for testing, which are generated using different synthesis protocols from Table 1 with 2000 and 1000 unique instances from [73].
+In addition, to study how our new turbulence mitigation algorithm performs under different conditions, we classify the turbulence strength into multiple levels: weak, medium, strong. The details of how we set the threshold is provided in the supplementary material. 3. Experimental Setup 3.1. Datasets and Training Setup
+To train the PiRN network, we utilized the PiRN-Syn synthetic dataset, which is generated by our curated data generation strategy as discussed in Section 2.4. The dataset comprises 100,000 degraded images for training and 50,000 degraded images for testing, generated using various syn-thesis protocols from Table 1, with 2000 and 1000 unique instances from [73], respectively. The diffusion network is trained using high-quality images from [29], paired with the restored output of its degraded version from PiRN. For training PiRN, we used a learning rate of 1e − 4 and em-ployed the cosine annealing scheduler to gradually decrease the learning rate over 100,000 iterations. The training of the diffusion network closely followed the optimal settings in [54]. In the beginning, during the first 5000 epochs of
+PiRN training, we set the scaling factor α in Equation 6 to 1 to provide an easy optimization landscape for PiRN, and then set it to 0.9 for the remaining training iterations. More implementation details can be found in the supplementary. 3.2. Evaluation Protocol
+Our proposed framework incorporates a strong back-bone, differentiable turbulence forward model, and a diffu-sion posterior sampler to achieve high-quality restoration.
+In order to validate the effectiveness of our design, we have designed experiments to answer several key questions:
+RQ1: How does the simulator-integrated PiRN design perform and generalize compared to classical state-of-the-art (SOTA) restoration architectures in both synthetic and real-world settings? simulator-in-loop training enhance
+RQ2: Does the restoration adaptability of the proposed framework to varying levels of turbulence strength?
+RQ3: How effective is posterior diffusion sampling in im-proving the perceptual quality of the restored images with-out impacting the standard PiRN metrics (PSNR, SSIM)?
+RQ4: How effective is PiRN/PiRN-SR for ad-hoc down-stream applications (e.g., detection and recognition)?
+For our experiments, we have used our PiRN syn-thetic test set, along with a variety of real-world turbulence benchmark datasets, including OTIS [21], CLEAR[1], Heat
+Chamber and Turbulence Text Data [41]. We trained all baseline methods using identical settings and datasets, re-lying on their official GitHub implementation to ensure a fair comparison. Further details regarding our evaluation datasets can be found in the supplementary material. 3.3. Simulator Integrated PiRN design and state-of-the-art restoration methods
+In this section, our main focus is to address research questions RQ1 and RQ2 by evaluating the advantages of integrating the turbulence forward model into the restora-tion training process to align with the synthetic data gen-eration. To answer RQ1, which aims to determine the ne-cessity of PiRN design in terms of performance and gen-eralization, we conducted a comparative study by assess-ing the performance of PiRN with several state-of-the-art classical restoration methods. The results, presented in Ta-ble 2, demonstrate significant benefits of PiRN design on our synthetic test set and a real-world turbulence bench-mark dataset Heat Chamber, in comparison to other base-lines. It is noteworthy that our design outperforms general image restoration models significantly and also achieves higher performance than the recent turbulence-based de-sign TurbNet [41], with a margin of +1.68 (PSNR) and
++0.78 (PSNR) on our synthetic test set and Heat Chamber dataset, respectively. Moreover, Figure 3 depicts the qual-itative performance of PiRN with and without our simula-tor integration on real-world turbulence benchmark CLEAR
+Figure 3. Qualitative performance of PiRN with and without our simulator integration on real-world turbulence benchmark CLEAR (Row1) and OTIS (Row2). Note that both models are trained using exactly the same PiRN-Sync train dataset for a fair comparison. Results in row 2 represent the ability of PiRN to generalize to different turbulence strengths.
+Figure 4. Qualitative performance comparison of our proposed method on synthetic PiRN-Syn (test) dataset wrt. SOTA baselines. and OTIS, trained on the same PiRN-Sync dataset. It is evi-dent that our design plays a significant role in modeling the turbulence degradation operator and generalizes very well on the real-world unseen degradation.
+Method
+TDRN [68]
+MPRNet [42]
+Uformer [65]
+Restormer [70]
+SwinIR [36]
+TurbNet [41]
+Ours [PiRN]
+Ours [PiRN-SR]
+PiRN-Syn (Test)
+Heat Chamber
+PSNR (↑) 19.48 21.93 22.20 22.45 22.67 23.72 25.40 25.61
+SSIM (↑) 0.5288 0.5819 0.6133 0.6274 0.6301 0.6749 0.7198 0.7204
+PSNR (↑) 18.42 18.12 18.68 19.12 19.43 19.76 20.54 20.59
+SSIM (↑) 0.6424 0.6379 0.6577 0.6840 0.6901 0.6934 0.7102 0.7115
+Table 2. Performance comparison of our proposed method wrt.
+SOTA classical methods on our synthetic test set and real-world
+Heah Chamber[41] dataset.
+Furthermore, we investigate the generalization capabil-ity of PiRN for different turbulence strengths (RQ2). Ta-ble 3 presents the results of our evaluation, which con-firm the ability of our proposed simulator-integrated de-sign (PiRN) to handle different levels of turbulence strength smoothly in our synthetic test set. PiRN consistently out-performs TurbNet by a margin of +0.81, +0.77, and +1.12 (PSNR), with significant benefits observed for strong degra-dation strength. The qualitative evaluation of the turbulence strength adaptation ability of PiRN on the real-world OTIS benchmark is also presented in Figure 3 (Row 2), which is consistent with our synthetic quantitative evaluation.
+Method
+TDRN [68]
+MPRNet [42]
+Uformer [65]
+Restormer [70]
+SwinIR [36]
+TurbNet [41]
+Ours [PiRN]
+Ours [PiRN-SR]
+Weak
+Strong
+Medium
+PSNR SSIM PSNR SSIM PSNR SSIM 0.591 26.61 0.620 27.01 0.633 27.76 0.638 27.91 0.645 28.02 0.649 28.31 0.662 29.12 0.665 29.15 23.44 24.76 25.30 25.68 25.96 26.07 26.84 26.86 21.64 22.98 23.54 23.56 23.87 23.90 25.02 25.07 0.659 0.672 0.687 0.689 0.691 0.738 0.747 0.747 0.703 0.716 0.721 0.729 0.736 0.759 0.763 0.766
+Table 3. Performance comparison of our proposed method across different turbulence strength wrt. other baselines.
+Figure 5. Qualitative performance benefits of using posterior diffusion sampling in improving the perceptual quality of the restored image.
+Our stochastic refinement module can be observed minimizing the gap between the rough restoration and real-world image distribution.
+Figure 6. Qualitative performance of our proposed PiRN network on real-world Turbulence Text and Heat Chamber [39] datasets.
+AWDR(↑)
+AD-LCS(↑)
+Raw Input 0.623 5.076
+SwinIR[36] 0.740 7.002
+TurbNet[41] Ours [PiRN] 0.758 7.314 0.776 7.498
+Table 4. Performance comparison of state-of-art restoration base-lines with respect to TurbNet on the Turbulence Text Dataset. 3.4. The importance of stochastic refinement
+In this section, we investigate the effectiveness of poste-rior diffusion sampling in improving the perceptual quality of PiRN outputs (RQ3). Figure 5 visually demonstrates the benefits of recursively performing 15 denoising steps us-ing the DDIM sampler on the restoration output of PiRN. It is evident that these inexpensive refinement iterations can considerably improve the perceptual quality of the PiRN outputs, making them more natural. To further quantify the perceptual improvements, we utilize popular perceptual metrics such as NIQE, NRQM, and LPIPS. Table 5 presents the performance of PiRN-SR compared to PiRN and other high-performing baselines. Our results indicate that inte-grating the diffusion sampler with the PiRN network signif-icantly enhances the perceptual performance across all the above metrics on our PiRN-Syn test set compared to the state-of-the-art TurbNet baseline. Importantly, these bene-fits can be obtained in a plug-and-play fashion, depending on resource availability, without compromising the standard pixel-wise performance metrics such as PSNR and SSIM (Table 2). Specifically, PiRN-SR shows an improvement of
+∼ 1.00 (NIQE), ∼ 0.643 (NRQM), and ∼ 0.023 (LPIPIS) over PiRN with only marginal computational cost.
+NIQE (↓)
+NRQM (↑)
+LPIPIS (↓)
+SwinIR[36] 7.4914 3.6423 0.4585
+TurbNet[41] 7.0163 3.7790 0.4369
+PiRN 6.5852 3.9810 0.4204
+PiRN-SR 5.5847 4.6239 0.3978
+Table 5. Quantative perceptual performance benefits of PiRN-SR wrt. PiRN and other baselines on PiRN-Syn (test) dataset. 3.5. Benefits of PiRN/PiRN-SR for ad-hoc down-stream applications
+In this section, we investigate the potential benefits of our proposed restoration network for ad-hoc downstream tasks (RQ4). We adopted the idea of using the performance of high-level vision tasks, namely text recognition task [41] and face detection [71], as an evaluation metric to validate the necessity of restoration. Firstly, for the text recognition task, Figure 6 (Row 1) illustrates the qualitative benefits of our PiRN network with respect to SOTA baseline TurbNet.
+For quantitative evaluation, we used Average Word Detec-tion Ratio (AWDR) and Average Detected Longest Com-mon Subsequence (AD-LCS) metrics introduced in [41] for publicly available OCR detection, and recognition al-gorithms [56, 62]. Table 4 presents the performance gain by PiRN over the real turbulence degraded text images and their restored version by various state-of-the-art methods.
+OCR algorithms achieve massive improvements of +0.153 (AWDR) and +2.422 (AD-LCS) when used on images re-Figure 7. Performance of ad-hoc MTCNN-based face detector [71] on a real-world video captured under atmospheric turbulence (camera distance 400m) [15] wrt. its restored version from PiRN-SR. Each line indicates if a person’s face has been detected in that frame with a given confidence score. It can be observed that PiRN-SR restoration significantly helps in improving the performance of MTCNN.
+Figure 8. Qualitative performance comparison of AT-DDPM with respect to our proposed framework for atmospheric turbulence mitigation.
+It can be clearly observed that AT-DDPM hallucinate significantly in comparison with our PiRN-SR output which is assisted by the restoration output of a physics-integrated restoration network (PiRN). stored by PiRN compared to being used directly on real im-ages from our proposed test dataset. Secondly, for the face detection task, we sampled 15 videos captured from vary-ing distances (200m, 400m, 500m) under turbulence from
+[15]. Figure 7 presents the performance of ad-hoc MTCNN-based face detector [71] on video frames (distance 400m).
+It can be clearly observed that our PiRN-SR restored videos significantly help in improving the performance capability of MTCNN (+0.034 gain in F1-score). Table 6 illustrates a detailed F1-score comparison of ad-hoc MTCNN detec-tor (at a confidence threshold ≥0.98) on our sampled video subset with and without restoration using recent baselines. 3.6. Comparison of PiRN-SR with AT-DDPM
+We compare the performance of our proposed ap-proached PiRN-SR with AT-DDPM, which performs knowledge distillation to transfer class prior information from a network trained for image super-resolution to the network for removing turbulence degradation. During in-ference, rather than starting from pure Gaussian noise, AT-DDPM begins with noised turbulence degraded images for speed-up in inference times. Figure 8 illustrate the per-formance comparison of AT-DDPM with respect to our proposed framework for atmospheric turbulence mitiga-tion.
+It can be clearly observed that AT-DDPM halluci-nate significantly in comparison with our PiRN-SR output which is conditioned on high-quality restoration, the output of a physics-integrated restoration network (PiRN). More-over, instead of completely relying on the diffusion net-work for complex turbulence restoration, our divide-and-conquer strategy suggests PiRN focus on handling turbu-lence strength variations and facilitating stochastic refine-ment (SR) with 10-20 denoising steps to mitigate the gap between the rough restoration and real-world image distri-bution. Table 7 presents the performance comparison (F1-score) of MTCNN-based face detection AT-DDPM w.r.t. our proposed method and SwinIR. It can be observed that
+AT-DDPM, as a stochastic method gets lower performance than the deterministic method SwinIR.
+No Restoration 0.5810 0.4987 0.4331
+SwinIR [36] 0.5866 0.4985 0.4006 200m 400m 500m
+TurbNet[41] Ours (PiRN-SR) 0.5923 0.4996 0.4510 0.6104 0.5093 0.4648
+Table 6. Performance comparison of ad-hoc MTCNN-based face detector [71] on real-world videos captured under atmospheric tur-bulence [15] from varying distances. We present the F1-score (at a confidence threshold ≥ 0.98, the higher the better) of the ad-hoc
+MTCNN detector on videos with and without restoration using re-cent baselines.
+No Restoration 0.4987 0.4331
+SwinIR AT-DDPM Restoration 0.4985 0.4006 0.4562 0.3997
+Ours 0.5093 0.4648 400m 500m
+Table 7. Performance comparison (F1-score) of MTCNN face de-tector on videos from [15] with varying distances. 4.

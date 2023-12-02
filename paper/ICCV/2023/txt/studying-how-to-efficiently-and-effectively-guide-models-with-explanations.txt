@@ -1,0 +1,54 @@
+Abstract
+Despite being highly performant, deep neural networks might base their decisions on features that spuriously cor-relate with the provided labels, thus hurting generalization.
+To mitigate this, ‘model guidance’ has recently gained pop-ularity, i.e. the idea of regularizing the models’ explana-tions to ensure that they are “right for the right reasons”
+[49]. While various techniques to achieve such model guid-ance have been proposed, experimental validation of these approaches has thus far been limited to relatively simple and / or synthetic datasets. To better understand the effec-tiveness of the various design choices that have been ex-plored in the context of model guidance, in this work we conduct an in-depth evaluation across various loss func-tions, attribution methods, models, and ‘guidance depths’ on the PASCAL VOC 2007 and MS COCO 2014 datasets.
+As annotation costs for model guidance can limit its ap-plicability, we also place a particular focus on efﬁciency.
+Speciﬁcally, we guide the models via bounding box anno-tations, which are much cheaper to obtain than the com-monly used segmentation masks, and evaluate the robust-ness of model guidance under limited (e.g. with only 1% of annotated images) or overly coarse annotations. Further, we propose using the EPG score as an additional evalua-tion metric and loss function (‘Energy loss’). We show that optimizing for the Energy loss leads to models that exhibit a distinct focus on object-speciﬁc features, despite only us-ing bounding box annotations that also include background regions. Lastly, we show that such model guidance can im-prove generalization under distribution shifts. Code avail-able at: https://github.com/sukrutrao/Model-Guidance 1.
+
+Introduction
+Deep neural networks (DNNs) excel at learning predic-tive features that allow them to correctly classify a set of training images with ease. The features learnt on the train-ing set, however, do not necessarily transfer to unseen im-ages: i.e., instead of learning the actual class-relevant fea-*Equal contribution. bicycle person cat car person (a)
+Explanations without
+Guidance
+Explanations with
+Guidance (b)
+Input Image
+Bounding Box
+Guidance
+Without
+Guidance
+With
+Guidance
+Waterbird on land
+Relevant
+Landbird
+Conﬁdence: 97%
+Waterbird
+Conﬁdence: 87%
+Fig. 1: (a) Model guidance increases object focus. Models may rely on irrelevant background features or spurious correlations (e.g. presence of person provides positive evidence for bicycle, center row, col. 1). Guiding the model via bounding box anno-tations can mitigate this and consistently increases the focus on object features (bottom row). (b) Model guidance can improve accuracy. In the presence of spurious correlations in the training data, non-guided models might focus on the wrong features. In the example image in (b), the waterbird is incorrectly classiﬁed to be a landbird due to the background (col. 3). Guiding the model via bounding box annotation (as shown in col. 2), the model can be guided to focus on the bird features for classiﬁcation (col. 4). tures, DNNs might memorize individual images (cf. [18]) or exploit spurious correlations in the training data (cf. [68]).
+For example, if bikes are highly correlated with people in the training data, a model might learn to associate the pres-ence of a person in an image as positive evidence for a bike (e.g. Fig. 1a, col. 1, rows 1-2), which can limit how well it generalizes. Similarly, a bird classiﬁer might rely on back-ground features from the bird’s habitat, and fail to correctly classify in a different habitat (cf. Fig. 1b cols. 1-3 and [42]).
+To detect such behaviour, recent advances in model in-terpretability have provided attribution methods (e.g. [53, 62, 57, 6]) to understand a model’s reasoning. These meth-ods typically provide attention maps that highlight regions of importance in an input to explain the model’s decisions
+cat train boat person motorbike sheep tvmonitor chair cow horse person sheep boat train cow s o c
+-B s n o i t a n a l p x
+E
+M
+A
+C d a r
+G s n o i t a n a l p x
+E e n i l e s a
+B d e d u
+G i e n i l e s a
+B d e d u
+G i
+Fig. 2: Qualitative results of model guidance. We show model-inherent B-cos explanations (input layer) of a B-cos ResNet-50 and
+GradCAM explanations (ﬁnal layer) of a conventional ResNet-50 before (‘Standard’) and after optimization (‘Guided’) for images from the VOC test set, using our proposed Energy loss (Eq. (6)). Guiding the model via bounding box annotations consistently increases the focus on object features for both methods. Speciﬁcally, we ﬁnd that background attributions are consistently suppressed in both cases. and can help identify incorrect reasoning such as reliance on spurious or irrelevant features, see for example Fig. 1b.
+As many attribution methods are in fact themselves dif-ferentiable (e.g. [57, 62, 53, 6]), recent work [49, 56, 24, 23, 66, 64] has explored the idea of using them to guide the models to make them “right for the right reasons” [49].
+Speciﬁcally, models can be guided by jointly optimizing for correct classiﬁcation as well as for attributing importance to regions deemed relevant by humans. This can help the model focus on the relevant features of a class, and correct errors in reasoning (Fig. 1b, col. 4). Such guidance has the added beneﬁt of providing well-localized explanations that are thus easier to understand for end users (e.g. Fig. 2).
+While model guidance has shown promising results, a detailed study of how to do this most effectively is crucially missing. In particular, model guidance has so far been stud-ied for a limited set of attribution methods and models and usually on relatively simple and/or synthetic datasets; fur-ther, the evaluation settings between approaches can signif-icantly differ, which makes a fair comparison difﬁcult.
+Therefore, in this work, we perform an in-depth evalua-tion of model guidance on large scale, real-world datasets, to better understand the effectiveness of a variety of design choices. Speciﬁcally, we evaluate model guidance along the following dimensions: the model architecture, the guidance depth1, the attribution method, and the loss function. In this context, we propose using the EPG score [67]—an evalua-tion metric that has thus far been used to evaluate the qual-ity of attribution methods—as an additional loss function (which we call the Energy loss) as it is fully differentiable.
+Further, as annotation costs can be a major hurdle for making model guidance practical, we place a particular fo-1The layer at which guidance is applied, e.g. typically at the last con-volutional layer for GradCAM [53] or the ﬁrst layer for IxG [57]. cus on efﬁcient guidance. Speciﬁcally, we use bounding boxes instead of semantic segmentation masks, and evalu-ate the robustness of guidance techniques under limited or overly coarse annotations to reduce data collection costs.
+We ﬁnd that our Energy loss lends itself well to those settings. On the one hand, it exhibits a high degree of robustness to limited or noisy bounding box annotations (cf. Figs. 10 and 12). On the other hand, despite the coarse-ness of bounding box guidance, it maintains a clear focus on object-speciﬁc features inside the bounding boxes, see
+Fig. 1a, row 3. In contrast, prior approaches often regular-ize for a uniform distribution of the attribution values inside the annotation masks, and thus tend to exhibit much lower attribution granularity (cf. Fig. 9).
+Contributions. (1) We perform an in-depth evaluation of model guidance on challenging large scale, multi-label clas-siﬁcation datasets (PASCAL VOC 2007 [16], MS COCO 2014 [34]), assessing the impact of attribution methods, model architectures, guidance depths, and loss functions.
+Further, we show that, despite being relatively coarse, bounding box supervision can provide sufﬁcient guidance to the models whilst being much cheaper to obtain than (2) We propose using the semantic segmentation masks.
+Energy Pointing Game (EPG) score [67] as an alternative to the IoU metric for evaluating the effectiveness of such guidance and show that the EPG score constitutes a good loss function for model guidance, particularly when using bounding boxes. (3) We show that model guidance can be performed cost-effectively by using annotation masks that are noisy or are available for only a small fraction (e.g. 1%) of the training data. (4) We show through experiments on the Waterbirds-100 dataset [51, 42] that model guidance with a small number of annotations sufﬁces to improve the model’s generalization under distribution shifts at test time.
+2.

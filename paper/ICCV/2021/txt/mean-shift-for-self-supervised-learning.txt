@@ -1,0 +1,227 @@
+Abstract
+Most recent self-supervised learning (SSL) algorithms learn features by contrasting between instances of images or by clustering the images and then contrasting between the image clusters. We introduce a simple mean-shift al-gorithm that learns representations by grouping images to-gether without contrasting between them or adopting much of prior on the structure or number of the clusters. We simply “shift” the embedding of each image to be close to the “mean” of the neighbors of its augmentation. Since the closest neighbor is always another augmentation of the same image, our model will be identical to BYOL when using only one nearest neighbor instead of 5 used in our experiments. Our model achieves 72.4% on ImageNet lin-ear evaluation with ResNet50 at 200 epochs outperforming
+BYOL. Also, our method outperforms the SOTA by a large margin when using weak augmentations only, facilitating adoption of SSL for other modalities. Our code is available here: https://github.com/UMBCvision/MSF 1.
+
+Introduction
+Most current visual recognition algorithms are super-vised, meaning that they learn from large scale annotated images or videos. However, in many applications, the an-notation process may be expensive, biased, ambiguous, or involve privacy concerns. Self-supervised learning (SSL) algorithms aim to learn rich representations from unlabeled images or videos. Such learned representations can be used along with small annotated data to provide an accurate vi-sual recognition model. We are interested in developing bet-ter SSL models using unlabeled images.
+Some recent SSL models learn by contrasting between instances of images. They pull different augmentations of an image instance together while pushing them away from other image instances [23, 11]. Some other SSL methods cluster the unlabeled images to a set of clusters with the hope that each cluster will contain semantically similar im-*Equal contribution ages. Then, a model that predicts those clusters learns rich representations similar to supervised learning with labels
+[9, 52, 10].
+These clustering methods also can be considered as con-trastive learning since they contrast between different clus-ters of images. For instance, the SoftMax layer in deep clus-tering method [9] encourages an image to be assigned to the correct single cluster and not the other clusters.
+Also, most clustering algorithms have strong priors on the overall structure of the clusters. For instance, deep clustering (k-means) using Euclidean distance encourages spherical cluster shapes which we believe is unnecessary for the purpose of SSL methods.
+Recently, BYOL [22] showed that it is possible to learn rich representations without contrasting between image in-stances. BYOL [22] works by simply pulling the two views of an image closer without any contrast with other images.
+The better performance of BYOL [22] compared to MoCo hints that contrasting with other images may be a limiting constraint. For instance, in MoCo [23], since the negative images are sampled randomly, they may be from the same category as the query, resulting in degraded representations.
+[42] tries to resolve this issue by not treating all negatives equally negative.
+Inspired by mean shift clustering, we generalize BYOL to a simple yet effective SSL method where a data point is pulled closer to not only its other augmentations but also the nearest neighbors (NNs) of its augmentation. Unlike
+DeepCluster [9], SwAV [10], and SeLA [52] that use ex-plicit, mutually exclusive cluster assignment, our method uses mean-shift algorithm that groups similar images to-gether locally without explicit cluster assignment. More-over, unlike k-means clustering, mean-shift does not have strong priors on the shape, size, or number of the clusters.
+This makes mean-shift suitable for SSL where such priors are not known. Compared to MoCo [23], SimCLR [11],
+SwAV [10] and few others, our method never contrasts be-tween different images or even cluster centers.
+Since we need a large set of embeddings to search for nearest neighbors, we adopt the memory bank idea [23] to maintain a random set of embeddings. Also, since the
+Figure 1: MSF method: Similar to BYOL, we maintain two encoders (“target” and “online”). The online encoder is updated with gradient descent while the target encoder is the moving average of the online encoder. We augment an image twice and feed to both encoders. We add the target embedding to the memory bank and look for its nearest neighbors in the memory bank. Obviously target embedding itself will be the first nearest neighbor. We want to shift the embedding of the input image towards the mean of its nearest neighbors, so we minimize the summation of those distances. Note that our method using only one nearest neighbor is identical to BYOL which pulls different augmentations together without grouping different instances of images. To our knowledge, our method is the first in grouping different instances of images without contrasting between image instances or clusters. model is evolving over time in the learning process, the old elements in the memory bank will not be valid, so we adopt the momentum idea from [23] to maintain two en-coders (“target” and “online”) instead of only one. The on-line model is updated by the loss and the target model is updated as a moving average of the online model. We feed two different augmentations of an image to these two en-coders, then we push the online embedding of the image to be close to the average of nearest neighbors of the target en-coding of the image in the target embedding space. Hence, similar to most recent SSL methods, our method also uses the inductive bias that the augmentation should not move the embedding much.
+Our experiments show that our method outperforms state-of-the-art methods on various settings. For instance, when trained on unlabeled ImageNet for 200 epochs, it achieves 72.4% linear ImageNet accuracy which is better than BYOL at 200 epochs.
+Most recent SSL methods use strong augmentations to improve the accuracy, leading to “augmentation engineer-ing” to improve SSL. However, in many applications, e.g., medical domain, designing such augmentations is not easy and needs extensive domain knowledge. Hence, designing
+SSL methods that do not rely heavily on large variations of augmentations is interesting. We show that when using only weak augmentations, our method (MSF w/w) outperforms
+BYOL by a large margin. We hypothesize that NNs act as a proxy for strong augmentations of the query image, so there is no need for engineering strong augmentations. 2. Method
+We are interested in mean-shift clustering, so at each it-eration we want to encourage the model to shift the embed-ding of an image to be closer to the average of its nearest neighbors on a large random set of samples.
+Following the notation of BYOL [22], we assume a tar-get encoder f and an online encoder g. Both encoders have the same backbone architecture followed by a projection layer and are initialized equally. The online encoder g is followed by an additional prediction layer h on top of it.
+The online encoder g and the prediction layer h are updated by back-propagating the loss while the target encoder f is updated by momentum update to be a running average of the online encoder g. Since nearest neighbor needs a large pool of examples, we maintain a first-in-first-out (FIFO) memory bank [23] that includes recent embeddings from the slowly evolving target encoder f .
+Given an unlabeled image x, we augment it randomly twice to get T1(x) and T2(x). We feed them to encoders and then normalize them with ℓ2 norm to get u = f (T1(x))
+||f (T1(x))||2 and v = h(g(T2(x)))
+. We first add u to the memory bank
+||h(g(T2(x)))||2 and then, find the k nearest neighbors of u in the memory bank to get a set of embeddings {zj}k j=1. Note that this set includes u itself. Since we know it is another augmentation of the same input image, it should be a good target for v.
+Figure 2: Nearest neighbors (NN) of the model at each epoch: For a random query images, we show how the nearest neighbors evolve at the learning time. Initially, NNs are not semantically quite related, but are close in low-level features. The accuracy of 1-NN classifier in the initialization is 1.5% which is 15 times larger than random chance (0.1%). This little signal is bootstrapped in our learning method and results in NNs of the late epochs which are mostly semantically related to the query image. More visualizations can be found in the appendix.
+Finally, we minimize the following loss:
+L = 1 k k (cid:88) j=1 dist(v, zj) where, dist(., .) is the distance metric between two embed-dings. We use MSE loss (dist(a, b) = ||a − b||2 2) as the dis-tance in our experiments. Minimizing this loss is equivalent to maximizing Cosine similarity as the vectors are already
+ℓ2 normalized. The final loss is the summation of the above loss for all input images.
+Ideally, we can average the set of nearest neighbors to come up with a single target embedding, but since averag-ing is dependent on the choice of loss function, we simply minimize the summation of distances. Note that for Eu-clidean distance, both methods result in identical gradients.
+Since u itself is included in our NN search, it will be always the best nearest neighbor. Hence, our method with k = 1 will be identical to BYOL which minimizes ||v −u||2 2 for each image without using a memory bank.
+Moreover, in the initial stages of the learning, v may be far from u and the other k − 1 nearest neighbors may be semantically different from the query image. Since those wrong neighbors are still close to u, the loss will still pull v closer to the neighborhood of u (another augmentation of v). In later stages of learning, when the representation is more mature, the other k − 1 neighbors will be semantically related and will contribute to learning since u and v are al-ready closer to each other. Table 2-right and Figure 2 show that the representation improves as the learning progresses.
+Strength of augmentation:
+In most exemplar-based
+SSL methods, augmentation plays an important role since the main supervision signal is that the augmentation should not change the embedding much. Hence, recent methods, e.g., MoCo v2, SimCLR, and BYOL, use strong augmen-tations. We believe such aggressive augmentations on the target embeddings u may add randomness to the learning process as some of those augmentation do not look natural, so the nearest neighbors will not be semantically close to the query image. Hence, we use weaker augmentations for the target model to make u and z less noisy while still us-ing strong augmentations for the online model. We refer to this as the weak/strong (“w/s”) variation. This is inspired by [40] which uses weak augmentations in semi-supervised learning. This variation results in almost one point im-provement over the regular variation where both encoders use strong augmentations. As shown in Fig. 4 (right), the nearest neighbors are more pure in the “weak only” setting which is consistent with our above intuition. Our experi-ments show that BYOL also benefits from w/s augmentation to some extent. This is probably due to more robust target encoding. Finally, we explore a weak/weak “w/w” variation where both views are augmented with a weak augmentation. 3. Experiments
+We report the results of our self-supervised learning and transfer learning in this section. We use PyTorch library for all experiments.
+Mem.
+Size kNN
+Time kNN
+GFLOPS
+NN 20-NN Transfer 1M 6.78% 128K 0.72% 1.05 0.13 62.0 62.0 64.9 65.2
+Mean 75.5 76.3
+Table 1: Additional computational cost of finding NNs: For-warding through each ResNet50 encoder needs 4.14 GFLOPS, so finding NNs adds a small cost. Note that any method like MoCo that uses a memory bank needs this additional cost. 3.1. Self-supervised Learning
+Mean Shift (MSF): We use 0.99 for the the momen-tum of the target encoder, top-k = 5, and 1.024M for the memory bank size (which is roughly the same as the size of
+ImageNet dataset). Our ablation study shows that a mem-ory bank of 128K does not degrade the results. We observe that the added computational cost of NN search is small compared to the overall forward and backward passes. We find that MSF with 128K memory bank size and 512 di-mensions for the embedding, uses less than 0.5GB of extra
+GPU memory for the memory bank and less than 1% of ex-tra computation for finding 5 NNs (see Table 1).
+BYOL-asym (baseline): Training SSL methods for more than 200 epochs is not easy due to resource con-straints. For instance, training BYOL with ResNet50 for 200 epochs takes roughly 7 days on four RTX 2080-Ti
+GPUs. Thus, for a fair comparison, we re-implement BYOL in our own framework and call it BYOL-asym. We note and justify the major differences between BYOL-asym and
+BYOL here. First, we use an asymmetric loss. The orig-inal BYOL paper [22] uses symmetric loss which passes each view of the image through both encoders. As a re-sult, the gradient is calculated over 2 × B instances where
+B is the batch size, so each epoch needs twice computa-tion compared to asymmetric loss. Hence, 200 epochs of
+BYOL-asym should be compared with 100 epochs of reg-ular BYOL. Second, we use a small batch size of 256 in-stead of 4096. [22] shows that BYOL works well even with the batch size of 256. Third, we use SGD optimizer in-stead of LARS. Despite these differences, our implementa-tion works reasonable well compared to reported results in prior work. Our MSF uses the same setup for fairness.
+Augmentation: In all of our experiments, “strong” aug-mentation refers to the augmentation in MoCo v2 [12]. The strong augmentation involves the following stochastic oper-ations: grayscale, color jitter, horizontal flip, and Gaussian blur. The “weak” augmentation is simply a random crop of size 224 × 224 with area ratio between 0.2 and 1.0 fol-lowed by random horizontal flipping with probability 0.5.
+MSF w/s refers to our “weak/strong” variation where the target encoder view is augmented with the weak augmenta-tion and online encoder view is augmented with the strong augmentation. MSF w/w refers to our “weak/weak” vari-ation where both teacher and student views use weak aug-mentation. BYOL-asym and MSF use the standard SSL practice of augmenting both views with the strong augmen-tation.
+Architecture: We generally follow [22] for the architec-tures of both BYOL-asym and MSF. We use the ResNet50
+[24] model as backbone in all our experiments. A projection layer (2 layer MLP) is added on top of the backbone. The first layer expands the feature channels from 2048 to 4096.
+It is followed by BatchNorm and ReLU layers. The final linear layer reduces the feature channels from 4096 to 512.
+The prediction layer architecture is the same as projection layer except its first layer expands the channels from 512 to 4096. After the pre-training step, online encoder’s back-bone is evaluated by removing the projection and prediction layers.
+Training: For both BYOL-asym and MSF, we use the
+SGD (lr=0.05, momentum=0.9, and weight decay=1e-4) optimizer and train for 200 epochs. Learning rate uses co-sine scheduler. 3.2. Evaluation on ImageNet
+Evaluation on full ImageNet. We evaluate the repre-sentations of the pre-trained model by training linear and nearest neighbor (NN) classifiers. We use the code pro-vided by [5] for training both classifiers. A single linear layer is trained on top of a frozen backbone. The features from the backbone are normalized to have unit ℓ2 norm and then scaled and shifted to have zero mean and unit variance for each dimension. The linear layer is trained with SGD (lr=0.01, epochs=40, batch size=256, weight decay=1e-4, and momentum=0.9). Learning rate is multiplied by 0.1 at 15 and 30 epochs. We use standard supervised ImageNet augmentations [2] during training. For nearest neighbor, we pre-process train and val ImageNet sets with center crop (size 256) augmentation and calculate ℓ2 normalized em-beddings by forwarding throught the backbone. We report
+Top-1 accuracies on ImageNet val set for linear, 1-NN, and 20-NN classifiers in Table 2.
+Evaluation on smaller ImageNet: Similar to [25, 11, 22, 5], we evaluate the pre-trained models on the task of classification with limited ImageNet labels. The training details are the same as above except the training dataset sizes are reduced to 1% and 10% of the train set of Ima-geNet [39]. The results are reported in Table 3. 3.3. Evaluation on Transfer Learning
+Linear classification: Following the procedure outlined in [11, 22], we evaluate the self-supervised pre-trained models for linear classification task on following datasets:
+Food101 [8], SUN397 [49], CIFAR10 [29], CIFAR100
+Method
+Ref. Batch
+Size
+Epochs
+Top-1
+Sym. Loss 2x FLOPS Linear
+NN 20-NN
+Supervised
+Random-init
+SeLa-v2 [52]
+SimCLR[11]
+SwAV [10]
+DeepCluster-v2 [9]
+SimSiam [13]
+MoCo v2 [23]
+MoCo v2 [23]
+CompRess † [5]
+InvP
+BYOL [22]
+BYOL [22]
+SwAV ‡ [10]
+SimCLR[11]
+SwAV [10]
+MoCo v2 [23]
+SimSiam [13]
+BYOL [22]
+MoCo v2 [23]
+CO2 [47]
+BYOL-asym [22]
+ISD [42]
+MSF
+MSF w/s
+MSF w/s (128K)
+SimCLR w/w [11]
+BYOL w/w [22]
+MSF w/w
+[4]
+-[10]
+[11]
+[10]
+[10]
+[13]
+[13]
+[12]
+[5]
+[46]
+[22]
+[22]
+[10]
+[13]
+[13]
+[13]
+[13]
+[13]
+[12]
+[47]
+-[42]
+---[22]
+[22]
+-256
+-4096 4096 4096 4096 256 256 256 256 256 256 4096 4096 4096 4096 256 256 4096 256 256 256 256 256 256 256 4096 4096 256 100
+-400 1000 400 400 400 400 800 1K+130 800 300 1000 800 200 200 200 200 200 200 200 200 200 200 200 200 300 300 200
+--✓
+✓
+✓
+✓
+✓
+✓
+✗
+✗
+✗
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✗
+✗
+✗
+✗
+✗
+✗
+✗
+✓
+✓
+✗ 76.2 5.1 67.2 69.3 70.1 70.2 70.8 71.0 71.1 71.9 71.3 71.8 74.3 75.3 68.3 69.1 69.9 70.0 70.6 67.5 68.0 69.3 69.8 71.4 72.4 72.1 40.2 60.1 66.3 71.4 1.5
+------57.3 63.3
+--62.8
+------50.9
+-55.0 59.2 60.6 62.0 62.0
+--54.6 74.8 2.0
+------61.0 66.8
+--66.9
+------54.3
+-59.2 62.0 64.0 64.9 65.2
+--57.4
+Table 2: Left: Evaluation on full ImageNet: We compare our model on the full ImageNet linear and nearest neighbor benchmarks using
+ResNet50. We find that given similar computational budget, our models are better than other state-of-the-art methods. Our w/s variation works slightly better than the regular MSF. Interestingly, when using weak augmentations only, our method (MSF w/w) outperforms
+BYOL and SimCLR with a large margin. We believe this is important in some applications,e g.g. medical domain, where augmentation engineering is not easy. Note that methods with symmetric loss are not directly comparable with the other ones as they need to feed each image twice though each encoder. This results in twice the computation for each mini-batch. One may argue that a non-symmetric BYOL with 200 epochs should be compared with symmetric BYOL with 100 epochs only as they use similar amount of computation. Note that symmetric MoCo v2 with 400 epochs is almost the same as asymmetric MoCo v2 with 800 epochs (71.0 vs. 71.1). Note that the accuracy of Random-init for ResNet50 is much lower than AlexNet (14.1% on conv5 layer from [35]). †: CompRess is not directly comparable as it uses ResNet50 distilled from a larger SSL teacher model (SimCLR-ResNet50x4). ‡: SwAV is not comparable as it uses multiple crops together. Right: Epochwise t-SNE for MSF: We visualize the ℓ2 normalized features for 10 random ImageNet classes at certain epochs of MSF training. We find that over the period of training, semantic clusters are formed in the feature space.
+[29], Cars [28], Aircraft [30], Flowers [32], Pets [36],
+Caltech-101 [20] and DTD [15]. The appendix includes more details on the datasets and training. The results are reported in Table 4. To verify our implementation, we eval-uate the official 1000-epoch BYOL weights provided in [1] and compare with the results from [22] in Table 4.
+Object detection: Following the procedure outlined in
+[23], we use Faster-RCNN [38] for the task of object detec-tion on PASCAL-VOC [19]. We use the code provided at
+[3] with default parameters. All the weights are finetuned on the trainval07+12 set and evaluated on the test07 set. We report an average over 5 runs in Table 5.
+Method
+Supervised
+PIRL [31]
+CO2 [47]
+SimCLR [11]
+InvP [46]
+BYOL [22]
+SwAV† [10]
+MoCo v2 [12]
+BYOL‡ [22]
+CompRess* [5]
+MoCo v2 [12]
+BYOL-asym
+ISD [42]
+MSF
+MSF w/s
+Fine-tuned
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✗
+✗
+✗
+✗
+✗
+✗
+✗
+✗
+Epochs
+Top-1
+Top-5 1% 10% 1% 10% 800 200 1000 800 1000 800 800 1000 1K+130 200 200 200 200 200 25.4
+--48.3
+-53.2 53.9 51.5 55.7 59.7 43.6 47.9 53.4 53.5 55.5 56.4
+--65.6
+-68.8 70.2 63.6 68.6 67.0 58.4 61.3 63.0 65.2 66.5 48.4 57.2 71.0 75.5 78.2 78.4 78.5 77.6 80.0 82.3 71.2 74.6 78.8 78.1 79.9 80.4 83.8 85.7 87.8 88.7 89.0 89.9 86.1 88.6 87.5 82.9 84.7 85.9 86.4 87.6
+Table 3: Evaluation on small labeled ImageNet: We compare our model on the ImageNet 1% and 10% linear evaluation bench-marks for ResNet50. The column “Fine-tuned” refers to whether the full network was fine-tuned or a single linear layer was trained.
+Given similar computational budgets, both of our models are better than other state-of-the-art methods. We evaluate BYOL and MoCo v2 with our evaluation framework and interestingly, realize that
+BYOL performs better in linear evaluation compared to finetun-ing the whole network on the 1% split. We report these numbers for fair comparison. * is ResNet50 compressed from SimCLR-R50x4. † uses a different augmentation strategy than others. ‡ is our evaluation with the official weights [1]. 3.4. Ablation study.
+Here, we study the effect of MSF hyperparameters and top-k, and design choices like augmentation strategies, memory bank size. We use ResNet50 and train it with Im-ageNet.
+In all experiments, we use the default MSF w/s variant and only vary the parameter of interest.
+Same view of an instance to both encoders: One may argue that the mean-shift grouping and using different views of the same instance for different encoders are orthogonal ideas, and mean-shift alone might work. We did an experi-ment by feeding the same augmented view to both encoders (T 1 = T 2) and realized that the model does not learn. It collapses in the first epoch. Hence, we believe using differ-ent views is still an important inductive bias.
+Effect of k in top-k: This section shows the effect of sampling different top-k nearest neighbors. We use k values from set {2, 5, 10, 20, 50}. We use k = 5 for main experi-ments, but k = 10 improves NN by 0.5 point. Note that set-ting k = 1, makes MSF identical to BYOL. Results are in the Table 6. Additionally, we plot the purity for each exper-iment in Figure 4. Purity for a single query is the percentage of the samples 2 to k in the top-k nearest neighbors (exclud-ing u itself) which have the same class as the query. Final purity is calculated by averaging the purities of all samples.
+One may study the effect of increasing k gradually during iterations as a future extension.
+Figure 3: Memory Bank Size: On ImageNet, we do not see an improvement in increasing the memory bank size beyond 128K which needs only 0.5GB of GPU memory.
+Size of memory bank: CompRess [5] shows that a large memory bank is important to accurately capture the neigh-borhood of a random sample in the embedding space. Thus, we vary the size of the memory bank from 256 to 1M to evaluate if larger memory bank can help with more accu-rate nearest neighbors. Results are in Figure 3. Although our main experiment uses 1M sized memory bank, we find that 128K works equally well. Note that the size of memory bank also depends on the training dataset size.
+Comparison of different augmentation strategies: Ta-ble 7 shows results for BYOL and MSF with different aug-mentation strategies. Comparing “s/s” variants with “w/s”, we find that BYOL receives a very small boost from the
+“w/s” variant while MSF improves consistently by ≈ 1 point on all three benchmarks. We believe this is due to better purity of the nearest neighbors while training (also shown in Fig. 4 (right)). Further, we observe that MSF w/w is significantly better as compared to BYOL w/w. This can be attributed to the nearest neighbors serving as a proxy for strong augmentation. 4.

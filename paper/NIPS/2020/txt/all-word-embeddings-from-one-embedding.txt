@@ -1,0 +1,128 @@
+Abstract
+In neural network-based models for natural language processing (NLP), the largest part of the parameters often consists of word embeddings. Conventional models prepare a large embedding matrix whose size depends on the vocabulary size.
+Therefore, storing these models in memory and disk storage is costly. In this study, to reduce the total number of parameters, the embeddings for all words are represented by transforming a shared embedding. The proposed method, ALONE (all word embeddings from one), constructs the embedding of a word by modifying the shared embedding with a ﬁlter vector, which is word-speciﬁc but non-trainable.
+Then, we input the constructed embedding into a feed-forward neural network to increase its expressiveness. Naively, the ﬁlter vectors occupy the same memory size as the conventional embedding matrix, which depends on the vocabulary size. To solve this issue, we also introduce a memory-efﬁcient ﬁlter construction approach.
+We indicate our ALONE can be used as word representation sufﬁciently through an experiment on the reconstruction of pre-trained word embeddings. In addition, we also conduct experiments on NLP application tasks: machine translation and summarization. We combined ALONE with the current state-of-the-art encoder-decoder model, the Transformer [36], and achieved comparable scores on WMT 2014 English-to-German translation and DUC 2004 very short summarization with less parameters1. 1
+
+Introduction
+Word embeddings have played a crucial role in the recent progress in the area of natural language processing (NLP) [3, 17, 22, 23]. In particular, word embeddings are necessary to convert discrete input representations into vector representations in neural network-based NLP methods [3]. To convert an input word w into a vector representation in a conventional way, we prepare a one-hot vector vw whose dimension size is equal to the vocabulary size V and an embedding matrix E whose shape is De × V (De represents a word embedding size). Then, we multiply E and vw to obtain a word embedding ew.
+NLP researchers have used word embeddings as input in their models for several applications such as language modeling [38], machine translation [30], and summarization [26]. However, in these methods, the embedding matrix forms the largest part of the total parameters, because V is much larger than the dimension sizes of other weight matrices. For example, the embedding matrix makes up one-fourth of the parameters of the Transformer, a state-of-the-art neural encoder-decoder model, on WMT English-to-German translation [36]. Thus, if we can represent each word with fewer parameters without signiﬁcant compromises on performance, we can reduce the model size to conserve memory space. If we save the memory space for embeddings, we can also train a bigger model to improve the performance. 1The code is publicly available at https://github.com/takase/alone_seq2seq 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Figure 1: Word embedding constructions by the conventional way and our proposed ALONE. ALONE represents each word with an embedding o and the ﬁlter vector mw. We ﬁx source matrices with random initialized values, and thus it is unnecessary to prepare trainable parameters for construction of mw. To increase the expressiveness, we input the embedding into a feed-forward neural network.
+To reduce the size of neural network models, some studies have proposed the pruning of unimpor-tant connections from a trained network [15, 8, 39]. However, their approaches require twice or much computational cost, because we have to train the network before and after pruning. Another approach [31, 28, 1] limited the number of embeddings by utilizing the composition of shared embeddings. These methods represent an embedding by combining several primitive embeddings, whose number is less than the vocabulary. However, since they require learning the combination of assignments of embeddings to each word, they need additional parameters during the training phase.
+Thus, prior approaches require multiple training steps and/or additional parameters that are necessary only during the training phase.
+To address the above issues, we propose a novel method: ALONE (all word embeddings from one), which can be used as a word embedding set without multiple training steps and additional trainable parameters to assign each word to a unique vector. ALONE computes an embedding for each word (as a replacement for ew) by transforming a shared base embedding with a word-speciﬁc
+ﬁlter vector and a shared feed-forward network. We represent the ﬁlter vectors with combinations of primitive random vectors, whose total is signiﬁcantly smaller than the vocabulary size. In addition, it is unnecessary to train the assignments, because we assign the random vectors to each word randomly.
+Therefore, while ALONE retains its expressiveness, its total parameter size is much smaller than the conventional embedding size, which depends on the vocabulary size due to De × V .
+Through experiments, we demonstrate ALONE can be used for NLP with comparable performances to the conventional embeddings but fewer parameters. We ﬁrst indicate ALONE has enough expres-siveness to represent the existing word embedding (GloVe [22]) through a reconstruction experiment.
+In addition, on two NLP applications of machine translation and summarization, we demonstrate
+ALONE with the state-of-the-art encoder-decoder model trained in an end-to-end manner achieved comparable scores with fewer parameters than models with the conventional word embeddings. 2 Proposed Method: ALONE
+Figure 1 shows an overview of the conventional and proposed word embedding construction approaches. As shown in this ﬁgure, the conventional way requires a large embedding matrix
+E ∈ RDe×V , where each column vector is assigned to a word, and we pick a word embedding with a one-hot vector vw ∈ R1×V . In other words, each word has a word-speciﬁc vector, whose size is
+De, and the total size summed over the vocabulary is De × V . To reduce the size, ALONE make words share some type of vector element with each other. ALONE has a base embedding o ∈ R1×Do, which is shared by all words, and represents each word by transforming the base embedding. To concretely obtain a word representation for w, ALONE computes an element-wise product of o and a
+ﬁlter vector mw, and then applies a feed-forward network to increase its expressiveness. The two components are described as follows. 2
+Figure 2: Construction of the ﬁlter vector mw. We pick several vectors corresponding to the word w from source matrices and combine them to construct mw. 2.1 Filter Construction
+To make the result of the element-wise product mw (cid:12) o unique to each word, we have to prepare different ﬁlter vectors from each other. In the simplest way, we sample values from a distribution such as Gaussian Do × V times, and then we construct the matrix whose size is Do × V with the sampled values. However, the above method requires similar memory space to E in the conventional word embeddings. Thus, we introduce a more memory-efﬁcient way herein.
+Our ﬁlter construction approach does not prepare the ﬁlter vector for each word explicitly. Instead, we construct a ﬁlter vector by combining multiple vectors, as shown in Figure 2. In the ﬁrst step, we prepare M source matrices such as codebooks, each of which is Do × c. Then, we assign one column vector of each matrix to each word randomly. Thus, each word is tied to M (column) vectors. In this step, since the probability of collision between two combinations is much small (1 − exp(− V 2 2(cM ) ) based on the birthday problem), each word is probably assigned to the unique set of M vectors.
+Moreover, the required memory space, i.e., Do × c × M is smaller than E when we use c × M (cid:28) V .
+To construct the ﬁlter vector mw, we pick assigned column vectors from each matrix, and compute the sum of the vectors. Then, we apply a function f (·) to the result. Formally, let m1 w be column vectors assigned to w, we compute the following equation: w, ..., mM mw = f (cid:18) M (cid:88) (cid:19)
+. mi w i (1)
+In this paper, we use two types of ﬁlter vectors: a binary mask and a real number vector based on the following distribution and function.
+Binary Mask A binary mask is a binary vector whose elements are 0 or 1, such as the dropout mask [29]. Thus, we ignore some elements of o based on the binary mask for each word. For the binary mask construction, we use the Bernoulli distribution. To make the binary mask containing 0 with probability po, we construct the source matrices with sampling from the Bernoulli(1 − p
+Moreover, we use the following Clip(·)2 as the function f to trim 1 or more to 1 in the ﬁlter vectors. o ). 1
+M
+Clip(a) = (cid:26)1 0 1 ≤ a otherwise (2)
+In other words, in binary mask construction, mw is computed from the element-wise logical OR operation over all mi w.
+Real Number Vector
+In addition to the binary mask, we use the ﬁlter vector, which consists of real numbers. We use the Gaussian distribution to construct source matrices, and the identity transformation as the function f . In other words, we use the sum of vectors from source matrices without any transformation as the ﬁlter vector. 2Equation (2) represents the operation for a scalar value. If an input is a vector such as Equation (1), we apply Equation (2) to all elements in the input vector. 3
+Table 1: Memory space required by each method for word representation. ALONE (naive) represents the case where we prepare ﬁlter vectors explicitly.
+Method
+Conventional way
+ALONE (naive)
+ALONE (proposed)
+ALONE (proposed (volatile))
+Memory usage
+De × V
+Do + Dinter × (Do + De) + Do × V
+Do + Dinter × (Do + De) + M × Do × c
+Do + Dinter × (Do + De) 2.2 Feed-Forward Network
+We obtain the unique vector to each word by computing the element-wise product of o and mw.
+However, in this situation, words share the same value in several elements. Thus, we increase the expressiveness by applying a feed-forward network FFN(·) to the result of mw (cid:12) o:
+FFN(x) = W2(max(0, W1x)), (3) where W1 ∈ RDinter×Do and W2 ∈ RDe×Dinter are weight matrices. In short, the feed-forward network in this paper consists of two linear transformations with a ReLU activation function. We use the output of FFN(mw (cid:12) o) as the word embedding for w. 2.3 Discussion on the Number of Parameters and Memory Footprint
+Table 1 summarizes the memory space required by each method. In this table, ALONE (naive) ignores the ﬁlter construction approach introduced in Section 2.1. As described previously, the conventional way requires a large amount of memory space because V is exceptionally large (> 104) in most cases. In contrast, ALONE (proposed) drastically reduces the number of parameters due to Do, Dinter, M × c (cid:28) V , and thus, we can reduce the memory footprint when we adopt the introduced ﬁlter construction way. Moreover, since ALONE uses random initialized vectors as ﬁlter vectors without any training, we can reconstruct them again and again if we store a random seed.
+Thus, we can ignore the memory space for ﬁlter vectors such as ALONE (proposed (volatile)).
+As an example, consider word embeddings on WMT 2014 English-to-German translation in the setting of the original Transformer [36]. In this setting, the conventional way requires 19M as the memory footprint due to V = 37000 and De = 512. In contrast, ALONE compresses the parameter size to 4M, which is less than a quarter of that footprint, when we set Do = 512 and Dinter = 4096.
+These values are used in the following experiment on machine translation. For ﬁlter vectors, the naive ﬁlter construction way requires an additional 19M for the memory footprint, but our introduced approach requires only 262k more when we set c = 64 and M = 8. These values are also used in our experiments. Thus, the proposed ALONE reduces the memory footprint as compared to that of the conventional word embeddings. 3 Experiments
+In this section, we investigate whether the proposed method, ALONE, can be an alternation of the conventional word embeddings. We ﬁrst conduct an experiment on the reconstruction of pre-trained word embeddings to investigate whether ALONE is capable of mimicking the conventional word embeddings. Then, we conduct experiments on real applications: machine translation and summarization. We train the Transformer, which is the current state-of-the-art neural encoder-decoder model, combined with the ALONE in an end-to-end manner. 3.1 Word Embedding Reconstruction
+In this experiment, we investigate whether ALONE has a similar expressiveness to the conventional word embeddings. We used the pre-trained 300 dimensional GloVe3 [22] as source word embeddings and reconstructed them with ALONE. 3https://nlp.stanford.edu/projects/glove/ 4
+Figure 3: Results on word embedding reconstruction. The dashed line indicates the Spearman’s rank correlation coefﬁcient of GloVe.
+Training details: The training objective is to mimic the GloVe embeddings with ALONE. Let ew be the conventional word embedding (GloVe in this experiment), we minimize the following objective function: 1
+V
+V (cid:88) w=1
+||ew − FFN(mw (cid:12) o)||2. (4)
+We optimized the above objective function with Adam [13] whose hyper-parameters are default settings in PyTorch [21]. We set mini-batch size 256 and the number of epochs 1000. We constructed each mini-batch with uniformly sampling from vocabulary and regard training on the whole vocabu-lary as one epoch. For c, M , and po in the binary mask, we set 64, 8, and 0.5 respectively4. We used the same dimension size as GloVe (300) for Do and conducted experiments with varying Dinter in
+{600, 1200, 1800, 2400}. In each setting, the total number of parameters is 0.4M, 0.7M, 1.1M, and 1.4M. We selected the top 5k words based on the frequency in English Wikipedia as target words5.
+We used ﬁve random seeds to initialize ALONE, and report the average of ﬁve scores.
+Test data: We used the word similarity task, which is widely used to evaluate the quality of word embeddings [22, 4, 37]. The task investigates whether similarity based on trained word embeddings corresponds to the human-annotated similarity. In this paper, we used three test sets: SimLex-999 [9],
+WordSim-353 [5], and RG-65 [25]. We computed Spearman’s rank correlation (ρ) between the cosine similarities of word embeddings and the human annotations as in previous studies.
+Results: Figure 3 shows the Spearman’s ρ of ALONE in both ﬁlter vectors. This ﬁgure also shows the Spearman’s ρ without training o (Fix o). The dashed line indicates the Spearman’s ρ of GloVe, i.e., the upper bound of word embedding reconstruction. Figure 3 indicates that ALONE achieved comparable scores to GloVe on all datasets in Dinter = 2400. These results indicate that ALONE has the expressive power to represent the conventional word embeddings.
+In the comparison between ﬁlter vectors, we cannot ﬁnd the signiﬁcant difference in Dinter = 2400, but the real number vectors slightly outperformed binary masks in small Dinter. Thus, we should use real number vectors as the ﬁlter vectors if the number of parameters is strongly restricted.
+Figure 3 shows that the setting without training o is defeated against training o in most cases.
+Therefore, it is better to train o to obtain superior representations. 3.2 Machine Translation
+Section 3.1 indicates ALONE can mimic pre-trained word embeddings, but there remain two ques-tions: 1. Can we train ALONE in an end-to-end manner? 2. In the realistic situation, can ALONE reduce the number of parameters related to word embeddings while maintaining performance? 4We tried several values, but we cannot observe any signiﬁcant differences among the results. 5We can use the whole vocabulary of pre-trained GloVe embeddings but we restricted vocabulary size to shorten the training time. 5
+Table 2: Results of WMT En-De translation.
+Dinter
+Method
+ConvS2S [6]
+Transformer [36]
+Transformer+DeFINE [16]
+Transformer (conventional word embeddings)
+Transformer (factorized embed)
+Transformer (factorized embed)
+Transformer+ALONE (Binary)
+Transformer+ALONE (Real number)
+Transformer+ALONE (Binary)
+Transformer+ALONE (Real number)
+ALONE without training o
+Transformer+ALONE (Binary)
+Transformer+ALONE (Real number)
+Transformer+ALONE (Binary)
+Transformer+ALONE (Real number) 4096 4096 8192 8192 4096 4096 8192 8192
+-Embed BLEU 66.0M 25.2 16.8M 27.3 27.01 16.8M 27.12 4.3M 26.43 8.5M 26.56 4.2M 26.97 4.2M 26.93 8.4M 27.55 8.4M 27.61 4.2M 26.75 4.2M 26.85 8.4M 26.90 8.4M 26.95
+To answer these questions, we conduct experiments on machine translation and summarization.
+Training details:
+In machine translation, we used ALONE as word embeddings instead of the conventional embedding matrix E in the Transformer [36]. We adopted the base model setting and thus shared embeddings with the pre-softmax linear transformation matrix. We used the fairseq implementation [19] and followed the training procedure described in its documentation 6. We set
+Do the same number as the dimension of each layer in the Transformer (dmodel, i.e., 512) and varied
+Dinter. For other hyper-parameters, we set as follows: c = 64, M = 8, and po = 0.5. Moreover, we applied the dropout after the ReLU activation function in Equation (3).
+Dataset: We used WMT En-De dataset since it is widely used to evaluate the performance of machine translation [6, 36, 18]. Following previous studies [36, 18], we used WMT 2016 training data, which contains 4.5M sentence pairs, newstest2013, newstest2014 for training, validation, and test respectively. We constructed a vocabulary with the byte pair encoding [27] whose merge operation is 32K in sharing source and target. We measured case-sensitive BLEU with SacreBLEU [24].
+Result: Table 2 shows BLEU scores of the Transformer with ALONE in the case Dinter = 4096, 8192. This table also shows BLEU scores of previous studies [6, 36, 16] and the Transformer trained in our environment with the same hyper-parameters as the original one [36]7. DeFINE [16] uses a factorization approach, which constructs embeddings from small matrices instead of one large embedding matrix, to reduce the number of parameters8. In addition, we trained the Transformer with a simple factorization approach as a baseline. In the simple factorization approach, we construct word embeddings from one small embedding matrix and weight matrix to expand a small embedding to one with the larger dimensionality De. We modiﬁed the dimension size to make the number of parameters related to embeddings almost equal to those in ALONE.
+Table 2 shows the Transformer with ALONE in Dinter = 8192 outperformed other methods even though the embedding parameter size is half that of the Transformer with the conventional embeddings.
+This result indicates that our ALONE can reduce the number of parameters related to embeddings without negatively affecting the performance on machine translation. 6https://github.com/pytorch/fairseq/tree/master/examples/scaling_nmt 7The number of parameters for embeddings in the Transformer is different from that in the original one [36] owing to the difference of vocabulary size. 8Table 2 shows the reported score. We cannot demonstrate the embedding parameter size for Trans-former+DeFINE because its vocabulary size is unreported but the parameter size of Transformer+DeFINE is 68M, which is larger than that of the original Transformer (60.9M). We consider that the original Trans-former (and our experiments) save the total parameter size by sharing embeddings with the pre-softmax linear transformation matrix. 6
+Table 3: Results on DUC 2004 task 1. The scores in bold are superior to the previous top score.
+Dinter
+Method
+ABS [26]
+LSTM EncDec+WFE [32]
+Transformer+LRPE+PE [34]
++ALONE (Binary)
++ALONE (Real number)
++ALONE (Binary)
++ALONE (Real number) 512 512 1024 1024
+Embed
+R-1 42.1M 28.18 37.7M 32.28 8.3M 32.29 0.5M 31.60 0.5M 31.96 1.0M 32.51 1.0M 32.57
+R-2 8.49 10.54 11.49 11.12 11.50 11.48 11.63
+R-L 23.81 27.80 28.03 27.25 27.74 28.08 28.24
+In comparison with the factorized embedding approaches, Transformer with ALONE (Dinter = 8192) achieved superior BLEU scores as compared to Transformer+DeFINE [16], while the total parameter size of Transformer with ALONE, 52.5M, is smaller than it (68M). In other words,
+Transformer+ALONE achieved better performance even though it had a disadvantage in the parameter size. Moreover, Transformer+ALONE outperformed Transformer (factorized embed) despite the number of parameters related to embeddings in both being almost equal. These results imply that
+ALONE is superior to a simple approach using a small embedding matrix and expansion with a weight matrix.
+Table 2 also shows BLEU scores of the Transformer with ALONE in the case without training the base embedding o. The setting without training o didn’t achieve BLEU scores as high as training o.
+Therefore, we also have to train o in the training ALONE with an end-to-end manner. 3.3 Summarization
+Training details: We also conduct an experiment on the headline generation task, which is one of the abstractive summarization tasks [26, 34]. The purpose of this task is to generate a headline of a given document with the desired length. Thus, we introduced ALONE into the Transformer with the length control method [34]. For other model details, we used the same as the experiment on machine translation. We used the publicly available implementation9 and followed their training procedure. As the length control method, we used the combination of LRPE and PE [34]. Moreover, we re-ranked decoded candidates based on the content words following the previous study [34].
+Dataset: As in previous studies [26, 34], we used pairs of the ﬁrst sentence and headline extracted from the annotated English Gigaword with the same pre-processing script provided by Rush et al.
+[26]10 as the training data. The training set contains about 3.8M pairs. For the source-side, we used the byte pair encoding [27] to construct a vocabulary. We set the hyper-parameter to ﬁt the vocabulary size 16K. For the target-side, we used a set of characters as a vocabulary to control the number of output characters. We shared the source-side and target-side vocabulary.
+We used the DUC 2004 task 1 [20] as the test set. Following the evaluation protocol [20], we truncated the characters of the output headline to 75 bytes and computed the recall-based ROUGE score. the ROUGE scores of
+Result: Table 3 shows the previous best method (Trans-former+LRPE+PE [34]) with ALONE in the case Dinter = 512, 102411. This table indicates that ALONE (Real number) achieved the comparable ROUGE-2 score to the previous best in
+Dinter = 512. In addition, Transformer+LRPE+PE+ALONE in Dinter = 1024 outperformed the previous best score except for ROUGE-2 in ALONE (Binary) despite the embedding parameter size being one-eighth of that of the original Transformer+LRPE+PE.
+Figure 4 shows loss (negative log likelihood) values on validation sets of machine translation and summarization (newstest2013 and a set sampled from English Gigaword, respectively) for each word embedding method. This ﬁgure indicates that the convergence of the Transformer with ALONE is 9https://github.com/takase/control-length 10https://github.com/facebookarchive/NAMAS 11In the abstractive summarization task, the vocabulary size is much smaller than that in the machine translation experiment because we used characters for the target-side vocabulary, and the source-side vocabulary size is also small. Thus, we set a smaller Dinter. 7
+(a) Machine Translation (b) Summarization
+Figure 4: Validation loss of each method. slower than the conventional embeddings. In particular, the convergence of Binary (512) is much slower than other methods in summarization. We consider this slow convergence harmed ROUGE scores of ALONE (Binary) in DUC 2004. Meanwhile, the Transformer+ALONE in Dinter = 8192, which outperformed the original Transformer in machine translation, achieved superior validation loss values as compared to the conventional embeddings.
+In conclusion, based on the machine translation and summarization results, the answers for the previously mentioned two questions are as follows; 1. Yes, we can train ALONE with a neural method from scratch. 2. Yes, our ALONE can reduce the parameter size for embeddings without sacriﬁcing performance. 4

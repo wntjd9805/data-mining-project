@@ -1,0 +1,196 @@
+Abstract
+Recent advances in self-supervised learning with instance-level contrastive ob-jectives facilitate unsupervised clustering. However, a standalone datum is not perceiving the context of the holistic cluster, and may undergo sub-optimal assign-ment. In this paper, we extend the mainstream contrastive learning paradigm to a cluster-level scheme, where all the data subjected to the same cluster contribute to a uniﬁed representation that encodes the context of each data group. Contrastive learning with this representation then rewards the assignment of each datum. To im-plement this vision, we propose twin-contrast clustering (TCC). We deﬁne a set of categorical variables as clustering assignment conﬁdence, which links the instance-level learning track with the cluster-level one. On one hand, with the corresponding assignment variables being the weight, a weighted aggregation along the data points implements the set representation of a cluster. We further propose heuristic cluster augmentation equivalents to enable cluster-level contrastive learning. On the other hand, we derive the evidence lower-bound of the instance-level contrastive objective with the assignments. By reparametrizing the assignment variables, TCC is trained end-to-end, requiring no alternating steps. Extensive experiments show that TCC outperforms the state-of-the-art on challenging benchmarks.
+
+Introduction 1
+Ancestored by various similarity-based [59] and feature-based [4, 56] approaches, unsupervised deep clustering jointly optimizes data representations and cluster assignments [81]. A recent fashion in this domain takes inspiration from contrastive learning in computer vision [11, 12, 24], leveraging the effectiveness and simplicity of discriminative feature learning. This strategy is experimentally reasonable, as previous research has found that the learnt representations reveal data semantics and locality [34, 80]. Even a simple migration of contrastive learning signiﬁcantly improves clustering performance, of which examples include a two-stage clustering pipeline [73] with contrastive pre-training and k-means [56] and a composition of an InfoNCE loss [62] and a clustering one [81] in
+[89]. Compared with the deep generative counterparts [16, 36, 54, 86], contrastive clustering is free from decoding and computationally practical, with guaranteed feature quality.
+However, have we been paying too much attention to the representation expressiveness of a single data point? Intuitively, a standalone data point, regardless of its feature quality, cannot tell us much about how the cluster looks like. Fig. 1 illustrates a simple analogy using the TwoMoons dataset.
+Without any context for the crescents, it is difﬁcult to assign a data point to either of the two clusters based on its own representation, as the point can be inside one moon but still close to the other.
+Accordingly, observing more data reveals more about the holistic distributions of the clusters, e.g., the shapes of the moons in Fig. 1, and thus heuristically beneﬁts clustering. Although we can implicitly parametrize the context of the clusters by the model itself, e.g., using a Gaussian mixture model (GMM) [4] or encoding this information by deep model parameters, explicitly representing the context yields the most common deep learning practice. This further opens the door for learning cluster-level representations with all corresponding data points. Namely, you never cluster alone.
+∗A part of this work was done when the author was with eBay. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: The motivation behind this work. (a): When assessing a standalone data point, cluster assignment can be challenging due to the non-linearity of the feature space and the lack of context information for the data distribution. (b): Our model learns this context by representing each cluster with latent features.
+In this paper, motivated by the thought experiment above, we develop a multi-granularity contrastive learning framework, which includes an instance-level granularity and a cluster-level one. The former learning track conveys the conventional functionalities of contrastive learning, i.e., learning compact data representations and preserving underlying semantics. We further introduce a set of latent variables as cluster assignments, and derive an evidence lower bound (ELBO) of instance-level
+InfoNCE [62]. As per the cluster-level granularity, we leverage these latent variables as weights to aggregate all the corresponding data representations as the set representation [87] of a cluster. We can then apply contrastive losses to all clusters, thereafter rewarding/updating the cluster assignments.
+Abbreviated as twin-contrast clustering (TCC), our work delivers the following contributions:
+• We develop the novel TCC model, which, for the ﬁrst time, shapes and leverages a uniﬁed representation of the cluster semantics in the context of contrastive clustering.
+• We deﬁne and implement the cluster-level augmentations in a batch-based training and stochastic labelling procedure, which enables on-the-ﬂy contrastive learning on clusters.
+• We achieve signiﬁcant performance gains against the state-of-the-art methods on ﬁve bench-mark datasets. Moreover, TCC can be trained from scratch, requiring no pre-trained models or auxiliary knowledge from other domains. 2 Preliminaries 2.1 Contrastive Learning
+Contrastive learning, as the name suggests, aims to distinguish an instance from all others using embeddings, with the dot-product similarity typically being used as the measurement. Let X =
+Rdx. An arbitrary transformation
+N i=1 be an N -point dataset, with the i-th observation xi xi
+{
+}
+Rdm encodes each data point into a dm-dimensional vector. With the index i being the f : Rdx identiﬁer, the InfoNCE loss [62] discriminates xi from the others through a softmax-like likelihood:
+→
+∈ xi) = log log p (i
+| exp (v j=1 exp (cid:0)v (cid:124) i f (xi)/τ ) (cid:124) j f (xi)/τ (cid:1) . (cid:80)N (1)
+N
+A temperature hyperparameter τ controls the concentration level [26, 80]. V = i=1 refers
+} to the vocabulary of the dataset, which is usually based on the data embeddings under different augmentations. As caching the entire V is not practical for large-scale training, existing works propose surrogates of Eq. (1), e.g., replacing V with a memory bank [80], queuing it with a momentum network [12, 24], or training with large batches [11]. vi
+{ 2.2 Deep Set Representations
+To learn the representations of sets, we need to consider permutation-invariant transformations.
+Zaheer et al. [87] showed that all permutation-invariant functions T (
+) applied to a set X generally
+· fall into the following form: (cid:18)(cid:88)N (cid:19)
+T (X) = g h(xi)
+, (2) i=1 2
+Figure 2: The schematic of TCC. Here, we demonstrate a 2-way clustering example with three images.
+For simplicity, we only illustrate the instance-level learning module on the last image, while it is applied to all images. where g(
+) are arbitrary continuous transformations. Note that the aggregation above can
+) and h(
+·
+· be executed on a weighted basis, which is typically achieved by the attention mechanism between the set-level queries and instance-level keys/values [31, 49]. Our design on each cluster is partially inspired by this, as back-propagation does not support hard instance-level assignment. Next, we deﬁne our cluster representation along with the clustering procedure, and describe how it is trained with contrastive learning.
+· · ·
+, K 3 Twin-Contrast Clustering
+We consider a K-way clustering problem, with K being the number of clusters. Let k
+∈ denote the entry of a cluster that xi may belong to, and the categorical variable 1,
+{
+}
+πi = [πi(1),
+, πi(K)] indicate the cluster assignment probabilities of xi. Following common practice, we regard image clustering as our target for simplicity. Fig. 2 provides a schematic of
+TCC. The cluster-level contrast track reﬂects our motivation from Sec. 1, while the instance-level one learns the semantics of each image. We bridge these two tracks with the inference model xi) so that both losses reward and update the assignment on each xi. In particular,
+πi(k) = qθ(k
+| qθ(k xi) is parametrized by a softmax operation:
+· · ·
+πi(k) = qθ(k (cid:124) exp(µ k fθ(xi)) (cid:124) k(cid:48) fθ(xi)) k(cid:48)=1 exp(µ
+) is a convolutional neural network (CNN) [47, 48] built upon random data augmentations,
+K k=1 as a set of trainable cluster prototypes,
+µk
+}
+{ xi) to aggregate xi). In the following, we where fθ(
+· producing dm-dimensional features. We denote µθ = where θ refers to the collection of all parameters. In Sec. 3.1, we leverage qθ(k cluster features, and in Sec. 3.2 we derive the ELBO of Eq. (1) with qθ(k will omit the index i for brevity when x and π clearly correspond to a single data point. xi) =
+| (cid:80)K (3)
+|
+|
+,
+| 3.1 Representing and Augmenting the Context for Cluster-Level Contrast
+Cluster-Level Representation We implement Eq. (2) for each cluster using soft aggregation, where qθ(k x) weighs the relevance of the data to the given cluster. Denoted as rk, the k-th cluster representation is computed by:
+| hθ(x; k) = π(k) fθ(x),
+· (cid:18)(cid:88)N rk = Tθ(X; k) = hθ(xi; k) (cid:19) (cid:46) (cid:13) (cid:13) (cid:13) (cid:13) (cid:88)N i=1 hθ(xi; k) (cid:13) (cid:13) (cid:13) (cid:13)2
+, (4) i=1 where the summation of π(k) = qθ(k shown in [11, 12, 24], L2-normalized features beneﬁt contrastive learning. 2 refers to the L2-norm. We adopt L2 normalization here for two main purposes. First, x) along x is not self-normalized. Second, and more importantly, as
+| (cid:107)·(cid:107)
+The Anchored Cluster Semantics
+Intuitively, π(k) reﬂects the degree of relevance of a datum to the k-th cluster. With it being the aggregation weight, rk represents the information that is related to the corresponding prototype µk. In other words, our design treats each µk as the semantic anchor that queries the in-coming batch to form a representation describing a certain latent topic. 3
+Cluster-Level Augmentation Equivalents Contrastive learning is usually employed alongside random data augmentation [11, 24] to obtain positive candidates. Though deﬁning a uniform augmentation scheme for sets is beyond the scope of this paper, the proposed model reﬂects cluster-level augmentation in its design by the following heuristics:
+). (a) Augmentation on elements. TCC implicitly inherits existing image augmentation tech-niques (such as cropping, color jittering, random ﬂipping, and grayscale conversion) by implementing them using fθ(
+· (b) Irrelevant minorities. We consider injecting a small proportion of irrelevant data into a cluster representation, while keeping the main semantics of the cluster unchanged. Eq. (4) turns out to be an equivalent to this. As the softmax product π(k) is always positive, those data that are not very related to the given cluster still contribute to the cluster’s representation, which compiles the irrelevant. Meanwhile, these irrelevant data are not dominating the value of the cluster representation, because the small value of π(k) scales the feature magnitude during aggregation, which counts the minority. (c) Subsetting. Empirically, a subset of a cluster holds the same semantics as the original.
+Batch-based training samples data at each step, which naturally creates subsets for each cluster.
+We experimentally ﬁnd the above augmentation equivalents are sufﬁcient for the clustering task. On the other hand, since Eq. (4) is permutation-invariant, reordering the sequence of data does not yield a valid augmentation.
+Cluster-Level Contrastive Learning We deﬁne a simple contrastive objective that preserves the identity of each cluster against the rest. Having everything in a batch, e.g., a SimCLR-like framework [11], does not allow augmentation (c) to be fully utilized in the loss, since the two augmented counterparts rk and ˆrk from a batch may form part of the same subset of a cluster.
+L
+Hence, we opt for the MoCo-like solution [24], employing an L-sized memory queue P = l=1 to cache negative samples and a momentum network to produce ˆrk = Tˆθ(X; k). P stores each cluster representation under different subsets, training with which preserves the temporal semantic consistency [45] of clusters. Our cluster-level objective minimizes the following negative log-likelihood (NLL): pl
+{
+} 1 = Ek[
+L log pθ(k rk)] =
+|
+−
+− 1
+K
+K (cid:88) log k=1 (cid:124) exp(ˆr krk/τ ) + (cid:80)L (cid:124) exp(ˆr krk/τ ) (cid:124) l=1 exp(p l rk/τ )1(l mod K
+,
+= k) (5) where 1(
+) is an indicator function and mod is the modular operator. Since the cluster number K
+· can be less than the queue size L, we exclude the features that represent the same cluster as k in the negative sample collection P by inserting the indicator function into the loss above. 3.2 Instance-Level Contrast with Cluster Assignments
+The ELBO We propose to reuse the inference model qθ(k x) discussed above to compute the
+| instance-level contrastive loss, so that the clustering process can beneﬁt from contrastive learning. x) in Eq. (1):
+Let us start from the following ELBO of log pθ(i
+|
+Eqθ(k|x) [log pθ(i
+KL (qθ(k log pθ(i pθ(k x)) , (6) x, k)]
+|
+− x)
+|
+||
+| x)
+|
+≥
+) is the Kullback–Leibler (KL) divergence. We derive this ELBO in Appendix A. The true where KL(
+· x) is not available under the unsupervised setting. We follow [40, 69] and use a ﬁxed distribution pθ(k
+| prior instead. In practice, we employ the uniform distribution, i.e., pθ(k x) := pθ(k) = 1/K. Then,
+| the KL term above can be reduced to a simple form x)). x)) = log K + pθ(k
+|
+|
+Empirically, this encourages an evenly distributed cluster assignment across the dataset.
+KL (qθ(k (qθ(k x)
+H
+−
+||
+|
+Regarding the expectation term in Eq. (6), back-propagation through the discrete entry k is not feasible. We resort to the Gumbel softmax trick [32, 57] as relaxation. Speciﬁcally, a latent variable (0, 1)K is assigned to each x as a replacement. Each entry c(k) yields the reparametrization c
+Gumbel(0, 1) and λ is another temperature c(k) = Softmaxk((log π(k) + (cid:15)(k))/λ), where (cid:15) hyperparameter. Hence, we obtain the surrogate Eqθ(k|x) [log pθ(i x, c)] and x, k)]
+|
+| the gradients can be estimated with Monte Carlo.
+E(cid:15) [log pθ(i (cid:39)
+∼
+∈ 4 (cid:54)
+Instance-Level Contrastive Learning In alignment with Eq. (5), log pθ(i
+| sentation of x on a momentum contrast basis [24] by deﬁning the following transformation: x, c) learns the repre-e = (fθ(x)+ NNθ(c))/ (cid:107) fθ(x) + NNθ(c) exp(ˆe(cid:124)e/τ ) 2, (cid:107) x, c) = log log pθ(i
+| exp(ˆe(cid:124)e/τ ) + (cid:80)J j=1 exp(q
+, (cid:124) j e/τ ) (7)
+) denotes a single fully connected network. We accordingly use ˆe to indicate the repre-where NNθ(
+·
+) and NNˆθ( sentation of x processed by a momentum network fˆθ(
+) under different augmentations
+·
+·
+J j=1 is also introduced to cache and Gumbel samplings [32, 57]. A J-sized memory queue Q = qj
+} negative samples, updated by ˆe. In this way, we obtain the instance-level loss:
+E(cid:15)i [log pθ(i 2 = Ei[ log K]. (qθ(k (8)
+{ xi, ci)]
+|
+− H xi))
+|
+−
+L
+− 3.3 Training and Inference
+TCC enables end-to-end training from scratch.
+Our learning objective is a simple convex com-bination of Eq. (5) and (8), i.e.,
+Algorithm 1: Training Algorithm of TCC
+Input: Dataset X =
+Output: Network parameters θ.
+Initialize ˆθ = θ repeat xi
+{
+N i=1
+}
+= α 1 + (1
+α) 2. (9)
+∈
+L
+L
+L
+Randomly select a mini-batch from X for each xi in the batch do
+−
+L
+The hyperparameter α (0, 1) controls the contributions of the two contrastive learning is com-tracks. As discussed in Sec. 3.1, puted following a batch-based routine. For each data point x, we obtain only one sample c from the Gumbel distribution at each step, since this is usually sufﬁcient for long-term training [39, 40, 69]. One may also regard this stochasticity as an alternative to data augmen-tation. The overall training algorithm is shown in Alg. 1. Here, Γ(
+) indicates an arbitrary
+· stochastic gradient descent (SGD) optimizer.
+All trainable components are subscripted by θ, while those marked with ˆθ are the network momentum counterparts to be updated with momentum moving average. Inference with TCC only requires disabling random data augmentation and then computing argmaxk qθ(k
+L ←
+θ
+←
+Update the queues P with ˆr and Q with ˆe
+Update ˆθ with momentum moving average
+Randomly augment xi twice
+Sample ci with Gumbel softmax until convergence or reaching max iteration;
+Eq. (9)
+Γ (
+θ end
+∇
+−
+L
+)
+θ x).
+|
+Complexity When sampling once for each x during training, the time complexity for Eq. (9) is (L + J), while the memory complexity for the memory bank turns out to be the same. Here we omit
+O the complexity introduced by the CNN backbone and dot-product computation, as it is orthogonal to the design. Compared with the recent mixture-of-expert approach [73], which requires a time and (KJ), TCC is trained in a more efﬁcient way. memory complexity of
+O 3.4 Relations to Existing Works
+MiCE [73] also proposes a lower bound for the instance-level contrastive objective. However, it does not directly reparametrize the variational model qθ(k x) for lower-bound computation and
+| inference, but instead employs a K-expert solution with EM. This design is less efﬁcient than TCC since each data point needs to be processed by all K experts. Moreover, MiCE [73] does not consider cluster-level discriminability. SCL [28] follows a similar motivation to TCC in cluster-level discriminability, but it implements this with an instance-to-set similarity, while our model learns a uniﬁed representation for each cluster. Furthermore, in SCL [28], the clustering inference model is disentangled from the instance-level contrastive objective. In contrast, the inference model qθ(k x) of TCC contributes to instance-level discrimination (Eq. (6)).
+|
+We recently ﬁnd CC [53] comes with a cluster-level contrastive loss as well. It utilizes the in-batch inference results [π1(k),
+, πn(k)] to describe the k-th cluster. However, this procedure is not literally learning the cluster representation, since it is not permutation free. Re-ordering the batch may shift the semantics of the produced feature. We mitigate this issue with deep sets [87] and the empirical cluster-level augmentations for temporal consistency [45]. A similar problem is witnessed in [66]. In addition, our instance-level discrimination model yields a more general case than the one
+· · · 5
+x, c) := pθ(i of CC [53]. When removing the stochasticity and enforcing pθ(i 2
+L
+| reduces to the one of [53]. We experimentally show that our design preserves more data semantics, and thus beneﬁts clustering. Being not related to our main contribution, we provide more elaboration on this in Appendix B under the framework of variational information bottleneck [2]. c) in our model,
+| 4

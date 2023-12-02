@@ -1,0 +1,120 @@
+Abstract
+This paper addresses the problem of policy selection in domains with abundant logged data, but with a restricted interaction budget. Solving this problem would enable safe evaluation and deployment of ofﬂine reinforcement learning policies in industry, robotics, and recommendation domains among others. Several off-policy evaluation (OPE) techniques have been proposed to assess the value of policies using only logged data. However, there is still a big gap between the evaluation by OPE and the full online evaluation in the real environment. Yet, large amounts of online interactions are often not possible in practice. To overcome this problem, we introduce active ofﬂine policy selection — a novel sequential decision approach that combines logged data with online interaction to identify the best policy. This approach uses OPE estimates to warm start the online evaluation.
+Then, in order to utilize the limited environment interactions wisely we decide which policy to evaluate next based on a Bayesian optimization method with a kernel function that represents policy similarity. We use multiple benchmarks with a large number of candidate policies to show that the proposed approach improves upon state-of-the-art OPE estimates and pure online policy evaluation 2. 1
+
+Introduction
+Reinforcement learning (RL) has recently proven to be successful in a range of applications from computer and board games [46, 55, 58] to robotics and chip design [37, 10, 45]. However, many challenges of real-world systems still prevent RL from being applied at scale in practice [16]. One of the limiting factors in real applications is that environment interactions are often expensive. Thus, training and evaluating agents becomes prohibitively slow and costly. Ofﬂine RL attempts to address this problem by training agents on a dataset without environment interactions [2, 23]. This enables researchers to train policies with multiple algorithms and different hyperparameter settings [50] on a single dataset. The best policy can then be chosen with off-policy policy evaluation (OPE) approaches
+[53, 40] (Fig. 1, left). These techniques attempt to estimate the expected agent performance by relying on the same pre-recorded dataset [28, 41, 36, 72].
+∗equal contribution 2The paper website is at https://sites.google.com/corp/view/active-ops and the code is at https://github.com/deepmind/active_ops. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: Left: Ofﬂine policy selection attempts to choose the best policy from a set of policies, given only a dataset of logged experiences. Right: Active ofﬂine policy selection additionally assumes a restricted environment interaction budget which is assigned intelligently to evaluate the most promising policies.
+Unfortunately, OPE estimates are not yet precise enough to be relied upon for choosing which agent to deploy. Moreover, OPE is intrinsically limited by the pre-recorded dataset: When there is a distribution shift between a trained policy and a behavioural policy, i.e., when the trained policy behaves very differently from the data collection policy, OPE is imprecise [38]. In many applications, however, a subset of policies can be evaluated online prior to ﬁnal deployment [23, 19], even though this process can be hard and laborious. For example, in robotics a small subset of ofﬂine RL policies can be tested on the real hardware. Another example is recommender systems, which allow for restricted policy evaluation via A/B tests on a small fraction of user trafﬁc.
+In this paper, we introduce the active ofﬂine policy selection problem. The goal is to identify the best policy where we beneﬁt from both ofﬂine evaluation with logged data and online evaluation with limited interaction (Fig. 1, right). In our approach we advance a solution based on Bayesian optimization (BO). It entails learning a Gaussian process (GP) surrogate function that maps policies to their expected returns. Then, we build on the GP statistics to construct an acquisition function to decide which policy to test next. To make BO successful in this problem setting, our approach has two key features. First, we incorporate existing OPE estimates as additional noisy observations (Fig. 2). This allows us to warm start online policy evaluation and to overcome the difﬁculties of GP hyper-parameter optimisation at the start. Second, we model correlation between policies through a kernel function based on actions that the policies take in the same states of the environment (Fig. 3). This makes our method data efﬁcient [26] as the information about the performance of one policy informs us about the performance of similar behaving policies without costly execution in the environment. It is particularly valuable when the number of candidate policies is large (or even larger than the interaction budget).
+The contributions of this paper are as follows. 1. We introduce the active ofﬂine policy selection problem. This problem is important in practice, but so far it has not been studied in the literature to the best of our knowledge. 2. We build a BO solution with an extended observation model to integrate both OPE estimates and interaction data. The use of OPE estimates enables us to warm-start learning a GP. 3. We propose a novel GP kernel to capture the dependency between the policies through the actions that they take. As a result, our method infers the value of one policy from those of similar policies.
+The rest of this paper is organized as follows. Section 1.1 gives background on ofﬂine policy evaluation and selection. In section 2, we propose a GP model for policy value estimation, explain how we approach the sequential decision making with BO and introduce a novel kernel based on the similarity of policy outputs. Section 3 discusses the related work. Section 4 shows that active policy evaluation can improve upon the OPE after merely a few interactions, thanks to the kernel that ensures data-efﬁciency. Additionally, our method works reliably with OPEs of varying quality and it scales well with the growing number of candidate policies. The paper is concluded with a discussion in section 5. 1.1 Off-policy policy evaluation and selection
+We consider a Markov decision process (MDP) deﬁned by a tuple (S, A, T, R, d0, γ), with state space
+S, action space A, transition distribution T (s(cid:48) s, a), reward function R(s, a), initial state distribution
+| 2
+Figure 2: Gaussian process of the policy value function. We observe OPE estimates for all policies and noisy episodic returns for some of them. Neighboring policies (measured by kernel K) have similar values, and the posterior variance is lower where there are more observations. Policies are aligned in 1D for visualization purposes, but in practice they reside in a high dimensional space. d0(s), and discount factor γ measured by the expected sum of discounted rewards:
+[0, 1]. A policy π(a
+|
+∈ s) maps from S to A. The value of a policy π is
+µπ = E (cid:35)
+γtR(st, at) (cid:34) ∞ (cid:88) t=0
+, with s0 ∼ d0(
+·
+), at ∼
+π( st), st+1 ∼
+·|
+T ( st, at) .
+·| (1)
+Typically, estimating the value of a given policy requires executing the policy in the environment many times. However, practical constraints make it difﬁcult to run many policies of unknown quality in the environment. To address this, OPE estimates a value ˆµπ using a dataset of trajectories
+D collected by a separate behavior policy πβ. In ofﬂine policy selection (OPS) the task is to select the policy with the highest value from a set of policies π1, π2, . . . , πK given access only to a dataset (Fig. 1, left). A straightforward approach is to select the policy with the highest OPE estimate
+D
+ˆµπ1, . . . , ˆµπK [20], and alternative approaches can be used depending on the quality metric [71]. 2 Active ofﬂine policy selection 2.1 Problem deﬁnition k
+≤
+We now formally deﬁne the active ofﬂine policy selection problem. Suppose we are given a set of
+K candidate policies πk, 1
+K. Denote by µk the unknown policy value and by ρk an OPE estimate computed from an ofﬂine dataset. At every step i, we can choose a policy ki to execute in the environment once and observe the trajectory with (discounted) episodic return ri, which is a noisy sample of the true policy value: E[ri] = µki. We would like to ﬁnd the policy with the highest value, k∗ = arg maxk µk, with as few trajectories (budget) as possible. Policy selection algorithm estimates the mean as mk and recommends a policy that maximizes it: ˆk = arg maxk mk. Simple regret of the recommended policy measures how close we are to the best policy:
+≤
+To solve this sequential decision problem, we introduce a GP over the policy returns and OPE estimates (subsection 2.2), and design the GP kernel over policies to model their correlated returns (subsection 2.3). Then we use these as part of a BO strategy (subsection 2.4). regret = µk∗
+µˆk .
+− (2) 2.2 Gaussian process over policy values
+Given a limited interaction budget and a large number of policies, it is impossible to obtain accurate estimates of their values by executing them many times. Fortunately, similar policies tend to have similar values. Thus, propagating the information between them helps to improve the value prediction.
+Intuitively, the number of policies that we need to execute to ﬁnd a good policy should depend on their diversity instead of the total number of candidate policies (see experiments supporting this in
+Fig. 7). Formally, we use GP to predict a joint distribution over the policy values. 3
+Figure 3: Left: The distance between two policies π1 and π2 is computed as an average distance across pairs of action vectors that are selected by each policy on a set of states. Middle: Pairwise distance matrix between policies on humanoid-run task. High distance is shown in yellow and low distance in dark blue. The 3×3 block structure of the matrix reﬂects the 3 types of training algorithm. Smaller blocks correspond to the increasing number of training steps with the same hyperparameters. Right: Policy value (µπ) versus action distance to the behavior policy ¯d(π, πβ). Policies with the same training algorithm are in the same color.
+A GP is a stochastic process, that is an indexed collection of random variables, such that every ﬁnite collection of them has a multivariate normal distribution [54]. In our case, we assume that the policy value µ as a function of policy π follows a GP, with a kernel function (πi, πj) over policies and mean m. Speciﬁcally, we consider the following generative process for the latent policy value µ(π),
+OPE estimate ρ, and episodic return r:
+K
+µ(π)
+GP(m(
+·
+),
+, (
+·
+)),
+·
+ρ
+∼
+∼ N
+We use a constant mean m without loss of generality. We assume a ﬂat prior for the hyper-parameter m, and weakly informative inverse Gamma prior for the variance σ2 r . Our probabilistic model is illustrated in Fig. 2.
+ρ and σ2
+∼ N
+K (µ(π), σ2
+ρ), r (µ(π), σ2 r ). (3)
+As we have a ﬁnite number of policies, the input space is a ﬁnite set
+, where each index corresponds to a candidate policy. The joint distribution of the K policy values reduces to a multivariate normal distribution,
+π1, . . . , πK}
+{
+=
+X
+µ1, . . . , µK ∼ N (m1K, K), with Kk,k(cid:48) = (πk, πk(cid:48)) , (4)
+K where 1K is a K-length vector of ones. For each policy πk, we have one noisy observation from an OPE method ρk, and zero or multiple noisy episodic return observations ri k. As the policies are related through the covariance matrix K, observing a return sample from one policy updates the posterior distribution of all of them. Given the OPE estimates ρ = [ρ1, . . . , ρK] and Nk return observations rk = [r1 k ] for each policy πk, the posterior distribution of the mean return is also a Gaussian, k, . . . , rNk
+µ1, . . . , µK| m = K(K + Λ)−1y, rk}k ∼ N
+{
+ρ, (m, Σ), with
+Σ = K
+K(K + Λ)−1K. yk = (cid:18) 1
+σ2
+ρ
++
+Nk
+σ2 r (cid:19)−1 (cid:32)
+ρk
+σ2
+ρ
++ 1
+σ2 r (cid:33) ri k
+,
+Λkk = (cid:18) 1
+σ2
+ρ
++
+Nk
+σ2 r (cid:19)−1
+, (5)
+−
+Nk(cid:88) i=1 where Λ is a diagonal matrix with diagonal entries deﬁned above. 2.3 Kernel
+A key component of the GP model is the kernel that measures our belief about the policy correlation.
+To obtain a kernel we make a key assumption: Policies that are similar in the actions that they take, yield similar returns. Then, our insight is to measure the distance between the policies through the actions that each of them takes on a ﬁxed set of states from the ofﬂine dataset (Fig. 3, left).
+Formally, to measure the similarity between π1 and π2, we obtain the policy actions at a given state s and measure the distance between these two action vectors d(π1(s), π2(s)) 3. We then deﬁne the distance between the two policies as the average distance over the states of the ofﬂine dataset
+,
+¯d(π1, π2) = Es∼D d(π1(s), π2(s)) .
+D (6) 3In this work, we use Euclidean distance for deterministic policies with continuous actions and Hamming distance for discrete actions. An extension to stochastic policies is straightforward. 4
+In practice we approximate ¯d using a randomly sampled subset of states
+An example of a pairwise distance matrix for a set of policies is shown in Fig. 3, middle. Rows and columns are the policies which are arranged ﬁrst by the type of the training algorithm, then by hyperparameters and ﬁnally by the training steps (none of which is observed by our method). Note the block structure, which reﬂects the different nature of training algorithms. Smaller blocks of increasing policy distances correspond to policies with more training steps and the same hyperparameters.
+⊂ D
+D
+. (cid:48)
+Additionally, Fig. 3, right shows an example of policy distances to the behaviour policy. The values of policies produced by the same algorithm change gradually as a function of this distance. It provides indication that our kernel construction is informative for predicting the value of a policy.
+¯d(π1, π2)/l), where σ and l are
+Finally, we compute Matérn 1/2 kernel as: the trainable variance and length-scale hyperparameters. This is a popular kernel choice [56]. As the distance metric is the average distance over states, using it in this kernel is equivalent to multiplication of kernels on these states and it is a valid positive semi-deﬁnite matrix. (π1, π2) = σ2 k exp(
+−
+K 2.4 Active ofﬂine policy selection with Bayesian optimization
+∈ X
+Under a GP formulation, we can employ BO [56] to search for the best policy efﬁciently. BO optimizes using a limited number of function queries that render noisy an unknown function µ(π) with π observations. BO has been used successfully in many applications including experimental design
+[5], robotics [42, 43], hyper-parameter optimization [59, 27, 12], preference learning and interactive machine learning [9, 8]. The key component of a BO algorithm is an acquisition function ui(π) that balances exploration and exploitation when selecting a query. Widely used acquisition functions include upper conﬁdence bounds (UCB), expected improvement (EI) and epsilon-greedy. Here, we simply use the UCB acquisition function [60, 30].4 Speciﬁcally, at every step i, we compute the score for a policy πk using ui(k) = mk + (cid:112)
+βiΣkk, (7) where βi is a constant depending on i. We then choose the policy with the highest score, ki = arg maxk ui(k), to execute next. After observing a new return rki, we update m and Σ in Eq. 5. We also update the hyper-parameters (m, σ2 k and l) with the maximum a posteriori estimate (see details in the appendix). r , σ2
+ρ, σ2
+Estimating the hyper-parameters with limited data is challenging in practice. Fortunately, in the active ofﬂine policy selection formulation, we can take advantage of the OPE estimates as prior observations to ﬁt the hyper-parameters before launching the interactive optimization process. In some ablations where OPE is not available we instead execute 5 randomly sampled policies before
+ﬁtting the hyperparameters. 3

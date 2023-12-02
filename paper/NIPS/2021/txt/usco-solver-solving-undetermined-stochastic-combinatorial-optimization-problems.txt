@@ -1,0 +1,184 @@
+Abstract
+Real-world decision-making systems are often subject to uncertainties that have to be resolved through observational data. Therefore, we are frequently confronted with combinatorial optimization problems of which the objective function is un-known and thus has to be debunked using empirical evidence. In contrast to the common practice that relies on a learning-and-optimization strategy, we consider the regression between combinatorial spaces, aiming to infer high-quality opti-mization solutions from samples of input-solution pairs – without the need to learn the objective function. Our main deliverable is a universal solver that is able to handle abstract undetermined stochastic combinatorial optimization problems. For learning foundations, we present learning-error analysis under the PAC-Bayesian framework using a new margin-based analysis. In empirical studies, we demon-strate our design using proof-of-concept experiments, and compare it with other methods that are potentially applicable. Overall, we obtain highly encouraging experimental results for several classic combinatorial problems on both synthetic and real-world datasets. 1
+
+Introduction
+Combinatorial optimization problems are not only of great theoretical interest but also central to enormous applications. Traditional research assumes that the problem settings (i.e., objective function) are completely known [1], but the reality is that the underlying system is often very complicated and only partial knowledge (from historical data) is provided. In a recommendation system, the item-user similarities could be unknown [2], which makes it impossible to compute the optimal recommendation scheme. In the study of wireless communications, the backbone network depends on stochastic node connections [3], incurring extra difﬁculties in designing management strategies.
+In the most general sense, we can formalize such scenarios by assuming that the objective function is governed by a conﬁguration space associated with an unknown distribution, where our goal is to maximize the expected objective. For example, the conﬁguration space may specify possible item-user similarities or candidate network structures. We call such problems as undetermined stochastic combinatorial optimization (USCO) problems.
+Since the distribution of the conﬁguration space is unknown, one can adopt the learning-and-optimization strategy [4], where the unknown distribution is ﬁrst learned from data so that the subsequent optimization problem can be solved using existing methods. While such a strategy is natural and proved successful in several applications [5], it may require a large amount of data to learn an excessive number of parameters – for example, the weight between each pair of nodes in a network or the similarity between each pair of user and item in a recommendation system. In the worst case, we may not even have access to such kind of data (due to, for example, privacy issues 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+[6]). Furthermore, a more technical concern is that the learning process is often independent of the optimization process, causing the situation that optimizing the learned objective function does not produce a good approximation to the true objective function, which is theoretically possible
+[7]. These concerns motivate us to think of the settings that can eschew model learning and can address USCO problems aiming right at the approximation guarantees. To this end, we consider the regression between the input space and solution space, and wish to directly compute the solution for future inputs without learning the hidden objective function.
+USCO-Solver. In this paper, we present USCO-Solver, a general-purpose solver to USCO problems.
+Our framework is designed through two main techniques: randomized function approximation and approximate structured prediction. The key idea is to construct a hypothesis space composed of afﬁne combinations of combinatorial kernels generated using random conﬁgurations, from which a large-margin machine is trained using input-solution pairs via approximate inference. The main advantage of USCO-Solver is that it can handle an abstract USCO problem as long as an oracle to solve its deterministic counterpart is given. Another signiﬁcance of USCO-Solver lies in our use of combinatorial kernels, which suggests a novel and principled way for incorporating an approximation algorithm into a learning process. In doing so, we are able to handle combinatorial objects easily without worrying much about their indifferentiability or the inherited symmetries, which is often not possible for mainstream learning methods [8].
+Theoretical analysis. For USCO-Solver, we present a learning-error analysis under the PAC-Bayesian framework, where we introduce the multiplicative margin dedicated to bounding the approximation guarantees. In particular, we prove that the approximation ratio of the predictions is essentially bounded by O(α2), whenever the considered problem admits an α-approximation in the deterministic sense. Such a result is possible due to the fact the hypothesis space of USCO-Solver can approximate the conﬁguration space arbitrarily well. To our knowledge, this is the ﬁrst result of such kind.
+Empirical studies. We conduct experiments with USCO problems concerning three classic combina-torial objects: path, coverage, and matching. On various real-world datasets, we consistently observe that USCO-Solver not only works the way it is supposed to, but also outperforms other competitors by an evident margin in most cases. In many case studies, near-optimal solutions can be computed without consulting the true conﬁguration distribution.
+Supplementary material. The proofs, together with more results and discussions on the experiments, can be found in the supplementary material. In addition, we release the experimental materials, including source code, datasets, and pretrain models, as well as their instructions. The experiment materials can be found online1. 2 Preliminaries 2.1 Undetermined stochastic combinatorial optimization problems
+We are concerned with an abstract combinatorial optimization problem associated with three ﬁnite combinatorial spaces: the input space X , the output space Y, and a conﬁguration space C; in addition, we are given a bounded non-negative function f (x, y, c) : X × Y × C → R+ denoting the objective value to be maximized. Let Φ be the set of all distributions over C. We consider stochastic combinatorial optimization problem in the sense that we seek to maximize f in terms of a distribution
+φtrue ∈ Φ rather than a ﬁxed conﬁguration in C. This is desired because the system that deﬁnes the objective values is often essentially probabilistic, which may stem from random networks or functions with random parameters. Therefore, the objective function is given by
+F (x, y, φtrue) = (cid:90) c∈C
+φtrue(c) · f (x, y, c) dc.
+Given x and φtrue, we are interested in the problem max y∈Y
+F (x, y, φtrue). (1) (2)
+We may wish to compute either the optimal solution H(x, φtrue) := arg maxy∈Y F (x, y, φtrue) or its α-approximation Hα(x, φtrue) for some α ∈ (0, 1). Such problems are fundamental and also 1https://github.com/cdslabamotong/USCO-Solver 2
+ubiquitous, ranging from the stochastic version of classic combinatorial problems [9] to applications subject to environmental uncertainties, such as commercial recommendation [10], viral marketing
+[11], and behavioral decision making in autonomous systems [12]. Taking the stochastic longest path problem [13] as an example, the length of each edge could follow a certain distribution, and therefore, each conﬁguration c ∈ C corresponds to a weighted graph; in such a case, x = (u, v) denotes a pair of source and destination, y denotes a path from u to v, and f (x, y, c) amounts to the length of y in c.
+While the above formulation is natural, we are always limited by our imperfect understanding of the underlying system, which could be formalized by assuming that the distribution φtrue over the conﬁguration is not known to us. Since the true distribution φtrue is unknown, the objective function
+F (x, y, φtrue) cannot be directly optimized. Essentially, a learning process is required. In such a sense, we call these problems undetermined stochastic combinatorial optimization (USCO) problems.
+Oracle. In general, USCO problems are made difﬁcult by a) the learning challenges in dealing with the unknown distribution φtrue and b) the approximation hardness in solving Equation 2. We focus on the learning challenges and thus assume the approximation hardness (if any) can be resolved by oracles. Notice that the objective function (Equation 1) lies in the positive afﬁne closure of its discretizations, which is
+∪∞ k=1 (cid:110) k (cid:88) i=1 wi · f (x, y, ci) : wi ∈ R+, ci ∈ C (cid:111)
+. (3)
+For some ﬁxed α ∈ (0, 1], we assume the access to a polynomial oracle for computing an α-approximation to maximizing any function in the above class, which implies that Hα(x, φ) is obtainable for each x ∈ X and φ. We can think of α as the best ratio that one can obtain by a polynomial algorithm, with α = 1 denoting the scenario when the optimal solution can be efﬁciently computed.
+For a vector w = (w1, ..., wk) ∈ Rk and a subset C = {c1, ..., ck} ⊆ C of conﬁgurations, we denote the induced kernel function as
+KC(x, y) := f (x, y, c1), ..., f (x, y, ck) (cid:16) (cid:17) and the associated afﬁne combination as k (cid:88)
+ˆFw,C(x, y) := i=1 wi · f (x, y, ci) = wT KC(x, y).
+Finally, we denote the α-approximation to maxy∈Y ˆFw,C(x, y) as hα w,C(x). 2.2 Learning settings
+We consider samples of input-solution pairs: (cid:110)
+Sm := (xi, yα i ) (cid:111)m
+⊆ 2X × Y i=1 where yα i := Hα(xi, φtrue) is an α-approximation associated with the input xi. Such samples intuitively offer the historical experience in which we successfully obtained good solutions to some inputs. From a learning perspective, we have formulated a regression task between two combinatorial spaces X and Y. Some formal treatments are given as follows.
+Let us assume that the true distribution φtrue is unknown but ﬁxed, and there is a distribution DX over X . Our goal is to design a learning framework AS : X → Y that can leverage a set S of samples to compute a prediction AS(x) ∈ Y for each future x ∈ X . For a prediction ˆy ∈ Y associated with an input x, let l(x, ˆy) ∈ [0, 1] be a general loss function. Since we aim to examine if ˆy is a good approximation to Equation 2, the loss l is determined jointly by ˆy and x. Consequently, we measure the performance of A by
+L(AS, DX , l) := Ex∼DX (cid:2)l(x, AS(x))(cid:3) 3 A learning framework
+In this section, we ﬁrst present the learning framework and then analyze its generalization bounds.
+Finally, we discuss training algorithms. 3
+3.1 USCO-Solver
+Following the standard idea of structured prediction [14, 15, 16], we wish for a score function ˆF (x, y) such that, for each x ∈ X , the y ∈ Y that can maximize ˆF (x, y) is a good solution to maximizing
+F (x, y, φtrue). Suppose that we are provided with a set Sm of m ∈ Z samples. USCO-Solver consists of the following steps:
+• Step 1. Select a distribution φem ∈ Φ over C and decide a hyperparameter K ∈ Z.
+• Step 2. Sample K conﬁgurations CK = {c1, ..., cK} ⊆ C independently following φem.
+• Step 3. Compute a seed vector (cid:101)w = ( (cid:101)w1, ..., (cid:101)wK) ∈ RK using the training data.
+• Step 4. Sample a vector w ∈ RK from Q(w|β · (cid:101)w, I), which is an isotropic Gaussian with identity convariance and a mean of β · (cid:101)w, with β being (cid:115)
+β := 4 minp | (cid:101)wp| · α2 2 ln 2mK (cid:107) (cid:101)w(cid:107)2 . (4)
+• Score function. With CK and w = (w1, ..., wK), we adopt the score function
+ˆFw,CK (x, y) :=
+K (cid:88) i=1 wi · f (x, y, ci).
+• Inference. For each input x ∈ X , the prediction is given by hα (x), which can be w,CK computed by the oracle.
+Given that the framework is randomized, the error of interest is
+L(USCO-SolverSm, DX , l) := Ew∼Q,CK ∼φem,x∼DX (cid:2)l(cid:0)x, hα w,CK (x)(cid:1)(cid:3). (5)
+So far, we have not seen how to determine the distribution φem, the parameter K, and the seed vector (cid:101)w. We will ﬁrst analyze how they may affect the generalization bound (Sec. 3.2), and then discuss how to make selections towards minimizing the generalization bound (Sec. 3.3). 3.2 Generalization bound
+We ﬁrst study the general loss functions and then consider a particular loss function for measuring the approximation effect in terms of Equation 2. 3.2.1 General loss
+The generalization error in general can be decomposed into training error and approximation error
+[17]; the PAC-Bayesian framework gives a particular bound of such kind [18, 19]. For USCO-Solver, since the decision boundary is probabilistic (as w is sampled from the seed vector (cid:101)w), the training error has to be bounded by considering the amount by which hα (xi) for each training input xi. To this end, we measure the similarity of two outputs y1, y2 ∈ Y through the concept of margin, which is given by (xi) can deviate from hα (cid:101)w,CK w,CK m(w, CK, x, y1, y2) := α · ˆFw,CK (x, y1) − ˆFw,CK (x, y2).
+For an input x, the potentially good solutions are those in
+I(x, w, CK) := y ∈ Y : m(w, CK, x, hα w,CK (cid:110) (x), y) ≤
+· ˆFw,CK (x, hα w,CK (cid:111)
+. (x))
+α 2 (6) (7)
+Intuitively, these are the solutions that are similar to the suboptimal one hα (x) in terms of the score function associated with w and CK. For each w, the training error is then taken by the worst-case loss over the possible y within the margin, which is w,CK
+L(w, CK, Sm) := m (cid:88) 1 m max y∈I(xi,w,CK ) l(xi, y). i=1
+Notice that the loss L( (cid:101)w, CK, Sm) associated with the seed vector (cid:101)w can be used to bound the training error with respect to w, provided that the predictions are within the margin (with high probability). With such intuitions, we have the ﬁrst learning bound. 4
+Theorem 1. For each (cid:101)w, CK, and δ > 0, with probability at least 1 − δ, we have
+L(USCO-SolverSm , DX , l) ≤ L( (cid:101)w, CK, Sm) + (cid:118) (cid:117) (cid:117) (cid:116) ln 2Km (cid:107) (cid:101)w(cid:107)2 ( (cid:107) (cid:101)w(cid:107)2 m
++ 4(cid:107) (cid:101)w(cid:107) minp | (cid:101)wp|·α2 )2 + ln m 2(m − 1)
+δ
+The proof is inspired by the PAC-Bayesian framework [20, 21] applying to approximate structured prediction [22, 19], where our contribution lies in the analysis of the multiplicative margin. 3.2.2 Approximation loss
+In line with Equation 2, one natural loss function is the approximation ratio of the predictions, which is lapprox(x, ˆy) := 1 − min(
+, 1) ∈ [0, 1]. (8)
+F (x, ˆy, φtrue)
+F (x, Hα(x, φtrue), φtrue)
+Essentially, we seek to generalize the approximation guarantee from the training samples to future inputs, and the guarantees on the training samples are limited by the oracle. With such, we hope to compare the generalization error under lapprox with α. According to Theorem 1, with an unlimited supply of training data (i.e., m → ∞), the generalization error is bounded by L( (cid:101)w, CK, Sm), and therefore, the learning error of the ERM solution is concentrated on (cid:104)
+Ex∼DX inf (cid:101)w max y∈I(xi, (cid:101)w,CK ) (cid:105) lapprox(xi, y)
+. (9)
+Relating the above quantity with α is not possible for the general case because the score function
+ˆF (cid:101)w,CK (x, y) deﬁning the margin is independent of the objective function F (x, y, φtrue) inducing the error. However, more concrete results can be obtained for the approximation loss, by leveraging a subtle relationship between our construction of the kernel function and the stochastic combinatorial optimization problem. The next result characterizes the relationship between Equation 9 and α.
+Theorem 2. Suppose that f (x, y, c) ∈ [A, B] and C := supc 0 and φem, when K is no less than
+φtrue(c)
+φem(c) . For each (cid:15) > 0, δ1 > 0, δ2 > 2 · A2 · max( with probability at least 1 − δ1 over the selection of CK, there exists a (cid:101)w such that
+, ln |Y | + ln
+) 2 · C 2 · B2 (cid:15)2 · δ2 1 2 1
+δ1 (10) (cid:104)
+Pr x∼DX max y∈I(xi, (cid:101)w,CK ) lapprox(xi, y) ≤ (1 + (cid:15)) − (1 − (cid:15))(α2/2) (1 + (cid:15)) (cid:105)
+≥ 1 − δ2.
+The above result shows that the approximation ratio in generalization is essentially bounded by α2/2.
+It is intuitive that the bound on K depends on the deviation of φem from φtrue (i.e., C), the range of the objective function (i.e.. B/A), and the size of the output space. 3.3 Training algorithms
+Theorems 1 and 2 have explained how m, K and φem may affect the generalization performance in theory. Practically, K can be conveniently taken as a hyperparameter, and φem is often the uniform distribution over C (unless prior knowledge about φtrue is given). Now, for the four steps in Sec. 3.1, the only problem left is to compute the seed vector (cid:101)w.
+Relaxed margin. While Theorem 2 indicates that there exists a desired weight, we are not able to search for such a weight directly because the loss function lapprox is not accessible under our setting. In practice, one can adopt the zero-one loss or other loss function preferred by the considered problem. For example, when the output space is a family of sets, the loss function can be induced by the set similarity [23]. For a general loss function l(xi, y), Theorem 1 suggests computing the weight (cid:101)w by minimizing the upper bound L( (cid:101)w, CK, Sm) + (cid:107) (cid:101)w(cid:107)2 m : min w l(xi, y) · 1(y ∈ I(xi, w, CK)) + ||w||2, max y 5
+where 1 is the indicator function. Notice that the above problem is not only non-convex but also complicated by the fact that w and hα (x) are convoluted with each other. For ease of optimization, a relaxed margin will be useful, as seen shortly. Notice that we have ˆFw,CK (xi, hα (xi)) ≥
+α · ˆFw,CK (xi, yα i ), and therefore, for each y ∈ Y, y ∈ I(xi, w, CK) implies that w,CK w,CK y ∈ I(x, w, CK) := (cid:8)y ∈ Y :
+α2 2
+· ˆFw,CK (xi, yα i ) − ˆFw,CK (xi, y) ≤ 0(cid:9), where the new margin I is measured with respect to yα i
+I(xi, w, CK) ⊆ I(xi, w, CK), which indicates that the error is further upper bounded by instead of hα w,CK (xi). Immediately, we have max y l(xi, y) · 1(y ∈ I(xi, w, CK)) + ||w||2, (11) which is less challenging to minimize.
+Large-margin training. Seeking a large-margin solution and scaling the margin proportional to the loss function, Equation 11 amounts to solving the following problem: min s.t. (cid:107)w(cid:107)2 + 1 2
+C 2m m (cid:88) i=1
+ξi wT KCK (xi, yα i ) − wT KCK (xi, y) ≥ η · l(xi, y) − ξi, ∀i ∈ [m], ∀y ∈ Y, y (cid:54)= yα i
+α2 2 w ≥ 0 where C and η are hyperparameters. Notably, this is the vanilla structured SVM [16, 24]. Viewing
+KCK as a score function, the constrains enforces that the solution yα i provided by the training data should have a high score. The above formulation appears to be a standard quadratic programming, but it in fact contains | Y | number of constrains, which can be prohibitively large (e.g., exponential in the coding length of the conﬁguration). Since the constraints are equivalent to max y∈Y wT KCK (xi, y) + η · l(xi, y) ≤
+α2 2 wT KCK (xi, yα i ) + ξi, ∀i ∈ [m], the number of constraints could be reduced as linear in sample size if we can effectively solve the loss-augmented inference problem: max y∈Y wT KCK (xi, y) + η · l(xi, y)
+For the zero-one loss, this is exactly to solve maxy∈Y wT KCK (xi, y), which, to our delight, can be solved using the oracle in Sec. 2.1. Once such loss-augmented inference problem can be solved, the entire programming can be readily solved by existing methods, such as the cutting-plane algorithm
+[25]. This completes the learning framework.
+Remark 1. While our discussion so far is focused on maximization problems, the theoretical analysis can be adapted to minimization problems easily. In the training part for minimization problems, the major adaption is to reverse wT KCK (xi, yα i ) and wT KCK (xi, y), which also turns the loss-augmented inference into a minimization problem.
+Remark 2. For the stochastic shortest path problem, φem denotes a distribution over a collection C of weighted graphs, and assuming the weights are nonnegative, we may use Dijkstra algorithm as the oracle, as maxy∈Y ˆFw,C(x, y) amounts to computing the shortest path in the combining graph of the sampled weighted graphs. 4 Empirical studies
+This section presents experiments across a variety of combinatorial problems, including stochastic shortest path (SSP), stochastic set cover (SSC), and stochastic bipartite matching (SBM). In addition to supporting the theoretical analysis, our empirical studies are of interest also because none of the existing methods is known to be effective for solving any USCO problem. 6
+Table 1: SSP results. Each cell shows the mean of performance ratio with the standard deviation.
+UCSO-Solver
+Other Methods 16
+K
+φexp 1.942 (0.11) 1.952 (0.04) 1.565 (0.02) 1.129 (0.01) 1.148 (0.01)
+φtrue 1.300(0.02) 1.015 (0.01) 1.016 (0.01) 1.010 (0.01) 1.022 (0.01) 3200 6400 1600 160 80
+K
+φexp 1.613 (0.01) 1.571 (0.02) 1.353 (0.01) 1.303 (0.02) 1.192 (0.01)
+φtrue 1.205 (0.01) 1.177 (0.01) 1.017 (0.01) 1.031 (0.01) 1.048 (0.01) 3200 6400 160 640
+NB
+DSPN 2.064 (0.16) 2.009 (0.12) 1.956 (0.10)
+Base
+NB
+DSPN 3.155 (0.03) 2.469 (0.07) 2.853 (0.28)
+Base 160 1600
+K
+φexp 7.599 (0.15) 5.829 (0.22) 5.858 (0.18) 4.613 (0.18) 4.323 (0.19)
+φtrue 1.361 (0.09) 1.026 (0.01) 1.022 (0.01) 1.042 (0.01) 1.051 (0.01) 3200 9600 6400
+NB
+DSPN 10.08 (0.57) 7.451 (1.05) 10.92 (2.45)
+Base
+Col
+NY
+Kro i ,φtrue)
+F (xi,ˆy,φtrue) for maximization problems and F (xi,ˆy,φtrue)
+Evaluation metric. For each training pair (xi, yα i ) and a prediction ˆy, the performance ratio is deﬁned as F (xi,yα i ,φtrue) for minimization problems.
+Therefore, lower is better in both cases. The performance is measured over ﬁve random testings. We here present the main experimental settings and discuss key observations, deferring the complete analysis to Appendix B.
+F (xi,yα 4.1 Stochastic shortest path (SSP)
+Problem deﬁnition and oracle. In the stochastic version of the shortest path problem, given a source u and a destination v in a graph G = (V, E), we wish to ﬁnd the path (from u to v) that is the shortest in terms of a distribution over the possible edge weights. In this case, the conﬁguration space C denotes a family of weighted graphs associated with a distribution φtrue, the input x = (u, v) is a pair of nodes, the output y is a path from u and v, and f (x, y, c) denotes the length of y in graph c. We construct instances where the edge weights are non-negative, and thus, each function in Equation 3 can be minimized optimally using the Dijkstra algorithm [26], which is the oracle we use to generate samples and solve the inference problem in USCO-Solver.
+Instance construction. To setup a concrete instance, we ﬁrst ﬁx a graph structure, where two real-world graphs (Col and NY) and one synthetic graph (Kro) are adopted. Col and NY are USA road networks complied from the benchmarks of DIMACS Implementation Challenge [27], and Kro is a Kronecker graph [28]. Following the common practice [29], we assign each edge a Weibull distribution with parameters randomly selected from {1, ..., 10}, which – together with the graph structure – induces the conﬁguration space C and φtrue. For each instance, we generate the pool of all possible input-solution pairs (x, y), where, for an input x = (u, v), y is the optimal solution to miny∈Y F (x, y, φtrue). For each considered method, we randomly select 160 training samples and 6400 testing samples from the pool.
+Implementing USCO-Solver. We setup two realizations (φexp and φtrue) of φem that will be used in USCO-Solver. φexp assigns each edge in E an exponential distribution normalized in [1, 1e5], and
+φtrue is exactly the true underlying distribution that deﬁnes the instance. Notice that φtrue is not obtainable under our learning setting, and it is used only to verify our designs. For each distribution, we sample a pool of 10000 conﬁgurations (i.e., weighted graphs). The number of conﬁgurations (i.e.,
+K) is enumerated from small to large, with different ranges for different datasets. Given the size
+K, the conﬁgurations are randomly selected from the pool in each run of USCO-Solver. We use the zero-one loss, and the training algorithm is implemented based on Pystruct [30].
+Implementing other competitors. For a baseline, we implement the Base method which, given an input x = (u, v), outputs the shortest path from u to v in G where the edge weights are randomly sampled from [0, 1]. Conceptually, our problem can be perceived as a supervised learning problem from V × V to the space of the paths, and thus, off-the-shelf learning methods appear to be applicable, which however turns out to be non-trivial. We managed to implement two methods based respectively on Naive Bayes (NB) [31] and Deep Set Prediction Networks (DSPN) [32], where the idea is to 7
+Table 2: SSC results. The table shows the results on two datasets Cora and Yahoo.
+UCSO-Solver
+Other Methods
+Cora
+Yahoo 8
+K
+φuni 1.480 (0.12) 1.452 (0.12) 1.230 (0.06) 1.147 (0.06) 1.083 (0.01)
+φtrue 1.029 (0.01) 1.033 (0.01) 1.003 (<0.01) 1.000 (<0.01) 1.000 (<0.01) 320 640 160 16 8
+K
+φuni 1.294 (0.03) 1.356 (0.03) 1.151 (0.01 1.146 (0.07) 1.093 (0.03)
+φtrue 1.036 (0.02) 1.013 (0.01) 1.003 (<0.01) 1.009 (<0.01) 0.999 (<0.01) 320 640 160 16
+GNN
+DSPN 1.036 (0.02) 1.782 (0.85) 16.57 (0.42)
+Rand
+GNN
+DSPN 1.076 (0.10) 1.387 (0.142) 6.58 (0.17)
+Rand leverage them to learn the node importance in the shortest path and then build the prediction based on the node importance.
+Observations. The main results are presented in Table 1. We highlight two important observations: a) the performance of USCO-Solver smoothly increases when more conﬁgurations are provided, and b) when fed with conﬁgurations from the true distribution φtrue, USCO-Solver can easily output near-optimal solutions on all the datasets. These observations conﬁrm that USCO-Solver indeed functions the way it is supposed to. In addition, the efﬁcacy of USCO-Solver is signiﬁcant and robust in terms of the performance ratio. On datasets like Col and NY, it can produce near-optimal solutions using φexp. Meanwhile, other methods are not comparable to USCO-Solver, though DSPN offers non-trivial improvement compared with Base on NY and Kro. It is also worth noting that different instances exhibit different levels of hardness with respect to the number of conﬁgurations needed by USCO-Solver. 3200 conﬁgurations are sufﬁcient for USCO-Solver to achieve a low ratio on Col, while the ratio is still larger than 4.0 on Kro even though 9600 conﬁgurations have been used. See
+Appendix B.2 for a complete discussion. 4.2 Stochastic set cover (SSC)
+In network science, coverage problems often require to compute a set of terminals that can maximally cover the target area [33]; in applications like recommendation system or document summarization
+[34], one would like to select a certain number of items that can achieve the maximum diversity by covering topics as many as possible. These problems can be universally formulated as a maximal coverage problem [35], where each instance is given by a family U of subsets of a ground set, where our goal is to select a k-subset of U of which the union is maximized. In its stochastic version, we assume that an item will appear in a subset with a certain probability [36]. The oracle we use is the greedy algorithm, which is a (1 − 1/e)-approximation [37]. We construct two instances based on two real-world bipartite graphs Cora [38] and Yahoo [39]. Similar to the setup for SSP, we ﬁrst generate the ground truth distribution φtrue and then generate samples. We implement two learning methods based on Graph neural network (GNN) and DSPN, together with a baseline method Rand that randomly selects the nodes in ˆy. For USCO-Solver, we consider a distribution φuni that generates a conﬁguration by generating subsets uniformly at random. See Appendix B.3 for details.
+The results are presented in Table 2. First, the observations here are similar to those in the SSP problem – USCO-Solver works in a manner as we expect, and it can produce high-quality solutions when a sufﬁcient number of conﬁgurations are provided. We can see that GNN and DSPN are also effective compared with Rand, which suggests that, compared to SSP, SSC is much easier for being handled by existing learning methods. 4.3 Stochastic bipartite matching (SBM)
+Our last problem is bipartite matching, which is regularly seen in applications such as public housing allocation [40], semantic web service [41] and image feature analysis [42]. We consider the minimum weight bipartite matching problem. Given a weighted bipartite graph G = (L, R, E), the input x = (L∗, R∗) consists of two subsets L∗ ⊆ L and R∗ ⊆ R with |L∗| = |R∗|, and the output y is a perfect matching between L∗ and R∗ such that the total cost is minimized. In other words, y is a bijection between L∗ and R∗. In its stochastic version, the weight we for each edge e ∈ E follows a certain distribution, and we aim to compute the matching that can minimize the expected 8
+Table 3: SBM results with φuni and φtrue.
+K 16 160 1600 3200 6400 12800 19200
+Rand
+φuni
+φtrue 3.627 (0.01) 3.582 (0.01) 3.407 (0.01) 3.261 (0.01) 3.107 (0.01) 2.874 (0.01) 2.696 (0.01) 1.029 (0.01) 1.033 (0.01) 1.003 (<0.01) 1.000 (<0.01) 1.000 (<0.01) 3.670 (0.01)
+Table 4: SBM results with φ10, φ5, φ1 and φ0.3. 16 160 320 640 16 160 320 640
+φ10
+φ1 4.889 (0.09) 3.602 (0.06) 1.831 (0.04) 1.271 (0.01) 1.038 (<0.01) 1.008 (<0.01) 1.003 (<0.01) 1.002(<0.01)
+φ5 4.321 (0.07) 1.403 (0.01) 1.120 (0.01) 1.040 (<0.01)
+φ0.3 1.008 (<0.01) 1.003 (<0.01) 1.002 (<0.01) 1.002(<0.01) cost F (x, y, φtrue). Notice that the minimum weight bipartite matching problem can be solved in polynomial time by linear programming [43], which is a natural oracle to use in USCO-Solver. We adopt a synthetic bipartite graph with 128 nodes. The weight we for each edge e ∈ E follows a
+Gaussian distribution N (µe, σe) with µe sampled uniformly from [1, 10] and σe = 0.3 · µe, which induces the true distribution φtrue. See Appendix B.4 for details.
+Results under φuni. For USCO-Solver, we consider φuni that generates the conﬁguration c by giving each edge a weight from [1, 10] uniformly at random. We also test USCO-Solver with features from the true distribution φtrue. The baseline method Rand produces y for a given input x = (L∗, R∗) by randomly generating a permutation of R∗. The result of this part is shown in Table 3. We see that
+USCO-Solver can again produce a better ratio when more conﬁgurations are provided, but different from SSP and SSC, it cannot achieve a ratio that is close to 1 even when 19200 conﬁgurations have been used. Plausibly, this is because the output space of SBM is more structured compared with SSP and SSC.
+Incorporating prior knowledge into USCO-Solver. For problems like bipartite matching where uniform conﬁgurations cannot produce a near-optimal solution, it would be interesting to investigate if USCO-Solver can easily beneﬁt from domain expertise. To this end, given a parameter q ∈
+{0.3, 1, 5, 10}, we consider the distribution φq that samples the weight for edge e from [µe − q ·
+µe, µe + q · µe], which accounts for the case that a conﬁdence interval of the weight we is known.
+The performance ratios produced by such distributions are shown in Table 4. As we can see from the table, the result indeed coincides with the fact that the prior knowledge is strong when p is small.
+More importantly, with the help of such prior knowledge, the ratio can be reduced to nearly 1 using no more than 160 conﬁgurations under φ1, while under the uniform distribution φuni, the ratio was not much better than Rand with the same amount of conﬁgurations (as seen in Table 3). 5 Further discussions

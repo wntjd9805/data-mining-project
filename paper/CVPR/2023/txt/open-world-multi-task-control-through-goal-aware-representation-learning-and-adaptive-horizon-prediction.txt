@@ -1,0 +1,395 @@
+Abstract
+We study the problem of learning goal-conditioned poli-cies in Minecraft, a popular, widely accessible yet challeng-ing open-ended environment for developing human-level multi-task agents. We ﬁrst identify two main challenges of learning such policies: 1) the indistinguishability of tasks from the state distribution, due to the vast scene diversity, and 2) the non-stationary nature of environment dynamics caused by partial observability. To tackle the ﬁrst challenge, we propose Goal-Sensitive Backbone (GSB) for the policy to encourage the emergence of goal-relevant visual state representations. To tackle the second challenge, the pol-icy is further fueled by an adaptive horizon prediction mod-ule that helps alleviate the learning uncertainty brought by the non-stationary dynamics. Experiments on 20 Minecraft tasks show that our method signiﬁcantly outperforms the best baseline so far; in many of them, we double the perfor-mance. Our ablation and exploratory studies then explain how our approach beat the counterparts and also unveil the surprising bonus of zero-shot generalization to new scenes (biomes). We hope our agent could help shed some light on learning goal-conditioned, multi-task agents in challeng-ing, open-ended environments like Minecraft. The code is released at https://github.com/CraftJarvis/
+MC-Controller. 1.
+
+Introduction
+Building agents that can accomplish a vast and diverse suite of tasks in an open-ended world is considered a key challenge towards devising generally capable artiﬁcial in-telligence [2, 3, 6, 35]. In recent years, environments like
+Minecraft have drawn much attention from the related re-search communities [16, 18–20, 26], since they are not only pick-place box-close combat pig harvest poppy
+Meta-world
+Minecraft stick-push window-open combat sheep harvest wood
+Figure 1. Comparison of states between Meta-world [49] (left) and
+Minecraft [24] (right) based on t-SNE visualization. The points with the same color represent states from the trajectories that com-plete the same task. It can be seen that the states are much more distinguishable in terms of tasks in Meta-world than in Minecraft, implying the higher diversity of states and tasks in open worlds like Minecraft over traditional multi-task agent learning environ-ments like Meta-world. popular, and widely accessible, but also offer an open-ended universe with myriad of tasks, making them great platforms for developing human-level multi-task agents.
+Although groundbreaking successes have been observed in many challenging sequential decision-making problems such as Atari [32], Go [39], and MOBA games [13, 44, 45], such successes have not been transferred to those open worlds. To understand the gap and design corresponding so-lutions, we need to ﬁrst understand the distinct challenges brought by these environments. Let’s take Minecraft [24] as an example: there are over twenty types of landscapes
+ranging from ﬂat lands like Savannah and desert to rough mountains with forests and caves. These diverse land-scapes also enable countless tasks that could be achieved by the agents: mining, harvesting, farming, combating, con-structing, etc. Compared to canonical agent learning en-vironments like Go [39], Atari [32], and robotic control suite [41, 43, 48], Minecraft provides a substantially more diverse distribution of states thanks to the rich scenes and tasks built with the game, making it exceptionally difﬁ-cult to extract the pivotal task-relevant visual state repre-sentations for goal-conditioned policies. To help our read-ers understand the signiﬁcance of this challenge, we visual-ize the states from trajectories that complete some tasks in
+Minecraft and Meta-world [48] (a popular multi-task learn-ing environment but with fewer states and tasks) in Fig. 1.
+States of different tasks are annotated with different colors.
+Clearly, the states in Minecraft are much less distinguish-able in terms of tasks than in Meta-world. Therefore goal-conditioned policies are more likely to struggle in mapping those states and tasks (served as goals) to actions.
+Another grand challenge in an open-ended environment like Minecraft hails from the setting of such games, where an agent can only have very limited observations of the world. For example, in MineDoJo [16] (a recent agent benchmark built on Minecraft), the observation space com-prises a ﬁrst-person view image and a list of possessed items. However, many more aspects of the surroundings re-main hidden from the agents. That is, the agent now has to work with a partially observable environment. A plague embedded with such an environment is non-stationary dy-namics, which makes it almost impossible to predict what will happen next. Therefore, the distances from states to the current goal become much less clear due to the world un-certainty, leading to less distinguishable states in terms of goal completeness and more faulty decisions emitted by the goal-conditioned policies.
+This paper aims at mitigating both aforementioned chal-lenges that emerge from most open-world environments.
+First, we observe that the architecture of the policy network is crucial to learning goal-relevant visual state representa-tions that allow goal-conditioned actions in domains with low inter-goal state diversity (cf. Fig. 1). To this end, we propose Goal-Sensitive Backbone (GSB), which enables ef-fective learning goal-conditioned policies over 20 tasks in the Minecraft domain. Next, to mitigate the challenge posed by the partially observed and non-stationary environment, we introduce horizon as an extra condition for the policy and a corresponding horizon prediction module. Speciﬁ-cally, the policy is also explicitly conditioned on the remain-ing time steps till achieving certain goals (i.e., distance-to-goal). We ﬁnd it signiﬁcantly boosts the performance of our agents in open-world multi-task domains. However, the ground-truth distance-to-goal is unavailable during evalu-ation. To ﬁx this problem, we train a horizon prediction module and feed the estimated distance-to-goal to the hori-zon commanding policy in evaluation. This leads to a 27% gain in average success rate under the multi-task settings.
+We evaluate the proposed approaches based on the sim-ple yet effective behavior cloning algorithm [10]. The ex-periments are conducted in three common biomes. In multi-task settings, our proposed method outperforms the base-line in terms of success rate and precision by a large mar-gin. It also achieves consistent improvement in single-task settings. Our ablation and exploratory studies then explain how our approach beat the counterparts and also unveil the surprising bonus of zero-shot generalization to new scenes (biomes).
+To summarize, targeting two identiﬁed challenges dis-tinct to open worlds, our contributions are threefold:
+• We propose Goal-Sensitive Backbone (GSB), a neural network that enables effective learning goal-relevant vi-sual state representations at multiple levels for goal-conditioned policies, aiming at addressing the challenge of diverse state distribution in open-ended environments.
+• We further introduce adaptive horizon prediction to ex-plicitly condition the policy on the distance from the cur-rent state to the goal, yielding much better performances in a partially observable open-ended environment with non-stationary dynamics.
+• We conduct extensive studies on the popular yet challeng-ing Minecraft domain with baselines and our proposed method. The results demonstrate superior advantages of our approach over the counterparts in terms of both suc-cess rate and precision of task completion. 2. Preliminaries
+|
+Goal-conditioned policy, as its name suggests, is a type of agent’s policy ⇡ for decision-making that is conditioned on s, g) as goals besides states. Speciﬁcally, we denote ⇡(a a goal-conditioned policy that maps the current state s and goal g to an action a. Compared to the canonical formula-tion of policy where the goal is absent, the goal-conditioned policy offers ﬂexibility of learning multi-task agent as it al-lows different behaviors for different tasks by simply alter-ing the goal. There are multiple ways to specify the goal, e.g., natural language instructions [2] and goal images [36].
+Goal-conditioned imitation learning is a simple yet ef-fective way to learn goal-conditioned policies. Speciﬁcally,
+⇡(a s, g) is optimized by imitating the demonstrations
+,
+|
+D where is a collection of trajectories
+}
+D
+⌧ i. A trajectory is a sequence of states, actions, and goals,
+T t, gi) deﬁned as ⌧ i = t=0, where T is the trajectory
+} length. The imitation learning objective is to maximize the likelihood of the action in demonstrations when attempting
+⌧ 1,⌧ 2,⌧ 3, . . . t, ai (si
+=
+{
+{
+kill sheep in Snowy Plains chop tree in Plains kill sheep in Plains
+Cross-biome
+Environment
+Single-biome
+Environment
+Figure 2. Demonstrations of the cross-biome environment and the more challenging single-biome environment. The challenge comes from the fact that the agent needs to learn diverse behaviors in similar states conditioned on different goals. to reach the desired goal
+JIL(⇡) = E⌧
+⇠D
+T t=0 log ⇡(at| st, g)
+. (1)
+⇥ X
+⇤
+  1) as the input, where st =
+Notation. At each timestep, our architecture takes in a tu-t , oE oI ple (st, at, ht, g, at
+, t }
+{ oI t is the raw image observation, oE t is the extra observation provides by the environments. ht comes from the demon-stration. ˜ht and ˜at are the predicted horizon and action, respectively. For simplicity, we also use the same symbols (oE 1) to represent their embeddings. t , g, at
+  3. Method
+In this section, we describe the proposed algorithm for learning goal-conditioned policies that are capable of com-pleting various preliminary tasks in open-world domains.
+First, we revisit and provide a detailed illustration of the identiﬁed challenges in open-world domains (§3.1). Aim-ing at solving these challenges, we proceed to introduce the proposed goal-sensitive backbone (§3.2) and adaptive horizon prediction module (§3.3). Finally, we provide an overview of the proposed method in Section 3.4. 3.1. Challenges
+As demonstrated in Section 1, the ﬁrst major challenge of open-world environments is the indistinguishability of states in terms of different goals (cf. Fig. 1). That is, it is often hard to identify the task/goal by looking at individual states. Compared to environments with clear goal indicators in their states, agents in open-world domains need to learn goal-conditioned diverse behaviors under similar states.
+This challenge can be reﬂected by the illustrative exper-iment in Fig. 2. Two multi-task environments are created based on the Minecraft domain. Both environments consist of two preliminary tasks: collect logs and hunt sheep, where the former can be done by chopping trees and the latter re-quires the agent to slaughter sheep. Both tasks require the agent to ﬁrst locate and approach the corresponding target.
+As shown in Fig. 2 (center), in the single-biome environ-ment (blue blob in Fig. 2), the agent is tasked to collect logs and hunt sheep both inside a randomly generated plain
+In contrast, in area with grass, trees, and various mobs. the cross-biome environment (red blob in Fig. 2), whenever the agent is tasked to hunt sheep, it is spawned randomly in a snowy plain. Although different in visual appearance, snowy plains and plains have very similar terrains, so the difﬁculty of each task in the cross-biome environment is similar to its counterpart in the single-biome environment.
+The main consequence of this change is that the agent can determine its goal by solely looking at the current state, which mimics the setting of Meta-World in Fig. 1(left).
+We collect demonstrations by ﬁltering successful trajec-tories played by VPT [4] (see §4.1 for more details) and use behavior cloning to train multi-task policies on both envi-ronments. Perhaps surprisingly, as shown in Fig. 2, despite the minor difference, performance in the single-biome envi-ronment is signiﬁcantly weaker than in the cross-biome one.
+This clearly demonstrates that the common practice of di-rectly concatenating observation features and goal features suffer from learning diverse actions (e.g., locate trees, ﬁnd sheep) given similar observations. In contrast, in the cross-biome environment, the difﬁculty of the two tasks funda-mentally remains the same, yet the agent only needs to learn a consistent behavior in each biome (i.e., plains and snow
+ﬁelds). This alleviates the need to learn goal-conditioned diverse behaviors in similar states and leads to a better suc-cess rate.
+The second key challenge comes from the partial ob-servability of the game and non-stationary environment dy-namics. Speciﬁcally, in Minecraft, the biome and mobs surrounding the agent are generated procedurally and ran-domly after each reset. Further, only a small fraction of the whole terrain is visible to the agent in one observation, lead-ing to more uncertainty of the world. From the perspective of learning goal-conditioned policies, the distances from states to the current goal will become much less clear com-pared to canonical learning environments like Atari [12].
+We refer to Appendix B for more discussion on this. Since the goal-conditioned policies also rely on distinguishable states in terms of goal completeness, they’re more likely to make wrong decisions as a result of world uncertainty. 3.2. Incentivize Goal-Conditioned Behavior with
+Stacked Goal-Sensitive Backbone
+As elaborated in Section 3.1, learning goal-conditioned policies becomes extremely hard when states collected from
+Image Observation
+Extra Observation
+Compass GPS Biome Voxels
+Goal Space
+Hunt a cow
+Shear a sheep
+…
+Chop Trees
+Action Space
+"
+!!
+"
+#
+!!
+GSB
+Embed
+Embed
+#!$%
+Embed
+"
+!!
+"
+#
+!!
+GSB
+Embed
+Embed
+&
+'!
+&
+'! e t a n e t n a c n o
+C e t a n e t n a c n o
+C (! (!
+Move
+Cam Attack Use
+#!$%
+Embed
+Training
+Goal-Sensitive Backbone (GSB)
+"
+"
+!!
+*(()
+"
+!
+ℎ%!
+ℎ! d e b m
+E
+"!
+ℒ!
+Horizon Loss
+#&!
+#!
+ℒ"
+Evaluation
+Adjust
+!
+ℎ%!
+ℎ)!
+Adaptive Horizon 
+Prediction d e b m
+E
+"!
+#!
+Conv
+Max
+G-Conv
+Block
+G-Conv
+Block
+×,
+Conv
+FC
+ReLU
+ReLU
+Conv
+FC
+ReLU
+Sigmoid
+×
++
+*((*%)
+Figure 3. Our Goal-conditioned Policy Architecture. Our contributions are in red and purple. Right: The goal-sensitive backbone (GSB) is a key component to incentivize goal-condition behaviors. It consists of a stack of g-conv blocks. It takes the image observation t and the goal embedding g as input, and outputs the goal-attended visual representation I g oI t . The multimodal joint representation f t is the concatenation of visual representation I g t and previous action embedding at 1.
+The horizon prediction module µ uses it to predict the horizon ˜ht while the horizon commanding policy ⇡✓ uses it to predict the action ˜at.
+Top: During the training, the predicted horizon ˜ht is only used to compute the horizon loss h. The policy is conditioned on ht that comes from the demonstration. Bottom: During the evaluation, the policy is conditioned on the predicted horizon ˜ht which needs to be adjusted. t , goal embedding g, extra observation embedding oE
+L
+  trajectories that accomplish different tasks are indistin-guishable. While certain algorithmic design choices could improve multi-task performance in such open-world envi-ronments, we ﬁnd that the structure of the policy network is a key factor towards higher episode reward. Speciﬁ-cally, we observe that existing CNN-based backbones can excel at completing many single tasks (e.g., hunt cow, col-lect stone), but struggle to learn goal-conditioned behavior when training on the tasks in a goal-conditioned manner.
+This motivates the need to properly fuse goal information into the network. Despite the existence of various feature fusion approaches such as concatenation and Bilinear lay-ers [27], they all perform poorly even with a moderate num-ber of tasks. This motivates the need to carry goal informa-tion into multiple layers of the network. Speciﬁcally, we propose goal-sensitive backbone (GSB), which effectively blends goal information to the state features at multiple lev-els. As shown in Fig. 3 (right), GSB is composed with mul-tiple goal convolution blocks (g-conv block), which are ob-tained by augmenting the vanilla convolution block with a goal branch. Functionally, it can provide deep feature fu-sion between multi-level visual features and the goal infor-mation. As we will proceed to show in Section 4.3, adding
+GSB can lead to signiﬁcant performance boost in multi-task environments. The g-conv block processes its input visual features x(l)
+W with two convolution layers
+H
+⇥
+⇥
+RC 2 connected layers, decribed as
+ˆg(l) = FC(ReLU(FC(g))). (3)
+The goal feature ˆg(l) is then used to modulate the interme-diate features ˆx(l) channel-wise. By adding a residual con-nection [21], the output feature x(l+1) is expressed by x(l+1) =  (ˆg(l))
+ˆx(l) + x(l),
+  (4)
+·
+ 
+) is the sigmoid function and where  ( is the element-wise product. This channel-wise modulation encourages the module to focus on goal-speciﬁc regions and discard the background information by adaptively weighing the chan-nel importance. We highlight that the g-conv block can be plugged into any convolution backbone to improve its capability of extracting goal-aware visual features. The proposed goal-sensitive backbone is constructed by replac-ing 6 convolution blocks of the widely-adopted Impala
+In our experiments, a GSB
+CNN [14] to g-conv blocks. is used to compute goal-conditioned state features I g t =
+GSB(oI t , g). Such an idea of fusing condition information into the backbone layer by layer was also used by some prior works [5, 22, 33, 34]. Here, we demonstrate that it works in a critical role for open-world multi-task control. 3.3. Combat World Uncertainty with Adaptive
+ˆx(l) = ReLU(Conv(ReLU(Conv(x(l))))). (2)
+Horizon Prediction
+Meanwhile, it maps the goal embedding g to the same fea-ture space as the intermediate features ˆx(l) with two fully-To address the challenge brought by the uncertainty of the world, we need to ensure the goal-conditioned policies
+to be more aware of goal-completeness given the current state. We observe that conditioning the policy addition-ally on the number of remaining steps toward achieving a goal, i.e., distance-to-goal, or horizon, can signiﬁcantly im-prove the accuracy of predicted actions on held-out ofﬂine datasets [17, 37]. Here, we deﬁne the horizon ht := T t, where T is the trajectory length, as the remaining time steps to complete the given goal. This motivates the design of a horizon commanding policy ⇡✓ : that takes a state s, a goal g, and a horizon h as inputs and out-puts an action a. A key problem of the horizon commanding policy is that it cannot be directly used for evaluation: dur-ing gameplay, horizon is unknown as it requires completing the whole trajectory. To ﬁx this problem, we introduce an additional horizon prediction module, which estimates the horizon given a state s and a goal g. Combining the two modules together, we can apply the fruitful horizon com-manding policy during gameplay.
+S⇥G⇥H ! A
+ 
+Both modules can be trained efﬁciently with dense su-pervision. Speciﬁcally, the horizon commanding policy ⇡✓ can be learned by any policy loss speciﬁed by RL algo-rithms. For example, when behavior cloning is used, ⇡✓ can be optimized by minimizing the loss
+ 
+La = log ⇡✓(at| where f t is the joint representation of the state and goal embedded by a neural network (see §3.4). The horizon pre-diction module is trained by a supervised learning loss ht, f t), (5)
+Lh = where µ is a network that predicts the horizon. log µ(ht| f t),
+  (6)
+During the evaluation, after computing the embedding f t for st and g, the horizon prediction module µ is ﬁrst in-voked to compute an estimated horizon ˜ht = µ(f t). This predicted horizon can then be fed to the horizon command-˜ht, f t). ing policy to compute the action distribution ⇡✓(at|
+In practice, we observe that feeding an adaptive version of
+˜ht, deﬁned as ˆht := max(˜ht   c, 0) (c is a hyperparame-ter), to ⇡✓ leads to better performance. We hypothesize that this advantageous behavior comes from the fact that by sup-plying the adaptive horizon ˆht, the agent is encouraged to choose actions that lead to speedy completion of the goal.
+The effectiveness of the adaptive horizon will be demon-strated in Section 4.3. 3.4. Model Summary
+As shown in Fig. 3, our model sequentially connects the proposed goal-sensitive backbone, horizon prediction mod-ule, and horizon commanding policy. At each time step t, the image observation and goal information are ﬁrst fed forward into the goal-sensitive backbone to compute goal-aware visual feature I g t . The visual feature is then fused (a) Flat (b) Plains
+Figure 4. Snapshots of the RGB camera view in three biomes. (c) Forest with additional input information including the extra obser-vation embedding oE t , the goal embedding g, and the pre-vious action embedding at 1 by concatenation and a feed-forward network:
+  f t = FFN(
+I g t k oE t k g k at 1
+ 
+). (7)
+⇥
+⇤
+Then, f t is input to the horizon prediction module to predict horizon ˜ht = µ(f t). And the horizon commanding policy takes in the horizon and features f t to compute the action.
+When trained with behavior cloning, the overall objective function is
+Lh. During the evaluation, the adap-tive horizon ˆht is fed to the horizon commanding policy in replacement of ˜ht.
+La +
+=
+L 4. Experiments
+This section analyzes and evaluates the proposed goal-sensitive backbone and the adaptive horizon prediction module in the open-world domain Minecraft. To minimize performance variation caused by the design choices in RL algorithms, we build the proposed method on top of the sim-ple yet effective behavior cloning algorithm. In Section 4.1, we ﬁrst introduce three suites of tasks; the agent is asked to collect and combat various target objects/mobs with in-distinguishable states conditioned on different goals (chal-lenge #1) and non-stationary environment dynamics (chal-lenge #2). Single-task and multi-task performance on the benchmarks is evaluated and analyzed in Section 4.2, and ablation studies are conducted in Section 4.3. Finally, we unveil the surprising bonus of zero-shot generalization to new scenes and tasks in Section 4.4. 4.1. Experimental Setup
+Environment and task. To best expose the challenges de-scribed in Sections 1 and 3.1, a key design principle of our benchmark environments is to task the agent to complete multiple preliminary tasks in similar yet highly random-ized scenes. By specifying the biome that surrounds the agent, Minecraft provides a perfect way to create such en-vironments. Speciﬁcally, as shown in Fig. 4, every biome has unique and consistent observations; randomness comes from the fact that the terrain is generated randomly in each episode. To evaluate the scalability of the proposed method in terms of the number of tasks, we choose Plains and
+Forest, the two most common biomes that contain a large number of resources and mobs.
+In addition to the two challenges, Plains and Forest also add unique difﬁculties to learning goal-conditioned policies. Speciﬁcally, although we have better views in
+Plains, the resources/targets are located further away from the agent and require more exploration. In contrast, there exist more occlusions and obstacles in Forest.
+), and Combat sheep (
+In the Forest benchmark,
+The Plains benchmark consists of four tasks: har-), is
+),
+),
+),
+),
+), cow ( vest oak wood ( pig ( the agent
+). tasked to complete thirteen tasks: combat sheep (
+), sand ( cow (
+), oak leaves ( oak wood ( birch leaves (
+), grass ( poppy (
+), birch wood (
+), wool (
+), orange tulip ( ).
+), harvest dirt (
+), pig (
+), pig ( the agent needs to combat sheep (
+), polar bear (
+), wolf (
+In addition to the above two benchmarks, we also the agent on a “hunt animals” benchmark based test on the Flat biome, which contains a ﬂattened world.
+),
+Speciﬁcally, cow (
+), chicken (
+), llama (
+) in the Flat environ-ment. Compared to other benchmarks, the challenge of
+Flat comes from the fact that the mobs are constantly wondering around, which makes it hard to locate and ap-proach the correct target.
+), donkey (
+), mushroom cow (
+), spider (
+), horse (
+⇥
+We adopt the original observation space provided by
+MineDoJo [16], which includes a RGB camera-view, 3 blocks yaw/pitch angle, GPS location, and the type of 3 surrounding the agent. We discretize the original multi-discrete action space provided by MineDojo into 42 discrete actions. Details are included in Appendix A.1.
+One signiﬁcant downside of
+Data collection pipeline. behavior cloning algorithms is the need for high-quality and densely-labeled trajectories, which often requires enor-mous human effort to collect. To mitigate this problem, we collect goal-conditioned demonstrations by ﬁltering suc-cessful trajectories from gameplays by pretrained non-goal-conditioned policies. Speciﬁcally, we adopt Video Pre-Training (VPT) [4], which is trained on tremendous amount of non-goal-conditioned gameplays. We rollout the VPT policy in the three benchmarks and record all episodes that accomplishes any of the deﬁned goals. These trajecto-ries are then converted to a goal-conditioned demonstration dataset. Please refer to Appendix A.2 for detailed settings and efﬁciency analysis of our data collection pipeline.
+Evaluation. During the evaluation, the maximum episode length is set to 600, 600, and 300 on the Flat, Plains and Forest benchmarks, respectively.
+Plains and
+Forest are given more time steps since, in these environ-ments, the agent needs more time to locate and approach the target. We use Success Rate and Precision as our evaluation metrics. A gameplay is successful if the agent completes the goal within the episode. Precision is deﬁned as the number of times the speciﬁed goal is achieved divided by the total number of goals completed in an episode. It measures how well the agent can be aware of the speciﬁed goal, instead of simply accomplishing any goal during gameplay. 4.2. Experimental Results
+We ﬁrst focus on the simpler single-task learning set-ting in order to isolate the challenge introduced by non-stationary dynamics and partial observability (§4.2.1). We then examine whether the proposed method can better ad-dress both challenges by examining its multi-task perfor-mance (§4.2.2). 4.2.1 Single task experiments
+We select three typical tasks, i.e., harvest log, hunt cow, and hunt sheep, from the Plains benchmark for single-task training. We compare the proposed method against the following baselines. First, MineAgent [16] is an online
+RL algorithm that leverages pretrained state representations and dense reward functions to boost training. BC (VPT) [4],
+BC (CLIP) [16], and BC (I-CNN) [14] are variants of the be-havior cloning algorithm that use different backbone mod-els (indicated in the corresponding brackets) for state fea-ture extraction. The backbones are ﬁnetuned with the BC loss (see Appendix A.3 for more details).
+Results are reported in Table 1. First, we observe that even the individual tasks are extremely challenging for on-line RL algorithms such as MineAgent, even its networks are pretrained on Minecraft data. We attribute this fail-ure to its inconsistent dense reward when facing a hard-exploration task (e.g., the additional provided reward is not consistently higher when the agent is moving closer to a target object). Next, compared to BC (I-CNN) that uses a randomly initialized impala CNN model, the Minecraft-pretrained backbones in BC (VPT) and BC (CLIP) do not bring any beneﬁt. This could be caused by the lack of plas-ticity, i.e., the ability to learn in these well-trained models, echoing similar ﬁndings in computer vision and RL [11].
+Finally, our approach outperforms all baseline methods, es-pecially in terms of precision. This demonstrates that our method is more robust against non-stationary dynamics and partially observable observations. 4.2.2 Multi-task experiments
+We move on to evaluate the proposed method on the three multi-task benchmarks introduced in Section 4.1. The base-line includes three behavior cloning methods (we use “MT-BC” as an abbreviation of multi-task behavior cloning). We also include two variations of our method: one without the goal-sensitive backbone, and the other without the adaptive
+Table 1. Results of single-goal tasks (§4.2.1) on Plains.
+Table 3. Additional ablation experiments on Plains biome.
+Method
+Success Rate (%)
+Precision (%)
+# Method
+Avg. SR (%) Avg. P (%)
+MineAgent [16] 00
+BC (CLIP) [16] 18 22
+BC (VPT) [4]
+BC (I-CNN) [14] 45 00 01 06 26 08 27 05 46 00 01 05 25 06 22 04 48
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+± 00 06 51 06 58 07 86 –
+±
+±
+± 08 43 09 46 05 55 –
+±
+±
+± 08 44 05 42 12 45 – 05 05 07
+±
+±
+±
+Ours 50
+± 07 58
+± 10 60
+± 08 83
+± 10 75
+± 10 75 06
+±
+Table 2. Results of multi-goal tasks (§4.2.2) on three biomes.
+Method
+Avg. Success Rate (%) Avg. Precision (%)
+Plains
+Flat
+Forest Plains
+Flat
+Forest
+MT-BC (VPT) [4] 25
+MT-BC (CLIP) [16] 22
+MT-BC (I-CNN) [14] 25 06 17 05 14 02 18 05 15 03 14 02 15 04 22 03 23 03 23 05 17 04 15 04 14 03 14 03 13 02 13 04 03 03
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+MT-BC (w/ GSB)
+Ours (I-CNN)
+Ours (w/ GSB) 32 31 55
+±
+±
+± 05 36 06 31 09 57
+±
+±
+± 03 19 04 18 09 30
+±
+±
+± 05 43 02 22 06 70
+±
+±
+± 06 36 03 28 09 50
+±
+±
+± 02 17 04 15 06 29 03 04
+±
+± 06
+± horizon prediction module. Results on the Plains, Flat, and Forest environments are reported in Table 2, respec-tively. First, we observe that our method signiﬁcantly out-performs all baselines in terms of both success rate and pre-cision in all three benchmarks. Moreover, scaling up the number of tasks does not necessarily deteriorate the per-formance of our method. Speciﬁcally, we compare the av-erage success rate on the Plains and Flat benchmark, which contain 4 and 9 tasks, respectively. While the base-lines struggle to maintain their success rate on the Flat environment, our approach is capable of maintaining high performance despite the increased number of tasks. Putting together, results on multi-task benchmarks clearly demon-strate the superiority of our method when facing open-world environments with the two elaborated challenges (cf. §3.1). 4.3. Ablation Study
+Ablation study on goal-sensitive backbone. To examine the effectiveness of our proposed goal-sensitive backbone, we compare the following two groups of architectures: 1)
+Ours (I-CNN) v.s. Ours (w/ GSB), 2) MT-BC (I-CNN) v.s.
+MT-BC (w/ GSB). The key distinction between the groups is whether the backbone employs a standard Impala CNN or a goal-sensitive backbone. As depicted in Table 2, our ﬁnd-ings indicate that the goal-sensitive backbone consistently enhances performance in terms of both success rate and pre-cision across all environments. Remarkably, in the Flat biome, our approach with the goal-sensitive backbone at-tains a 26% and 22% performance improvement in success rate and precision, respectively. This demonstrates that the goal-sensitive backbone effectively fuses the goal informa-tion into visual features and leads to goal-aware behavior. 1 Ours (GSB + horizon pred) 2 Ours + RNN 3 Ours − horizon pred + RNN 4 Ours − horizon pred 5 w/o horizon loss 6 w/o extra obs 7 w/o language condition 55 65 39 35 09 07 08 08
+±
+±
+±
+± 70 67 51 45 09 08 08 15
+±
+±
+±
+± 47 50 25 06 07 03
+±
+±
+± 54 69 26 08 07 05
+±
+±
+±
+Table 4. The success rate (SR) under condition-free policy.
+Goal
+Avg.
+Success Rate (%) 44 19 24 06 23 11 11 07 25 03
+±
+±
+±
+±
+±
+Parameter sensitivity on horizon prediction. To investi-gate the sensitivity of the horizon-based control policy to the constant c (outlined in §3.3), we perform experiments with c values ranging from 0 to 14. We train and evaluate the model using the multi-task setting on the Flat bench-mark, shown in Figure 5. Our ﬁndings indicate that within the 0 to 10 range, decreasing c enhances performance, while further reduction leads to decline. This implies that sub-tracting a small constant from the predicted horizon-to-goal yields a more effective policy. However, subtracting a larger value results in performance deterioration, as attaining the goal within such a limited horizon may be unfeasible.
+Comparision with recurrent architecture. We built two recurrent variants ( “Ours + RNN”, “Ours − horizon pred +
+RNN”) by using a GRU module to fuse the joint representa-tion ft and optionally also removing the horizon prediction module. During training, the batch size, frame number, and skipping frame are set to 8, 16, and 5, respectively. Ta-ble 3 (exp1 vs. exp3) shows that “Ours − horizon pred +
+RNN” becomes signiﬁcantly worse, likely due to the par-26% SR). However, when com-tial observability issue ( bining RNN and horizon module (exp2), the performance gains signiﬁcantly more than our original method (+10%
+SR). To sum up, while RNNs can aid in addressing partial observability, our ﬁndings indicate that in our open-world scenario, they are considerably more effective when com-bined with our horizon prediction module.
+Ablation on horizon loss, extra observation, and lan-Table 3 demonstrates that excluding guage condition. horizon loss (exp5) and extra observation (exp6) can result in a decrease of success rate by 8% and 5%, respectively.
+Furthermore, as depicted in Table 4, when the language con-dition is removed from the input (exp7), the policy primar-ily accomplishes the “chopping tree” task (44% SR) while scarcely completing the “hunting pig” task (11% SR). The tasks “hunting sheep” and “hunting cow” are executed fairly evenly (around 24% SR). This is likely due to trees appear-ing more frequently than animals in the environment.
+ 
+Table 5. Quantitive results on generalization to a novel biome.
+Success Rate (%)
+Precision (%)
+Train
+Eval
+!
+Flat
+Plains
+!
+!
+Flat 72 60 57
+Flat 67 47 60
+Avg. 63 58 44 48 54 89 89 70
+Avg. 49 83
+Figure 5. Multi-task performance as a function of subtracting the horizon constant c. Results show that setting c to a small constant lead to better overall performance as it incentivizes the agent to exhibit behaviors that lead to faster task completion. 4.4. Generalization Performance
+In the open-ended Minecraft environment, which fea-tures a variety of biomes with distinct appearances, a de-cent agent should be capable of generalizing across these diverse biomes. To evaluate the agent’s zero-shot gener-alization ability in a new biome, we initially train the agent using data exclusively from the Plains biome. Subsequently, we test it in the Flat biome, where it faces the challenge of combatting sheep, cows, and pigs. Complicating the task, numerous distracting mobs, such as wolves and mushroom cows, appear in the testing biome but not in the training biome. The results are presented in Table 5.
+Our zero-shot agent demonstrates success rates comparable to those of an agent trained directly on the Flat biome. The high precision of our zero-shot agent also indicates its ro-bust performance, even amidst numerous novel distracting mobs in the new testing biome. Therefore, we believe that our agent displays a degree of zero-shot generalization to new environments, achieved through goal-aware represen-tation learning and adaptive horizon prediction. 5.

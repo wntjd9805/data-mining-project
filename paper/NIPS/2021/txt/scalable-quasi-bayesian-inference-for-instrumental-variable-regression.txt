@@ -1,0 +1,170 @@
+Abstract
+Recent years have witnessed an upsurge of interest in employing ﬂexible machine learning models for instrumental variable (IV) regression, but the development of uncertainty quantiﬁcation methodology is still lacking. In this work we present a scalable quasi-Bayesian procedure for IV regression, building upon the recently developed kernelized IV models. Contrary to Bayesian modeling for IV, our ap-proach does not require additional assumptions on the data generating process, and leads to a scalable approximate inference algorithm with time cost compara-ble to the corresponding point estimation methods. Our algorithm can be further extended to work with neural network models. We analyze the theoretical proper-ties of the proposed quasi-posterior, and demonstrate through empirical evaluation the competitive performance of our method. 1
+
+Introduction
+Instrumental variable (IV) regression is a standard approach for estimating causal effect from con-founded observational data.
+In the presence of confounding, any regression method estimating
+E(y | x) cannot recover the causal relation f † between the outcome y and the treatment x, since the residual u = y − f †(x) is correlated with x due to the unobserved confounders. IV regression enables identiﬁcation of the causal effect through the introduction of instruments, variables z that are known to inﬂuence y only through x.
+IV regression is widely used in economics [1], epidemiology [2] and clinical research [3], but mod-eling nonlinear effect in IV regression can be challenging. Recent years have seen great development in adopting modern machine learning models for IV regression [4–8]. However, there is still a lack of uncertainty quantiﬁcation measures for these ﬂexible IV models. Uncertainty quantiﬁcation is es-pecially important for IV analysis, since unlike in standard supervised learning scenarios, we do not have (unconfounded) validation data, from which we could deduce the error pattern of the estimated model. Moreover, the instrument of choice may be weak, meaning that it only provides limited information for x; in such cases point estimators suffer from high variance [9]. This problem is ex-acerbated in the nonparametric setting, where IV estimation is usually an ill-posed inverse problem, where instruments provide vanishing information for the higher-order nonlinear effects [10].
+The IV setting brings unique challenges for uncertainty quantiﬁcation. For example, while it is natural to consider a Bayesian approach, speciﬁcation of the likelihood requires knowledge of the entire data generating process, which is typically unavailable in IV regression. Consequently, most, if not all, existing work on Bayesian IV [11–15] assumes the following data generating process:
+∗ZW and YZ contribute equally. ‡JZ is the corresponding author. An extended version is available at https://arxiv.org/abs/2106.08750v2. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+x = g(z) + u1, y = f (x) + u2, where (u1, u2) are correlated and independent of z. These methods then conduct posterior inference on g, f as well as the generative model for the unobserved confounders (u1, u2). However, the additive error in x is an unnecessary assumption for most point estimation procedures, and is difﬁcult to check in high dimensions. Furthermore, the need to model the generating process of (u1, u2) introduces an extra risk of model misspeciﬁcation, and
+Bayesian inference on the generative model is computationally expensive, especially on complex high-dimensional datasets. None of these issues present if only point estimation is needed.
+For the above reasons, it is appealing to turn to an alternative quasi-Bayesian approach [16–18].
+Quasi-Bayesian analysis views IV estimation as a generalized method-of-moments (GMM) proce-dure, and deﬁnes the quasi-posterior as a Gibbs distribution constructed from a chosen prior and violation of the moment constraints. It does not require full knowledge of the data generating pro-cess, and thus does not suffer from the aforementioned drawbacks of Bayesian inference. However, computation of the quasi-posterior is non-trivial, as its density contains a conditional expectation term E(y − f (x) | z), which itself needs to be estimated from data. This makes both approximate inference and theoretical analysis difﬁcult. So far, quasi-Bayesian analysis for nonparametric IV is only developed on classical models such as wavelet basis [17, 18] or Nadaraya-Watson smoothing
+[19], while adoption of ﬂexible machine learning models such as kernel machines or neural net-works remains an open challenge. Moreover, numerical study has been limited in previous work, so little is known about the empirical performance of the quasi-Bayesian approach.
+In this work, we present a novel quasi-Bayesian procedure for IV regression, building upon the re-cent development in kernelized IV models [7, 20]. We employ a Gaussian process (GP) prior and construct a quasi-likelihood using a kernel conditional expectation estimator. We establish theo-retical properties of the resultant quasi-posterior, proving its consistency and showing that it may quantify instrument strength. Furthermore, inspired from the minimax formulation of IV estimation
+[5, 8, 20, 21], we design a principled approximate inference algorithm using random feature expan-sion and a novel adaptation of the “randomized prior trick” [22]. The algorithm has the form of stochastic gradient descent-ascent and is thus scalable and easy to implement. It can also be adapted to work with ﬂexible neural network models, in which case its behavior can be formally justiﬁed by analyzing the neural networks in the kernel regime. Empirical evaluation shows that the pro-posed method produces informative uncertainty estimates, scales to high-dimensional and complex nonlinear problems, and is especially advantageous when the instrument is weak.
+The rest of the paper is organized as follows: In Section 2 we set up the problem. We then derive the quasi-posterior and analyze its theoretical properties in Section 3, and present the approximate inference algorithm in Section 4. Section 5 reviews related work, and Section 6 presents numerical studies. Finally, we discuss conclusion and future work in Section 7. 2 Notations and Setup
+Notations We use boldface (x, y, z) to represent random variables on the space X × Y × Z, reg-ular font (x, y, z) to denote deterministic values. [n] denotes the set {1, 2, · · · , n}. {(xi, yi, zi) : i ∈ [n]} indicates the training data. We use the notations X := (x1, . . . , xn) ∈ X n, f (X) := (f (x1), . . . , f (xn)); likewise for Y, Z. For ﬁnite-dimensional vectors θ, θ(cid:48) ∈ Rm, we use (cid:107)θ(cid:107)2, (cid:104)θ, θ(cid:48)(cid:105)2 to denote the Euclidean norm and inner product, respectively. For any operator
+A : H1 → H2 between Hilbert spaces H1 and H2, we denote its adjoint by A∗ : H2 → H1. When
+H1 = H2 and λ ∈ R, we use the notation Aλ := A + λI for simplicity.
+IV regression Denote the treatment and response variables as x, y, the instrument as z, and the true structural function of interest as f †. Consider the data generating process y = f †(x) + u, where the unobserved u satisﬁes E(u | z) = 0, but may correlate with x. Then f † satisﬁes
+E(y − f †(x) | z) = 0 a.s. [P (dz)], (1) where P denotes the data distribution. This conditional moment restriction (CMR) formulation is the standard deﬁnition in literature [e.g., 23, 18], and is used in the recent work on machine learning models for IV. It connects to GMM as (1) can be viewed as a continuum of generalized moment constraints. Note that (1) does not place any structural constraint on the conditional distribution p(x | z), such as additive noise; hence, it does not require full knowledge of the data generating 2
+process. Also, as discussed in, e.g., Hartford et al. [4], the setup can also be extended to incorporate observed confounders v, by including v in both x and z.
+Kernelized IV and a dual view Let H, I be suitably chosen function spaces on X , Z, respec-tively. The generalized moment constraint (1) motivates the use of the following objective min f ∈H
+L(f ) := d2 n( ˆEnf − ˆb) + ¯λΩ(f ), (2) where ˆEn : H → I is an empirical approximation to the conditional expectation operator E : f (cid:55)→
+E(f (x) | z = ·), ˆb is an estimator of E(y | z = ·), {dn} is a sequence of suitable (semi-)norm on I, and Ω : H → R is a regularization term.
+When H, I are reproducing kernel Hilbert spaces (RKHS) with corresponding kernels kx, kz, it is
+H, and deﬁne ˆb as the result of kernel ridge regression on y with respect natural to set Ω(f ) = 1 to z. In this case ˆEn can be deﬁned with the empirical kernel conditional expectation operator: let
+Czx = E(k(x, ·) ⊗ k(z, ·)), Czz = E(k(z, ·) ⊗ k(z, ·)). Assuming E maps all f ∈ H to Ef ∈ I, we have [24] 2 (cid:107)f (cid:107)2
+CzzEf = Czxf, ∀f ∈ H.
+ˆCzx where ˆCzz := 1 n i=1 k(zi, ·) ⊗ k(zi, ·), ˆCzx is de-This motivates the use of ˆEn := ˆC −1 zz,¯ν
+ﬁned similarly, and ¯ν is a regularization hyperparameter.2 The choice of dn is ﬂexible; the dual IV 2 (cid:104)g, ˆCzz,¯νg(cid:105)I. Introducing the evaluation formulation uses d2 2 (cid:107)g(cid:107)2 operator Sz : I → Rn, Szg := (g(z1), . . . , g(zn)), we have ˆb = ˆC −1 zz,¯ν j=1 g(zj)2 + ¯ν n(g) := 1 2n
+I = 1 (cid:80)n
+S∗ z Y n , and (cid:80)n
+L(f ) = (cid:13) (cid:13)
+ˆC −1/2 (cid:13) zz,¯ν (cid:13) 1 2 (cid:18)
+ˆCzxf −
+S∗ z Y n (cid:19)(cid:13) 2 (cid:13) (cid:13) (cid:13)
+I
++ (cid:18)
+= max g∈I 1 n n (cid:88) j=1 (f (xj) − yj)g(zj) − (cid:107)f (cid:107)2
+H
+¯λ 2 g(zj)2 2 (cid:19)
+−
+¯ν 2 (cid:107)g(cid:107)2
+I +
+¯λ 2 (cid:107)f (cid:107)2
+H, (3) (4) 2 u2 = supv∈R 2 v2(cid:1) and the equality where (4) holds because of the Fenchel duality 1
+E(u(x, y)g(z)) = E(E(u(x, y) | z)g(z)); see [25, 8, 21, 26]. The dual formulation (4) circum-vents the need to compute ˆEn directly, an operator between the typically inﬁnite-dimensional spaces
+H and I, and leads to a scalable estimation procedure based on stochastic gradient descent-ascent (SGDA). It can also be generalized to work with deep neural networks (DNNs) instead of kernel machines, by replacing the RKHS regularizer with a suitable regularizer for DNNs, although theo-retical analysis for the resulted algorithm requires separate effort [8, 26]. As we shall see, (4) will also enable the construction of a scalable approximate inference algorithm. (cid:0)uv − 1 3 Quasi-Bayesian Analysis of Dual IV
+Introduce the notations Sx : H → Rn, Sxf := (f (x1), . . . , f (xn)), so that ˆCzx = 1 z Sz. Deﬁne λ := n¯λ, ν = n¯ν. Now we can re-express (3) in an equivalent form as: 1 n S∗ n S∗ z Sx, ˆCzz = 1 2
+L(f ) =
+¯L(f ) := (f (X) − Y )(cid:62)(λ−1L)(f (X) − Y ) + n
+λ z is a linear map from Rn to Rn, and thus can be identiﬁed with an n × where L := 1 n matrix. Since the ﬁrst term above is equivalent to the log density of the multivariate normal distribution N (Y | f (X), λL−1), we can view (5) as the objective of a kernel ridge regression problem, which has a data-dependent noise covariance λL−1.3 The connection between kernel ridge regression and Gaussian process regression [28] thus motivates the use of the quasi-posterior n Sz ˆC −1 zz,¯νS∗ (cid:107)f (cid:107)2
+H, 1 2 (5) 2With an abuse of notation, k refers to the reproducing kernel of the corresponding RKHS (kx for H or kz for I) whenever the denotation is clear. 3Here we assume the invertibility of L for brevity. Alternatively, observe that (5) deﬁnes a linear inverse
+Lf (X) and noise variance λ−1I, and we can
+√ problem with the ﬁnite-dimensional observation operator f (cid:55)→ follow [27, Chapter 6] to derive the same quasi-posterior. 3
+Π(df | D(n)), deﬁned through the following Radon-Nikodym derivative w.r.t. the standard GP prior
+Π = GP(0, kx): dΠ(· | D(n)) dΠ (f (X) − Y )(cid:62)(λ−1L)(f (X) − Y ) n( ˆEnf − ˆb) d2 (f ) ∝ exp
+= exp
+. (6) n
+λ 1 2
+−
+− (cid:16) (cid:17) (cid:16) (cid:17)
+Note that contrary to standard Bayesian modeling, we do not assume Y ∼ N (f (X), λL−1) is part of the true data generating process, nor does the theoretical analysis below rely on it. Instead, the quasi-posterior (6) should be interpreted as a Gibbs distribution which trades off between the n( ˆEnf − ˆb), which characterizes the estimated violation of the properly scaled evidence λ−1nd2
+GMM constraint (1), and our prior belief Π(df ). This trade-off is most clear from the well-known variational characterization of the Gibbs distribution [29],
+Π(· | D(n)) = arg min
+Ψ n( ˆEnf − ˆb)] + KL(Ψ (cid:107) Π).
+Ef ∼Ψ[λ−1nd2 (7)
+Nonetheless, the ﬁctitious data generating process f ∼ GP(0, k), Y ∼ N (f (X), λL−1) is useful for deriving the quasi-posterior, since its conditional distribution pﬁc(df | Y ) coincides with (6) [27,
+Chapter 6]. In the probability space of this ﬁctitious data generating process, for any ﬁnite set of test inputs x∗, we have pﬁc(f (x∗), Y ) ∼ N 0, (cid:18) (cid:20)K∗∗
+Kx∗ Kxx + λL−1
+K∗x (cid:21)(cid:19)
+, where K(·) denote the corresponding Gram matrices with subscript ∗ denoting x∗ and x denoting X (so, e.g., K∗x := k(x∗, X)). Thus by the Gaussian conditioning formula, we have
+Π(f (x∗) | D(n)) = pﬁc(f (x∗) | Y ) = N (m, S), where m := K∗x(λI + LKxx)−1LY, (8) (9)
+S := K∗∗ − K∗xL(λI + KxxL)−1Kx∗,
+L = Kzz(Kzz + νI)−1.
+In the above Kzz := k(Z, Z) denotes the Gram matrix, and (11) follows from the deﬁnition L = n−1Sz(n−1S∗ z , the Woodbury identity, and the observation that SzS∗ z Sz + ¯νI)−1S∗ z = Kzz. (10) (11)
+Theoretical Analysis For the quasi-posterior Π(· | D(n)) to be a useful measure of uncertainty, it needs to satisfy the following informal criteria: as n → ∞, we expect (C1) Π(· | D(n)) will exclude incorrect solutions; (C2) In cases of non-identiﬁcation, Π(· | D(n)) will not exclude any valid solution in the model.
+In the following, we formalize these criteria, and demonstrate that with appropriately chosen hyper-parameters, the quasi-posterior satisﬁes both criteria. We will work with the following assumptions:
+Assumption 3.1. The restriction of the conditional expectation operator f (cid:55)→ E(f (x) | z = ·) on
+H, denoted as E, has its image contained in I. E : H → I is bounded.
+Assumption 3.1 is intuitive, and is also slightly more general than some previous work [20, 26] that require the conditional expectation operator to be bounded on the entire hypothesis space, which typically corresponds to the “sample space” of the GP prior in our setting, and is much larger than
+H (see Appendix A). Nonetheless, we note that Hypothesis 4 in Singh et al. [7] may be more general, although they impose extra smoothness assumptions on E.
+Assumption 3.2. The true structural function f †(x) is such that, there exists a sequence {τm : m ∈
+N} satisfying τm → 0, and mτ 2 m ≥ inf m∈H:(cid:107)f †−f † f † m(cid:107)≤τm (cid:107)f † m(cid:107)2
+H − log Π({f : (cid:107)f (cid:107) ≤ τm}), (12) where (cid:107) · (cid:107) denotes the sup norm.
+Assumption 3.2 requires that f † can be well approximated in H; this is more general than previous work [e.g., 20, 7] that require f † ∈ H, but is typical in the GP literature [30, 31]. The sequence
+{τm} is determined by the complexity of H and its ability for approximating f †, and is usually the optimal posterior contraction rate for Gaussian process regression on the unconfounded dataset
+{(xi, f †(xi) + (cid:15)i) : i ∈ [m]} [31]. 4
+Assumption 3.3. X and Z are Polish spaces. The kernels kx, kz are continuous, supx∈X k(x, x) + supz∈Z k(z, z) ≤ κ2, and Mercer’s representations [32] of kx and kz exist. The random variable y − f †(x) is sub-exponential.
+Assumption 3.3 imposes technical conditions frequently assumed in literature [e.g., 33]. The re-quirements on the kernels can be satisﬁed by e.g. continuous kernels on compact subsets of Rd.
+Given the assumptions above, we characterize (C1) by showing that as n → ∞, the posterior places vanishing mass on the region of functions that violates the GMM constraints (1). Concretely,
+Theorem 3.1 (Proof in Appendix B). There exist a constant M > 0 depending on the data distribu-tion and the kernels of choice, and a sufﬁciently slowly growing sequence {γn} → ∞ (e.g., we can always have γn ≤ log log n) such that when taking ¯λ = n−1/2, ¯ν = min{τ 2 n(cid:101), n−1/2γn}, it has
+√ (cid:100)
+D(n)Π({f : E2(f (x) − y | z) > M τ 2
+E
+√ (cid:100) n(cid:101)} | D(n)) → 0. (13)
+Remark 3.1. The above result should primarily be interpreted as a consistency result, although n(cid:101) in the semi-norm f (cid:55)→ it also provides a posterior contraction rate [34] in the order of τ(cid:100) (cid:107)Ef (cid:107)L2(P (dz)), where {τm} is deﬁned in Assumption 3.2. As an example, suppose the regular-ity of f † is similar to the Matérn-1/2 RKHS; then for suitable kernels we have τ(cid:100) n(cid:101) = O(n−1/8), see Remark A.3.
+√
+√ 2(b+1) , a rate of O(n− b−1
+The rate is suboptimal, and can be immediately improved if we impose further regularity assumption on kz: if we assume the critical radius of the local Rademacher complexity [35] of the unit-norm ball
+I1 is δn (cid:16) τn (cid:16) n− b 2(b+1) ) for the semi-norm can be established following similar arguments. This is still worse than [26], which provides the rate O(max{τn, δn}) for what corresponds to our posterior mean estimator. Nonetheless, their result is also generally suboptimal, because the choice of δn (cid:16) τn is actually suboptimal when the IV regression problem is ill-posed.
+To date, minimax optimal rates have only been established under additional assumptions on the relations between the conditional expectation operator and the model for f . Our extended version establishes such results, for both this semi-norm and more intuitive norms such as L2(P (dx)).
+Remark 3.2. The use of an increasing λ = n¯λ is a technical artifact due to our minimal assumptions on kz. It is common to impose extra regularization in nonparametric IV, due to the need to estimate
+E from data [19], and, in the quasi-Bayesian setting, also due to the additional technical challenges
+[18]. However, this is not necessary for our method if additional assumptions are imposed, as we show in the extended version. In practice, our hyperparameter selection procedure does not produce
+λ with signiﬁcant growth.
+The following proposition characterizes (C2):
+Proposition 3.1 (Proof in Appendix B). The scaled log quasi-likelihood estimate (cid:96)n(f ) = n( ˆEnf − ˆb) satisﬁes d2 (cid:16)(cid:110)
+Π
+∀f : ∀δ > 0, lim n→∞
+D(n) ((cid:12)
+P (cid:12)(cid:96)n(f ) − Ez∼P (z)(E(f (x) − y | z)2)(cid:12) (cid:12) > δ) = 0 (cid:111)(cid:17)
+= 1.
+In words, for Π-almost every f , the log quasi-likelihood estimate scaled by n−1 converges to
+Ez∼P (z)(E(f (x) − y | z)2), which characterizes the violation of (1). While the restriction to the probability-1 subset can be concerning in the nonparametric setting [34], the proof only depends on f satisfying similar approximability conditions to f †; see (45).
+Remark 3.3. To understand why the proposition characterizes (C2), suppose there are multiple f that satisfy (1). Then all of them will eventually have signiﬁcantly higher log likelihood than functions violating (1): the difference is Θ(λ−1n). If these functions have a similar level of regularity in the sense that their concentration functions, which is the right-hand side of (12), have the same asymptotics as (cid:15) → 0, Borell’s inequality [e.g., 34, Proposition 11.17] implies that the posterior mass of small (cid:107) · (cid:107)-norm balls around them will also have the same asymptotics.
+Finally, we provide the following (over-)simpliﬁed example, which compares the behavior of the quasi-posterior and bootstrap in the context of (C2):
+Example 3.1. Suppose z is completely non-informative so that E(f (x) | z) ≡ Ef (x) for all f ; and suppose the estimated conditional expectation ˆEn is sufﬁciently accurate, so that we replace it 5
+with E.4 In this case bootstrap on (3) will always return the point estimator f ≡ 0 due to the non-zero regularization on (cid:107)f (cid:107)H, while the quasi-posterior behaves like the prior, correctly reﬂecting the complete lack of evidence in data.
+While this example is oversimpliﬁed, and in practice the estimation error of E plays an important role, it is known that bootstrap uncertainty estimates can be problematic given weak IVs [36–38].
+We also observe similar failures for bootstrap in the experiments (see Section 6.1). 4 Scalable Approximate Inference via a Randomized Prior Trick
+We now turn to approximate inference with parametric models such as random feature expansion or wide NNs. Scalable inference for the IV quasi-posterior appears difﬁcult, since for any f , computing the quasi-likelihood involves computing ˆEnf , which in turn requires either inverting an n × n
+Gram matrix, judging from (5) and (11), or solving an optimization problem speciﬁc to f from (4).
+Nonetheless, we show that it is possible, by extending the “randomized prior” trick for Gaussian process regression [22] to work with (quasi-)likelihoods with an optimization formulation as in (4).
+Our algorithm works with random feature models. A random feature model for kz approximates kz(z, z(cid:48)) ≈ ˜kz,m(z, z(cid:48)) := 1 m φz,m(z)(cid:62)φz,m(z(cid:48)), where φz,m takes value in Rm. Then the map m ϕ(cid:62)φz,m(·) =: g(·; ϕ) parameterizes an approximate RKHS ˜H; and for all c > 0, the
+ϕ (cid:55)→ 1√ random function g(·; ϕ), where ϕ ∼ N (0, cI), is distributed as GP(0, c˜kz,m). The notations related to kx are similar and thus omitted. Now we can state the objective function:
+Proposition 4.1 (Proof in Appendix C.1). Let φ0 ∼ N (0, λν−1I), θ0 ∼ N (0, I), ˜yi ∼ N (yi, λ).
+Then the optima θ∗ of (cid:18) (cid:19) (f (xi; θ) − ˜yi)g(zi; φ) −
+− (cid:107)φ − φ0(cid:107)2 2 + (cid:107)θ − θ0(cid:107)2 2 (14) g(zi; φ)2 2
+ν 2 min
+θ∈Rm max
+φ∈Rm n (cid:88) i=1
+λ 2 parameterizes a random function which follows the quasi-posterior distribution (6), where the ker-nels are replaced by the random feature approximations.
+Given the above proposition, we can sample from the random feature-approximated quasi-posterior by solving (14) with stochastic gradient descent-ascent; the approximation errors will be analyzed in the following. The objective (14) is closely related to (4); as we show in Appendix C.1.1, it is equivalent to min f ∈ ˜H max g∈ ˜I n (cid:88) (cid:18) i=1 (f (xi) − ˜yi)g(zi) − (cid:19) g(zi)2 2
+−
+ν 2 (cid:107)g − g0(cid:107)2
+˜I +
+λ 2 (cid:107)f − f0(cid:107)2
+˜H, (15) which differs from (4) only in the regularizers: instead of regularizing the norm of f and g, (15) encourages the functions to stay close to randomly sampled anchors [39]. Alternatively, we can view (15) as perturbing the point estimator (4), so that it has a covariance matching that of the quasi-posterior. A similar relation is also observed in the original randomized prior trick, which i=1(f (xi) − ˜yi)2 + λ(cid:107)f − f0(cid:107)2 2. transforms GP regression to the optimization problem minf ∈ ˜H
+In both cases, the resultant algorithm for approximate inference has the same time complexity as ensemble training for point estimation. (cid:80)n
+While the algorithm can be directly applied to neural network models as in [22], we follow [40] and modify the objective, to account for the difference between the neural tangent kernel (NTK)
+[41] of a wide neural network architecture and the NNGP kernel of the corresponding inﬁnite-width
+Bayesian neural network [42–44]. Concretely, we modify (14) as min
+θ max
+φ n (cid:88) (cid:18) i=1 ( ˜fθ(xi) − ˜yi)˜gφ(zi) − (cid:19)
+˜gφ(zi)2 2
+−
+ν 2 (cid:107)φ − φ0(cid:107)2 2 +
+λ 2 (cid:107)θ − θ0(cid:107)2 2, (16) where ˜gφ(z) := g(z; φ) − g(z; φ0) + ˜g0(z), ˜g0(z) := (cid:114) (cid:10) ¯φ0,
+λ
+ν
+∂g
+∂φ (cid:12) (cid:12)φ=φ0 (z)(cid:11), 4This setting could be realistic in the sample splitting setup considered in [7]. Note that as long as we have
+ﬁnite samples for the estimation of f (the “second stage”), we still need to have ¯λ > 0. 6
+and φ0 denotes the initial value of φ, and ¯φ0 ∼ N (0, I) is a set of randomly initialized NN parame-ters independent of φ0; and ˜fθ is deﬁned similarly.
+We only give a formal justiﬁcation for the modiﬁcation, under the assumption5 that the NNs remain in the kernel regime throughout training, so that g(z; φ) − g(z; φ0) = (cid:104)φ − φ0, ∂g(z)
+∂φ |φ0(cid:105)2 [47]. Thus for the purpose of analyzing g(·; φ) − g(·; φ0), we can view g as a random feature model with the parameterization φ (cid:55)→ (cid:104)φ, ∂g(z)
+∂φ |φ0 (cid:105)2. Thus by the argument in Appendix C.1.1, we can show that the weight regularizer (cid:107)φ − φ0(cid:107)2 is equivalent to (cid:107)g(·; φ) − g(·; φ0)(cid:107) ˜I = (cid:107)˜gφ − ˜g0(cid:107) ˜I, where ˜I is
+∂φ |φ0, ∂g(z(cid:48)) determined by the NTK kg,ntk(z, z(cid:48)) := (cid:104) ∂g(z)
+∂φ |φ0(cid:105)2. Similar arguments can be made for
+˜fθ and ˜f0. Consequently, (16) is equivalent to an instance of (15) with ˜H, ˜I deﬁned by the NTKs.
+Implementation details for the algorithm, including hyperparameter selection, are discussed in Ap-pendix D.
+Convergence analysis We now complete the analysis of the inference algorithm, by showing that for any ﬁxed set of test points x∗, SGDA can approximate the marginal distribution Π(f (x∗) | D(n)) arbitrarily well given a sufﬁcient computational budget. This implies that the approximate posterior is good enough for prediction purposes.
+We place several mild assumptions on the random feature model, listed in Appendix C.2; they are satisﬁed by common approximations such as the random Fourier features [48]. The SGDA algorithm is described in detail in Appendix C.4. Under this setup, we have
+Proposition 4.2 (Proof in Appendix C.5). Fix D(n) and λ, ν > 0. Then there exist a sequence of choices of m and SGDA step-size schemes, such that for any l ∈ N, we have supx∗∈X l max((cid:107)ˆµm − µm(cid:107)2, (cid:107) ˆSm − Sm(cid:107)F ) p
+→ 0.
+In the above, ˆµm, ˆSm denote the mean and covariance of the approximate marginal posterior for f (x∗), µ, S correspond to the true posterior, (cid:107)·(cid:107)F denotes the Frobenius norm, and the convergence in probability is deﬁned with respect to the sampling of random feature basis. 5

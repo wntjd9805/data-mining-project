@@ -1,0 +1,203 @@
+Abstract
+Recently, Masked Image Modeling (MIM) achieves great success in self-supervised visual recognition. However, as a reconstruction-based framework, it is still an open question to understand how MIM works, since MIM appears very dif-ferent from previous well-studied siamese approaches such as contrastive learning. In this paper, we propose a new viewpoint: MIM implicitly learns occlusion-invariant fea-tures, which is analogous to other siamese methods while the latter learns other invariance. By relaxing MIM formulation into an equivalent siamese form, MIM methods can be in-terpreted in a unified framework with conventional methods, among which only a) data transformations, i.e. what invari-ance to learn, and b) similarity measurements are different.
+Furthermore, taking MAE [29] as a representative example of MIM, we empirically find the success of MIM models relates a little to the choice of similarity functions, but the learned occlusion invariant feature introduced by masked image – it turns out to be a favored initialization for vision transformers, even though the learned feature could be less semantic. We hope our findings could inspire researchers to develop more powerful self-supervised methods in computer vision community. 1.
+
+Introduction
+Invariance matters in science [33]. In self-supervised learning, invariance is particularly important: since ground truth labels are not provided, one could expect the favored learned feature to be invariant (or more generally, equiv-ariant [17]) to a certain group of transformations on the inputs. Recent years, in visual recognition one of the most successful self-supervised frameworks – contrastive learn-ing [22, 42, 47] – benefits a lot from learning invariance.
+The key insight of contrastive learning is, because recog-nition results are typically insensitive to the deformations (e.g. cropping, resizing, color jittering) on the input images,
+†Corresponding author. This work is supported by The National Key
+Research and Development Program of China (No. 2017YFA0700800) and
+Beijing Academy of Artificial Intelligence (BAAI). a good feature should also be invariant to the transforma-tions. Therefore, contrastive learning suggests minimizing the distance between two (or more [10]) feature maps from the augmented copies of the same data, which is formulated as follows: min
+θ
+E x∼D
+M (z1, z2) , z1 = fθ(T1(x)), z2 = fθ(T2(x)), (1) where D is the data distribution; fθ(·) means the encoder network parameterized by θ; T1(·) and T2(·) are two trans-formations on the input data, which defines what invariance to learn; M(·, ·) is the distance function1 (or similarity mea-surement) to measure the similarity between two feature maps z1 and z2. Clearly, the choices of T and M are es-sential in contrastive learning algorithms. Researchers have come up with a variety of alternatives. For example, for the transformation T , popular methods include random crop-ping [3, 12, 28, 30], color jittering [12], rotation [25, 44], jigsaw puzzle [41], colorization [56] and etc. For the simi-larity measurement M, InfoMax principle [3] (which can be implemented with MINE [7] or InfoNCE loss [12,14,30,42]), feature de-correlation [6, 55], asymmetric teacher [15, 28], triplet loss [36] and etc., are proposed.
+Apart from contrastive learning, very recently Masked
+Image Modeling (MIM, e.g. [5]) quickly becomes a new trend in visual self-supervised learning. Inspired by Masked
+Language Modeling [18] in Natural Language Processing,
+MIM learns feature via a form of denoising autoencoder [48]: images which are occluded with random patch masks are fed into the encoder, then the decoder predicts the original embeddings of the masked patches: min
+θ,ϕ
+E x∼D
+M (dϕ(z), x ⊙ (1 − M )) , z = fθ(x ⊙ M ), (2) where “⊙” means element-wise product; M is patch mask 2; fθ(·) and dϕ(·) are encoder and decoder respectively; z is 1Following the viewpoint in [15], we suppose distance functions could contain parameters which are jointly optimized with Eq. (1). For example, weights in project head [12] or predict head [15, 28] are regarded as a part of distance function M(·). 2So “x ⊙ M ” represents “unmasked patches” and vice versa.
+the learned representation; M(·, ·) is the similarity measure-ment, which varies in different works, e.g. l2-distance [29], cross-entropy [5] or perceptual loss [20] in codebook space.
+Compared with conventional contrastive methods, MIM re-quires fewer effort on tuning the augmentations, furthermore, achieves outstanding performances especially in combina-tion with vision transformers [21], which is also demon-strated to be scalable into large vision models [29, 37].
+In this paper, we aim to build up a unified understanding framework for MIM and contrastive learning. Our motiva-tion is, even though MIM obtains great success, it is still an open question how it works. Several works try to interpret
+MIM from different views, for example, [29] suggests MIM model learns "rich hidden representation" via reconstruction from masked images; afterwards, [8] gives a mathematical understanding for MAE [29]. However, what the model learns is still not obvious. The difficulty lies in that MIM is essentially reconstructive (Eq. (2)), hence the supervision on the learned feature (z) is implicit. In contrast, contrastive learning acts as a siamese nature (Eq. (1)), which involves explicit supervision on the representation. If we manage to formulate MIM into an equivalent siamese form like Eq. (1),
+MIM can be explicitly interpreted as learning a certain in-variance according to some distance measurement. We hope the framework may inspire more powerful self-supervised methods in the community.
+In the next sections, we introduce our methodology. No-tice that we do not aim to set up a new state-of-the-art MIM method, but to improve the understanding of MIM frame-works. Our findings are concluded as follows:
+• We propose RelaxMIM, a new siamese framework to approximate the original reconstructive MIM method.
+In the view of RelaxMIM, MIM can be interpreted as a special case of contrastive learning: the data trans-formation is random patch masking and the similarity measurement relates to the decoder. In other words,
+MIM models intrinsically learn occlusion invariant features.
+• Based on RelaxMIM, we replace the similarity measure-ment with simpler InfoNCE loss. Surprisingly, the per-formance maintains the same as the original model. It suggests that the reconstructive decoder in MIM frame-work does not matter much; other measurements could also work fine. Instead, patch masking may be the key to success. training from scratch. We hypothesize that the encoder learns data-agnostic occlusion invariant features during pretraining, which could be a favored initialization for finetuning. 2. MIM intrinsically learns occlusion invariant feature
+In this section, we mainly introduce how to approximate
+MIM formulation (Eq. (2)) with a siamese model. For sim-plicity, we take MAE [29] as an representative example of MIM, in which the similarity measurement is simply l2−distance on the masked patches. Other MIM methods can be analyzed in a similar way. Following the notations in
+Eq. (2), the loss function for MAE training is3:
+L(x, M ) = ∥dϕ(fθ(x ⊙ M )) ⊙ (1 − M ) − x ⊙ (1 − M )∥2. (3)
+Let us focus on the second term. Typically, the dimension of feature embedding is much larger than dimension of input image, thus the encoder (at least) has a chance to be loss-less [37]. That means for the encoder function fθ(·), there
+ϕ′(·) parameterized by ϕ′ that satisfying exists a network d′ d′
+ϕ′(fθ(x ⊙ (1 − M ))) ⊙ (1 − M ) ≈ x ⊙ (1 − M ). Then, we rewrite Eq. (3) in the following equivalent form:
+L(x, M ) = ∥dϕ(fθ(x ⊙ M )) ⊙ (1 − M ) s.t. ϕ′ = arg min
+− d′
+ϕ′(fθ(x ⊙ (1 − M ))) ⊙ (1 − M )∥2
+ϕ′(fθ(x′ ⊙ (1 − M )))
+E x′∼D
+⊙ (1 − M ) − x′ ⊙ (1 − M )∥2
+∥d′
+ϕ′ (4)
+Eq. (4) can be further simplified. Notice that d′
+ϕ′(·) just approximates the “inverse” (if exists) of fθ(·), there is no reason to use a different architecture from dϕ(·). So we let d′ = d. Then we define a new similarity measurement:
+Mϕ,ϕ′(z1, z2) ≜ ∥(dϕ(z1) − dϕ′(z2)) ⊙ (1 − M )∥2, (5) and transformations:
+T1(x) = x ⊙ M,
+T2(x) = x ⊙ (1 − M ), (6) hence Eq. (4) equals to:
+L(x, M ; θ, ϕ) = Mϕ,ϕ′(fθ(T1(x)), fθ(T2(x))) s.t. ϕ′ = arg min
+ϕ′
+E x′∼D
+∥(dϕ′(fθ(T2(x′))) (7)
+− T2(x′)) ⊙ (1 − M )∥2.
+• To understand why patch masking is important, we per-form MIM pretraining on very few images (e.g. only 1 image), then finetune the encoder with supervised train-ing on full ImageNet. Though the learned representa-tions lack of semantic information after pretraining, the finetuned model still significantly outperforms those
+We name Eq. (7) siamese form of MAE. 3In original MAE [29], the encoder network only generates tokens of unmasked patches and the decoder only predict the masked patches during training. In our formulations, for simplicity we suppose both networks predict the whole feature map; we equivalently extract the desired part via proper masking if necessary.
+Figure 1. CKA similarity between the representations generated by the masked image and the full image respectively under different mask ratios. FT means finetuned model on ImageNet; and other models except “Supervised” are self-supervised pretrained models. (Best view in color.)
+Discussion. Eq. (7) helps us to understand MIM from a explicit view. Compared Eq. (7) with Eq. (1), the formulation can be viewed as a special case of contrastive learning: the loss aims to minimize the differences between the representa-tions derived from two masking transformations. Therefore, we conclude that MIM pretraining encourage occlusion invariant features. The decoder joints as a part of the simi-larity measurement (see Eq. (5)), which is reasonable: since it is difficult to define a proper distance function directly in the latent space, a feasible solution is to project the represen-tation back into the image space, because similarities like l2-distance in image space are usually explainable (analo-gous to PSNR). In addition, the constraint term in Eq. (7) can be viewed as standard AutoEncoder defined on the space of T2(x), which guarantees the projection dϕ′(·) to be infor-mative, avoiding collapse of the similarity measurement.
+Although Eq. (7) explicitly uncovers the invariant proper-ties of MIM in theory, it is a drawback that Eq. (7) involves a nested optimization, which is difficult to compute. We thus propose a relaxed form of Eq. (7), named R-MAE (or
+RelaxMIM in general): min
+θ,ϕ,ϕ′
+E x∼D
+Mϕ,ϕ′(fθ(T1(x)), fθ(T2(x)))
++ λ∥(dϕ′(fθ(T2(x))) − T2(x)) ⊙ (1 − M )∥2. (8)
+Eq. (8) jointly optimizes the distance term and the constraint term in Eq. (7). λ controls the balance of the two terms. In practice, we let ϕ = ϕ′ to save computational cost, as we empirically find the optimization targets of dϕ(·) and dϕ′(·) in Eq. (8) do not diverge very much.
+Moreover, the transformations T1 and T2 are coupled in
+Eq. (6), which is not a common manner in siamese frame-works. Actually, it is not critical whether the two transfor-mations are independently. As the constraint term is used to ensure the informative projection, even setting T2(x) = x (a pure AutoEncoder) does not have a big impact on the performance.
+Empirical evaluation.
+First, we verify our claim that
+MIM representation is robust to image occlusion, as sug-gested by Eq. (7). We compute the CKA similarity [32] between the learned features from full images and images with different mask ratios respectively, at each block in the encoder. Fig. 1 shows the CKA similarities of different mod-els. The numbers (0.1 to 0.9) indicate the mask ratios (i.e. percentages of image patches to be dropped) of the test im-ages respectively. As shown in Fig. 1, both original MAE and our relaxed R-MAE (as well as another variant C-MAE, see the next section) obtain high CKA scores, suggesting those methods learn occlusion invariant features. In contrast, other methods such as supervised training or MoCo v3 [16] do not share the property, especially if the drop ratio is large. After finetuning, the CKA similarities drop, but are still larger than those training from scratch.
+Next, we verify how well R-MAE (Eq. (8)) approximates the original MAE. We pretrain the original MAE and R-Table 1. Comparisons of self-supervised methods on ImageNet with ViT-B [21]. Epochs in the table indicate numbers of pretraining epochs (for random initialization baselines they are total epochs of training from scratch). PSNR means the similarity between the generated image (from the masked image) and the original image after pretraining. R-MAE† means T2 is randomly sampled with mask ratio of 25%.
+R-MAE‡ means T2(x) = x.
+Pretrain Methods
+Transformation
+Framework
+Epochs
+FT Acc (%)
+PSNR (dB)
+Random Init – – – –
+MoCov3 [16]
+DINO [10] crop & jitter crop & jitter siamese siamese
+BeiT [5]
+MAE [29]
+CAE [13] patch masking patch masking patch masking reconstructive reconstructive reconst. + siam.
+MAE (our impl.)
+R-MAE (ours)
+R-MAE† (ours)
+R-MAE‡ (ours) patch masking patch masking patch masking patch masking reconstructive siamese siamese siamese 100 300 300 800 300 1600 300 100 100 100 100 80.9 82.1 83.2 82.8 82.9 83.6 83.3 83.1 82.7 82.8 82.7 – – – – – 19.3 – 22.2 23.7 23.0 22.9
+MAE on ImageNet using the same settings: the mask ratio is 0.75 and training epoch is 100 (λ is set to 1 for ours).
+Then we finetune the models on labeled ImageNet data for another 100 epochs. Results are shown in Tab. 1. Our fine-tuning accuracy is slightly lower than MAE by 0.4%, which may be caused by the relaxation. Nevertheless, R-MAE roughly maintains the benefit of MAE, which is still much better than supervised training from scratch and competitive among other self-supervised methods with longer pretraining.
+Another interesting observation is that, the reconstruction quality of R-MAE is even better than the original MAE (see
+PSNR column in Tab. 1), which we think may imply the trade-off by the choice of λ in Eq. (8). We will investigate the topic in the future.
+Last, we verify that transformations in Eq. (6) can be independent. We randomly sample T1 with mask ratio of 75% and T2 with mask ratio of 25%. To ensure the effective-ness of training, we compute the loss on the common parts of the masked patches of T1 and unmasked patches of T2 (following [29]). We call this model R-MAE†. As shown in
+Tab. 1, the finetuning accuracy is comparable with R-MAE.
+Furthermore, we try an extreme setting: we set the mask ratio of T2 to 0%, then the constraint term can be seemed as a pure AutoEncoder. We call this model R-MAE‡. As results in Tab. 1, the finetuning accuracy is 82.7%, which is the same as the R-MAE model with coupled transformations. two things are special: 1) data transformations T (·): pre-vious contrastive learning methods usually employ random crop or other image jittering, while MIM methods adopt patch masking; 2) similarity measurement M(·, ·), con-trastive learning often uses InfoNCE or other losses, while
+MIM implies a relatively complex4 formulation as Eq. (5).
+To understand whether the two differences are important, in this section we study how the choice of M(·, ·) affects the performance.
+Contrastive MAE (C-MAE). We aim to replace the mea-surement Mϕ,ϕ′(·, ·) with a much simpler InfoNCE loss [42].
+We name the new method contrastive MAE (C-MAE). In-spired by [16, 28], we transform the representations with asymmetric MLPs before applying the loss. The new dis-tance measurement is defined as follows: (cid:94)Mϕ,ϕ′(z1, z2) ≜ LNCE = −log exp(s(z1, z2)/τ ) j exp(s(z1, z′ j)/τ ) (cid:80) and s(z, z′) = qϕ′(pϕ(z)) · pϕ(z′)
+∥qϕ′(pϕ(z))∥ · ∥pϕ(z′)∥
+,
+, (9) (10) where pϕ(·) and qϕ′(·) are project head and predict head respectively following the name in BYOL [28], which are implemented with MLPs; τ is the temperature of the softmax.
+Readers can refer to [16] for details. Hence the objective function of C-MAE is: 3. Similarity measurement in MIM is replace-L(x, M ; θ, ϕ, ϕ′) = (cid:94)Mϕ,ϕ′(fθ(T1(x)), fθ(T2(x))). (11) able
+Eq. (7) bridges MIM and contrastive learning with a uni-fied siamese framework. Compared with conventional con-trastive learning methods (e.g. [10, 12, 16, 28, 30]), in MIM
+Unlike Eq. (7), C-MAE does not include nested optimization, thus can be directly optimized without relaxing. 4Notice that the constraint term in Eq. (7) also belongs to the similarity measurement.
+The design of transformation T . We intend to use the same transformation as we used in MAE and R-MAE (Eq. (6)). However, we find directly using Eq. (6) in C-MAE leads to convergence problem. We conjecture that even though the two transformations derive different patches from the same image, they may share the same color distribution, which may lead to information leakage. Inspired by Sim-CLR [12], we introduce additional color augmentation after the transformation to cancel out the leakage. The detailed color jittering strategy follows SimSiam [15].
+Implementation details. Following [16], we use a siamese framework, which contains an online model and a target model whose parameters are EMA updated by the online model. We use 2-layer projector (i.e. pϕ(·) in Eq. (11)) and 2-layer predictor (qϕ′), and use GELU as activation layer.
+To represent the masked patches into the encoder network, we adopt learnable mask tokens as [5, 53] does rather than directly discard the tokens within the masked region as the original MAE, because unlike MAE, our C-MAE does not include a heavy transformer-based decoder.
+Result and discussion. Tab. 2 shows the finetuning results of C-MAE and a few other self-supervised methods. C-MAE achieves comparable results with the counterpart MAE base-lines, suggesting that in MIM framework the reconstructive decoder, or equivalently the measurement in siamese form (Eq. (5)), does not matter much. A simple InfoNCE loss works fine. We also notice that our findings agree with re-cent advances in siamese MIMs, e.g. iBOT [57], MSN [2] and data2vec [4], whose frameworks involve various dis-tance measurements between the siamese branches instead of reconstructing the unmasked parts, however, achieve com-parable or even better results than the original reconstruction-based MIMs like [5, 29]. In addition to those empirical ob-servations, our work uncovers the underlying reason: both reconstructive and siamese methods target learning occlu-sion invariant features, thereby it is reasonable to obtain similar performances.
+Tab. 2 also indicates that, as siamese frameworks, C-MAE achieves comparable or even better results than previous counterparts such as DINO [10], even though the former mainly adopts random patch masking while the latter in-volves complex strategies in data transformation. [29] also reports a similar phenomenon that data augmentation is less important in MIM. The observation further supports the viewpoint that learning occlusion invariant feature is the key to MIM, rather than the loss. Intuitively, to encourage occlusion invariance, patch masking is a simple but strong approach. For example, compared with random crop strat-egy, patch masking is more general – cropping can be viewed as a special mask pattern on the whole image, however, ac-cording to the experiments in [29, 53], it is good enough or
+Table 2. Comparisons of C-MAE and other pretraining methods on
+ImageNet finetuning. All models are based on ViT-B.
+Pretrain Methods
+Epochs
+FT Acc (%)
+Random Init
+MoCo v3 [16]
+DINO [10]
+MAE [29]
+MAE (our impl.)
+C-MAE (ours)
+MAE (our impl.)
+C-MAE (ours) – 300 800 1600 100 100 400 400 80.9 83.2 82.8 83.6 83.1 82.9 83.2 83.1
+Table 3. Ablation study on the strategies of C-MAE loss. All models are pretrained for 100 epochs.
+Measurement Class Token
+Patch Tokens
+FT Acc (%) instance-wise instance-wise token-wise token-wise
+✓
+✓ average
+✓
+✓ 82.5 82.6 82.9 82.9 even better to leave patch masking fully randomized5.
+Token-wise vs. instance-wise loss. We mainly evaluate our method on ViT-B [21] model. By default, the model generates a latent representation composed of 14×14 patch tokens and one class token, where each patch relates to one image patch while the class token relates to the whole instance. It is worth discussing how the loss in Eq. (11) applies to the tokens. We come up with four alternatives: apply the loss in Eq. (11) 1) only to the class token; 2) on the average of all patch tokens; 3) to each patch token respectively; 4) to each patch token as well as the class token respectively. If multiple tokens are assigned to the loss, we gather all loss terms by averaging them up. Tab. 3 shows the ablation study results. It is clear that token-wise loss on the patch tokens achieves the best finetuning accuracy on
+ImageNet. In comparison, adding the class token does not lead to improvement, which may imply that class token in self-supervised learning is not as semantic as in supervised learning. Therefore, we use a token-wise-only strategy for
+C-MAE by default.
+Additional ablations. Tab. 4 presents additional results on
+MAE and C-MAE. First, Although C-MAE shows compara-ble finetuning results with MAE, we find under linear prob-ing [29, 30] and few-shot (i.e. finetuning on 10% ImageNet 5Although very recent studies [31, 35, 46, 49] suggest more sophisticated masking strategies can still help.
+Table 4. Additional comparisons on MAE and C-MAE. All models are pretrained and finetuned for 100 epochs respectively.
+Pretrain Methods
+Lin. Prob Acc (%)
+FT Acc (%) 10% FT Acc (%)
+MAE
+MAE w/ color jitter (whole image)
+MAE w/ color jitter (unmasked only)
+C-MAE
+C-MAE w/o mask token
+C-MAE (BYOL loss)
+C-MAE w/o mask token (BYOL loss) 54.5 53.4 54.0 41.1 56.2 26.9 55.2 83.1 83.1 83.0 82.9 82.6 82.8 82.5 67.5 67.3 67.3 66.4 67.5 65.2 66.1 training data) protocols, C-MAE models lead to inferior re-sults. Further study shows the degradation is mainly caused by the usage of mask tokens in C-MAE, which is absent in the original MAE – if we remove the mask tokens as done in MAE’s encoder, linear probing and few-shot accuracy largely recover (however finetuning accuracy slightly drops), which we think is because mask tokens enlarge the structural gap between pretraining and linear/few-shot probing, since the network is not fully finetuned under those settings.
+Second, we further try replacing the InfoNCE loss (Eq. (9)) with BYOL [28] loss in C-MAE. Following the ablations in Tab. 3, we still make the BYOL loss in token-wise manner. Compared with InfoNCE, BYOL loss does not have explicit negative pairs. Results imply that BYOL loss shows similar trend as InfoNCE loss, which supports our viewpoint “similarity measurement in MIM is replaceable”.
+However, we also find BYOL loss is less stable, resulting in slightly lower accuracy than that of InfoNCE.
+Last, since our C-MAE involves color jittering [12], one may argue that color transformation invariance could be an-other key factor other than occlusion invariance. We study the original MAE with additional color jittering (Tab. 4).
+We compare two configurations: a) augmenting the whole image before applying MAE; b) only augmenting the un-the reconstruction targets keep the masked patches (i.e. same). Results show that neither setting boosts MAE fur-ther, which implies the invariance of color jittering does not matter much.
+Moreover, we try the compositions of three different aug-mentation strategies on MAE and C-MAE. As shown in
+Tab. 5, both MAE and C-MAE drop a lot of performance when removing patch masking (marked as green blocks), which indicates learning occlusion invariance is critical for the models. Interestingly, C-MAE further gains better per-formances with additional augmentations (cutmix and color jitter), while MAE not. We think the phenomenon is resulted from the differences in learning dynamics. As studied in previous works [12], siamese frameworks such as contrastive learning tend to suffer from information leakage issue, i.e. learning a shortcut according to color or texture clues to distinguish positive pairs over the negatives. Therefore, C-MAE needs stronger augmentation to avoid such information leakage. Anyway, we find the upper bound performances of the two frameworks are similar. Details of the experiment are explained in Appendix A. 4. MIM learns a favored, (almost) data-agnostic initialization
+As discussed in the above sections, learning occlusion invariant features is the key “philosophy” of MIM methods.
+Hence an interesting question comes up: how do the learned networks model the invariance? One possible hypothesis is that occlusion invariance is represented in an data-agnostic way, just analogous to the structure of max pooling – the output feature is robust only if the most significant input part is not masked out, thereby the invariance is obtained by design rather than data. Another reasonable hypothesis is, in contrast, the invariance requires knowledge from a lot of data. In this section we investigate the question.
+Inspired by [1], to verify our hypotheses we try to signifi-cantly reduce the number of images for MAE pretraining, i.e. ranging from 1 for 1000 randomly sampled from ImageNet training set, hence the semantic information from training data should be very limited in the pretraining phase. Notice that MAE training tends to suffer from over-fitting on very small training set, as the network may easily “remember” the training images. Therefore, we adopt stronger data aug-mentation and early-stop trick to avoid over-fitting. Tab. 6 presents the result. Very surprisingly, we find pretraining with only one image with 5 epochs already leads to improved finetuning score – much better than 100-epoch training from scratch and on par with training for 300 epochs. The fine-tuning results do not improve when the number of pretrain images increases to 1000. Since it is not likely for only one image to contain much of the semantic information of the whole dataset, the experiment provides strong evidence that
+MIM can learn a favored initialization, more importantly, which is (almost) data-agnostic. Tab. 7 also indicates the choice of sampling strategy does not affect the finetuning
+Table 5. Ablation study of different augmentation strategies on MAE and C-MAE. The models are trained for 100 epochs with ViT-S on
+ImageNet-100. Sup means 200-epoch supervised result. ■ means patch masking, ■ means cutmix, and ■ means color augmentation. (Best view in color.)
+Pretrain Methods
+Sup
+■
+■
+■
+■ ■ ■ ■ ■ ■ ■ ■ ■
+MAE
+C-MAE 81.6 71.9 80.0 87.1 86.5 83.3 83.5 81.6 82.8 86.1 86.9 85.5 86.8 83.8 83.1 86.4 87.1
+Table 6. Comparisons of MAE pretrained with different numbers of images.
+Pretrain Images
+Stronger Aug.
+Train Epochs
+FT Epochs
+FT Acc (%) 1 10 100 1000
+Random Init
+✓
+✓
+✓
+✓ 5 2 5 10 10 100 100
+--100 100 100 100 100 100 100 100 300 82.3 81.9 82.3 82.1 82.2 82.2 82.2 80.9 82.1
+Table 7. Comparisons of different image sampling strategies. For
+MAE pretraining, 1000 images are sampled with different strategies respectively from ImageNet.
+Sampling Strategy
+# of Categories
+FT Acc (%) in one class random one per class 1 617 1000 82.2 82.2 82.2 accuracy, further suggesting that such benefit from MIM pre-training might be free of category information.
+Moreover, in Tab. 8 we benchmark various pretraining methods on a 1000-image subset from ImageNet training data, which provides more insights on MIM training. We find the linear probing accuracy of MAE is very low, which is only slightly better than random feature (first row), sug-gesting that the feature learned from 1000 images is less semantic; however, the finetuning result as well as few-shot finetuning is fine. Our proposed R-MAE and C-MAE share similar properties as the original MAE – relatively low lin-ear probing scores but high finetuning performance. The observation strongly supports our first hypothesis at the be-ginning of Sec. 4: the occlusion invariance learned by MIM could be data-agnostic, which also serves as a good initial-ization for the network. In comparison, supervised training and MoCo v3 [16] on 1000 images fail to obtain high fine-tuning scores, even though their linear probing accuracy is higher, which may be because those methods cannot learn occlusion-invariant features from small dataset effectively.
+In Appendix B, we will discuss more on the topic. 5. Experimental Details
+Pretraining. We use ViT-B/16 as the default backbone.
+For MAE pretraining, we use the same settings as [29], and use the patch normalization when computing loss. We use the mask ratio of 0.75, which is the most effective one in [29].
+We use AdamW optimizer with cosine decay scheduler and the batch size is set to 1024. We set the base learning rate (learning rate for batch size of 256) as 1.5e-4 with a 20-epoch linear warm-up and scale up the learning rate linearly when batch size increases [27]. For R-MAE, we search the learning rate and finally set the base learning rate as 3.0e-4.
+Other training settings are the same as [29]. For C-MAE, the momentum to update the teacher model is set to 0.996, and the temperature to compute contrastive loss is set to 0.2.
+For projector and predictor heads, we set 2048-d for hidden layers, and 768-d for output layers. We search the learning rate and finally set the base learning rate as 1.5e-4. Other parameters are the same as C-MAE. We train the model for 100 epochs on the ImageNet [45] dataset as default. Due to the computational resource constraints, we report the results of 400 epochs to prove that our method gains better results with longer training.
+Finetuning. We follow the training settings in [29]. We use the average pooling feature of the encoded patch tokens as the input of classifier, and train the model end-to-end.
+Following [29], we reset the parameters of the final normal-Table 8. Comparisons of different pretraining methods on 1000 images sampled from ImageNet (one image for each class). All methods pretrain for 100 epochs on the sampled dataset (except for random initialized baseline) and then finetune for 100 epochs on full/10%-ImageNet accordingly.
+Pretrain Methods
+Lin. Prob Acc (%)
+FT Acc (%) 10% FT Acc (%)
+Random Init
+Supervised
+MoCo v3
+MAE
+R-MAE
+C-MAE 6.1 33.1 37.3 13.8 25.9 20.1 80.9 81.0 79.2 82.2 82.1 82.1 34.9 52.6 45.8 57.6 58.8 61.9 ization layer. We use AdamW optimizer with cosine decay scheduler and set the batch size to 1024. We set the base learning rate as 1.0e-3 with 5-epoch linearly warm-up and train the model for 100 epochs. Note that the supervised trained ViT in our paper uses the same settings as finetuning and the model is trained for 100 epochs. 6.

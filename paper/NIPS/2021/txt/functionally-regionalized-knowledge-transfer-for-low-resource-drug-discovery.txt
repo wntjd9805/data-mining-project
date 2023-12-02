@@ -1,0 +1,190 @@
+Abstract
+More recently, there has been a surge of interest in employing machine learning approaches to expedite the drug discovery process where virtual screening for hit discovery and ADMET prediction for lead optimization play essential roles. One of the main obstacles to the wide success of machine learning approaches in these two tasks is that the number of compounds labeled with activities or ADMET properties is too small to build an effective predictive model. This paper seeks to remedy the problem by transferring the knowledge from previous assays, namely in-vivo experiments, by different laboratories and against various target proteins.
+To accommodate these wildly different assays and capture the similarity between assays, we propose a functional rationalized meta-learning algorithm FRML for such knowledge transfer. FRML constructs the predictive model with layers of neural sub-networks or so-called functional regions. Building on this, FRML shares an initialization for the weights of the predictive model across all assays, while customizes it to each assay with a region localization network choosing the pertinent regions. The compositionality of the model improves the capacity of generalization to various and even out-of-distribution tasks. Empirical results on both virtual screening and ADMET prediction validate the superiority of FRML over state-of-the-art baselines powered with interpretability in assay relationship. 1
+
+Introduction
+Drug discovery brings new candidate medications to billions of people, helping them live longer, healthier and more productive lives. One crux step in drug discovery is virtual screening, which is a fast and cost-effective method that computationally predicts the activity value of a compound against the target protein of a disease. As shown in Figure 1(a), the hits screened out of large drug libraries of compounds by a virtual screening algorithm are further empirically validated against their in-vivo activities, resulting in leads. After optimizing the ADMET properties (absorption, distribution, metabolism, excretion and toxicities) of the leads, we obtain the drug candidates.
+There have been both traditional machine learning [33] and deep learning approaches [4] devoted to virtual screening, while the prediction performance (i.e., the hit rate) is far from satisfactory.
+The crucial challenge lies in that the number of training compounds whose activities have been tested against the target protein of focus is severely limited. Though state-of-the-art deep learning algorithms typically rely on supervision in the form of thousands to millions of annotated data, it is highly expensive and almost impossible for in-vivo experiments to collect a sufﬁcient set of drug
+∗Part of the work was done when H.Y. was a student at Penn State University, correspondence to: Y.W. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+compounds with activity labels. In fact, virtual screening as a computational pre-screening method is desired precisely because of the prohibitive costs of an in-vivo experiment (i.e., an assay). Fortunately, previous assays conducted by different laboratories around the world towards a wide variety of diseases with different biological target proteins together provide a rich repository for learning the interactions between a protein and a compound. For example, as COVID-19 and SARS share high amino acid sequence identity, previous assays against SARS 3CLpro and PLpro proteases contribute a lot to learning a predictive model for COVID-19 [16].
+We are highly motivated to transfer the knowl-edge of interactions from this repository to ad-dress the scarcity of labeled compounds in the assay against the target protein of our focus, which we name as the target assay for conve-nience. The challenges of such knowledge trans-fer are two-fold: (1) how to share the transfer-able knowledge but meanwhile accommodate the wide variance between assays, and (2) how to adequately identify the nearest neighbor as-Figure 1: (a): Workﬂow for discovery of drug can-says to the target assay to reduce the risk of neg-didates using virtual screening. (b): Distributions ative transfer. Since assays are from different of activity values for 10 randomly selected assays. institutions and against various target proteins, the compounds tested and the distribution of activity values vary a lot from assay to assay. As evidenced in Figure 1(b), there exists a large discrepancy between distributions of activity values for 10 randomly selected assays. The prevalent ﬁne-tuning strategy in transfer learning [21], trains a single model on previous assays and ﬁne-tunes it to the target assay – it struggles in predicting accurately for each assay and confuses the most similar assays to the target with the others. (b) (a)
+Gradient-based meta-learning [7] has been a promising practice, which learns from previous assays an initialization for a shared predictive model and adapts the model from this initialization to each assay. while the initialization is learned so that the adapted model of each assay generalizes well on testing compounds, maintaining a shared initialization is still insufﬁcient to handle wildly varying assays [37] and pinpoint the most similar assays. Recent efforts on heterogeneous meta-learning deal with this issue by modulating the shared initialization to different assays via task embedding [20, 35, 37].
+Instead of only differentiating initializations, motivated by compositionality and brain functional specialization in neuroscience [5, 26], we aim to push ahead with distinguishing neural sub-networks, or so-called functional regions, each of which consists of a disparate set of parameters. This advancement brings at least the following two beneﬁts. First, the similarity between assays is more accurately measured in a divide-and-conquer manner – only modulation for the initialization weights in those overlapping regions between two assays are considered for comparison. Second, the reduced parameter space prevents the predictive model from overﬁtting to a limited set of training compounds.
+We name the resulting meta-learning algorithm as FRML. The predictive model of the FRML is dissected into a sequence of hierarchically organized functional regions. Provided with an assay, the contrastive assay representation network forwards the learned assay embedding to a region localization network. The region localization network locates the most relevant functional regions for the assay in a recurrent manner, to be consistent with the hierarchical organization of functional regions. In the stage of meta-training on previous assays, both the region localization network and the weights for initializations of all functional regions are jointly learned. When it comes to meta-testing,
+FRML quickly adapts to the target assay via easy assembly of the located regions.
+We summarize our major contributions as follows. (1) We propose a novel meta-learning algorithm
+FRML, which pushes a step forward from differentiating initializations to differentiating neural sub-networks between tasks; (2) We demonstrate the effectiveness of FRML on not only virtual screening but also the task of ADMET prediction. (3) FRML respects the key principle of machine learning models in healthcare – it is interpretable in the relationship between assays. 2 Notations and Problem Deﬁnition
+In this section, we deﬁne some notations and discuss our problem. In drug prediction, we consider each task Ti as an assay which refers to an in-vivo experiment on a group of compounds, and all tasks 2
+are sampled from the distribution p(T ). Note that we use either task or assay alternatingly in the remainder of this paper. Assuming that we have N historical assays {Ti}N i=1 as meta-training assays, we aim to generalize a meta-learner from these meta-training assays and quickly adapt it to unseen target assays {Tt}Nt t=1 even with limited amount of annotated data. Here, we deﬁne the process of learning well-generalized meta-knowledge from the meta-training assays as the meta-training phase and the adaption process on the target assays as the meta-testing phase. i , Ys i , Yq i = {Xq i } = {(xs, ys)i,j}ns
+Concretely, for each task Ti, a support set of training samples Ds i = {Xs i j=1 nq and a query set of testing samples Dq i } = {(xq, yq)i,j} j=1 are sampled from Ti, where i i and nq ns i represent the number of support and query samples, respectively. Denote that the feature space is X and the label space is Y, a predictive model (a.k.a., base learner) f : x (cid:55)→ ˆy is deﬁned to map a sample x ∈ X to its predicted value ˆy ∈ Y. For each task Ti, the base learner f is updated from the initialization θ0 by minimizing the expected empirical loss L on Ds i , i.e., minθ L(θ; Ds i ), resulting in the optimal parameters θi. Speciﬁcally, the loss function L is deﬁned as mean square error 2) or cross-entropy loss (i.e., − (cid:80) (i.e., (cid:80) log p(y|x, fθ)) for regression and classiﬁcation problems, respectively. In the meta-training phase, the query sets {Dq i=1 of all meta-training assays are used to optimize the initialization of the base learner, so that the ﬁnal initialization θ∗ 0 can be further adapted to each meta-testing task Tt via the corresponding support set Ds t . Formally, we deﬁne our problem as, 0 is well-generalized. θ∗ (cid:107)fθ(x)−y(cid:107)2 (x,y)∈Ds i (x,y)∈Ds i i }N
+ˆYq t = arg max
+Yq t p(Yq t |Xq i , Ds t , fθ∗ 0
+). (1)
+The well-generalized model initial weights θ∗ meta-training assays. We will detail how to learn θ∗ 0 in Section 3. 0 encrypt the comprehensive knowledge learned from 3 Methodology
+In this section, we introduce the proposed framework FRML whose overview is illustrated in Figure 2.
+The goal of FRML is to improve the generalization ability for a wide range of and even out-of-distribution target assays with limited training samples via discriminating functional regions between assays. To achieve this goal, we dissect the base learner into a sequence of functional regions. Given a new assay, we propose a region localization network taking the learned assay representation as input to locate and assemble the most relevant functional regions. Subsequently, FRML can be quickly adapted to the novel assay on the assembled functional region set. In the following subsections, we will ﬁrst discuss the predictive models for virtual screening and ADMET classiﬁcation as the base learner and our meta-learning pipeline. Then we elaborate the details of three key components (i.e., assay representation learning, localization strategy, and region localization network).
+Figure 2: Overview of the proposed FRML. In each assay Ti, the recurrent region localization network, guided by its learned representation ti, locates the most relevant functional regions (darker 01 → θ2 blocks) and assembles them (trace: input→ θ1 01) in the dissected base learner fθ. 03 → θ4 02 → θ3 3.1 Predictive Models for Drug Discovery and Gradient-based Meta-Learning
+We build predictive models for virtual screening and ADMET prediction, both of which are crucial for drug discovery. The input to the predictive models is a drug compound represented by 1024 dimensional Morgan ﬁngerprints [28], i.e., x ∈ R1024. For virtual screening, the output is the activity value of the compound against the target protein in this assay, i.e., y ∈ R, while the output for 3
+ADMET prediction could be a discrete category or a real value. In our empirical study, we only consider those ADMET prediction tasks of classiﬁcation, i.e., y ∈ C, where C denotes the set of property categories. Building on these, we construct a neural network consisting of two fully connected layers as the predictive model, which also serves as the base learner f. We denote the weights for the base learner f to be θ.
+With the base learner f , we introduce gradient-based meta-learning as the backbone meta-learning framework, which regards the initialization θ0 for the base learner as the transferable knowledge.
+Apparently, it enjoys the advantage of being independent of problem types. Speciﬁcally, here we illustrate the gradient-based meta-learning by using model-agnostic meta-learning (MAML) [6] as an example. In the meta-training phase, MAML obtains the assay-speciﬁc model for each assay Ti by updating the parameters θ via the support set Ds i in a few gradient steps starting from θ0, i.e.,
+θi = θ0 − α∇θL(θ; Ds (2)
+Here α denotes the learning rate for assay adaptation. Though only one gradient step is presented as exemplary in Eqn. (2), it is easy to extend to several gradient steps. The crux is to evaluate the adapted assay-speciﬁc model θi on the query set Dq i and leverage the result as a feedback to meta-update the initializations θ0 as, i ).
+θ0 ← θ0 − β
+L(θi; Dq i ), (3) (cid:88) 1
+N
+Ti∈p(T ) where β is the learning rate for meta-updating. As a result of the meta-training phase, we get the well-generalized initialization θ∗ 0 for the base learner. In the meta-testing phase, the speciﬁc model θt for each target assay Tt with the support set Ds t is achieved by a few gradient steps starting from the learned initialization θ∗ t ). Finally, the performance is evaluated on the query set Dq t of the target assay Tt. Without loss of generality, we again take MAML as the backbone meta-learning framework of FRML and detail each component in the following. 0, i.e., θt = θ∗ 0 − α∇θL(θ∗ 0 ; Ds 3.2 Contrastive Assay Representation Learning
+Learning the representation of assay Ti is a prerequisite to determining the functional regions that are speciﬁc to the assay. Following previous works [35, 37], we represent the assay with a representation vector ti ∈ Rd by aggregating all training samples of the support set Ds j=1, where an aggregator AGG is involved. The aggregator consists of a mapping function denoted as MF (e.g., recurrent network, convolutional network) that ﬁrst encodes each individual sample into a dense representation vector, and a sample-level mean pooling layer to summarize all samples to generate the assay representation ti. Note that the pooling guarantees the assay representation to be invariant of the permutation of samples. Formally, we deﬁne the aggregation process as, i ={(xs, ys)j i }ns i ti = AGG(Ds i ) = 1 ns i ns i(cid:88) j=1
+MF(F(xj i ) ⊕ yj i ), (4) where F(·) is an embedding function that transforms the input features into a low-dimensional vector.
+Both the embedded input features and the label are concatenated by the operator ⊕. We will provide more details on the deﬁnitions of F(·) and MF(·) later in Section 4.
+The loss function to train the parameters F(·) and MF(·) could be Eqn. (3) only. Unfortunately, it is far from enough to learn a robust assay representation: ﬁrst, the gradients back-propagated through the base learner and the region localization network tend to be too small for training to work effectively; second, the assay representation and the region localization are interleaving, so that the objective in
+Eqn. (3) takes them as a whole regardless of the accuracy for each of them. To overcome this limitation, we are motivated to impose another loss function on the assay representation network directly. The key intuition is that each set of samples in an assay provides a partial view of the assay, and the assay representation is expected to be consistent across views. This motivates the constrastive objective – different views of the same assay have similar task representations, while the representations of views from different assays should be different. Speciﬁcally, we create different views of assay Ti by randomly splitting Ds i /nc), we obtain nc subsets of equal size, i.e., Ds
+. We can now formulate the contrastive learning objective as follows: i /nc. By deﬁning cu := ((u − 1)ns u=1Ocu i into nc sets of size ns i = ∪nc i /nc, · · · , uns i
+N (cid:88) (cid:88) (cid:20) log
+Lcl = i=1 1≤u≤v≤nc exp (cid:0)Φ(cid:0)AGG(Ocv e=1 exp (cid:0)Φ(cid:0)AGG(Ocv i ), AGG(Ocu i )(cid:1)(cid:1) i ), AGG(Ocu e )(cid:1)(cid:1) (cid:80)N (cid:21)
+, (5) 4
+where Φ is a similarity measure function.
+In our experiments, we adopt the dot product, i.e.,
+Φ(a, b) = aT b. This contrastive loss function pushes the representations of different assays apart and meantime stabilizes the assay representation. 3.3 Localization Strategy
+The assays are measured by different experimenters on different equipment, so that they are expected to have widely distributed assay representations. Given an assay with its representation, in this section, the localization strategy sets out to locate and assemble the functional regions that are speciﬁc to this assay. Before detailing the localization strategy, we ﬁrst dissect the initialization θ0 of the base learner into K functional regions. These functional regions are dissected in a layer-wise manner to maintain the hierarchical structure of the neural network. For each layer l, we denote 0ml }M l its corresponding functional regions as θl ml=0, where M l represents the total number of functional regions in the l-th layer and (cid:80) 0 = {θl l M l = K.
+Following the hierarchical representation in neural networks, we locate and assemble these functional regions in a hierarchical manner – each functional region at layer l + 1 receives signals from the functional regions at layer l. For each assay Ti, denoting the representation of functional region ml in layer l as hml
+, we deﬁne the representation of functional region ml+1 in layer l + 1 to be: i hml+1 i
+= f ml+1 (
+M l (cid:88) ml=1 pml→ml+1 i hml i
+),
+M l (cid:88) ml=1 pml→ml+1 i
+= 1, (6) (·) represents the mapping function for functional region ml+1. pml→ml+1 where f ml+1 deﬁned as the probability of functional region ml being assembled to ml+1 is crucial; a value of pml→ml+1
+= 1 suggests that functional region ml should be included for assay Ti. Obviously, the probability pml→ml+1 varies from assay to assay, so that we model it as a function of the representation ti, i.e.,
+= RG(ti), (7) pml→ml+1 i where RG(·) represents the region localization network we detail in the next subsection. i i i 3.4 Region Localization Network
+An ideal region localization network is expected to satisfy two criteria, including high representational capacity and consistency with the hierarchical structure behind functional regions. To meet the criteria, we propose a recurrent region localization network, where a recurrent neural network (GRU as exemplary) is used. The input to the recurrent neural network at step l + 1 is the combination of
+|ml−1 ∈ assay representation ti and the assembly probabilistic set pl
+[1, M l−1], ml ∈ [1, M l]}. Consequently, the hidden representation at step l + 1 is, i of layer l, where pl i = {pml−1→ml i (8)
+˜rl+1 i; rl i = GRU(ti ⊕ pl and bf ∈ R1×M lM l+1 i)Wf + bf , i
+|ml ∈ [1, M l], ml+1 ∈ [1, M l+1]} ∈ R1×M lM l+1 where Wf ∈ Rd(cid:48)×M lM l+1
+=
+{˜rml→ml+1
+. The hidden representations at step l + 1, in return, determine the assembly probability at layer l + 1. Note that the assembly probability is expected to be as close to the bounds of its range (0, 1) as possible, so that only the most pertinent functional regions are located. To this end, we apply the Gumbel-softmax estimator [10, 18] which models the categorical distribution to ˜ri, i.e., are learnable parameters and ˜rl+1 i pml→ml+1 i
+= exp((˜rml→ml+1 sl=1 exp((˜rsl→ml+1 i i (cid:80)M l
++ qml→ml+1
+)/τ ) i
++ qsl→ml+1 i
+)/τ )
+, (9) where τ is the temperature and qml→ml+1
+Gumbel(0, 1). i is sampled from the Gumbel distribution, i.e., qml→ml+1 i
+∼
+Combining the meta-learning loss in Eqn. (3) and the contrastive loss in Eqn. (5), we arrive at the overall objective function of FRML deﬁned as: min
+Θ
+Lall = min
+Θ (cid:88)
+L + λLcl,
+Ti∈p(T ) (10) where the hyperparameter λ balances between two losses and Θ represents all learnable parameters.
+For better understanding of our framework, we show the meta-training process in Algorithm 1 and the meta-testing process in Appendix A. 5
+Algorithm 1 Meta-training Process of FRML
+Require: {M 1, . . . , M L}: # of functional regions of each layer; α, β: learning rates; λ1, λ2: item factors in loss i , Dq 1: Randomly initialize Θ 2: while not done do 3: 4: 5: 6: 7: 8: 9: 10: 11: 12: end while end for
+Update Θ ← Θ − β 1
+Sample a batch of assays from p(T ) for all Ti do
+Sample Ds
+Get assay representation ti in Eqn. (4) and the reconstruction loss Lcl via Eqn. (5)
+Use Eqn. (8) to compute {˜r1
+Calculate {p1 i } by Eqn. (9) and get the assembled trace across functional regions
+Use gradient descent to update parameters based on the learned trace: θi = θ0 −α∇θL(θ; Ds i ) i , . . . , ˜rL i } i from Ti i , . . . , pL
+N ∇Θ (cid:80)
+Ti∈p(T ) L(θi; Dq i ) + λLcl(Ds i ) 4 Experiments
+In this section, we empirically evaluate the effectiveness of FRML on two diverse drug discovery tasks: drug activity prediction and ADMET property prediction. We consider comparison of the proposed FRML with three categories of baselines. The ﬁrst category simply using base learner without assay adaptation, including FC-Individual and FC-All. The second category is knowledge transfer with assay adaptation: Fine-tuning, MAML [6], ANIL [24], ANIL++ [3]. In the second category of methods, we also compared FRML with Prototypical Network (ProtoNet) [31] and
+Matching Network (MatchingNet) [34] for classiﬁcation tasks, i.e., ADMET property prediction.
+The last category is heterogeneous meta-learning methods, including MMAML [35], HSML [37],
+ARML [38]. Detailed descriptions of all baselines are provided in Appendix B and the detailed hyperparameters for both applications are listed in Appendix D. 4.1 Drug Activity Prediction 4.1.1 Dataset Description
+For drug activity prediction, we use the dose-response activity assays from ChEMBL[1], where 4,276 assays are selected in this problem. Here, we randomly sample 100 assays as the meta-testing set, 76 assays as the meta-validation set, and the rest of assays for meta-training. The random splitting is repeated four times to construct four assay groups, named Assay Group I, II, III, IV, respectively. A few support and query drug compounds are available for each assay. In terms of the features for each drug compound, we use 1,024-dimensional Moragn ﬁngerprint implemented in RDKit [12]. For each assay Ti, we calculated the coefﬁcient of determination (R2) between the predicted value ˆYq i and the ground truth value Yq i . The median and mean R2 values of all meta-testing assays are reported.
+We adopt another widely used metric for evaluating whether a virtual screening model is usable in practice, i.e., the number of assays with R2 > 0.3. More detailed information and data statistics are summarized in Appendix C.1. 4.1.2 Overall Performance
+The performance of FRML and the baselines are reported in Table 1. In this experiment, FRML incorporates ANIL and ANIL++, while all other heterogeneous meta-learning algorithms (e.g.,
+MMAML) incorporate ANIL. Note that ANIL++ is modiﬁed from ANIL to improve stability. From the results in Table 1, we obtain the key observations: (1) The performance of FC-Individual is inferior to that of other methods, indicates that involving the data from source assays beneﬁts the performance; (2) Gradient-based meta-learning methods (MAML, ANIL, ANIL++, heterogeneous methods, and FRML) achieve signiﬁcantly better performance than Fine-tuning, corrugating our motivation that Fine-tuning may confuse the most similar assays to the target with the others; (3) In most cases, heterogeneous methods (MMAML-ANIL, HSML-ANIL, ARML-ANIL, FRML-ANIL) achieve better performance than homogeneous meta-learning models, showing the effectiveness of integrating assay-speciﬁc knowledge transfer; (4) Our proposed FRML-ANIL++ achieves the best per-6
+Table 1: Performance of drug activity prediction (Measured by mean R2, median R2 and #R2 > 0.3).
+Model
+FC-Individual
+FC-All
+Fine-tuning
+MAML
+ANIL
+ANIL++
+MMAML-ANIL
+HSML-ANIL
+ARML-ANIL
+Assay Group I
+Assay Group II
+Assay Group III
+Assay Group IV
+Mean Med. R2 >0.3 Mean Med. R2 >0.3 Mean Med. R2 >0.3 Mean Med. R2 >0.3 0.141 0.064 0.228 0.131 0.251 0.166 0.291 0.182 0.299 0.184 0.367 0.299 0.292 0.205 0.295 0.192 0.299 0.204 16 30 37 38 41 50 42 41 43 44 52 0.114 0.060 0.187 0.103 0.197 0.124 0.232 0.158 0.226 0.143 0.315 0.252 0.231 0.154 0.234 0.145 0.233 0.159 0.237 0.162 0.327 0.311 10 23 24 29 30 43 31 34 32 35 51 0.112 0.046 0.199 0.103 0.219 0.121 0.265 0.191 0.268 0.199 0.335 0.289 0.276 0.187 0.277 0.196 0.270 0.191 0.285 0.207 0.345 0.315 10 28 31 36 37 48 37 35 39 40 51 0.118 0.047 0.252 0.160 0.266 0.194 0.302 0.256 0.304 0.282 0.362 0.324 0.308 0.260 0.306 0.254 0.311 0.267 0.322 0.287 0.372 0.349 10 35 37 46 48 51 46 47 46 49 56 0.310 0.226
+FRML-ANIL (ours)
+FRML-ANIL++ (ours) 0.375 0.328
+Table 2: Ablation study on drug activity prediction.
+Model
+Assay Group I
+Assay Group II
+Assay Group III
+Assay Group IV
+Mean Med. R2 >0.3 Mean Med. R2 >0.3 Mean Med. R2 >0.3 Mean Med. R2 >0.3 0.367 0.299
+ANIL++ 0.371 0.315
+Ablation I (w/o cl)
+Ablation III (w/o localization) 0.369 0.301 0.372 0.303
+Ablation II (RNN -> FC)
+FRML-ANIL++ (ours) 0.375 0.328 50 51 50 52 52 0.315 0.252 0.318 0.263 0.317 0.263 0.326 0.299 0.327 0.311 43 45 47 50 51 0.335 0.289 0.338 0.305 0.336 0.291 0.341 0.306 0.345 0.315 48 49 49 50 51 0.362 0.324 0.368 0.338 0.368 0.329 0.367 0.333 0.372 0.349 51 54 53 53 56 formance in all four assay groups. This possibly results from that differentiating neural sub-networks reduces the parameter space, which improves the generalization capability and further beneﬁts the performance. Besides, integrating FRML with ANIL also achieves consistent improvements, showing its compatibility with different backbone meta-learning models. 4.1.3 Ablation Study
+To further show the effectiveness of the proposed modules in FRML, we conduct comprehensive ablation studies by comparing FRML with three ablation models described as follows. First, we consider an ablation model (Ablation I (w/o cl)) with the contrastive loss removed. Second, we design
+Ablation II (w/o localization) to show that the improvements of FRML is caused by knowledge localization rather than increasing the capacity of baseline. Third, we change the recurrent structure to a plain localization network and propose Ablation III (RNN->FC), where fully connected layers with softmax are utilized to learn the assembly probability set {p1 i , . . . , pL i }.
+We evaluate the ablation models on all four assay groups and report the performance in Table 2. Note that FRML is also included in comparison. From the results in the table, we have the following three
+ﬁndings: (1) removing the contrastive loss hurts the performance, which indicates the effectiveness of the contrastive loss in learning well-differentiated assay representations; (2) the superiority of FRML over abalation II demonstrates that the improvements stem from efﬁcient knowledge structuring rather than larger model capacity; (3) compared to the plain localization network, the performance gain of recurrent region localization network demonstrates its superiority by predicting the assembly probability in a hierarchical way. 4.1.4 Analysis
+Effect of the Number of Functional Re-gions. We analyze the effect of the number of functional regions and illustrate the results in Figure 3(a). In this ﬁgure, we observe that (1) if the number of functional regions is too small (e.g. 1), it may be insufﬁcient to cap-ture the structures across assays. (2) when we continually increase the number of functional regions, the results keep stable or even slightly decrease, which are consistent with our ﬁnd-(a) (b)
+Figure 3: (a): Num. of functional regions w.r.t. the mean R2 on Assay Group I, II, III, IV. (b): Perfor-mance w.r.t. support set ratio on Assay Group I. 7
+ings that the gains of FRML arise out of the effective knowledge structuring instead of the increase of the model capacity.
+Besides, we also conduct an experiment using a dif-ferent number of functional regions in each layer.
+Here, we use two functional blocks in layer one and four functional blocks in layer two. The results are re-ported in Table 3. We observe that the performance is slightly worse than the strategy of using three layers for each layer. One potential reason is that the Mor-gan ﬁngerprint features have covered enough low-level features, and it might be more useful to add more functional blocks in the ﬁrst layer.
+Table 3: Performance of FRML with differ-ent knowledge blocks in each layer on drug activity prediction. (2, 4) represents that we use 2 blocks in layer 1 and 4 blocks in layer 2.
+G-I represents group I. Mean R2 is reported.
+# of Blocks
+G-I
+G-II G-III G-IV (2, 4) (3, 3) 0.369 0.324 0.344 0.367 0.375 0.327 0.345 0.372
+Effect of the Ratio of the Support set. In order to show the superiority of FRML under different ratios of the support set, we analyze the performance w.r.t. the support set ratio and show the results in Figure 3(b). When we down-sample the support set to contain 5%, 25%, and 50% of all compounds in an assay, FRML consistently achieves better performance than the most competitive baseline ANIL++. This marks the capability of FRML in handling the data scarcity problem in healthcare.
+Analysis of Localization Strategy. We further analyze the localization strategy, where the assembled traces of six randomly selected meta-testing assays from Group II are illustrated in Figure 4(a)-(f) and their corresponding biological properties are reported in the right table of Figure 4. Here, we observe that the six assays are mainly located in three different traces. Besides, assays 1640791, 701282, 1639959, 302952 activate the same trace 1→21. The trace groups are consistent with their biological properties reported in the table. First, assays 1640791 and 701282 are both cell-based functional assays targeting GPCRs by evaluating the antagonistic activity of compounds to their downstream cAMP pathway. 1639959 and 302952 are both cell-based functional assay of membrane transporters.
+All four assays are targeting membrane proteins (receptors or transporters). Thus, they share the ﬁrst layer but select different traces in the second layer. Second, different from the above four assays, assays 147797 and 1520 choose a completely different path since they are single protein assays that directly evaluate the effect of compounds to their protein targets. The consistency of localization results and biological properties further verify the effectiveness of FRML for distinguishing different domains via localization strategy.
+Figure 4: Left Figure (a)-(f) show the located traces from six meta-testing assays of Group II, where their corresponding biological information are reported in the right table. Darker blocks and blue links represent located functional regions and assembled links, respectively. 4.2 ADMET Property Prediction 4.2.1 Dataset Description & Evaluation Metric
+Besides the drug activity prediction, we further evaluate FRML on ADMET property prediction. The
+AMDET Prediction problem is constructed by combining 4 benchmark datasets from the Molecu-leNet [36] with biophysiology and physiology targets. The 4 datasets are MUV [29], SIDER [11],
+Tox21 and ToxCast [27]. Each property prediction is a binary classiﬁcation task. All the properties from MUV, SIDER, Tox21, and 22 properties form ToxCast are involved in the experiment, resulting in 68 tasks. We randomly sample 42 tasks for meta-training and use the remaining 26 tasks for meta-testing. Considering the data balance, for each tasks, we randomly sample only partial instances from the majority category to match the size of minority data, together with all the minority data, to 8
+Table 4: Performance of ADEMT property prediction (averaged accuracy with 95% conﬁdence interval are reported).
+Model
+FC-Individual
+FC-All
+Fine-tuning
+MAML
+ProtoNet
+MatchingNet
+ANIL
+ANIL++
+SIDER
+Tox21
+MUV
+ToxCast 52.12 ± 0.81% 51.25 ± 0.37% 52.91 ± 0.67% 62.75 ± 1.27% 67.13 ± 0.89% 68.63 ± 0.84% 55.04 ± 1.06% 70.82 ± 1.61% 67.60 ± 0.89% 68.84 ± 0.84% 55.41 ± 1.05% 71.04 ± 1.59% 67.69 ± 0.81% 69.12 ± 0.84% 56.66 ± 1.09% 72.53 ± 1.64% 68.03 ± 1.16% 69.29 ± 1.30% 55.19 ± 1.18% 72.10 ± 1.52% 66.69 ± 1.04% 68.72 ± 1.04% 55.15 ± 1.07% 71.39 ± 1.33% 67.92 ± 0.89% 69.81 ± 0.85% 55.13 ± 1.22% 72.09 ± 1.78% 68.04 ± 0.86% 68.94 ± 0.92% 56.95 ± 1.13% 72.66 ± 1.67%
+MMAML-ANIL
+HSML-ANIL
+ARML-ANIL 68.57 ± 0.82% 69.86 ± 0.90% 58.06 ± 1.21% 72.10 ± 1.55% 69.15 ± 0.87% 69.98 ± 0.88% 57.94 ± 1.18% 71.73 ± 1.46% 68.94 ± 0.84% 70.07 ± 0.91% 58.99 ± 1.16% 72.08 ± 1.56% 69.89 ± 0.87% 70.85 ± 0.85% 59.94 ± 1.00% 73.56 ± 1.58%
+FRML-ANIL (ours)
+FRML-ANIL++ (ours) 70.01 ± 0.86% 71.07 ± 0.91% 60.66 ± 1.09% 74.02 ± 1.57% form the task dataset. In this experiment, following the conventional few-shot learning protocol [7], we apply 2-way classiﬁcation with 5-shot support samples for each task. The details of the dataset descriptions are available in Appendix C.2. As for the model performance, it is measured by averaged classiﬁcation accuracy. 4.2.2 Results
+We report the performance of FRML and the baselines in Table 4. Similar ﬁndings to that of drug activity prediction experiments are observed. Therefore, we again conﬁrm the effectiveness and importance of integrating task-speciﬁc knowledge transfer in the proposed FRML. A speciﬁc ﬁnding is that: all heterogeneous meta-learning models and FRML obtain higher gain of performance on
+MUV than on the three datasets. In particular, FRML achieves signiﬁcant performance improvement on MUV dataset. This may be caused by the category difference of MUV from the other three datasets which we will detail in the next subsection. Besides, we conduct similar ablation studies to those for drug activity prediction and report the results in Table 5. Similar results are observed, again demostrating the effectiveness of FRML in differentiating different properties.
+Table 5: Ablation study of ADEMT property prediction (averaged accuracy with 95% conﬁdence interval are reported).
+Model
+SIDER
+Tox21
+MUV
+ToxCast 68.04 ± 0.86% 68.94 ± 0.92% 56.95 ± 1.13% 72.66 ± 1.67%
+ANIL++ 68.79 ± 0.84% 69.65 ± 0.86% 58.70 ± 1.18% 72.86 ± 1.68%
+Ablation I (w/o cl)
+Ablation II (w/o localization) 68.30 ± 0.83% 69.42 ± 0.92% 57.33 ± 1.04% 72.70 ± 1.55% 69.15 ± 0.80% 70.08 ± 0.87% 59.54 ± 1.00% 73.41 ± 1.68%
+Ablation III (RNN->FC)
+FRML-ANIL++ (ours) 70.01 ± 0.86% 71.07 ± 0.91% 60.66 ± 1.09% 74.02 ± 1.57% 4.2.3 Analysis of Localization Strategy
+In this part, we analyze the localization strat-egy for ADMET prediction. In Figure 5, we show the assembled traces of four meta-testing tasks sampled from different sub-datasets.
+In these ﬁgures, tasks from different sub-domains are located in different trace groups (i.e., the three datasets SIDER, Tox21, Tox-cast select 1→21→32→4 while MUV selects
+Figure 5: (a)-(d) show the assembled traces (blue links) among located regions (darker blocks) from four meta-testing tasks sampled from SIDER, Tox21,
+MUV, ToxCast, respectively. 9
+1→22→31→4, respectively). Compared to SIDER, Tox21, Toxcast, we notice that MUV selects a different trace, which matches the natural difference between MUV and the other three datasets. The category of the MUV dataset is a biophysics while that of the other three are physiology. Besides,
+MUV is designed for validation of virtual screening techniques, while the other three are designed for measuring different targets. 5

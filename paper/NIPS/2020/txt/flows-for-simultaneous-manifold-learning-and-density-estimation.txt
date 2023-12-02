@@ -1,0 +1,406 @@
+Abstract
+-ﬂows), a new class of generative models
+We introduce manifold-learning ﬂows (
+M that simultaneously learn the data manifold as well as a tractable probability density on that manifold. Combining aspects of normalizing ﬂows, GANs, autoencoders, and energy-based models, they have the potential to represent datasets with a manifold structure more faithfully and provide handles on dimensionality reduction, denoising, and out-of-distribution detection. We argue why such models should not be trained by maximum likelihood alone and present a new training algorithm that separates manifold and density updates. In a range of experiments we demonstrate how
+-ﬂows learn the data manifold and allow for better inference than standard
+ﬂows in the ambient data space.
+M 1
+
+Introduction
+Inferring a probability distribution from exam-ple data is a common problem that is increas-ingly tackled with deep generative models. Both generative adversarial networks (GANs) [1] and variational autoencoders (VAEs) [2] are based on a lower-dimensional latent space and a learn-able mapping to the data space, in essence de-scribing a lower-dimensional data manifold em-bedded in the ambient data space. While they allow for efﬁcient sampling, their probability density is intractable, limiting their usefulness for inference tasks. On the other hand, normaliz-ing ﬂows [3–6] are based on a latent space with the same dimensionality as the data space and a diffeomorphism; their tractable density permeates the full data space and is not restricted to a lower-dimensional surface.
+Figure 1: Sketch of how a standard ﬂow in the ambient data space (left) and an
+-ﬂow (right) model data on a manifold.
+M
+The ﬂow approach may be unsuited to data that do not populate the full ambient data space they natively reside in, but are restricted to a lower-dimensional manifold [7]. Normalizing ﬂows are by construction not able to represent such a structure exactly, instead they learn a smeared-out version with support off the data manifold. We illustrate this in the left panel of Fig. 1. In addition, the requirement of latent spaces with the same dimension as the data space increases the memory footprint and computational cost of the model. While ﬂows have been generalized from Euclidean spaces to Riemannian manifolds [8], this approach has so far been limited to the case where the chart for the manifold is prescribed.
+We introduce manifold-learning ﬂows (
+-ﬂows): normalizing ﬂows based on an injective, invertible map from a lower-dimensional latent space to the data space.
+-ﬂows simultaneously learn the shape of the data manifold, provide a tractable bijective chart, and learn a probability density over the
+M
+M 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+manifold, as sketched in the right panel of Fig. 1.
+We discuss how this approach marries aspects of normalizing ﬂows, GANs, autoencoders, and energy-based models [9–11]. Compared to standard ﬂow-based generative models,
+-ﬂows may more accurately approximate the true data distribution, avoiding probability mass off the data manifold.
+In addition, the model architecture naturally allows one to model a conditional density that lives on a ﬁxed manifold. This should improve data efﬁciency in such situations as it is ingrained in the architecture and does not need to be learned. The lower-dimensional latent space may also reduce the complexity of the model, and the ability to project onto the data manifold provides dimensionality reduction, denoising, and out-of-distribution detection capabilities.
+M
+In this paper we summarize the main conceptual ideas and ﬁndings. We will frequently relegate in-depth discussions, additional results, and implementation details to the supplementary material, which contains a substantially extended version of this paper. The code used in our study is available at http://github.com/johannbrehmer/manifold-flow. 2 Generative models and the data manifold
+Consider a data-generating process that draws samples x p∗(x),
+∗ is a n-dimensional Riemannian manifold embedded in the d-dimensional data space X where and n < d. We consider the two problems of estimating the density p∗(x) as well as the manifold
+∗
+∈ M
+X = Rd according to x
+M
+⊂
+∼
+∗ given some training samples xi} ∼ p∗(x).
+{
+M
+We will ﬁrst review how existing classes of generative models address these problems, before
+-ﬂows). For simplicity, we treat the manifold introducing the new manifold-learning ﬂows (
+M as topologically equivalent to Rn and assume that its dimensionality n is known. To facilitate a straightforward comparison, we will describe all generative models in terms of two vectors of latent
+V , where U = Rn is the latent space that maps to the learned manifold variables u
+, i. e. the coordinates of the manifold. V = Rd n parameterizes any remaining latent variables,
+−
+M representing the directions “off the manifold”. We summarize the approaches in Fig. 2 and Tbl. 1, and discuss many algorithms in more detail in Sec. 2 of the supplementary material.
+U and v
+∈
+∈
+V
+×
+Ambient ﬂow (AF). A standard Euclidean nor-malizing ﬂow [6] in the ambient data space is a diffeomorphism f : U
+X to-gether with a tractable base density puv(u, v).
+The density in X is then given by px(x) = 1(x)) (cid:12) 1, where Jf is the puv(f −
+Jacobian of f , a d d matrix. In the generative mode, ﬂows sample u and v from their base densities and apply the transformation x = f (u, v), yielding px(x). There is no difference between u and v, x and the model has no notion of a data manifold. 1(x))(cid:12) (cid:12)− (cid:12)det Jf (f − (cid:55)→
+∼
+×
+⊂
+: U
+∗ (cid:55)→ M
+Flow on a prescribed manifold (FOM). When a chart g∗
+X for the data manifold is known a priori, one can construct a
+ﬂow on this manifold [8, 12–14]. The density is only deﬁned over
+∗ (x) = 1(x)) (cid:12)
+∗ and given by p 1 1(x))](cid:12) 1(x))Jg(g∗ − 2 , pu(g∗ − (cid:12)− d matrix. where Jg is the Jacobian of g∗, an n
+×
+The density pu(u) is modeled with a standard normalizing ﬂow in n dimensions, i. e. with a learnable diffeomorphism h that maps to another set of latent variables ˜u and a corresponding base density p˜u(˜u).
+M (cid:12)det[J T g (g∗ −
+M
+Generative adversarial networks (GANs) map an n-dimensional latent space to the data space 2
+Figure 2: Schematic relation between data x and latent variables u, v, ˜u in different models. Red arrows show learnable transformations, black ar-rows prescribed ones. Solid lines denote bijections, dashed lines injections, dotted lines unrestricted transformations.
+(cid:55)→ M ⊂
+X. g is neither restricted to be invertible nor in-through a learnable function g : U jective, and there can be multiple u that correspond to the same data point x. Strictly speaking, g is not a chart and the image of this transformation not necessarily a Riemannian manifold, though this distinction is not our focus and we will simply call this subset a manifold. While the lack of restrictions on g increases the expressivity of the neural network, it also makes the model density intractable. Variational autoencoders (VAEs) similarly link a lower-dimensional latent space to the data space. They can also often be associated with a learned data manifold, for instance via the mean of a Gaussian decoder; subtleties in this relation are discussed in the supplementary material.
+× (cid:88)
+M (cid:88) (cid:88)
+Model
+AF
+FOM
+GAN
+VAE
+PIE
+PAE
+Manifold Chart Tractable density Restr. to no manifold prescribed learned learned learned learned learned learned
+Pseudo-invertible encoder (PIE).
+One way to give ambient ﬂows a no-tion of a (learnable) data manifold is to treat some of the latent variables differently from others and rely on the training to align one class of la-tent variables with the manifold co-ordinates. The PIE model [15] splits the latent variables of an ambient ﬂow into two vectors u and v with differ-ent base densities. The distribution of u, designated to represent the co-ordinates on the manifold, is modeled with an n-dimensional Euclidean ﬂow, i. e. a transformation h that maps it to another latent variable ˜u associated with some base density. For v, which should learn the off-the-manifold directions in latent space, it uses a base density pv(v) that sharply peaks around 0, for instance a Gaussian with a small variance ε2
+Table 1: Comparison of generative models. The last column classi-ﬁes models by whether their density is restricted to the manifold; parantheses (
+) indicate an alternative sampling procedure that can generate data restricted to the manifold, but which does not correspond to the model density.
+× (cid:88) (cid:88)
+) (
+×
+) (
+× (cid:88) (cid:88) (cid:88)
+× only ELBO (cid:88)
+-ﬂow e-ﬂow
+Var[u].
+M
+M
+× (cid:88) (cid:88)
+× (cid:88) (cid:88)
+×
+× (cid:88)
+×
+For sufﬁciently ﬂexible transformations, this architecture has the same expressivity as an ambient
+ﬂow, independently of the orientation of the latent space. In particular, a single scaling layer can learn to absorb the difference in base densities, allowing the ﬂow to squeeze any region of data space into the narrow base density pv(v). From that perspective it does not seem like PIE is actually a different model than AF. Yet somehow in practice learning dynamics and the inductive bias of the model seem to couple in a way that favor an alignment of the level set v = 0 with the data manifold. (cid:28)
+The model density px(x) has the same form as for AFs and generally has support over the full data space X, extending beyond the manifold. While one could sample from this density, the authors of Ref. [15] instead deﬁne a generative mode that samples data only from the learned manifold by pu(u) and applying x = f (u, 0), i. e. ﬁxing the off-the-manifold latents to v = 0. sampling u
+Note, however, that the density deﬁned by this sampling procedure is not the same as the tractable density px(x) (and not even proportional to px(x) for x
+). We discuss this inconsistency in depth in Sec. 2.C of the supplementary material.
+∈ M
+∼
+In a conditional version of the original PIE model, both the shape of the manifold as well as the density on it generally depend on the variables θ being conditioned on. We introduce a new conditional PIE version in which g (and thus the manifold) is independent of θ, while h(˜u
+θ) and therefore the density
+| are conditional on θ. Training such a model by maximum likelihood leads to a stronger incentive to align the variables u with the manifold coordinates, since in any other alignment the model cannot model the dependence on θ.
+-ﬂow). As the main new model presented in this paper,
+Manifold-learning ﬂow (
+-ﬂows com-bine the learnable manifold aspect of GANs with the tractable density of FOMs without introducing inconsistencies between generative mode and the tractable likelihood. We begin by modeling the relation between the latent space and data space with a diffeomorphism f : U
+X, just as for an ambient ﬂow or PIE. We deﬁne the model manifold
+× through the level set
+M
+M (cid:55)→
+V
+M g : U (cid:55)→ M ⊂
+X with u
+→ g(u) = f (u, 0) . (1)
+In practice, we implement this transformation as a zero padding followed by a series of invertible
+Pad, where Pad denotes padding a n-dimensional vector with transformations, g = fk ◦ · · · ◦ d
+− n zeros. f1 ◦ 3
+Just as for FOM and PIE, we model the base density pu(u) with an n-dimensional ﬂow h, which maps u to another latent variable ˜u with an associated tractable base density p˜u(˜u). The induced probability density on the manifold is then given by (x) = p˜u(h− 1(g− 1(x))) p
+M (cid:12) (cid:12)det Jh(h− 1(g− (cid:12) 1(x))) (cid:12)− 1 (cid:12) (cid:12)det[J T g (g− 1(x))Jg(g− (cid:12) 1(x))] (cid:12)− 1 2 . (2)
+This is the same as for FOM models, except with a learnable transformation g rather than a prescribed, closed-form chart.
+Sampling from an p˜u(˜u) and pushes the latent variable forward to the data space as u = h(˜u) followed by x = g(u) = f (u, 0), leading to data points on the manifold that consistently follow x
+-ﬂow is straightforward: one draws ˜u (x).
+M
+∼ p
+∼
+M
+∈
+As a ﬁnal ingredient to the
+-ﬂow approach,
+M we add a prescription for evaluating arbitrary
+X, which may be off the manifold. points x g maps from a low-dimensional latent space to the data space and is therefore a decoder. We 1 followed deﬁne a matching encoder g− 1 : X by a projection to the u component: g− (cid:55)→ 1(x)) with
+U , with x
+Proj(u, v) = u. This extends the inverse of g (which is so far only deﬁned for x
+) to the whole data space X. Similar to an autoencoder, combining g and g−
+− which is zero if and only if x exact inverses of each other as long as points on the manifold are studied. 1 allows us to calculate a reconstruction error
+Figure 3: Sketch of how an or off the learned manifold. 1(x) = Proj(f − 1 as f −
+∈ M
+∈ M g−
+→
+-ﬂow evaluates data on
+M 1(x))
+, (cid:107)
+. Unlike for standard autoencoders, the encoder and decoder are g(g− x (cid:107) x (cid:107) x(cid:48)
+−
+= (cid:107) x
+X, an
+For an arbitrary x
+-ﬂow thus lets us compute three quantities (see Fig. 3): the projection
+M
+∈ 1(x)), which may be used as a denoised version of the input; the onto the manifold x(cid:48) = g(g−
+, which will be important to learn the manifold, but may also be useful reconstruction error x(cid:48) for anomaly detection or out-of-distribution detection; and the likelihood on the manifold after the
+-ﬂows separate the distance from the data manifold and the projection, p density on the manifold—two concepts that easily get conﬂated in an ambient ﬂow.
+-ﬂows thus embrace ideas of energy-based models [9–11] for dealing with off-the-manifold issues, but still have a tractable, exact likelihood on the learned data manifold.
+− (x(cid:48)). In this way,
+M
+M
+M (cid:107) (cid:107)
+M
+-ﬂow model where instead of using the inverse f −
+Manifold-learning ﬂows with separate encoder (
+Me-ﬂow). Finally, we introduce a variant of 1 followed by a projection as an encoder, we the
+U . This encoder is not restricted to be invertible encode the data with a separate function e : X (cid:55)→ or to have a tractable Jacobian, potentially increasing the expressiveness of the network. Just as in the
+Me-ﬂow model returns a projected point onto
+-ﬂow approach, for a given data point x an the learned manifold, a reconstruction error, and the likelihood on the manifold evaluated after the projection. The added expressivity of this encoder comes at the price of potential inconsistencies between encoder and decoder, which the training procedure will have to try to penalize, exactly as for standard autoencoders.
+M
+Probabilistic autoencoder (PAE). How important is the invertibility of the transformation f (and
+Me-ﬂow model and replace g with
+-ﬂow and
+Me-ﬂow models? If we take the therefore g) in the a decoder g : U
+X which is not required to be invertible, we arrive at an autoencoder model in which the latent space is modeled with a ﬂow. This setup has recently been called probabilistic autoencoder (PAE) [16]. While relaxing the requirement of invertibility may make this generative model more expressive, it also loses the tractable density of the model.
+M (cid:55)→
+Manifolds with unknown dimensionality or nontrivial topology.
+If the manifold dimension n is not known a priori, it can be determined through cross-validation based on the reconstruction error or the performance on downstream tasks. Alternatively, for the PIE algorithm one could use trainable values of the base density variance ε along each latent direction, allowing the model to learn the manifold dimensionality directly from the training data. If the manifold consists of multiple disjoint pieces, potentially with different dimensionality, a mixture model with multiple charts gi may be applicable [12]. 4
+3 Efﬁcient training and evaluation
+Maximum likelihood is not enough. Since the
+-ﬂow density is tractable, maximum likelihood is an obvious candidate for a training objective. However, the situation is more subtle as the
+-ﬂow model describes the density after projecting onto the learned manifold. The deﬁnition of the data variable in the likelihood hence depends on the weights φf of the manifold-deﬁning transformation f , and a comparison of naive likelihood values between different conﬁgurations of φf is meaningless.
+φf , φh), where φh are the weights deﬁning h, it is
+Instead of thinking of a likelihood function p(x
+φh) parameterized by the different φf . instructive to think of a family of likelihood functions pφf (x
+|
+M
+M
+|
+M
+-ﬂows by simply maximizing the naive likelihood p(x
+φf , φh) therefore does not incen-Training tivize the network to learn the correct manifold. As an extreme example, consider a model manifold that is perpendicular to the true data manifold. Since this conﬁguration allows the
+-ﬂow to project all points to a small region of high density on the model manifold, this pathological conﬁguration may lead to a high naive likelihood value. We demonstrate this issue with a concrete example in
+Sec. 3.A of the supplementary material.
+M
+|
+A second challenge is the computational efﬁciency of evaluating the
+-ﬂow density in Eq. (2).
+While this quantity is in principle tractable, it cannot be computed as efﬁciently as the likelihood of an ambient ﬂow. The underlying reason is that since the Jacobian Jg is not square, it is not obvious how the determinant det J T
+-ﬂow out of the typical elements of ambient ﬂows like coupling layers. Evaluating the
+-ﬂow density then requires the computation of all entries of the Jacobians of the individual transformation. While this cost can be reasonable for the evaluation of a limited number of test samples, it can be prohibitively expensive during training. Since the computational cost grows with increasing data dimensionality d, training by maximizing log p g Jg can be decomposed further, at least when we compose an does not scale to high-dimensional problems.
+M
+M
+M
+M
+Separate manifold and density training (M/D). We can solve both problems at once by separating the training into two phases. In the manifold phase, we update only the parameters of f , which and the chart g. Similarly to autoencoders, we through a level set also deﬁne the manifold
+M minimize the reconstruction error from the projection onto the manifold,
+. For the x (cid:107)
+Me-ﬂow model, the parameters of the encoder e are also updated during this phase. In the density phase, we update only the parameters of h by maximum likelihood. h only affects the density pu, we are thus keeping the manifold ﬁxed during this phase. 1(x)) (cid:107) g(g−
+−
+Such a training procedure is not prone to the gradient ﬂow aligning the manifold with pathological conﬁgurations, as we demonstrate in Sec. 3.A of the supplementary material. Moreover, training only h by maximum likelihood does not require computing the expensive terms in the model likelihood.
+The loss in the density phase is given by
+L[h] = 1 n
+− (cid:88) (cid:16) x log p˜u(h− 1(u))
+− log det Jh(h− 1(u)) 1 2
+− log det[J T g (u)Jg(u)] (cid:17) (3) 1(x). Only the last term is expensive to evaluate, but it does not depend on the with u = g− parameters of h and does not contribute to the gradient updates in this phase! We can therefore train the parameters of h by minimizing only the ﬁrst two terms, which can be evaluated efﬁciently.
+The two phases can be scheduled sequentially or in an alternating schedule, see Sec. 3.B of the supplementary material.
+Likelihood evaluation. For high-dimensional data, evaluating the likelihood in Eq. (2) can become so expensive that even the likelihood evaluations at test time must be limited. In Sec. 3.C of the supplementary material we discuss several approximate inference techniques that may reduce this computational cost. We also argue that this issue can be solved efﬁciently and exactly in the common case where the density (but not the manifold) is conditional on some model parameters θ and the downstream goal is inferring these model parameters θ. In this case, the
+-ﬂow setup enables the fast and exact computation of likelihood ratios and MCMC acceptance probabilities.
+M 4 Experiments
+A common metric for ﬂow-based models is the likelihood evaluated on a test set, but such a com--ﬂow variants evaluate the likelihood after parison is not meaningful in our context. Since the
+M 5
+Figure 4: Ground truth and
+-ﬂow model for the mixture model on a polynomial surface.
+M projecting to a learned manifold, the data variable in the likelihood is different for every model and the likelihoods of different models may not even have the same units. Instead, we analyze the performance through the generative mode, the quality of the manifold, or the performance on downstream inference tasks, depending on the experiment. In Sec. 4 of the supplementary material we describe our setup in detail and provide additional experiments, more results, and exhaustive discussions.
+M
+-ﬂow and
+Architectures. We compare
+Me-ﬂow models to AF, PIE, and PAE baselines. All models are based on rational-quadratic neural spline ﬂows [17]. For tabular datasets, we construct transformations f and h by alternating coupling layers with either random permutations or invertible linear transformations, using between 20 and 35 coupling layers depending on the dataset. For image data, f is based on a multi-scale architecture [5] with between 20 and 28 coupling layers across four 1 convolutions, closely following Refs. [17, 18]. In the levels interspersed with actnorm layers and 1
+Me-ﬂow, and PIE models we apply two additional invertible linear layers to a subset of the
+M channels before projecting to the manifold coordinates u; this gives the models the freedom to align the learned manifold with features across different scales. For the transformation h we use the same setup as for tabular data. While the inherently different architectures between the manifold-aware models and the manifold-agnostic AF make it hard to match the conﬁgurations exactly, we try to ensure fairness by using the same overall number of coupling layers and matching as many of the other hyperparameters as possible.
+-ﬂow,
+× 0.1
+) (cid:80)
+Mixture model on a polynomial surface. As a ﬁrst synthetic example we consider a two-dimensional manifold embedded in R3 deﬁned by x = R (z0, z1, f (z))T . Here z = (z0, z1)T is a 0zj 1, vector of two latent variables that parameterize the manifold, f (z) = exp( and the rotation matrix R as well as the coefﬁcients aij are given in the supplementary material. We generate training and test data on this manifold from a mixture model of two Gaussians in the latent space, which is conditional on a model parameter θ
+We train models on 105 training samples and evaluate them on four metric in Tbl. 2. Samples generated from the ﬂows are judged based on the mean distance to the true data manifold. The quality of the learned manifold in the PIE,
+Me-ﬂow models is estimated with the reconstruction error when projecting test samples to the manifold. As an inference task we compute the posterior over θ given some observed data, using MCMC samplers based on the different model likelihoods; we report the maximum mean discrepancies (MMD) between the true posterior and the approximate posteriors [19]. Finally, we evaluate out-of-distribution (OOD) detection by comparing the distribution of log likelihood (AF, PIE) or reconstruction error (
+Me-ﬂow, PAE) between a test sample and an OOD sample. i,j aijzi
+-ﬂow, and
+-ﬂow, 1, 1].
+[
+− z (cid:107)
+M
+M
+−
+∈ (cid:107)
+In all metrics except OOD detection, manifold-learning ﬂows provide the best results.
+-ﬂow and
+M
+Model
+Manifold distance Reconstruction error
+Posterior MMD OOD AUC
+AF
+PIE (original)
+PIE (uncond. manifold)
+PAE
+-ﬂow (alternating M/D)
+-ﬂow (sequential M/D) e-ﬂow (alternating M/D) e-ﬂow (sequential M/D)
+M
+M
+M
+M 0.005 0.035 0.006 0.002 0.002 0.009 0.003 0.002 – 1.278 1.253 0.002 0.003 0.013 0.003 0.002 0.071 0.131 0.075 – 0.020 0.017 0.030 0.007 0.990 0.933 0.972 0.990 0.986 0.961 0.985 0.987
+Table 2: Results for the mixture model on a polynomial surface, showing the median out of 5 runs. The best results, generally consistent with each other within the variance observed in the ﬁve runs, are shown in bold. 6
+Model (algorithm)
+AF
+PIE (original)
+PIE (unconditional manifold)
+PAE
+-ﬂow e-ﬂow
+M
+M
+AF (SCANDAL)
+PIE (original, SCANDAL)
+PIE (uncond. manifold, SCANDAL)
+PAE (SCANDAL)
+-ﬂow (SCANDAL) e-ﬂow (SCANDAL)
+M
+M
+Likelihood ratio estimator (ALICES)
+Closure
+Reco. error
+Log posterior 0.0019 0.0023 0.0022 0.0073 0.0045 0.0046 0.0565 0.1293 0.1019 0.0323 0.0371 0.0291
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+± 0.0001 0.0001 0.0001 0.0001 0.0004 0.0002 0.0059 0.0218 0.0104 0.0010 0.0030 0.0010 – 2.054 1.681 0.052 0.012 0.029 3.090 1.751 0.053 0.011 0.030
+±
+±
+±
+±
+±
+±
+±
+±
+±
+± – 0.076 0.136 0.001 0.001 0.001 – 0.052 0.064 0.001 0.001 0.002 – 3.94 4.68 1.82
+−
+−
+−
+−
+−
+− 1.71 1.44 0.40 0.03 0.23 0.11 0.14 0.05 0.87 1.56 0.18 – 0.30 0.34 0.09 0.17 0.05 – 0.04 0.09 0.05
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+Table 3: Results for the particle physics dataset, showing the mean between at least 5 runs after removing the best and worst run.
+Me-ﬂow samples are closest to the true data manifold, most faithfully reconstruct test samples after projecting them to the learned manifold, and clearly outperform the AF and PIE baselines when it comes to inference on θ. They are on par with PAE, which does not have a tractable density, showing that the restriction to an invertible decoder does not pose a signiﬁcant restriction to the expressiveness of the model. We show the ground truth data manifold and one
+-ﬂow model in Fig. 4.
+M
+−
+∈ dt = x0(ρ x0), dx1 dt = x0x1 −
+Lorenz attractor. The Lorenz sys-tem is a three-dimensional, non-linear,
+R3 deterministic system in which x evolves with time under the equations dx0 dt = σ(x1 −
+− x1, and dx2
+βx2. For x2) certain parameter choices and initial conditions it has chaotic solutions that tend to the Lorenz attractor, a strange attractor with Hausdorff dimension of approximately 2.06 [20]. We train an
+-ﬂow model to learn the invariant
+M probability density of the Lorenz at-tractor on a two-dimensional manifold. The learned manifold and density, shown in Fig. 5, are
+-ﬂow is even able to describe the nontrivial disconnected branches of the attractor. plausible; the
+Figure 5: Manifold and invariant density of the Lorenz attractor learned by an
+-ﬂow model from two different perspectives.
+M
+M
+Particle physics. Next, we consider a real-world problem from particle physics. Proton-proton
+R40. The likelihood collisions at the Large Hadron Collider experiments lead to observations x
+θ) is conditional on 3 constants of nature θ and is only known implicitly through a simulator, p∗(x
+| though from the laws of particle physics we know that the data must be restricted to some 14-dimensional manifold embedded in the 40-dimensional data space. Given an observation
+, the xobs}
+{ goal is inference on θ, a setting known as simulation-based (or likelihood-free) inference [21].
+We train ﬂow models on 106 training samples generated from the simulator to learn the likelihood function. In addition to the usual training schemes we consider models trained with the SCANDAL loss [22], in which additional information from the simulator is leveraged to make the training more sample efﬁcient. As an additional baseline we consider an estimator of the likelihood ratio function trained with the ALICES method [23]; while likelihood ratio estimators are known to provide a strong baseline for inference, they lose the ability to generate data [21, 24].
+∈
+Samples generated from the ﬂows are ﬁrst evaluated on a domain-speciﬁc closure test, with a closure of 0 being best and a closure of 1 corresponding to the product of the marginal densities (or a random reshufﬂing of all features across samples). The learned manifolds are again evaluated on the reconstruction error when projecting test samples. Finally, we use an MCMC sampler based on the different model likelihoods and kernel density estimation to compute the posterior for different synthetic observations. Since the true posterior is intractable, we assess the inference quality through the log posterior evaluated at the true parameter point used to generate the observed samples. 7
+Figure 6: Left: 2-D manifold learned by an manifold dataset. Right: 64-D manifold test samples, their projection to the learned manifold, and residuals.
+-ﬂow. Middle: uncurated ﬂow samples for the 64-D image
+M
+The results in Tbl. 3 show that the AF models produce the most realistic samples according to the closure test, but do not result in reliable inference results: pure likelihood-based training seems to incentivize learning the overall data distribution more than ﬁguring out the subtle effects of the parameters of interest. Our improved PIE version with an unconditional manifold and the
+Me-ﬂow models deﬁne
+M higher-quality manifolds with lower projection errors than PIE and PAE. SCANDAL training reduces the sample quality as measured by the closure test, but substantially improves the quality of inference, in some cases even outperforming the baseline likelihood ratio estimator.
+Me-ﬂow models perform better on the inference task.
+-ﬂow /
+-ﬂow /
+M n = 2
+Model n = 64
+CelebA
+AF
+PIE
+FID scores
+Log posterior
+Images. Finally, we study three image datasets. The
+ﬁrst two consist of synthetic images that populate an n-dimensional manifold. We generate these with a Style-GAN2 [25] model trained on the FFHQ dataset [26], sam-pling n of the GAN latent variables while keeping all others ﬁxed. We consider a dataset with n = 2 and 104 training samples as well as one with n = 64 104 training samples; for the latter the distribution of images depends on a model parameter θ. and 2
+In addition, we use the real-world CelebA-HQ dataset [26]. Here the existence of a data manifold and its dimension are not known, for the
+Me-ﬂow models we use n = 512. All images are downsampled to a resolution of 64
+Table 4: FID scores and inference metrics for the n-dimensional StyleGAN image manifolds and CelebA. We show the mean out of at least 3 runs. 58.3 139.5 43.9 43.5 33.6 75.7 37.4 35.8 24.0 32.2 20.8 23.7 0.17 6.40 2.67 1.81 1.18 1.54 0.27 0.70 1.5 5.0 0.2 0.2 0.2 5.1 0.2 0.4 0.0 0.8 0.5 0.2
+-ﬂow e-ﬂow
+-ﬂow and
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+±
+± n = 64
+M 64.
+M
+M
+−
+·
+In Tbl. 4 we evaluate the ﬂow models based on the Fréchet Inception Distance (FID score) [27, 28].
+For n = 64, we also evaluate the quality of inference on θ given an observed dataset, reporting the log posterior at the true parameter point θ∗. Both
+Me-ﬂow models perform better than the AF and PIE baselines on the StyleGAN image manifold datasets, though slightly worse than the
+AF models on CelebA. This may point to a suboptimal choice of manifold dimension n; in Sec. 4.F
+-ﬂow performance on n. In all of the supplementary material we study the dependence of the experiments,
+Me-ﬂows ﬁnd higher-quality manifolds than PIE models. In Fig. 6 we show an image manifold learned by an
+-ﬂow model, samples generated from different ﬂows, and projections of test samples onto learned image manifolds.
+-ﬂows and
+-ﬂow and
+M
+M
+M
+M
+× 5

@@ -1,0 +1,36 @@
+Abstract
+Non-maximum Suppression (NMS) is an essential post-processing step in modern convolutional neural networks for object detection. Unlike convolutions which are inher-ently parallel, the de-facto standard for NMS, namely Gree-dyNMS, cannot be easily parallelized and thus could be the performance bottleneck in convolutional object detec-tion pipelines. MaxpoolNMS is introduced as a paralleliz-able alternative to GreedyNMS, which in turn enables faster speed than GreedyNMS at comparable accuracy. However,
+MaxpoolNMS is only capable of replacing the GreedyNMS at the ﬁrst stage of two-stage detectors like Faster-RCNN.
+There is a signiﬁcant drop in accuracy when applying Max-poolNMS at the ﬁnal detection stage, due to the fact that
+MaxpoolNMS fails to approximate GreedyNMS precisely in
+In this paper, we pro-terms of bounding box selection. pose a general, parallelizable and conﬁgurable approach
+PSRR-MaxpoolNMS, to completely replace GreedyNMS at all stages in all detectors. By introducing a simple Re-lationship Recovery module and a Pyramid Shifted Max-poolNMS module, our PSRR-MaxpoolNMS is able to ap-proximate GreedyNMS more precisely than MaxpoolNMS.
+Comprehensive experiments show that our approach out-performs MaxpoolNMS by a large margin, and it is proven faster than GreedyNMS with comparable accuracy. For the
+ﬁrst time, PSRR-MaxpoolNMS provides a fully paralleliz-able solution for customized hardware design, which can be reused for accelerating NMS everywhere.
+Figure 1. (Top) Visualized comparison of MaxpoolNMS [2], our method and GreedyNMS at the ﬁnal detection stage of Faster-RCNN. Compared to MaxpoolNMS, our method behaves more like GreedyNMS. (Bottom) Pipeline of PSRR-MaxpoolNMS. Re-lationship Recovery to build up the conﬁdence score maps, fol-lowed by Pyramid Shifted MaxpoolNMS to eliminate overlapped boxes and only keep the boxes with peak scores. Each cell on the map encodes the conﬁdence score, scale/ratio (C) and spatial location (X, Y ) of bounding boxes. 1.
+
+Introduction
+Object detection is one of the key tasks in computer vi-sion, with the objective of localizing and classifying ob-jects in a scene. During the past few years, deep convo-lutional neural networks has emerged as the champion of
+*Corresponding author: J. Lin (lin-j@i2r.a-star.edu.sg)
+This research is supported by the Agency for Science, Technology and Research (A*STAR) under its AME Programmatic Funds (Project
+No.A1892b0026). object detection [9, 21, 19]. Convolutional object detec-tors are broadly grouped into either one-stage detectors like
+SSD [19] and YOLO [20] or two-stage detectors like Faster
+RCNN [21] and R-FCN [3], in which convolutions of-ten account for the majority of computing operations. On the other side, signiﬁcant progress has been made towards better-performing dedicated hardware for accelerating the convolution operations by exploiting their inherent paral-lelism, such as GPU and Google TPU [15]. Therefore, the execution time spent on convolution operations is decreas-15840
+ing rapidly, e.g., at milliseconds.
+Non-maximum Suppression (NMS), as a must-have post-processing technique in all convolutional object de-tectors, is likely to become the performance bottleneck in object detection pipelines [2]. The de-facto standard for
+NMS, namely GreedyNMS, is composed of a sorting opera-tion over conﬁdence scores for tens of thousands of bound-ing boxes, followed by nested for loops to greedily select the boxes with high scores and remove the boxes signiﬁ-cantly overlapped with the selected ones. Unlike convolu-tions which are inherently parallel, GreedyNMS cannot be easily parallelized due to the nested for loops. Thus, Greed-NMS would gradually dominate the execution time of con-volutional object detectors [2], as convolutions run faster thanks to the increasing parallelism on dedicated hardware (e.g., from P100 to V100 GPU).
+MaxpoolNMS [2], as a parallelizable alternative to Gree-dyNMS, is introduced to largely accelerate GreedyNMS without incurring loss in detection accuracy. MaxpoolNMS is inspired by the observation that bounding boxes with high conﬁdence scores correlate to peak values on the so-called conﬁdence score maps in which the spatial relationship be-tween anchor boxes is preserved. Therefore, NMS can be designed as simple max pooling on the score maps which encode conﬁdence scores, scales, ratios, and spatial loca-tions of anchor boxes (see Fig 1 Bottom). After max pool-ing, only boxes with peak scores are kept and the others are suppressed. In terms of execution time, MaxpoolNMS runs much faster than GreedyNMS, mainly attributed to the fact that max pooling operations are inherently parallel.
+However, MaxpoolNMS is dedicated only to replacing the GreedyNMS at the ﬁrst stage of two-stage detectors, e.g., the GreedyNMS after the region proposal network in
+Faster-RCNN. There is a signiﬁcant drop in detection ac-curacy when directly applying MaxpoolNMS at the second stage of two-stage detectors, e.g., the GreedyNMS after the detection network in Faster-RCNN (see visualized example in Fig. 1 Top and quantitative results in Table 1). This low-ers the value of MaxpoolNMS since a customized hardware for MaxpoolNMS cannot be reused to replace GreedyNMS at all stages in all detectors.
+In this paper, we propose a general approach, namely
+PSRR-MaxpoolNMS, to completely replace GreedyNMS at all stages in all detectors. The key is to approximate Gree-dyNMS as precisely as possible, which can be measured by the overlap ratio of the selected bounding boxes between
+GreedyNMS and the approximation method. As evidenced by the low overlap ratio (see Table 1), MaxpoolNMS fails to approximate GreedyNMS, mainly due to (A) the score map mismatch problem on conﬁdence score maps (see Fig. 2) and (B) the difﬁculty of maximizing the score map spar-sity (see Fig. 4 and Fig. 5) with a single-scan max pool-ing on the conﬁdence score maps. PSRR-MaxpoolNMS introduces a Relationship Recovery module and a Pyramid
+Shifted MaxpoolNMS module to solve problem (A) and (B) respectively. As a result, our PSRR-MaxpoolNMS is able to approximate GreedyNMS more precisely than Maxpool-NMS (see the overlap ratio in Table 1).
+We summarize our contributions as follows:
+• A general approach PSRR-MaxpoolNMS to accelerate
+NMS at all stages in all convolutional object detectors.
+• A Relationship Recovery module to correct the score map mismatch when projecting bounding boxes to conﬁdence score maps, enabling more accurate scale, aspect ratio and spatial relationships between boxes.
+• A Pyramid Shifted MaxpoolNMS on conﬁdence score maps to signiﬁcantly increase the sparsity of the score maps, and thus eliminate more overlapped boxes.
+• In PSRR-MaxpoolNMS, the Relationship Recovery and the Pyramid Shifted MaxpoolNMS are simple and parallelizable operations. Therefore, for the ﬁrst time,
+PSRR-MaxpoolNMS provides a fully parallelizable solution for customized hardware design, which can be reused for accelerating NMS everywhere.
+• Finally, our PSRR-MaxpoolNMS outperforms Max-poolNMS by a large margin. Moreover, it is proven faster than GreedyNMS with comparable accuracy. 2.

@@ -1,0 +1,464 @@
+Abstract
+We study the problem of system identiﬁcation and adaptive control in partially ob-servable linear dynamical systems. Adaptive and closed-loop system identiﬁcation is a challenging problem due to correlations introduced in data collection. In this paper, we present the ﬁrst model estimation method with ﬁnite-time guarantees in both open and closed-loop system identiﬁcation. Deploying this estimation method, we propose adaptive control online learning (ADAPTON), an efﬁcient reinforcement learning algorithm that adaptively learns the system dynamics and continuously updates its controller through online learning steps. ADAPTON estimates the model dynamics by occasionally solving a linear regression problem through interac-tions with the environment. Using policy re-parameterization and the estimated model, ADAPTON constructs counterfactual loss functions to be used for updating the controller through online gradient descent. Over time, ADAPTON improves its model estimates and obtains more accurate gradient updates to improve the controller. We show that ADAPTON achieves a regret upper bound of polylog (T ), after T time steps of agent-environment interaction. To the best of our knowledge,
+ADAPTON is the ﬁrst algorithm that achieves polylog (T ) regret in adaptive control of unknown partially observable linear dynamical systems which includes linear quadratic Gaussian (LQG) control. 1
+
+Introduction
+Reinforcement learning (RL) in unknown partially observable linear dynamical systems with the goal of minimizing a cumulative cost is one of the central problems in adaptive control [1]. In this setting, a desirable RL agent needs to efﬁciently explore the environment to learn the system dynamics, and exploit the gathered experiences to minimize overall cost [2]. However, since the underlying states of the systems are not fully observable, learning the system dynamics with ﬁnite time guarantees brings substantial challenges, making it a long-lasting problem in adaptive control. In particular, when the latent states of a system are not fully observable, future observations are correlated with the past inputs and observations through the latent states. These correlations are even magniﬁed when closed-loop controllers, those that naturally use past experiences to come up with control inputs, are deployed. Therefore, more sophisticated estimation methods that consider these complicated and unknown correlations are required for learning the dynamics.
+In recent years, a series of works have studied this learning problem and presented a range of novel methods with ﬁnite-sample learning guarantees. These studies propose to employ i.i.d. Gaussian excitation as the control input, collect system outputs and estimate the model parameters using the data 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+collected. The use of i.i.d. Gaussian noise as the open-loop control input (not using past experiences) mitigates the correlation in the inputs and the output observations. For stable systems, these methods provide efﬁcient ways to learn the model dynamics with conﬁdence bounds of ˜ (1/√T ), after T
+O times step of agent-environment interaction [3–6]. Here ˜
+) denotes the order up to logarithmic
+O factors. Deploying i.i.d. Gaussian noise for a long period of time to estimate the model parameters has been the common practice in adaptive control since incorporating closed-loop controller introduces signiﬁcant challenges to learn the model dynamics [7]. (
+·
+These estimation techniques later have been deployed to propose explore-then-commit based RL algorithms to minimize regret, i.e., how much more cost an agent suffers compared to the cost of a baseline policy [8]. These algorithms deploy i.i.d. Gaussian noise as the control input to learn the model parameters in the explore phase and then exploit these estimates during the commit phase to minimize regret. Among these works, Lale et al. [9] and Simchowitz et al. [6] respectively propose to use optimism [10] and online convex optimization [11] during the commit phase. These works attain regret of ˜ (T 2/3) in the case of convex cost functions. Moreover, in the case of strongly convex cost
+O functions, Mania et al. [12], Simchowitz et al. [6] show that exploiting the strong convexity allows to guarantee regret of ˜ (√T ). These methods heavily rely on the lack of correlation achieved by
+O using i.i.d. Gaussian noise as the open-loop control input to estimate the model. Therefore, they do not generalize to the adaptive settings, where the past observations are used to continuously improve both model estimates and the controllers. These challenges pose the following two open problems:
+“Can we estimate the model parameters in closed-loop setting with ﬁnite-time guarantees?”
+“Can we utilize such an estimation method, and propose an RL algorithm to signiﬁcantly improve regret in partially observable linear dynamical systems?”
+In this paper, we give afﬁrmative answers to both of these questions:
+Novel closed-loop estimation method: We introduce the ﬁrst system identiﬁcation method that
+• allows to estimate the model parameters with ﬁnite-time guarantees in both open and closed-loop setting. We exploit the classical predictive form representation of the system that goes back to
+Kalman [13] and reformulate each output as a linear function of previous control inputs and outputs with an additive i.i.d. Gaussian noise. This reformulation allows to address the limitations of the prior open-loop estimation methods in handling the correlations in inputs and outputs. We state a novel least squares problem to recover the model parameters. We show that when the controllers persistently excite the system, the parameter estimation error is ˜ (1/√T ) after T samples. Our
+O method allows updating the model estimates while controlling the system with an adaptive controller.
+Novel RL algorithm for partially observable linear dynamical systems: Leveraging our novel
+• estimation method, we propose adaptive control online learning algorithm (ADAPTON) that adaptively learns the model dynamics and efﬁciently uses the model estimates to continuously optimize the controller and reduce the cumulative cost. ADAPTON operates in growing size epochs and in the beginning of each epoch estimates the model parameters using our novel model estimation method.
+During each epoch, following the online learning procedure introduced by Simchowitz et al. [6],
+ADAPTON utilizes a convex policy reparameterization of linear controllers and the estimated model dynamics to construct counterfactual loss functions. ADAPTON then deploys online gradient descent on these loss functions to gradually optimize the controller. We show that as the model estimates improve, the gradient updates become more accurate, resulting in improved controllers.
+We show that ADAPTON attains a regret upper bound of polylog(T ) after T time steps of agent-environment interaction, when the cost functions are strongly convex. To the best of our knowledge, this is the ﬁrst logarithmic regret bound for partially observable linear dynamical systems with unknown dynamics which includes the canonical LQG setting. The presented regret bound improves
+˜ (√T ) regret of Simchowitz et al. [6], Mania et al. [12] in stochastic setting with the help of novel
+O estimation method which allows updating model estimates during control (Table 1). 2 Preliminaries
+We denote the Euclidean norm of a vector x as norm, (cid:107)2 is its spectral (cid:107)F is its Frobenius norm, A(cid:62) is its transpose, A† is its Moore-Penrose inverse, and (cid:107)2. For a given matrix A, x
+A (cid:107)
+A (cid:107) (cid:107) 2
+Table 1: Comparison with prior works in partially observable linear dynamical systems.
+Work
+Regret
+T 2/3
+Lale et al. [9]
+T 2/3
+Simchowitz et al. [6]
+√T
+Mania et al. [12]
+Simchowitz et al. [6] √T
+This work polylog(T )
+Cost
+Identiﬁcation Noise
+Open-Loop
+Convex
+Open-Loop
+Convex
+Strongly Convex Open-Loop
+Strongly Convex Open-Loop
+Strongly Convex Closed-Loop
+Stochastic
+Adversarial
+Stochastic
+Semi-adversarial
+Stochastic
+Tr(A) is the trace of A. ρ(A) denotes the spectral radius of A, i.e., the largest absolute value of its eigenvalues. The j-th singular value of a rank-n matrix A is denoted by σj(A), where
+σmax(A) :=σ1(A)
+σn(A) := σmin(A) > 0. I is the identity matrix with appropriate (µ, Σ) denotes a multivariate normal distribution with mean vector µ and covariance dimensions. matrix Σ.
+σ2(A)
+. . .
+N
+≥
+≥
+≥
+State space form: Consider an unknown discrete-time linear time-invariant system Θ, yt = Cxt + zt, xt+1 = Axt + But + wt,
+Rn is the (latent) state of the system, ut ∈ (1)
+Rp is the control input, and the observation where xt ∈
+Rm is the output of the system. At each time step t, the system is at state xt and the agent yt ∈ observes yt, i.e., an imperfect state information. Then, the agent applies a control input ut, observes the loss function (cid:96)t, pays the cost of ct = (cid:96)t(yt, ut), and the system evolves to a new xt+1 at time 1, wt and step t + 1. Let (
+Ft
+− z I) respectively. In this paper, in contrast to the standard assumptions zt are in LQG literature that the algorithm is given the knowledge of both σ2 z , we only assume the knowledge of their upper and lower bounds, i.e., σ2
+σ2 w, σ2 w w ≤ w, σ2 and 0 < σ2 z. For the system Θ, let Σ be the unique positive semideﬁnite solution to the following DARE (Discrete Algebraic Riccati Equation), 0) be the corresponding ﬁltration. For any t, conditioned on (0, σ2 z, for some ﬁnite σ2
+σ2 z, such that, 0 < σ2
+Ft; t wI) and z, and σ2 w and σ2
+σ2 w ≤
+σ2 z ≤ w, σ2 (0, σ2
+≥
+N z ≤
+N
+Σ = AΣA(cid:62)
+−
+AΣC (cid:62)
+CΣC (cid:62) + σ2 z I 1
+−
+CΣA(cid:62) + σ2 wI. (2)
+Σ can be interpreted as the steady state error covariance matrix of state estimation under Θ. (cid:0) (cid:1)
+Predictor form: An equivalent and common representation of the system Θ in (1), is its predictor form representation introduced by Kalman [13] and characterized as,
+ˆxt+1 = ¯Aˆxt + But + F yt, yt = C ˆxt + et, (3) 1
+−
+CΣC (cid:62)+σ2 z I where F = AΣC (cid:62) white innovation process and ¯A = A (cid:0) can be seen as the estimate of the state in (1).
+Deﬁnition 2.1 (Controllability & Observability). A system is (A, B) controllable if the controllability 1B] has full row rank. As the dual, a system is (A, C) observable if the matrix [B AB A2B . . . An observability matrix [C (cid:62) (CA)(cid:62) (CA2)(cid:62) . . . (CAn is the Kalman ﬁlter gain in the observer form, et is the zero mean
+F C. In this equivalent representation of system, the state ˆxt 1)(cid:62)](cid:62) has full column rank.
+− (cid:1)
+−
+−
+We assume that the unknown system Θ is (A, B) controllable, (A, C) observable and (A, F ) control-lable. This provides exponential convergence of the Kalman ﬁlter to the steady-state. Thus, without loss of generality, for the simplicity of analysis, we assume that x0 ∼ N (0, Σ), i.e., the system starts at the steady-state. In the steady state, et ∼ N
+/ρ(A)τ .
+We assume that the unknown system Θ is order n and ρ(A) < 1. Let Φ(A) = supτ
+In the following we consider the standard setting where Φ(A) is ﬁnite. The above mentioned construction is the general setting for the majority of literature on both estimation and regret mini-mization [3–6, 9, 12] for which the main challenge is the estimation and the controller design. 0, CΣC (cid:62) + σ2 z I 0 (cid:107)
+Aτ (cid:107) (cid:1) (cid:0)
+≥
+.
+Note that, recently there has been signiﬁcant effort to generalize this setting to stabilizable systems when a stabilizing controller is given [6]. However, many partially observable linear dynamical systems cannot be stabilized by a static feedback controller and the assumption of the existence of such controller can be restrictive [14]. Therefore, in this work, we consider the setting described above in order to present the general framework of learning and regret analysis in partially observable linear dynamical systems. 3
+3 System Identiﬁcation
+In this section, we ﬁrst explain the estimation methods that use state-space representation of the system (1) to recover the model parameters and discuss the reason why they cannot provide reliable estimates in closed-loop estimation problems. Then we present our novel estimation method which provides reliable estimates in both open and closed-loop estimation.
+Challenges in using the state-space representation for system identiﬁcation: Using the state-space representation in (1), for any positive integer H, one can rewrite the output at time t as follows, yt =
+H i=1
+CAi
+− 1But i + CAH xt
+−
+H + zt +
+− 1
+H
+− i=0
+CAiwt 1. i
+−
+− (4) (cid:88)
+Deﬁnition 3.1 (Markov Parameters). The set of matrices that maps the inputs to the output in (4) is called Markov parameters of the system Θ. They are the ﬁrst H parameters of the Markov 1B that uniquely describes the operator, G =
+−
+Rm system behavior. Moreover, G(H) = [G[0] G[1] . . . G[H
+Hp denotes the H-length Markov
+× parameters matrix. i > 0, G[i] = CAi
+∀ 1]] 0 with G[0] = 0m p, and
+G[i] (cid:88)
+}i
+∈
+{
+−
+×
+≥ 1, let the Markov operator of Θ be bounded, i.e.,
+κG. Due to stability of A,
+For κG ≥ the second term in (4) decays exponentially and for large enough H it becomes negligible. Therefore, using Deﬁnition 3.1, we obtain the following for the output at time t,
+H (cid:107) ≤ 0 (cid:107) i
+≥ (cid:80)
+H 1
+G[i] yt ≈
+G[i]ut
+− i=0 i + zt +
+− i=0
+CAiwt 1. i
+−
+− (5)
+From this formulation, a least squares estimation problem can be formulated using outputs as the dependent variable and the concatenation of H input sequences ¯ut = [ut, . . . , ut
+H ] as the regressor to recover the Markov parameters of the system:
+− (cid:88) (cid:88)
+G(H) = arg min
+X
+T yt −
+X ¯ut(cid:107) 2 2. (6) t=H (cid:107) (cid:98) (cid:88)
+Prior ﬁnite-time system identiﬁcation algorithms propose to use i.i.d. zero-mean Gaussian noise for the input, to make sure that the two noise terms in (5) are not correlated with the inputs i.e. open-loop estimation. This lack of correlation allows them to solve (6), estimate the Markov parameters and develop ﬁnite-time estimation error guarantees [3, 4, 9, 15]. From Markov parameter estimates, they recover the system parameters (A, B, C) up to similarity transformation using singular value decomposition based methods like Ho-Kalman algorithm [16].
+However, when a controller designs the inputs based on the history of inputs and observations, the t i=0. This correlation inputs become highly correlated with the past process noise sequences,
+− prevents consistent and reliable estimation of Markov parameters using (6). Therefore, these prior open-loop estimation methods do not generalize to the systems that adaptive controllers generates the inputs for estimation, i.e., closed-loop estimation. In order to overcome this issue, we exploit the predictor form of the system Θ and design a novel system identiﬁcation method that provides consistent and reliable estimates both in closed and open-loop estimation problems. wi}
+{ 1
+Novel estimation method for partially observable linear dynamical systems: Using the predictor form representation (3), for a positive integer He, the output at time t can be rewritten as follows, yt = 1
+He− k=0
+C ¯Ak (F yt
+− k 1 +But
+− 1) + et + C ¯AHe xt
+−
+He. k
+−
+− (cid:88) t
+Using the open or closed-loop generated input-output sequences up to time τ , construct subsequences of He input-output pairs for He ≤ 1 . . . u(cid:62)t
+φt =
+− 1 . . . y(cid:62)t
+−
+R(m+p)He .
+He u(cid:62)t
+−
+He
+The output of the system, yt can be represented using φt as: (cid:2)
+He for
+≤ (cid:62)
+∈
+Gyφt+et+C ¯AHext yt =
+. (8)
+Notice that ¯A is stable due to (A, F )-controllability of Θ [17]. Therefore, with a similar argument used in (4), for He = O(log(T )), the last term in (7) is negligible. This yields into a linear model of the dependent variable yt and the regressor φt with additive i.i.d. Gaussian noise et: 1F CB C ¯AB . . . C ¯AHe−
+CF C ¯AF . . . C ¯AHe−
+Gy = y(cid:62)t
+− 1B
+τ ,
+− (cid:3) (cid:3) (cid:2) (7) yt, ut}
+{
+τ t=1, we yt ≈ Gyφt + et. 4 (9)
+For this model, we achieve consistent and reliable estimates by solving the following regularized least squares problem,
+Gy = arg min (cid:98)
+X
+λ
+X (cid:107) 2
+F + (cid:107)
+τ t=He (cid:107) yt − 2 2.
+Xφt(cid:107) (10) (cid:88)
+This problem does not require any speciﬁcation on how the inputs are generated and therefore can be deployed in both open and closed-loop estimation problems. Exploiting the speciﬁc structure of
+Gy in
+Gy (see Appendix (8), we design a procedure named SYSID, which recovers model parameters from
+B for details). To give an overview, SYSID forms two Hankel matrices from the blocks of
+Gy which (cid:98) corresponds to the product of observability and controllability matrices. SYSID applies a variant of
+Ho-Kalman procedure and similar to this classical algorithm, it uses singular value decomposition of (cid:98) these Hankel matrices to recover model parameter estimates ( ˆA, ˆB, ˆC) and ﬁnally constructs
+G(H).
+For the persistently exciting inputs, the following gives the ﬁrst ﬁnite-time system identiﬁcation guarantee in both open and closed-loop estimation problems (see Appendix D for the proof).
+Theorem 1 (System Identiﬁcation). If the inputs are persistently exciting, then for T input-output pairs, as long as T is large enough, solving the least squares problem in (10) and deploying SYSID procedure provides model parameter estimates ( ˆA, ˆB, ˆC,
+G(H)) in which there exists a similarity n such that, with high probability, transformation S
+Rn (cid:98)
+∈
+S−
+× 1AS (cid:107)
+ˆA (cid:107)
+−
+ˆB
+, (cid:107)
+−
+S− 1B
+, (cid:107)
+ˆC (cid:107)
+,
+CS (cid:107)
+− (cid:98)
+G(H) (cid:107)
+−
+G(H)
+= ˜
+O (cid:107) (1/√T ) (11) 4 Controller and Regret (cid:98)
+In this section we describe the class of linear dynamic controllers (LDC) and show how a convex policy reparameterization can provide accurate approximations of the LDC controllers. Then we provide the regret deﬁnition, i.e. performance metric, of the adaptive control task.
+Linear dynamic controller (LDC): An LDC policy π is a linear controller with an internal state dynamics of t+1 = Aπsπ sπ t = Cπsπ uπ (12)
+Rs is the state of the controller, yt is the input to the controller, i.e. observation from the where sπ system that controller is designing a policy for, and uπ t is the output of the controller. LDC controllers provide a large class of controller. For instance, when the problem is canonical LQG setting, the optimal policy is known to be a LDC policy [1]. t + Dπyt, t + Bπyt, t ∈
+Nature’s output: Using (4), we can further decompose the generative components of yt to obtain, yt = zt + CAtx0 + t 1
+− i=0
+CAt
+− i
+− 1wi + t i=0
+G[i]ut
+− i
+Notice that ﬁrst three components generating yt are derived from the uncontrollable noise processes in the system, while the last one is a linear combination of control inputs. The ﬁrst three components are known as Nature’s y, i.e., Nature’s output [6, 18], of the system, t (cid:88) (cid:88) 1 1 t bt(G) := yt −
+− i=0
+G[i]ut i = zt + CAtx0 +
+−
+CAt i
+−
+− 1wi.
+− i=0 (13) (cid:88)
+The ability to deﬁne Nature’s y is a unique characteristics of linear dynamical systems. At any time t step t, after following a sequence of control inputs i=0, and observing yt, we can compute bt(G) using (13). This quantity allows for counterfactual reasoning about the outcome of the system. 0, we can reason what the outputs y(cid:48)τ t of the system
+Particularly, having access to
+}t
+≥
+τ t u(cid:48)i} i=0 , i.e., would have been, if the agent, instead, had taken other sequence of control inputs
+− ui}
+{ bτ
+{ t(G)
+−
+{
+− (cid:88) bτ
+This property indicates that we can use
+{ input sequences, and build a desirable controller, as elaborated in the following. t(G)
+− (cid:88)
+}t
+≥ y(cid:48)τ t = bτ
+−
+− t(G) +
+τ 1 t
+−
+G[i]u(cid:48)τ
+− i=0 0 to evaluate the quality of any other potential t
+− i.
+−
+Disturbance feedback control (DFC): In this work, we adopt a convex policy reparametrization called DFC introduced by Simchowitz et al. [6]. A DFC policy of length H (cid:48) is deﬁned as a set of
+H (cid:48) parameters, M(H (cid:48)) := i=0 , prescribing the control input of
+} 1
+M [i]
+{
+H (cid:48)
+− 1 (14) uM t =
+− i=0
+M [i]bt i(G).
+− (cid:88) 5
+Figure 1: ADAPTON bt
+H (cid:48) for Nature’s y, i(G) i=0 . The DFC policy construction is in parallel with the classical Youla
+} parametrization [18] which states that any linear controller can be prescribed as acting on past noise sequences. Thus, DFC policies can be regarded as truncated approximations to LDCs. More formally, any stabilizing LDC policy can be well-approximated as a DFC policy (see Appendix A).
+{
+−
+− 1
+Deﬁne the convex compact sets of DFCs, such that all the controllers in these sets
+Mψ and persistently excite the system Θ. The precise deﬁnition of persistence of excitation condition is given in Appendix E.2. The persistence of excitation condition is a mild condition and it only requires a signiﬁcantly wide matrix that maps past H (cid:48) noise sequences to input to be full row rank.
+This condition holds in many well-known controllers such as H2, H
+. Moreover, if a controller is persistently exciting there exists a neighborhood around it consisting of persistently exciting controllers.
+M
+∞
+The controllers M(H (cid:48)0) of
+H (cid:48)0 =
+κ
+Mψ, i.e.,
+H (cid:48) 2 (cid:99) − (cid:98)
+=
+M
+∈ Mψ are bounded i.e.,
+M(H (cid:48)) = M(H (cid:48)0) + ∆ : M(H (cid:48)0)
+{
+M
+H. Thus, all controllers M(H (cid:48)) (cid:80)
+∈ M
+H (cid:48)0− i
+≥ 1 0 (cid:107)
+M [i] (cid:107) ≤
+∈ Mψ, are also bounded (cid:80)
+κψ and
+H (cid:48) i
+M 1
+∆[i]
+− 0 (cid:107)
+H (cid:48) 1
+− 0 (cid:107) i
+≥
+≥
+= κψ(1 + r). Throughout the interaction with the system, the agent has access to (cid:107) ≤ where is an r-expansion rκψ}
+κ
+.
+M where (cid:107) ≤
+M
+M [i]
+,
+)
+· (cid:22) ∇ 2(cid:96)t(
+·
+Loss function: The loss function at time t, (cid:96)t, is smooth and strongly convex for all t, i.e., 0
+≺
+αlossI
+αlossI for a ﬁnite constant αloss. Note that the standard quadratic regulatory costs of (cid:96)t(yt, ut) = y(cid:62)t Qtyt + u(cid:62)t Rtu(cid:62)t with bounded positive deﬁnite matrices Qt and Rt are
+) is non-negative special cases of the mentioned setting. For all t, the unknown lost function ct = (cid:96)t(
+,
+·
+R, y(cid:48)
+, u(cid:48) strongly convex and associated with a parameter L, such that for any R with (cid:107) (cid:107) we have, u (cid:107) (cid:107) ≤
+, (cid:107)
+, (cid:107)
+· (cid:107) (cid:22) (cid:107) y (cid:80) (cid:96)t(y(cid:48), u(cid:48)) (cid:96)t(y, u)
+|
+− (cid:107)
+Regret deﬁnition: We evaluate the agent’s performance by its regret with respect to M(cid:63), the optimal, t ). After in hindsight, DFC policy in the given set
+T step of interaction, the agent’s regret is denoted as
+Mψ, i.e., M(cid:63) = arg minM
+T t=1 (cid:96)t(yM t
+, uM
+∈Mψ
+| ≤
+| ≤
+−
+− (cid:107)
+LR( (cid:107) y y(cid:48)
++ u (cid:107) u(cid:48)
+) and (cid:96)t(y, u)
+| (15)
+LR2. (cid:80) (16)
+REGRET(T ) =
+T t=1 ct − (cid:96)t(yM(cid:63) , uM(cid:63) ). (cid:88) 5 ADAPTON
+In this section, we present ADAPTON, a sample efﬁcient adaptive control online learning algorithm which learns the model dynamics through interaction with the environment and continuously deploys online convex optimization to improve the control policy. ADAPTON is illustrated in Figure 1 and the detailed pseudo-code is provided in Appendix C. uI) for the ﬁrst
+Warm-up: ADAPTON starts with a ﬁxed warm-up period and applies ut ∼ N
+Tw time steps. The length of the warm-up period is chosen to guarantee an accountable ﬁrst estimate of the system, the persistence of excitation during the adaptive control period and the stability of the online learning algorithm on the underlying system. (0, σ2 6
+Adaptive control in epochs: After warm-up, ADAPTON starts controlling the system and operates in epochs with doubling length. ADAPTON sets the base period Tbase to the initial value Tbase = Tw and for each epoch i, it runs for 2i 1Tbase time steps.
+−
+Model estimation in the beginning of epochs: At the beginning of each epoch i, ADAPTON exploits the past experiences up to epoch i. It deploys the proposed closed-loop estimation method and solves (10) to estimate
+Gy to estimate model parameter
+Gy. ADAPTON then exploits the construction of true estimates ˆAi, ˆBi, ˆCi and constructs an estimate of H-length Markov parameters matrix,
+Gi(H), via
+SYSID described in Section 3 and provided in Appendix B.
+Gi) = yt − such that uMt t = (cid:98)
+. Finally, ADAPTON receives the loss function (cid:96)t, pays a cost of (cid:96)(yMt
+Control input, output and loss during the epochs: ADAPTON utilizes to estimate the Nature’s outputs, bt( executes a DFC policy Mt ∈ M yMt t
+Counterfactual input, output, loss: ADAPTON uses counterfactual reasoning introduced in Sim-chowitz et al. [6] to update its controller. After observing the loss function (cid:96)t, it constructs,
+Gi(H) and the past inputs j. Using these estimates, ADAPTON
+G[j] i ut j=0 M [j] 1
+− (cid:98)
+Gi) and observes the output of
+H j=1
+H (cid:48)
+− t bt
+, uMt t (cid:80) (cid:80) j(
+). (cid:98) (cid:98)
+− t (cid:98)
+˜ut
+− j(Mt,
+Gi) = 1
+H (cid:48)
+− l=0
+M [l] t bt
+− j l(
+−
+Gi), (17) the counterfactual inputs, which are the recomputations of past inputs as if the current DFC policy is applied using Nature’s y estimates. Then, ADAPTON reasons about the counterfactual output of the system. Using the current Nature’s y estimate and the counterfactual inputs, the agent approximates what the output of the system could be, if counterfactual inputs had been applied, (cid:98) (cid:98) (cid:88)
+˜yt(Mt,
+Gi) = bt(
+Gi) +
+H j=1
+ˆG[j] i ˜ut j(Mt,
+−
+Gi). (18) (cid:88)
+Using the counterfactual inputs, output and the revealed loss function (cid:96)t, ADAPTON ﬁnally constructs, (cid:98) (cid:98) (cid:98) ft(Mt,
+Gi) = (cid:96)t(˜yt(Mt, (19) which is termed as the counterfactual loss. It is ADAPTON’s approximation of what the cost would have been at time t, if the current DFC policy was applied until time t. It gives a performance evaluation of the current DFC policy to ADAPTON for updating the policy. Note that the Markov parameter estimates are crucial in the accuracy of this performance evaluation.
+Gi), ˜ut(Mt,
+Gi)). (cid:98) (cid:98) (cid:98)
+Online convex optimization: In order to optimize the controller during the epoch, at each time step,
+ADAPTON runs online gradient descent on the counterfactual loss function ft(Mt,
+Gi) while keeping the updates in the set via projection [6],
+M
+Mt+1 = proj
+M
+Mt − (cid:18)
+ηt∇Mft
+M,
+Gi (cid:16) (cid:98)
+.
+Mt(cid:19) (cid:17) (cid:12) (cid:12) (cid:12)
+Notice that if ADAPTON had access to the underlying Markov operator G, the counterfactual loss would have been the true loss of applying the current DFC policy until time t, up to truncation. By knowing the exact performance of the DFC policy, online gradient descent would have obtained accurate updates. Using the counterfactual loss for optimizing the controller causes an error in the
+Gi. Therefore, as the Markov estimates gradient updates which is a function of estimation error of improve via our closed-loop estimation method, the gradient updates get more and more accurate. (cid:98) 6 Regret Analysis (cid:98)
+In this section, we ﬁrst provide the closed-loop learning guarantee of ADAPTON, then show that
+ADAPTON maintains stable system dynamics and present the regret upper bound for ADAPTON.
+Closed-loop learning guarantee: In the beginning of adaptive control epochs, ADAPTON guarantees that Markov parameter estimates are accurate enough that deploying any controller from set
+M provides persistence of excitation in inputs (see Appendix E). Under this guarantee, using our novel estimation method at the beginning of any epoch i ensures that during the epoch,
+=
+˜ 1Tbase), due to Theorem 1 and doubling length epochs.
+O (1/√2i
+Gi(H)
+G(H)
+− (cid:107) (cid:107)
+− (cid:98) 7
+bt(G) (cid:107)
+Stable system dynamics with ADAPTON: Since wt and zt are Gaussian disturbances, from standard concentration results we have that Nature’s y is bounded with high probability for all t (see Appendix
+κb for some κb. The following lemma shows that during ADAPTON, Markov
+F). Thus, let parameter estimates are well-reﬁned such that the inputs, outputs and the Nature’s y estimates of
+ADAPTON are uniformly bounded with high probability. The proof is in Appendix F.
+Lemma 6.1. For all t during the adaptive control epochs, yt(cid:107) ≤ 2κb with high probability. and
+κb(1 + κGκ ut(cid:107) ≤ (cid:107) (cid:107) ≤
+κb,
+G)
+M
+M
+κ (cid:107)
+) bt( (cid:107) (cid:107) ≤ (cid:98)
+Regret upper bound of ADAPTON: The regret decomposition of ADAPTON includes 3 main pieces: (R1)Regret due to warm-up,(R2)Regret due to online learning controller,(R3)Regret due to lack of system dynamics knowledge (see Appendix G for exact expressions and proofs). R1 gives constant regret for the short warm-up period. R2 results in (log(T )) regret. Note that this regret decomposition and these results follow and adapt Theorem 5 of Simchowitz et al. [6]. The key difference is in R3, which scales quadratically with the Markov parameter estimation error
+Gi(H)
+. Simchowitz et al. [6] deploys open-loop estimation and does not update the (cid:107) (cid:107) model parameter estimates during adaptive control and attains R3 = ˜ (√T ) which dominates
+O the regret upper bound. However, using our novel system identiﬁcation method with the closed-loop learning guarantees of Markov parameters and the doubling epoch lengths ADAPTON gets
+R3 =
+Theorem 2. Given tion, with high probability, ADAPTON achieves logarithmic regret, i.e., REGRET(T ) = polylog(T ).
+, a closed, compact and convex set of DFC policies with persistence of excita-(polylog(T )).
+G(H)
+M
+O
+O
+− (cid:98)
+. Recall
+In minimizing the regret, ADAPTON competes against the best DFC policy in the given set that any stabilizing LDC policy can be well-approximated as a DFC policy. Therefore, for any LDC policy π whose DFC approximation lives in the given
+, Theorem 2 can be extended to achieve the
+ﬁrst logarithmic regret in LQG setting.
+Corollary 6.1. Let π(cid:63) be the optimal linear controller for LQG setting. If the DFC approximation of
+π(cid:63) is in t ) = polylog(T ).
+Mψ, then the regret of ADAPTON with respect to π(cid:63) is t=1 ct − (cid:96)t(yπ(cid:63) t
+, uπ(cid:63)
+M
+M
+T (cid:80)
+Note that without any estimation updates during the adaptive control, ADAPTON reduces to a variant of (log(T )) the algorithm given in Simchowitz et al. [6]. While the update rule in ADAPTON results in updates in adaptive control period, one can follow different update schemes as long as ADAPTON obtains enough samples in the beginning of the adaptive control period to obtain persistence of excitation. The following is an immediate corollary of Theorem 2 which considers the case when number of epochs or estimations are limited during the adaptive control period.
+Corollary 6.2. If enough samples are gathered in the adaptive control period, ADAPTON with any update scheme less than log(T ) updates has REGRET(T )
+[polylog(T ), ˜O(√T )].
+O
+∈ 7

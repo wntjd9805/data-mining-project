@@ -1,0 +1,219 @@
+Abstract
+Out-of-distribution generalization is one of the key challenges when transferring a model from the lab to the real world. Existing efforts mostly focus on building invariant features among source and target domains. Based on invariant features, a high-performing classiﬁer on source domains could hopefully behave equally well on a target domain. In other words, we hope the invariant features to be transferable. However, in practice, there are no perfectly transferable features, and some algorithms seem to learn “more transferable” features than others. How can we understand and quantify such transferability? In this paper, we formally deﬁne transferability that one can quantify and compute in domain generalization.
+We point out the difference and connection with common discrepancy measures between domains, such as total variation and Wasserstein distance. We then prove that our transferability can be estimated with enough samples and give a new upper bound for the target error based on our transferability. Empirically, we evaluate the transferability of the feature embeddings learned by existing algorithms for domain generalization. Surprisingly, we ﬁnd that many algorithms are not quite learning transferable features, although few could still survive. In light of this, we propose a new algorithm for learning transferable features and test it over various benchmark datasets, including RotatedMNIST, PACS, Ofﬁce-Home and
+WILDS-FMoW. Experimental results show that the proposed algorithm achieves consistent improvement over many state-of-the-art algorithms, corroborating our theoretical ﬁndings.1 1
+
+Introduction
+One of the cornerstone assumptions underlying the recent success of deep learning models is that the test data should share the same distribution as the training data. However, faced with ubiquitous distribution shifts in various real-world applications, such assumption hardly holds in practice. For example, a self-driving recognition system trained using data collected in the daytime may continually degrade its performance during nightfall. The system may also encounter weather or trafﬁc conditions in a new city that never appear in the training set. In light of these potentially unseen scenarios, it is 1Code available at https://github.com/Gordon-Guojun-Zhang/Transferability-NeurIPS2021. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+of paramount importance that the trained model can generalize Out-Of-Distribution (OOD): even if the target domain is not exactly the same as the source domain(s), the learned model should hopefully behave robustly under slight distribution shift.
+To this end, one line of works focuses on learning the so-called invariant representations [2, 16, 57, 58]. At a colloquial level, the goal here is to learn feature embeddings that lead to indistinguishable feature distributions from different domains. In practice, both the feature embeddings and the domain discriminators are often parametrized by neural networks, leading to an adversarial game between these two. Furthermore, in order to avoid degenerate solutions, the learned features are required to be informative about the output variable as well. This is enforced by placing a predictor over the features and minimize the corresponding supervised loss simultaneously [17, 32, 48, 49].
+Another line of recent works aims to learn features that can induce invariant predictors, ﬁrst termed as the invariant risk minimization (IRM) [3, 39] paradigm. Roughly speaking, the goal of IRM is to discover a feature embedding, upon which the optimal predictors, i.e., the Bayes predictor, are invariant across the training domains. Again, at the same time, the features should be informative about the output variable as well. However, the optimization problem of IRM is rather difﬁcult, and several follow-up works have proposed different relaxations to the original formulation [1, 26].
+Despite being extensively studied, both theoretical [41, 59] and empirical [20, 23] works have shown the insufﬁciency of existing algorithms for domain generalization (DG). Methods based on invariant features ignore the potential shift in the marginal label distributions across domains [59] and the methods based on invariant predictors are not robust to covariate shift [26]. Perhaps surprisingly, empirical works have shown that with proper data augmentation and careful model tuning, the very basic algorithm of empirical risk minimization (ERM) demonstrates superior performance on domain generalization over existing methods on benchmark image datasets [20, 23]. This sharp gap between theory and practice calls for a fundamental understanding of the following question:
+What kind of invariance should we look for, in order to ensure that a good model on source domains also achieves decent accuracy on a related target domain?
+In this work we attempt to answer the above question by proposing a criterion for models to look at, dubbed as transferability, which asks for an invariance of the excess risks of a predictor across domains. Different from existing proposals of invariant features and invariant predictors, which seek to ﬁnd feature embeddings that respectively induce invariant marginal and conditional distributions, our notion of transferability depends on the excess risk, hence it directly takes into account the joint distribution over both the features and the labels. We show how it can be used to naturally derive a new upper bound for the target error, and then we discuss how to estimate the transferability empirically with enough samples. Our deﬁnition also inspires a method that aims to ﬁnd more transferable features via representation learning using adversarial training.
+Empirically, we perform experiments to measure the transferability of several existing algorithms, on both small and large scale datasets. We show that many algorithms, including ERM, are not quite transferable under the deﬁnition (Fig. 1, see more details in §5): when we go away from the optimal classiﬁer (with distance δ in the parameter space), it could happen that the source accuracy remains high but the target ac-curacy drops signiﬁcantly. This implies that during the training process, an existing algorithm may ﬁnd a good source classiﬁer with low target accuracy, hence violating the requirement for invariance of excess risks.
+In contrast, our algorithm is more transferable, and achieves consistent improvement over existing state-of-the-art algorithms, corroborating our ﬁndings. 2 What is Transferability?
+Figure 1: The target and source (test) accuracies of
+ERM on MNIST.
+In this section we present our deﬁnition of transferability in the classiﬁcation setting. The setup of domain generalization is the following:
+Settings and Notation Given n labeled source domains S1, . . . , Sn, the problem of domain gen-eralization is to learn a model from these source domains, in the hope that it performs well on an 2
+unseen target domain T that is “similar” to the source domains. Throughout the paper, we assume that both the source domains and the unseen target domain share the same input and output spaces, denoted as X and Y, respectively. For multi-class classiﬁcation, the output space Y = [K] is a set of labels for multi-class classiﬁcation. For binary classiﬁcation, we consider Y = {−1, +1}. Denote H as the hypothesis class. We deﬁne the classiﬁcation error of a classiﬁer h ∈ H on a domain D (or S for source domains, or T for target domains) as:2 (cid:15)D(h) = E(x,y)∼D[(cid:96)(h(x), y)]. (1)
+For (cid:96)(h(x), y) = 1(h(x) (cid:54)= y), where 1(·) is the usual indicator function, we use (cid:15)0−1 it is the 0-1 loss.
+D (h) to denote
+In domain generalization, we often have several source domains. For the ease of presentation, we only consider a single source domain in this section, and later extend to the general case in Section 5.
+Given two domains, the source domain S and the target domain T , the task of domain generalization is to transfer a classiﬁer h that performs well on S to T . We ask: how much of the success of h on S can be transferred to T ?
+Note that in order to evaluate the transferability from S to T , we need information from the target domain, similar to the test phase in traditional supervised learning. We believe a good criterion of transferability should satisfy the following properties: 1. Quantiﬁable: the notion should be quantiﬁable and can be computed in practice; 2. Any near-optimal source classiﬁer should be near-optimal on the target domain. 3. If the two domains are similar, as measured by e.g., total variation, then they are transferable to each other, but the converse may not be true.
+At ﬁrst glance the second criterion above might seem too strong and restrictive. However, we argue that in the task of domain generalization, we only have labeled source data and there is no clue to distinguish a classiﬁer from another if both of them perform equally well on the source domain.
+Based on the second property, we ﬁrst propose the following deﬁnition of transferability:
+Deﬁnition 1 (transferability). S is (δS , δT )H-transferable to T if for δS > 0, there exists δT > 0 such that argmin((cid:15)S , δS )H ⊆ argmin((cid:15)T , δT )H, where: argmin((cid:15)D, δD)H := {h ∈ H : (cid:15)D(h) ≤ inf h∈H (cid:15)D(h) + δD}.
+In the literature the set argmin((cid:15)D, δD)H is also known as a δD-minimal set [24] of (cid:15)D, which represents the near-optimal set of classiﬁers. Note that the δ-minimal set depends on the hypothesis class H. Throughout the paper, we omit the subscript H in the deﬁnition when there is no confusion.
+Def. 1 says that near-optimal source classiﬁers are also near-optimal target classiﬁers. Furthermore, it is easy to verify that our transferability is transitive: if S is (δS , δP )-transferable to P, and P is (δP , δT )-transferable to T , then S is (δS , δT )-transferable to T .
+Next we deﬁne transfer measures, which we will show to be equivalent with Def. 1 in Prop. 5.
+Deﬁnition 2 (quantiﬁable transfer measures). Given some Γ ⊆ H, (cid:15)∗
+S := inf h∈Γ (cid:15)S (h) and (cid:15)∗
+T := inf h∈Γ (cid:15)T (h) we deﬁne the one-sided transfer measure, symmetric transfer measure and the realizable transfer measure respectively as:
+TΓ(S(cid:107)T ) := sup h∈Γ (cid:15)T (h) − (cid:15)∗
+T − ((cid:15)S (h) − (cid:15)∗
+S ),
+TΓ(S, T ) := max{TΓ(S(cid:107)T ), TΓ(T (cid:107)S)} = sup h∈Γ
+Tr
+Γ(S, T ) := sup h∈Γ
+|(cid:15)S (h) − (cid:15)T (h)|.
+|(cid:15)S (h) − (cid:15)∗
+S − ((cid:15)T (h) − (cid:15)∗
+T )|, (2) (3) (4)
+The distinction between Γ and H will become apparent in Prop. 5. Note that the one-sided transfer measure is not symmetric. If we want the two domains S and T to be mutually transferable to each other, we can use the symmetric transfer measure. We call both quantities as transfer measures.
+Furthermore, the symmetric transfer measure reduces to (4) in the realizable case when (cid:15)∗
+T = 0.
+In statistical learning theory, (cid:15)D(h) − (cid:15)∗
+D is often known as an excess risk [24], which is the relative error compared to the optimal classiﬁer. The transfer measures can thus be represented with the difference of excess risks. With Def. 2, we can immediately obtain the following result that upper bounds the target error:
+S = (cid:15)∗ 2Throughout the paper, we will use the terms domain and distribution interchangeably. 3
+Proposition 3 (target error bound). Given Γ ⊆ H, for any h ∈ Γ, the target error is bounded by:
+S + TΓ(S(cid:107)T ) ≤ (cid:15)S (h) + (cid:15)∗ (cid:15)T (h) ≤ (cid:15)S (h) + (cid:15)∗
+S + TΓ(S, T ).
+T − (cid:15)∗
+T − (cid:15)∗ (5)
+The ﬁrst error bound of such type for a target domain uses H-divergence [8, 9, 12] for binary classiﬁcation (or more rigorously, the H∆H-divergence). The main difference between ours and
+H-divergence is that H-divergence only concerns about the marginal input distributions, whereas the transfer measures depend on the joint distributions over both the inputs and the labels. We note that Proposition 3 is general and works in the multi-class case as well. Moreover, even in the binary classiﬁcation case we can prove that our Proposition 3 is tighter than H-divergence (see
+Proposition 27 in the appendix).
+In practice we may not know the optimal errors. In this case, we can use the realizable transfer measure to upper bound the symmetric transfer measure (note that (cid:15)∗
+Proposition 4. For Γ ⊆ H and domains S, T we have: TΓ(S, T ) ≤ 2Tr
+T may not be zero):
+S or (cid:15)∗
+Γ(S, T ).
+Since Def. 1 essentially asks that the excess risks of approximately optimal classiﬁers on the source domain are comparable between the source and target domains, we can show that Def. 1 and Def. 2 are equivalent if Γ is a δ-minimal set:
+Proposition 5 (equivalence between transferability and transfer measures). Let δS > 0 and
+Γ = argmin((cid:15)S , δS ) and suppose inf h∈Γ (cid:15)T (h) = inf h∈H (cid:15)T (h). If TΓ(S(cid:107)T ) ≤ δ or TΓ(S, T ) ≤ δ, then S is (δS , δ + δS )-transferable to T . Furthermore, if S is (δS , δT )-transferable to T , then
+TΓ(S(cid:107)T ) ≤ δT and TΓ(S, T ) ≤ max{δS , δT }.
+In Prop. 5, we do not require Γ = H since it is unnecessary to impose that all classiﬁers in H have similar excess risks on source and target domains. Instead, we only constrain Γ to be a δ-minimal set, i.e., Γ includes approximately optimal classiﬁers of S. See also Example 8. An additional assumption is that Γ also includes the optimal classiﬁer of T which can be ensured by controlling δS . 2.1 Comparison with other discrepancy measures between domains
+In this subsection, we compare the realizable transfer measure (4) with other discrepancy measures between domains and focus on the 0-1 loss (cid:15)0−1
+Γ(S, T ) can be written as an integral probability metric (IPM) [36, 46]. The l.h.s. of (4) can be written as:
+D . We ﬁrst note that Tr
+Tr
+Γ(S, T ) := dFΓ (S, T ), where dF (S, T ) = sup f ∈F (cid:12) (cid:12) (cid:12) (cid:12) (cid:12) (cid:90) (cid:88) y f (x, y)(pS (x, y) − pT (x, y))dx (cid:12) (cid:12) (cid:12) (cid:12) (cid:12)
+, (6) and FΓ := {(x, y) (cid:55)→ 1(h(x) (cid:54)= y), h ∈ Γ}. Typical IPMs [46] include MMD, Wasserstein distance,
+Dudley metric and the Kolmogorov–Smirnov distance (see Appendix B.2 for more details). However,
+FΓ is fundamentally different from these IPMs since it relies on an underlying function class Γ. Our realizable transfer measure shares some similarity with Arora et al. [4], where a changeable function class is used, but the exact choices of the function class are different.
+Γ(S, P) + Tr
+Even though the transferability can be written in terms of IPM, it is in fact a pseudo-metric:
+Proposition 6 (pseudo-metric). For a general loss (cid:15)D as in (1), Tr for any distributions S, T , P on the same underlying space, we have Tr
+Γ(S, T ) ≤ Tr
+Γ (T , S) (symmetry), and Tr
+T r
+However in general Tr
+Γ(S, T ) is not a metric since Tr
+Γ(S, T ) = 0 even if S (cid:54)= T . For instance, taking
+Γ = {h∗} to be the optimal classiﬁer on both S and T . we have Tr
+Γ(S, T ) = 0, but S and T could differ a lot (see Figure 2). In the next result we discuss the connection between realizable transfer measures and total variation (c.f. Appendix B.2).
+Proposition 7 (equivalence with total variation). For binary classiﬁcation with labels {−1, 1}, given the 0-1 loss (cid:15)D = (cid:15)0−1
+Γ(S, T ) ≤ dTV(S, T ) for domains S, T and any Γ ⊆ H.
+Denote Ht to be the set of all binary classiﬁers. Then we have dTV(S, T ) ≤ 4Tr
+Ht
+Γ(S, T ) is a pseudo-metric, i.e.,
+Γ(S, T ) =
+Γ(P, T ) (triangle inequality).
+Γ(S, S) = 0, Tr
+D , we have Tr (S, T ).
+Prop. 7 tells us that transfer measures (see also Prop. 4) are no stronger than total variation, and in the realizable case, (3) is equivalent to the similarity of domains (as measured by total variation) if Γ is unconstrained. We can moreover show that transfer measures are strictly weaker, if we choose Γ to be some δ-minimal set: 4
+Example 8 (very dissimilar joint distributions but transferable). We study the distributions de-scribed in Figure 2. The joint distributions are very dissimilar, i.e., for any X, Y in the domain,
+|pS (X, Y ) − pT (X, Y )| = 0.8. Deﬁne hρ(X) = (cid:26)1
+−1 if − 1 ≤ X < ρ if ρ ≤ X < 1
+. (7)
+We choose the hypothesis class H = {hρ, ρ ∈ [−1, 1]} and Γ = {hρ, |ρ| ≤ δ/0.8} (for small δ, say
+δ < 0.01) to be some neighborhood of the optimal source classiﬁer h∗ = h0. Then TΓ(S, T ) = suph∈Γ |(cid:15)S (h) − (cid:15)T (h)| = δ, and S is (δS , δ + δS )-transferable to T on Γ for any δS > 0 according to Prop. 5. Note that (cid:15)∗
+S = (cid:15)∗
+T = 0. 3 Computing Transferability
+In the last section we proposed a new con-cept called transferability. However, although
+Def. 1 provides a theoretically sound result for transferability, it is hard to verify it in practice, since we cannot exhaust all approximately good classiﬁers, especially for rich models such as deep neural networks. Nevertheless, Prop. 3 and Prop. 5 provide a framework to compute transferability through transfer measures, de-In this section we dis-spite their simplicity. cuss how to compute these quantities by mak-ing necessary approximations based on transfer measures. There are two difﬁculties we need to overcome: (1) In practice we only have ﬁ-nite samples drawn from true distributions; (2)
+We need a surrogate loss such as cross entropy for training and the 0-1 loss for evaluation. In
+§3.1 we show that our transfer measures can be estimated with enough samples, and in §3.2 we discuss transferability with a surrogate loss.
+These results will be used in our algorithms in the next section.
+Figure 2: Visualization of Example 8. Source domain: PS (Y = 1, −1 ≤ X < 0) = 0.1,
+PS (Y = −1, 0 ≤ X < 1) = 0.9. Target domain: PT (Y = 1, −1 ≤ X < 0) = 0.9,
+PT (Y = −1, 0 ≤ X < 1) = 0.1. The dark and light colors show the intensity of the probabil-ity mass. The vertical axis denotes whether it is the target or source domain (above or below x-axis). 3.1 Estimation of transferability
+We show how to estimate the transfer measure TΓ(S(cid:107)T ) from ﬁnite samples. Other versions of transfer measures in Def. 1 follow analogously (see Appendix A for more details).
+Lemma 9 (reduction of estimation error). Given general loss (cid:15)D as in (1), suppose (cid:98)S and (cid:98)T are i.i.d. sample distributions drawn from distributions of S and T , then for any Γ ⊆ H we have:
+TΓ(S(cid:107)T ) ≤ TΓ( (cid:98)S(cid:107) (cid:98)T ) + 2estΓ(S) + 2estΓ(T ), (cid:98)S (h)|, estΓ(T ) = suph∈Γ |(cid:15)T (h) − (cid:15) with the estimation errors estΓ(S) = suph∈Γ |(cid:15)S (h) − (cid:15) (cid:98)T (h)|.
+This lemma tells us that estimating transferability is no harder than computing the estimation errors of both domains. If the function class Γ has uniform convergence property [44], then we can guarantee efﬁcient estimation of transferability. We ﬁrst bound the sample complexity through Rademacher complexity, which is a standard tool in bounding estimation errors [5]:
+Theorem 10 (estimation error with Rademacher complexity). Given the 0-1 loss (cid:15)D = (cid:15)0−1
+D , suppose (cid:98)S and (cid:98)T are sample sets with m and k samples drawn i.i.d. from distributions S and T , respectively. For any Γ ⊆ H the following holds with probability 1 − δ:
+TΓ(S(cid:107)T ) ≤ TΓ( (cid:98)S(cid:107) (cid:98)T ) + 4Rm(FΓ) + 4Rk(FΓ) + 2 (cid:114) log(4/δ) 2m
++ 2 (cid:114) log(4/δ) 2k
+, where FΓ := {(x, y) (cid:55)→ 1(h(x) (cid:54)= y), h ∈ Γ}. If furthermore, Γ is a set of binary classiﬁers with labels {−1, 1}, then 2Rm(FΓ) = Rm(Γ), 2Rk(FΓ) = Rk(Γ). 5
+We also provide estimation error results using Vapnik–Chervonenkis (VC) dimension and Natarajan dimension in Appendix B.3. It is worth mentioning that the VC dimension of piecewise-polynomial neural networks has been upper bounded in Bartlett et al. [7]. Since transfer measures can be estimated, in later sections we do not distinguish the sample sets (cid:98)S, (cid:98)T and the underlying distributions S, T . 3.2 Transferability with a surrogate loss
+Due to the intractability of minimizing the 0-1 loss, we need to use a surrogate loss [6] for training in practice. In this section, we discuss this nuance w.r.t. transferability. We will focus on the most commonly used surrogate loss, cross entropy (CE), although some of the results can be easily adapted to other loss functions. To distinguish a surrogate loss from the 0-1 loss, we use (cid:15)D from now on for a surrogate loss and (cid:15)0−1
+D for the 0-1 loss. One of the difﬁculties is the non-equivalence between
+δ-minimal sets w.r.t. the 0-1 loss and a surrogate loss, i.e. argmin((cid:15)D, δD) might be quite different from argmin((cid:15)0−1
+D , δD) since the loss is nonconvex and nonsmooth. In light of these difﬁculties, we propose a more practical notion of transferability based on surrogate loss (cid:15)D:
+Proposition 11 (transfer measure with a surrogate loss). Given surrogate loss (cid:15)D ≥ (cid:15)0−1 eral domain D. Suppose Γ = argmin((cid:15)S , δS ) and denote (cid:15)∗ ((cid:15)0−1
+T
+D , δD). Moreover, it is not practical to ﬁnd all elements in argmin((cid:15)0−1
+D on a gen-S = inf h∈Γ (cid:15)S (h),
+T = inf h∈Γ (cid:15)T (h), (cid:15)∗
+)∗ = inf h∈H (cid:15)0−1
+T
+T − ((cid:15)S (h) − (cid:15)∗
+S ) ≤ δ, (8) (h). If the following holds: (cid:15)T (h) − (cid:15)∗
+TΓ(S(cid:107)T ) = sup h∈Γ then we have argmin((cid:15)S , δS ) ⊆ argmin((cid:15)0−1
+T
+, δ + δS + (cid:15)∗
+T − ((cid:15)0−1
+T
+)∗).
+This proposition implies that if the transfer measure is small, then a near-optimal classiﬁer of the surrogate loss in the source domain would be near-optimal in the target domain for the 0-1 loss. It also gives us a practical framework to guarantee transferability, which we will discuss in more depth in Section 4. Assume (cid:15)D : H → R to be Lipschitz continuous and strongly convex, which is satisﬁed for the cross entropy loss (see Appendix B.4). We are able to translate the δ-minimal set to Lp balls in the function space:
+C1(cid:107)h − h∗(cid:107)2,D ≤ (cid:15)D(h) − (cid:15)D(h∗) ≤ C2(cid:107)h − h∗(cid:107)1,D, (9) where C1 and C2 are absolute constants and h∗ is an optimal classiﬁer. The function norms (cid:107) · (cid:107)1,D and (cid:107) · (cid:107)2,D are the usual Lp norms over distribution D. Since the classiﬁer h = q(θ, ·) is usually parameterized with, say a neural network, we further upper bound the function norms by the distance of parameters, that is, for 1 ≤ p < ∞, h = q(θ, ·) and h(cid:48) = q(θ(cid:48), ·), we have (cid:107)h − h(cid:48)(cid:107)p,D ≤
+L(cid:107)θ − θ(cid:48)(cid:107)2, with L some Lipschitz constant of q (Appendix B.4). Combined with (9), we obtain: (cid:15)D(h) − (cid:15)D(h(cid:48)) ≤ LC2(cid:107)θ − θ(cid:48)(cid:107)2.
+In other words, if the parameters are close enough, then the losses should not differ too much. We denote (cid:107) · (cid:107)2 as the Euclidean norm, and for later convenience we will omit the subscript in (cid:107) · (cid:107)2. (10) 4 Algorithms for Evaluating and Improving Transferability
+The notion of transferability is deﬁned w.r.t. domains, hence by learning feature embeddings that induce certain feature distributions, one can aim to improve transferability of two given domains. In this section we design algorithms to evaluate and improve transferability by learning such transforma-tions. To start with, let g : X → Z be a feature embedding (a.k.a. featurizer), where Z is understood to be a feature space. By a joint distribution Dg (or S g, T g) we mean a distribution on g(X ) × Y.
+Formally, we are dealing with push-forwards of distributions:
+S g := (g, id)#S, T g := (g, id)#T , (11) where (g, id) : (x, y) (cid:55)→ (g(x), y) is a function on X × Y. S and T here are joint distributions on
+X × Y, and here we specify X to be the space of the original signal such as an image. Since S and
+T cannot be changed, what we are evaluating here is the feature embedding g. The key quantity is transfer measures as in (8):
+TΓ(S g(cid:107)T g) = sup h∈Γ (cid:15)T g (h) − (cid:15)∗
+T g − ((cid:15)S g (h) − (cid:15)∗
+S g ), Γ = argmin((cid:15)S g , δS g ). (12) 6
+Although Γ is hard to compute, we can use (10) to obtain a lower bound of (12). That is, given a parametrization of the classiﬁer h = q(θ, ·) and the optimal classiﬁer h∗ = q(θ∗, ·), we have:
+TΓ(S g(cid:107)T g) ≥ sup (cid:107)θ−θ∗(cid:107)≤δ (cid:15)T g (h) − (cid:15)S g (h) − (cid:15)∗
+T g + (cid:15)∗
+S g
+≥ sup (cid:107)θ−θ∗(cid:107)≤δ (cid:15)T g (h) − (cid:15)S g (h) − (cid:15)T g ((cid:99)h∗)
+≈ sup (cid:15)T g (h) − (cid:15)S g (h) − (cid:15)T g ((cid:99)h∗) (13) (cid:107)θ−(cid:99)θ∗(cid:107)≤δ where δ > 0 depends on Γ and the constant in (10). In the second and the third lines, we approximated the optimal errors (cid:15)∗
+T g ≤ (cid:15)T g ((cid:99)h∗), and we use the learned classiﬁer (cid:99)h∗ = q( (cid:98)θ∗, ·) as a surrogate for the optimal classiﬁer. As a result, if the r.h.s. of (13) is large, then S g is not quite transferable to T g.
+S g ≤ (cid:15)S g ((cid:99)h∗), 0 ≤ (cid:15)∗
+S g with 0 ≤ (cid:15)∗
+T g and (cid:15)∗
+Algorithm 1: Algorithm for evaluating transferability among multiple domains
+Input: learned feature embedding g, learned classiﬁer (cid:99)h∗ = q( (cid:98)θ∗, ·), target sample training set
+T = S0, sample training sets S1, . . . , Sn, ascent optimizer, minimal errors (cid:15)∗
+Si adversarial radius δ
+Initialize: a classiﬁer h = q(θ, ·) and θ = (cid:98)θ∗, gap = −∞ for t in 1 . . . T do
+≈ (cid:15)Si((cid:99)h∗),
+Find maxi (cid:15)Si(h ◦ g) and mini (cid:15)Si(h ◦ g) and corresponding indices j and k
+Run an ascent optimizer on h to maximize gap0 = (cid:15)Sj (h ◦ g) − (cid:15)Sk (h ◦ g)
+Project θ onto the Euclidean ball (cid:107)θ − (cid:98)θ∗(cid:107) ≤ δ if gap0 > gap then gap = gap0, save accuracies and losses of each domain
+Output: j, k, h, (cid:15)Sj (h ◦ g) − (cid:15)Sk (h ◦ g), (cid:15)Sj ((cid:99)h∗), (cid:15)Sk ((cid:99)h∗)
+We can thus design an algorithm to evaluate the transferability in Section 4.1. By computing the lower bound in (13), we can disprove the transferability as in Prop. 5 and Prop. 11. Computing the lower bound in (13) can be regarded as an attack method: there is an adversary trying to show that S g is not transferable to T g. For this attack, we could also design a defence method aiming to minimize the lower bound and learn more transferable features. 4.1 Algorithm for evaluating transferability
+In domain generalization we have one target domain and more than one source domains. To ease the presentation, we denote S0 = T (and thus S g 0 = T g) and extend the index set to be {0, 1, · · · , n}. i and S g
+We need to evaluate the transferability (13) between all pairs of S g j . Algorithm 1 gives an (h) among all pairs of (h) − (cid:15)S g efﬁcient method to compute the worst-case gap sup(cid:107)θ−(cid:99)θ∗(cid:107)≤δ (cid:15)S g (i, j). Essentially, it ﬁnds the worst pair of (i, j) at each step such that the gap (cid:15)S g (h) takes the largest value, and then maximize this gap over parameter θ through gradient ascent. (h) − (cid:15)S g j j i i
+Note that the computation of (13) also depends on the information from the target domain. This is valid since we are only evaluating but not training over these domains. 4.2 Algorithm for improving transferability i , S g
+The evaluation sub-procedure provides us a way to pick a pair of non-transferable domains (S g j ), which in turn could be used to improve the transferability among all source domains by updating the feature embedding g such that the gap sup(cid:107)θ−θ∗(cid:107)≤δ (cid:15)S g (h) for (i, j) ∈ [n] × [n].
+Simultaneously, we also require that the feature embedding g preserves information for the target task of interest. With the parametrization h = q(θ, ·), h(cid:48) = q(θ(cid:48), ·), the overall optimization problem can be formulated as: (h) − (cid:15)S g j i min g,h max (cid:107)θ(cid:48)−θ(cid:107)≤δ 1 n n (cid:88) i=1 (cid:15)Si (h ◦ g) + (cid:0)maxi(cid:15)Si (h(cid:48) ◦ g) − mini(cid:15)Si (h(cid:48) ◦ g)(cid:1) . (14) 7
+Intuitively, we want to learn a common feature embedding and a classiﬁer such that all source errors are small and the pairwise transferability between source domains is also small. If the optimization problem is properly solved, then we have the following guarantee:
+Theorem 12 (optimization guarantee). Assume that the function q(·, x) is Lθ Lipschitz continuous for any x. Suppose we have learned a feature embedding g and a classiﬁer h such that the loss functional (cid:15)S g
+: H → R is L(cid:96) Lipschitz continuous w.r.t. distribution S g i for i ∈ [n] and i max (cid:107)θ(cid:48)−θ(cid:107)≤δ 1 n n (cid:88) i=1 (cid:15)Si (h ◦ g) + (cid:0)maxi(cid:15)Si (h(cid:48) ◦ g) − mini(cid:15)Si (h(cid:48) ◦ g)(cid:1) ≤ η, (15) where θ, θ(cid:48) are parameters of h and h(cid:48). Then for any h(cid:48) ∈ Γ = {q(θ(cid:48), ·) : (cid:107)θ − θ(cid:48)(cid:107) ≤ δ}, we have:
+Γ(T g
+Tr 1 , T g 1 , T g (cid:15)Si 2 ) ≤ η, 2 , T g ∈ conv(S g 1 , . . . , S g for any T g n) and any i ∈ [n]. (h(cid:48) ◦ g) ≤ η + L(cid:96)Lθδ, (cid:15)T (h(cid:48) ◦ g) ≤ 2η + L(cid:96)Lθδ, (16) i
+The Lipschitzness assumption for (cid:15)S g is mild and can be satisﬁed for cross entropy loss (c.f. Ap-pendix B.4.1). Here conv(·) denotes the convex hull in the same sense as Albuquerque et al. [2], i.e., each element is a mixture of source distributions. Thm 12 tells us that if we can solve the optimization problem (14) properly, we can guarantee transferability on a neighborhood of the classiﬁer, as an approximation of the δ-minimal set. We thus propose Algorithm 2, which shares similarity with exist-ing frameworks, such as DANN [16] and Distributional Robust Optimization [43, 45], in the sense that they all involve adversarial training and minimax optimization. However, the objective in our case is different and we provide a more detailed comparison with existing methods in Appendix B.5.
+Algorithm 2: Transfer algorithm for domain generalization
+Input: samples sets of source domains S1, . . . , Sn, feature embedding g, classiﬁer h = q(θ, ·), adversarial classiﬁer h(cid:48) = q(θ(cid:48), ·), surrogate loss (cid:15)D, adversarial radius δ, ascent optimizer, descent optimizer, weight parameter λ, number of epochs T for t in 1 . . . T do
+Compute maxi (cid:15)Si (h ◦ g) and mini (cid:15)Si(h ◦ g)
+Initialization h(cid:48) = h (or θ(cid:48) = θ) for k in 1 . . . N do
+Run the ascent optimizer on h(cid:48) to maximize maxi (cid:15)Si(h(cid:48) ◦ g) − mini (cid:15)Si(h(cid:48) ◦ g) ﬁxing g
+Project θ(cid:48) onto the Euclidean ball (cid:107)θ(cid:48) − θ(cid:107) ≤ δ
+Fixing h(cid:48), run the descent optimizer on g, h to minimize error = 1 n i (cid:15)Si(h ◦ g) + (maxi (cid:15)Si(h(cid:48) ◦ g) − mini (cid:15)Si(h(cid:48) ◦ g)) (cid:80)
+Output: feature embedding g, classiﬁer h 5 Experiments
+Gulrajani and Lopez-Paz [20] did extensive experiments on comparing DG algorithms, using the same neural architecture and data split. Speciﬁcally, they show that with data augmentation, ERM perform relatively well among a large array of algorithms. Our experiments are based on their settings. We run Algorithm 1 on standard benchmarks, including RotatedMNIST [18], PACS [28], Ofﬁce-Home
+[51] and WILDS-FMoW [23] (c.f. Appendix C.1). Speciﬁcally, WILDS-FMoW is a large dataset with nearly half a million images. Detailed experimental settings can be seen at Appendix C.
+Evaluating transferability
+From Figure 3 it can be seen that at a neighborhood of the learned classiﬁer, there exists a classiﬁer such that the target accuracy is degraded signiﬁcantly, whereas some source domain still has high accuracy. This poses questions to whether current popular algorithms such as ERM [50], DANN [17] and Mixup [53, 54] are really learning invariant and transferable features. If so, the target accuracy should be high given a high source accuracy. However, for the
+PACS dataset and Mixup model (the second column of Figure 3), the target accuracy decreases by more than 30% while the source accuracy remains roughly at the same level. We can also, e.g., read from the ﬁrst column that with a small decrease of the source (test) accuracy by ∼ 2% (at δ = 2), the target accuracy of DANN drops by ∼ 10%. 8
+Figure 3: Top row: test accuracy of the target domain; bottom row: test accuracy of one of the source domains. Each column is for a given dataset with the name in the middle, and the legends on the bottom row are the same as those on the top row. δ is the parameter in Algorithm 1.
+From Figure 3 we can also see that Correlation Alignment [CORAL, 47] and Spectral Decomposition
+[SD, 40] have better transferability that other algorithms. In some sense, they are in fact learning robust classiﬁers, i.e., all the classiﬁers on the neighborhood of the learned classiﬁer can achieve good accuracies. With this robust classiﬁer, the target accuracy does not decrease much even if the classiﬁer is perturbed.
+Improving transferability
+Algorithm 2 has good performance among all four datasets that we tried, comparable to CORAL and SD. Note that CORAL and SD do not always perform well, such as in the Ofﬁce-Home and WILDS-FMoW datasets, but our Transfer algorithm does. However, in our experiments we ﬁnd there are two limitations of Algorithm 2: (1) we need a large number of inner maximization steps to compute the gap, which needs more training time. This is similar to adversarial robustness [33] which is slower than usual training. In order to overcome this difﬁculty we used pretraining from other algorithms in the experiments on Ofﬁce-Home and WILDS-FMoW; (2) Moderate hyper-parameter tuning is needed. For example, we need to tune N is Algorithm 2, the learning rate (lr) of SGA and the choice of δ. We ﬁnd that taking N = 20 or 30 is usually a good choice, and δ can be quite large such that the projection step is not taken. We take lr = 0.01 for
+RotatedMNIST and lr = 0.001 for other datasets.
+In order to show the difference with the well-known H-divergence [8], we compute the
+Label shift label shifts in the PACS dataset. As shown in Zhao et al. [59], the optimal joint error (cid:15)S (h∗) + (cid:15)S (h∗) (h∗ is the optimal classiﬁer that minimizes (cid:15)S (h) + (cid:15)T (h)) can be large under the shift of label distributions. We follow [59] and compute the label shift between pairs of domains in the PACS dataset, measured by total variation. From Table 1 we can see that the label shift is large in this case, and thus the H-divergence bound [8] can be quite loose. Comparably, our transfer measure bound
+Prop. 3 is tighter (c.f. Prop. 27) and therefore still useful in practice.
+Table 1: Label shift between pairs of domains in the PACS dataset. TV: total variation; A: art painting; C: cartoon; P: photo; S: sketch. The total variation is always between zero and one.
+TV
+A
+A
+C
+P
+S 0.0 0.12 0.11 0.3
+C 0.12 0.0 0.18 0.24
+P 0.11 0.18 0.0 0.37
+S 0.3 0.24 0.37 0.0 9
+6

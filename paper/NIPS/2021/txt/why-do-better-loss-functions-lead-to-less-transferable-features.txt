@@ -1,0 +1,213 @@
+Abstract
+Previous work has proposed many new loss functions and regularizers that improve test accuracy on image classiﬁcation tasks. However, it is not clear whether these loss functions learn better representations for downstream tasks. This paper studies how the choice of training objective affects the transferability of the hidden repre-sentations of convolutional neural networks trained on ImageNet. We show that many objectives lead to statistically signiﬁcant improvements in ImageNet accu-racy over vanilla softmax cross-entropy, but the resulting ﬁxed feature extractors transfer substantially worse to downstream tasks, and the choice of loss has little effect when networks are fully ﬁne-tuned on the new tasks. Using centered kernel alignment to measure similarity between hidden representations of networks, we
+ﬁnd that differences among loss functions are apparent only in the last few layers of the network. We delve deeper into representations of the penultimate layer, ﬁnding that different objectives and hyperparameter combinations lead to dramatically different levels of class separation. Representations with higher class separation obtain higher accuracy on the original task, but their features are less useful for downstream tasks. Our results suggest there exists a trade-off between learning invariant features for the original task and features relevant for transfer tasks. 1
+
+Introduction
+Features learned by deep neural networks on ImageNet transfer effectively to a wide range of computer vision tasks [23, 60, 34]. These networks are often pretrained using vanilla softmax cross-entropy [10, 11], but recent work reports that other loss functions such as label smoothing [66] and sigmoid cross-entropy [8] outperform softmax cross-entropy on ImageNet. Although a previous investigation suggested that label smoothing and dropout can hurt transfer learning [34], the vast majority of work studying alternatives to softmax cross-entropy has restricted its empirical investigation to the accuracy of the trained networks on the original dataset. While it is valuable to study the impact of objective functions on classiﬁcation accuracy, improving transfer accuracy of learned representations can have a more signiﬁcant practical impact for many applications.
+This paper takes a comparative approach to understand the effects of different training objectives for image classiﬁcation through the lens of neural network representations and their transferability.
+We carefully tune hyperparameters of each loss function and conﬁrm that several loss functions outperform softmax cross-entropy by a statistically signiﬁcant margin on ImageNet. However, we
+ﬁnd that these improvements do not transfer to other tasks (see Table 1 and Figure 1). We delve deeper and explain these empirical ﬁndings in terms of effects of different objectives on neural network representations. Our key ﬁndings are as follows:
+• We analyze the performance of 9 different objectives on ImageNet and in transfer settings. Although many loss functions and regularizers lead to statistically signiﬁcant improvements over vanilla
+∗Correspondence to: skornblith@google.com
+†Work performed while at Google. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+softmax cross-entropy on ImageNet, these gains do not transfer. These alternative loss functions produce ﬁxed feature extractors that transfer substantially worse to other tasks, in terms of both linear and k-nearest neighbors classiﬁcation accuracy, and provide no beneﬁt when representations are fully ﬁne-tuned.
+• The choice of objective primarily affects representations in network layers close to the output.
+Centered kernel alignment (CKA) reveals large differences in representations of the last few layers of the network, whereas earlier layers are similar regardless of which training objective is used.
+This helps explain why the choice of objective has little impact on ﬁne-tuning transfer accuracy.
+• All objectives that improve accuracy over softmax cross-entropy also lead to greater separation between representations of different classes in the penultimate layer features. These alternative objectives appear to collapse within-class variability in representations, which accounts for both the improvement in accuracy on the original task and the reduction in the quality of the features on downstream tasks. 2 Loss Functions and Output Layer Regularizers
+We investigate 9 loss functions and output layer regularizers. Let z ∈ RK denote the network’s output (“logit”) vector, and let t ∈ {0, 1}K denote a one-hot vector of targets. Let x ∈ RM denote the vector of penultimate layer activations, which gives rise to the output vector as z = W x + b, where W ∈ RK×M is the matrix of ﬁnal layer weights, and b is a vector of biases.
+All investigated loss functions include a term that encourages z to have a high dot product with t.
+To avoid solutions that make this dot product large simply by increasing the scale of z, these loss functions must also include one or more contractive terms and/or normalize z. Many “regularizers” correspond to additional contractive terms added to the loss, so we do not draw a ﬁrm distinction between loss functions and regularizers. We describe each objective in detail below, and provide hyperparameters in Appendix A.1.
+Softmax cross-entropy [10, 11] is the de facto loss function for multi-class classiﬁcation in deep learning:
+Lsoftmax(z, t) = − tk log
+K
+K
+= − tkzk + log
+K ezk . (1) ezk
+K j=1 ezj !
+Xk=1
+Xk=1
+Xk=1
+The loss consists of a term that maximizes the dot product between the logits and targets, as well as a contractive term that minimizes the LogSumExp of the logits.
+P
+Label smoothing [66] “smooths” the targets for softmax cross-entropy. The new targets are given by mixing the original targets with a uniform distribution over all labels, t′ = t × (1 − α) + α/K, where
+α determines the weighting of the original and uniform targets. In order to maintain the same scale for the gradient with respect to the positive logit, in our experiments, we scale the label smoothing loss by 1/(1 − α). The resulting loss is:
+Lsmooth(z, t; α) = − 1 1 − α
+K (1 − α)tk +
+Xk=1 (cid:16) log
+α
+K (cid:17) ezk
+K j=1 ezj ! (2)
+Müller et al. [43] previously showed that label smoothing improves calibration and encourages class centroids to lie at the vertices of a regular simplex.
+P
+Dropout on penultimate layer: Dropout [64] is among the most prominent regularizers in the deep learning literature. We consider dropout applied to the penultimate layer of the neural network, i.e., when inputs to the ﬁnal layer are randomly kept with some probability ρ. When employing dropout, we replace the penultimate layer activations x with ˜x = x ⊙ ξ/ρ where ξi ∼ Bernoulli(ρ). Writing the dropped out logits as ˜z = W ˜x + b, the dropout loss is:
+K
+K
+Ldropout(W , b, x, t; p) = Eξ [Lsoftmax( ˜z, t)] = − tkzk + Eξ
+Xk=1 log
+"
+Xk=1 e˜zk
+.
+# (3)
+Dropout produces both implicit regularization, by introducing noise into the optimization process [75], and explicit regularization, by changing the parameters that minimize the loss [69]. 2    
+Extra ﬁnal layer L2 regularization: It is common to place the same L2 regularization on the ﬁnal layer as elsewhere in the network. However, we ﬁnd that applying greater L2 regularization to the
+ﬁnal layer can improve performance. The corresponding loss is:
+Lextra_l2(W , z, t; λﬁnal) = Lsoftmax(z, t) + λﬁnalkW k2
+F. (4)
+In architectures with batch normalization, adding additional L2 regularization has no explicit regu-larizing effect if the learnable scale (γ) parameters are unregularized, but it still exerts an implicit regularizing effect by altering optimization.
+Logit penalty: Whereas label smoothing encourages logits not to be too negative, and dropout imposes a penalty on the logits that depends on the covariance of the weights, an alternative possibility is simply to explicitly constrain logits to be small in L2 norm:
+Llogit_penalty(z, t; β) = Lsoftmax(z, t) + βkzk2.
+Dauphin and Cubuk [19] showed that this regularizer yields accuracy improvements comparable to dropout.
+Logit normalization: We consider the use of L2 normalization, rather than regularization, of the logits. Because the entropy of the output of the softmax function depends on the scale of the logits, which is lost after normalization, we introduce an additional temperature parameter τ that controls the magnitude of the logit vector, and thus, indirectly, the minimum entropy of the output distribution: (5)
+Llogit_norm(z, t; τ ) = Lsoftmax(z/(τ kzk), t) = − 1
+τ kzk
+K
+K tkzk + log ezk/(τ kzk). (6)
+Xk=1
+Xk=1
+Cosine softmax: We additionally consider L2 normalization of both the penultimate layer features and the ﬁnal layer weights corresponding to each class. This loss is equivalent to softmax cross-entropy loss if the logits are given by cosine similarity sim(x, y) = xTy/(kxkkyk) between the weight vector and the penultimate layer plus a per-class bias:
+Lcos(W , b, x, t; τ ) = − tk (sim(Wk,:, x)/τ + bk) + log esim(Wk,:,x)/τ +bk , (7)
+K
+K
+Xk=1
+Xk=1 where τ is a temperature parameter as above. Similar losses have appeared in previous literature [54, 71, 76, 72, 73, 21, 38, 15], and variants have introduced explicit additive or multiplicative margins to this loss that we do not consider here [38, 72, 73, 21]. We observe that, even without an explicit margin, manipulating the temperature has a large impact on observed class separation.
+Sigmoid cross-entropy, also known as binary cross-entropy, is the natural analog to softmax cross-entropy for multi-label classiﬁcation problems. Although we investigate only single-label multi-class classiﬁcation tasks, we train networks with sigmoid cross-entropy and evaluate accuracy by ranking the logits of the sigmoids. This approach is related to the one-versus-rest strategy for converting binary classiﬁers to multi-class classiﬁers. The sigmoid cross-entropy loss is:
+Lsce(z, t) = −
+K k=1 tk log
+= −
+P (cid:16)
+K k=1 tkzk + (cid:16)
++ (1 − tk) log ezk ezk +1
+K k=1 log(ezk + 1). (cid:17) 1 − ezk ezk +1 (cid:16) (cid:17) (cid:17) (8)
+The LogSumExp term of softmax loss is replaced with the sum of the softplus-transformed log-its. We initialize the biases of the logits b to − log(K) so that the initial output probabilities are approximately 1/K. Beyer et al. [8] have previously shown that sigmoid cross-entropy loss leads to improved accuracy on ImageNet relative to softmax cross-entropy.
+P
+P
+Squared error: Finally, we investigate squared error loss, as formulated by Hui and Belkin [30]:
+Lmse(z, t; κ, M ) = 1
+K
+K
+κtk(zk − M )2 + (1 − tk)z2 k
+, (9)
+Xk=1 (cid:0) (cid:1) where κ and M are hyperparameters. κ sets the strength of the loss for the correct class relative to incorrect classes, whereas M controls the magnitude of the correct class target. When κ = M = 1, the loss is simply the mean squared error between z and t. Like Hui and Belkin [30], we ﬁnd that placing greater weight on the correct class slightly improves ImageNet accuracy. 3
+3 Results
+For each loss, we trained 8 ResNet-50 [29, 27] models on the ImageNet ILSVRC 2012 dataset [20, 57].
+To tune loss hyperparameters and the epoch for early stopping, we performed 3 training runs per hyperparameter conﬁguration where we held out a validation set of 50,046 ImageNet training examples. We provide further details regarding the experimental setup in Appendix A. We also conﬁrm that our main ﬁndings hold for Inception v3 [66] models in Appendix B. 3.1 Better objectives improve accuracy, but do not transfer better
+Table 1: Objectives that produce higher ImageNet accuracy lead to less transferable ﬁxed features. “Im-ageNet” columns reﬂect accuracy of ResNet-50 models on the ImageNet validation set. “Transfer” columns reﬂect accuracy of L2-regularized multinomial logistic regression or k-nearest neighbors classiﬁers trained to classify different transfer datasets using the ﬁxed penultimate layer features of the ImageNet-trained networks.
+Numbers are averaged over 8 different pretraining runs; values not signiﬁcantly different than the best are bold-faced (p < 0.05, t-test). The strength of L2 regularization is selected on a holdout set, and k is selected using leave-one-out cross-validation on the training set. See Appendix Table B.1 for a similar table for Inception v3 models, Appendix D.2 for linear transfer accuracy evaluated at different epochs of ImageNet pretraining, and
+Appendix D.3 for similar ﬁndings on the Chexpert chest X-ray dataset [31].
+ImageNet
+Transfer
+Pretraining loss
+Top-1 Top-5 Food CIFAR10 CIFAR100 Birdsnap SUN397 Cars Pets Flowers
+Linear transfer:
+Softmax
+Label smoothing
+Sigmoid
+More ﬁnal layer L2
+Dropout
+Logit penalty
+Logit normalization
+Cosine softmax
+Squared error
+K-nearest neighbors:
+Softmax
+Label smoothing
+Sigmoid
+More ﬁnal layer L2
+Dropout
+Logit penalty
+Logit normalization
+Cosine softmax
+Squared error 77.0 77.6 77.9 77.7 77.5 77.7 77.8 77.9 77.2 77.0 77.6 77.9 77.7 77.5 77.7 77.8 77.9 77.2 93.40 93.78 93.50 93.79 93.62 93.83 93.71 93.86 92.79 93.40 93.78 93.50 93.79 93.62 93.83 93.71 93.86 92.79 74.6 72.7 73.4 70.6 72.6 68.1 66.3 62.0 39.8 60.9 59.2 58.5 55.0 58.4 52.5 50.9 45.5 27.7 92.4 91.6 91.7 91.0 91.4 90.2 90.5 89.9 82.2 88.8 88.3 88.2 87.7 88.2 86.5 86.6 86.0 74.5 76.9 75.2 75.7 73.7 75.0 72.3 72.9 71.3 56.3 67.4 66.3 66.6 65.0 66.4 62.9 63.1 61.5 44.3 55.4 53.6 52.3 51.5 53.6 48.1 50.7 45.4 21.8 38.4 39.2 34.4 36.2 38.1 31.0 35.1 28.8 13.8 62.0 61.6 62.0 60.1 61.2 59.0 58.1 55.0 39.9 53.0 53.5 52.8 51.1 52.4 49.3 45.8 41.8 28.6 60.3 92.0 54.8 92.9 92.5 56.1 50.3 92.4 54.7 92.6 92.3 48.3 92.0 45.4 91.1 36.7 84.7 15.3 28.9 27.3 26.7 24.4 27.8 22.4 24.1 19.0 9.1 88.8 91.5 90.8 90.9 91.1 90.8 88.2 87.0 82.6 94.0 91.9 92.9 89.8 92.1 86.6 82.9 75.3 46.7 83.6 80.3 81.5 75.6 80.1 68.1 63.1 52.7 28.2
+We found that, when properly tuned, all investigated objectives ex-cept squared error provide a statistically signiﬁcant improvement over softmax cross-entropy, as shown in the left two columns of
+Table 1. The gains are small but meaningful, with sigmoid cross-entropy and cosine softmax both leading to an improvement of 0.9% in top-1 accuracy over the baseline. For further discussion of differences in the training curves, robustness, calibration, and predictions of these models, see Appendix C.
+Although networks trained with softmax cross-entropy attain lower ImageNet top-1 accuracy than any other loss function, they nonetheless provide the most transferable features. We evaluated the transferability of the ﬁxed features of our ImageNet-pretrained models by training linear or k-nearest neighbors (kNN) classi-ﬁers to classify 8 different natural image datasets: Food-101 [9],
+CIFAR-10 and CIFAR-100 [36], Birdsnap [6], SUN397 [77],
+Stanford Cars [35], Oxford-IIIT Pets [51], and Oxford Flow-ers [48]. The results of these experiments are shown in Table 1 and Figure 1. In both linear and kNN settings, representations learned with vanilla softmax cross-entropy perform best for most tasks.
+Figure 1: Higher ImageNet accu-racy is not associated with higher linear transfer accuracy. Points represent training runs.
+See Appendix Figure D.1 for simi-lar plots for individual datasets. individual 4
+Table 2: The training objective has little impact on the performance of ﬁne-tuned networks. Accuracy of
+ﬁne-tuning pretrained networks on transfer datasets, averaged over 3 different pretraining initializations. We tune hyperparameters separately for each objective and dataset. Numbers not signiﬁcantly different than the best are bold-faced (p < 0.05, t-test for individual datasets, two-way ANOVA for average). See Appendix A.3 for training details.
+Pretraining loss
+Food CIFAR10 CIFAR100 Birdsnap SUN397 Cars Pets Flowers Avg.
+Softmax
+Label smoothing
+Sigmoid
+More ﬁnal layer L2
+Dropout
+Logit penalty
+Logit normalization
+Cosine softmax
+Squared error 88.2 88.3 88.3 88.1 88.3 88.4 87.9 88.3 87.8 96.9 96.7 96.9 96.9 96.7 96.9 96.9 96.9 96.9 84.1 84.0 83.6 84.4 84.2 83.9 82.9 83.2 84.0 76.2 76.3 76.2 75.9 76.5 76.4 76.0 75.6 75.7 63.4 91.3 93.1 63.6 91.2 93.7 63.5 91.8 93.7 64.5 91.5 93.8 63.9 91.2 93.9 63.3 91.2 93.4 58.3 91.2 92.7 56.9 91.3 92.5 61.0 91.4 93.0 96.7 96.3 96.3 96.2 96.3 96.0 95.9 95.9 95.2 86.2 86.3 86.3 86.4 86.4 86.2 85.2 85.1 85.6
+As shown in Table 2, when networks are fully ﬁne-tuned on downstream tasks, the pretraining objective has little effect on the resulting accuracy. When averaging across all tasks, the best loss provides only a 0.2% improvement over softmax cross-entropy, which does not reach statistical signiﬁcance and is much smaller than the 0.9% difference in ImageNet top-1 accuracy. Thus, using a different loss function for pretraining can improve accuracy on the pretraining task, but this improvement does not appear to transfer to downstream tasks. 3.2 The choice of objective primarily affects hidden representations close to the output
+Our observation that “improved” objectives improve only on ImageNet and not on transfer tasks raises questions about which representations, exactly, they affect. We use two tools to investigate differences in the hidden representations of networks trained with different loss functions. First, we use centered kernel alignment [33, 17, 18] to directly measure the similarity of hidden representations across networks trained with different loss functions. Second, we measure the sparsity of the ReLU activations in each layer. Both analyses suggest that all loss functions learn similar representations throughout the majority of the network, and differences are present only in the last few ResNet blocks.
+Linear centered kernel alignment (CKA) provides a way to measure similarity of neural network representations that is invariant to rotation and isotropic scaling in representation space [33, 17, 18]. Unlike other ways of measuring representational similarity between neural networks, linear
+CKA can identify architectural correspondences between layers of networks trained from different initializations [33], a prerequisite for comparing networks trained with different objectives. Given two matrices X ∈ Rn×p1 and Y ∈ Rn×p2 containing activations to the same n examples, linear CKA computes the cosine similarity between the reshaped n × n covariance matrices between examples:
+CKAlinear(X, Y ) = vec(cov(X)) · vec(cov(Y )) kcov(X)kFkcov(Y )kF
+. (10)
+We measured CKA between all possible pairings of ResNet blocks from 18 networks (2 different initializations for each objective). To reduce memory requirements, we used minibatch CKA [47] with minibatches of size 1500 and processed the ImageNet validation set for 10 epochs.
+As shown in Figure 2, representations of the majority of network layers are highly similar regardless of loss function, but late layers differ substantially. Figure 2a shows similarity between all pairs of blocks from pairs of networks, where one network is trained with vanilla softmax cross-entropy and the other is trained with either softmax or a different loss function. The diagonals of these plots indicate the similarity between architecturally corresponding layers. For all network pairs, the diagonals are stronger than the off-diagonals, indicating that architecturally corresponding layers are more similar than non-corresponding layers. However, in the last few layers of the network, the diagonals are substantially brighter when both networks are trained with softmax than when the second network is trained with a different loss, indicating representational differences in these layers. Figure 2b shows similarity of representations among all loss functions for a subset of blocks.
+Consistent differences among loss functions are present only in the last third of the network, starting around block 13. 5
+Figure 2: The choice of loss function affects representations only in later network layers. All plots show linear centered kernel alignment (CKA) between representations computed on the ImageNet validation set. a: CKA between network layers, for pairs of ResNet-50 models trained from different initializations with different losses. As controls, the top-right plot shows CKA between two networks trained with softmax, and the bottom-right plot shows CKA between a model trained with softmax loss and a model at initialization where batch norm moments have been computed on the training set. b: CKA between representations extracted from corresponding layers of networks trained with different loss functions. Diagonal reﬂects similarity of networks with the same loss function trained from different initalizations. See Appendix Figure B.1 for a similar ﬁgure for
+Inception v3 models.
+Figure 3: Loss functions affect sparsity of later layer representations. Plot shows the average % non-zero activations for each ResNet-50 block, after the residual connection and subsequent nonlinearity, on the ImageNet validation set. Dashed lines indicate boundaries between stages.
+The sparsity of activations reveals a similar pattern of layer-wise differences between networks trained with different loss functions. Figure 3 shows the proportion of non-zero activations in different layers.
+In all networks, the percentage of non-zero ReLU activations decreases with depth, attaining its minimum at the last convolutional layer. In the ﬁrst three ResNet stages, activation sparsity is broadly similar regardless of the loss. However, in the ﬁnal stage and penultimate average pooling layer, the 6
+Table 3: Regularization and alternative losses im-prove class separation in the penultimate layer. Re-sults are averaged over 8 ResNet-50 models per loss on the ImageNet training set.
+Loss/regularizer
+Softmax
+Label smooth.
+Sigmoid
+Extra L2
+Dropout
+Logit penalty
+Logit norm
+Cosine softmax
+Squared error
+ImageNet top-1 Class sep. (R2) 77.0 ± 0.06 0.349 ± 0.0002 77.6 ± 0.03 0.420 ± 0.0003 77.9 ± 0.05 0.427 ± 0.0003 77.7 ± 0.03 0.572 ± 0.0006 77.5 ± 0.04 0.461 ± 0.0003 77.7 ± 0.04 0.601 ± 0.0004 77.8 ± 0.02 0.517 ± 0.0002 77.9 ± 0.02 0.641 ± 0.0003 77.2 ± 0.04 0.845 ± 0.0002
+Figure 4: Class separation in different layers of ResNet-50, averaged over 8 models per loss on the ImageNet training set. For convolutional layers, we compute co-sine distances by ﬂattening the representations of exam-ples across spatial dimensions. degree of sparsity depends greatly on the loss. Penultimate layer representations of vanilla softmax networks are the least sparse, with 92.8% non-zero activations. Logit normalization, cosine softmax, and squared error all result in much sparser (<25% non-zero) activations.
+These results immediately suggest an explanation for the limited effect of the training objective on networks’ ﬁne-tuning performance. We observe differences among objectives only in later network layers, but previous work has found that these layers change substantially during ﬁne-tuning [79, 53, 46], an observation we replicate in Appendix D.4. Thus, the choice of training objective appears to affect parts of the network that are speciﬁc to the pretraining task, and do not transfer when the network is ﬁne-tuned on other tasks. 3.3 Regularization and alternative losses increase class separation
+The previous section suggests that different loss functions learn very different penultimate layer representations, even when their overall accuracy is similar. However, as shown in Appendix C.4, combining different losses and penultimate layer regularizers provides no accuracy improvements over training with only one, suggesting that they share similar mechanisms. In this section, we demonstrate that a simple property of networks’ penultimate layer representations can explain their beneﬁcial effect on accuracy relative to vanilla softmax cross-entropy, as well as their harmful effect on ﬁxed features. Speciﬁcally, compared to vanilla softmax cross-entropy, all investigated losses cause the network to reduce the relative within-class variance in the penultimate layer representation space. This reduction in within-class variance corresponds to increased separation between classes, and is harmful to linear transfer.
+The ratio of the average within-class cosine distance to the overall average cosine distance measures the dispersion of representations of examples belonging to the same class relative to the overall dispersion of embeddings. We take one minus this quantity to get a closed-form index of class separation that is between 0 and 1:
+R2 = 1 − ¯dwithin/ ¯dtotal (11)
+¯dwithin =
+K
+Nk
+Nk
+Xk=1 m=1
+X n=1
+X 1 − sim(xk,m, xk,n)
+KN 2 k
+,
+¯dtotal =
+K
+K
+Nj
+Nk j=1
+X
+Xk=1 m=1
+X n=1
+X 1 − sim(xj,m, xk,n)
+K 2NjNk where xk,m is the embedding of example m in class k ∈ {1, . . . , K}, Nk is the number of examples in class k, and sim(x, y) = xTy/(kxkkyk) is cosine similarity between vectors. As we show in
+Appendix E.1, if the embeddings are ﬁrst L2 normalized, then 1 − R2 is the ratio of the average within-class variance to the weighted total variance, where the weights are inversely proportional to the number of examples in each class. For a balanced dataset, R2 is equivalent to centered kernel alignment [17, 18] between the embeddings and the one-hot label matrix, with a cosine kernel. See
+Appendix E.2 for results with other distance metrics.
+As shown in Table 3 and Figure 4, all regularizers and alternative loss functions we investigate produce greater class separation in penultimate layer representations as compared to vanilla softmax loss.
+Importantly, this increase in class separation is speciﬁc to forms of regularization that affect networks’ 7
+Figure 5: Class separation negatively correlates with lin-ear transfer accuracy. a:
+Mean linear transfer accuracy across all tasks vs. class separa-tion on ImageNet, for different loss functions. b: For cosine softmax loss, training at higher temperature produces greater class separation but worse lin-ear transfer accuracy.
+Table 4: Temperature of cosine softmax loss controls ImageNet accuracy, class separation (R2), and linear transfer accuracy.
+ImageNet
+R2
+Temp. Top-1
+Food CIFAR10 CIFAR100 Birdsnap SUN397 Cars
+Pets Flowers
+Transfer 0.01 0.02 0.03 0.04 0.05 0.06 0.07 0.08 74.9 77.0 77.5 77.6 77.6 77.5 77.5 77.6 0.236 0.358 0.475 0.562 0.634 0.693 0.738 0.770 73.4 72.1 69.1 66.0 62.8 60.3 57.1 53.7 91.9 91.8 91.5 90.7 90.4 89.3 88.7 87.7 76.5 76.2 74.9 73.8 72.2 69.8 68.6 66.5 57.2 56.5 53.7 50.3 47.6 43.3 39.6 35.5 60.5 60.4 59.1 57.4 55.4 53.8 51.4 49.4 62.9 58.5 51.8 45.1 38.6 33.3 29.1 25.7 91.7 92.2 92.3 91.7 91.0 91.0 90.2 89.3 93.6 91.2 87.4 82.2 78.3 72.7 67.9 63.2
+ﬁnal layers. In Appendix E.3, we show that adding regularization through data augmentation improves accuracy without a substantial change in class separation. We further investigate the training dynamics of class separation in Appendix E.4, ﬁnding that, for softmax cross-entropy, class separation peaks early in training and then falls, whereas for other objectives, class separation either saturates or continues to rise as training progresses. 3.4 Greater class separation is associated with less transferable features
+Although losses that improve class separation lead to higher accuracy on the ImageNet validation set, the feature extractors they learn transfer worse to other tasks. Figure 5a plots mean linear transfer accuracy versus class separation for each of the losses we investigate. We observe a signiﬁcant negative correlation (Spearman’s ρ = −0.93, p = 0.002). Notably, vanilla softmax cross-entropy produces the least class separation and the most transferable features, whereas squared error produces much greater class separation than other losses and leads to much lower transfer performance.
+To conﬁrm this relationship between class separation, ImageNet accuracy, and transfer, we trained models with cosine softmax with varying values of the temperature parameter τ .1 As shown in
+Table 4, lower temperatures yield lower top-1 accuracies and worse class separation. However, even though the lowest temperature of τ = 0.01 achieved 2.7% lower accuracy on ImageNet than the best temperature, this lowest temperature gave the best features for nearly all transfer datasets. Thus, τ controls a tradeoff between the generalizability of penultimate-layer features and the accuracy on the target dataset. For τ ≥ 0.04, ImageNet accuracy saturates, but, as shown in Figure 5b, class separation continues to increase and transfer accuracy continues to decrease.
+Is there any situation where features with greater class separation could be beneﬁcial for a downstream task? In Figure 6, we use L2-regularized logistic regression to relearn the original 1000-way ImageNet classiﬁcation head from penultimate layer representations of 40,000 examples from the ImageNet validation set.2 We ﬁnd that features from networks trained with vanilla softmax loss perform worst, whereas features from networks with greater class separation perform substantially better. Thus, it 1Training at τ < 0.05 was unstable; we scale the loss by the τ to reduce the effect of τ on the size of the gradient WRT the correct class logit. Relationships for τ ≥ 0.05 remain consistent without loss scaling. 2We use this experimental setup to avoid training linear classiﬁers on examples that were also seen during pretraining. However, results are qualitatively similar if we train the linear classiﬁer on a 50,046 example subset of the training set and test on the full validation set. 8
+Figure 6: Class separation positively correlates with accuracy when relearning how to classify ImageNet classes from limited data. All accuracy numbers are computed on a 10,000 example subset of the ImageNet validation set (10 examples per class). Blue dots indicate accuracy of the weights of the original ImageNet-trained model. Orange dots indicate accuracy of a linear classiﬁer trained on the other 40,000 examples from the ImageNet validation set. Lines connect blue and orange dots corresponding to the same objective. The gap between the accuracies of the original and relearned classiﬁers narrows as class separation increases. Class separation is measured on the ImageNet training set. All numbers are averaged over 8 models. seems that representations with greater class separation are “overﬁt,” not to the pretraining datapoints, but to the pretraining classes—they perform better for classifying these classes, but worse when the downstream task requires classifying different classes.
+Our results above provide some further evidence that greater class separation can be beneﬁcial in real-world scenarios where downstream datasets share classes with the pretraining dataset. In
+Tables 1 and 4, representations with the lowest class separation perform best on all datasets except for
+Oxford-IIIT Pets, where representations with slightly greater class separation consistently perform slightly better. We thus explore class overlap between transfer datasets and ImageNet in Appendix F, and ﬁnd that, of the 37 cat and dog breeds in Oxford-IIIT Pets, 25 correspond directly to ImageNet classes. Furthermore, it is possible to achieve 71.2% accuracy on Oxford-IIIT Pets simply by taking the top-1 predictions of an ImageNet classiﬁer and and mapping them directly to its classes, but this strategy achieves much lower accuracy on other datasets. 4

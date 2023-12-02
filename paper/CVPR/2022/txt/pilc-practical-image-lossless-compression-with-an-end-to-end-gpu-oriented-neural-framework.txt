@@ -1,0 +1,87 @@
+Abstract
+Generative model based image lossless compression al-gorithms have seen a great success in improving compres-sion ratio. However, the throughput for most of them is less than 1 MB/s even with the most advanced AI accelerated chips, preventing them from most real-world applications, which often require 100 MB/s. In this paper, we propose
+PILC, an end-to-end image lossless compression framework that achieves 200 MB/s for both compression and decom-pression with a single NVIDIA Tesla V100 GPU, 10× faster than the most efficient one before. To obtain this result, we first develop an AI codec that combines auto-regressive model and VQ-VAE which performs well in lightweight set-ting, then we design a low complexity entropy coder that works well with our codec. Experiments show that our framework compresses better than PNG by a margin of 30% in multiple datasets. We believe this is an important step to bring AI compression forward to commercial use. 1.
+
+Introduction
+Lossy compression have shown great success in recent research [3, 6, 22, 25–28, 30].
+In this paper, we focus on lossless compression. The basic idea of a lossless com-pression algorithm is to represent more likely appeared data with shorter codewords, while less frequent data with longer ones, such that the codeword is shorter than the original data in expectation. For example, an image with each pixel ran-domly generated is rarely seen in the real world, while a real picture taken by a camera occurs much more often, so the latter compresses better for almost all image compression algorithms.
+According to Shannon’s source coding theorem [34], no algorithm can compress data shorter than its entropy. On the other hand, if the distribution of data is known in ad-*Equal contribution.
+†Correspondence to: Zhenguo Li (li.zhenguo@huawei.com) and
+Shutao Xia (xiast@sz.tsinghua.edu.cn).
+Figure 1. Comparison of compression throughput and ratio on
+CIFAR10. Our framework achieves high compression throughput with a competitive compression ratio. vance, an entropy coder can be applied so that the code length would be very close to its entropy, thus obtaining the optimal compression ratio.
+Unfortunately, in most cases, the data distribution is un-known. Traditional algorithms make use of some prior in-formation to infer this distribution. For example, LZ77 [47] and LZ78 [48] used by most archive formats assume that data with lots of repeated segments occur more often than those without. For image compression algorithms, PNG [4] assumes most adjacent pixels are similar to each other, and JPEG-like algorithms apply the fact that lower fre-quency components are more significant than higher fre-quency ones.
+Recently, deep generative models have shown great suc-cess in probabilistic modelling and lossless compression.
+However, the low throughput makes them difficult to be used in real scenarios. An end user does not want to wait for too long to compress/decompress a file, and a file server needs to manipulate tons of files every day. In many cases, a 100+ MB/s throughput is needed. For example, streaming a 1080p video with 30 fps requires 187 MB/s for decom-pression. However, it is difficult for a learned algorithm to achieve this speed due to the following bottlenecks:
+Network inference. Barely any AI compression algo-rithms have inference speed of 100+ MB/s because:
+• A large network is usually needed for a good density estimation [5].
+• Multiple network inferences are required to decom-press with an auto-regressive [32, 41] model.
+• Bits-Back scheme [12] prevents algorithms from ap-plying a large batch size [37].
+Coder. Generative models only cooperate well with a dynamic entropy coder, which is far slower than static vari-ants used in traditional algorithms. For most AI algorithms, the coder decodes only about 1 MB/s single-threaded.
+Data transfer. Data transfer between CPU memory and
+GPU memory can also be a bottleneck for AI algorithms.
+• Too many transfers are needed for decompression with an auto-regressive or hierarchical AE/VAE model.
+• Transfer amount is too large for models predicting with a complicated distribution including lots of parame-ters, such as a distribution mixed by 10 logistic ones.
+Besides, other problems exist in current AI algorithms.
+One is single image decompression. One would expect to decompress only this image, instead of having to decom-press many unrelated ones at the same time, but it is not the case for some VAE [37] and Flow algorithms [13] us-ing bits-back [12]. Another is compression with different image sizes. An algorithm that can only compress images with a fixed size hardly gets used in real applications, how-ever, those with a fully connected layer or transformer layer in the network are not straight-forward to change the input size. Table 1 briefly show the limitation of current algo-rithms. 1.1. Our contributions
+In this paper, we focus on practical image lossless com-pression. To solve above issues, we make the following contributions:
+• We build an end-to-end framework with compres-sion/decompression throughput of about 200 MB/s in one Tesla V100, and compression ratio 30% better than
+PNG, which also enables single image decompression and image of different sizes.
+• We develop a very lite auto-regressive + Vector Quan-tized Variational Auto-encoder (VQ-VAE) [42] model, whose inference speed is about 300 MB/s, but log-likelihood is similar to L3C [23], whose inference speed is only about 30 MB/s.
+• We design an AI compatible semi-dynamic entropy coder that is efficient in GPU besides CPU. As a re-sult, only one data transfer with a minimal amount is needed between CPU memory and GPU memory. As far as we know, this is the first GPU coder applied in
+Table 1. Limitations for some generative model based algorithms, where the columns mean: whether single image decompression is supported; whether images of different sizes are supported; whether inference time, coder, transfer time are faster than 100
+MB/s, respectively.
+Algorithm
+Single
+Size
+Inference Code
+Trans
+PixelCNN [41]
+DistAug [16]
+L3C [23]
+BB-ANS [37]
+Bit-Swap [17]
+IDF [14]
+LBB [13]
+PILC (Ours)
+✓
+✓
+✓
+✗
+✗
+✓
+✗
+✓
+✓
+✗
+✓
+✗
+✗
+✓
+✓
+✓
+✗
+✗
+✗
+✗
+✗
+✗
+✗
+✓
+✗
+✗
+✗
+✗
+✗
+✗
+✗
+✓
+✗
+✗
+✓
+✗
+✗
+✓
+✗
+✓ an AI compression algorithm.
+• We implement the end-to-end version in pure Python and PyTorch, making it easier for future works to test and improve on our implementation. 2.

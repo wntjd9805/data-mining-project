@@ -1,0 +1,217 @@
+Abstract
+We present an approach to efficiently and effectively adapt a masked image modeling (MIM) pre-trained vanilla Vision
+Transformer (ViT) for object detection, which is based on our two novel observations: (i) A MIM pre-trained vanilla
+ViT encoder can work surprisingly well in the challenging object-level recognition scenario even with randomly sam-pled partial observations, e.g., only 25% ∼ 50% of the input embeddings. (ii) In order to construct multi-scale rep-resentations for object detection from single-scale ViT, a randomly initialized compact convolutional stem supplants the pre-trained patchify stem, and its intermediate features can naturally serve as the higher resolution inputs of a fea-ture pyramid network without further upsampling or other manipulations. While the pre-trained ViT is only regarded as the 3rd-stage of our detector’s backbone instead of the whole feature extractor. This naturally results in a ConvNet-ViT hybrid architecture. The proposed detector, named
+MIMDET, enables a MIM pre-trained vanilla ViT to out-perform leading hierarchical architectures such as Swin
+Transformer, MViTv2 and ConvNeXt on COCO object de-tection & instance segmentation, and achieves better results compared with the previous best adapted vanilla ViT detec-tor using a more modest fine-tuning recipe while converging 2.8× faster. Code and pre-trained models are available at https://github.com/hustvl/MIMDet. 1.
+
+Introduction
+Transformer [53] is born to transfer. Entering the 2020s,
+Vision Transformer (ViT) [16] is rapidly transferring the landscape of computer vision in both architectural de-sign [35, 54, 17, 62, 25] as well as representation learn-ing [5, 21, 61, 64, 18]. From the perspective of architectural design, Swin Transformer [35], as a representative, seam-lessly incorporates the local window attention into a hier-archical macro architecture. The window attention enables
+Swin Transformer to efficiently process high-resolution in-puts with feasible costs, and the inherent pyramidal feature hierarchy can better handle the large variations of visual entities’ scales and sizes, which is crucial for object-level understanding. Meanwhile, from the perspective of gen-eral visual representation learning, masked image modeling (MIM) [5, 21] pre-trained vanilla ViT1 demonstrates promis-ing scalability and is superior to the supervised isotropic or hierarchical ViT counterparts when transferred to image as well as video classification tasks [64, 15, 55, 4] with low-resolution inputs.
+The compelling transfer learning performance of MIM pre-trained ViTs in image- and video-level recognition tasks motivate us to ponder: Is it possible for the more challeng-ing object- or instance-level recognition tasks, e.g., object detection and instance segmentation, to also benefit from the powerful MIM pre-trained representations? Unfortu-nately, it is quite slow for vanilla ViT to directly process high-resolution images required by object-level recognition, for the complexity of global attention scales quadratically with the spatial dimension. One way is to re-introduce win-dow attention or its variants during the fine-tuning stage, which can help reduce the attention’s costs [31]. However, using window attention causes a discrepancy between MIM pre-training and fine-tuning, as the window partition implic-itly treats inputs as 2D continuous regular grids, while the vanilla ViT is pre-trained to process 1D partial sequences.
+Inspired by the MIM pre-training [5, 21], this work pur-sues a radical solution to transfer a vanilla ViT for object-level recognition (Figure 1b): We feed the MIM pre-trained
+ViT encoder with only a partial input, e.g., only 25% ∼ 50% of the input sequence of embeddings with random sampling, during the object detection fine-tuning stage. The output sequence fragments are then complemented with learnable
+*Equal contribution. † Xinggang Wang (xgwang@hust.edu.cn) is the corresponding author. This work was done when Shusheng Yang was interning at ARC Lab, Tencent PCG. 1For disambiguation, in this paper, “vanilla ViT” refers to the Vision
+Transformer proposed by [16] with the isotropic, single-scale architecture unless specified.
+Figure 1: Overview of our MIMDET and comparisons with previous representative approaches adapting vanilla ViT for object detection (e.g., [31]). In MIMDET, a randomly initialized compact convolutional stem (ConvStem) replaces the pre-trained large kernel patchify stem (PatchStem), and the ViT encoder only receives and processes sampled partial input embeddings. The intermediate features of ConvStem can directly serve as the higher resolution inputs for a standard FPN [32]. tokens (e.g., [MASK] tokens) and processed by a lightweight decoder to recover the full feature map. This seemingly bold approach turns out to be surprisingly good in terms of accuracy-resource trade-off. Our motivation is that: (i) For a long time, the 2D continuous regular grid is considered as the de facto input from of Convolutional Neural Networks (ConvNets) [28] as well as hierarchical ViTs in visual un-derstanding. Unlike them, vanilla ViT treats the input as a sequence of individual tokens / embeddings. Therefore it is feasible for ViT to process nonconsecutive input subsets, which serves as the foundation of our approach. (ii) Visual signal has heavy spatial redundancy by nature, which en-courages the recent MIM pre-training approaches to adopt a very high masking ratio (e.g., 40% ∼ 75%) [5, 21]. The successful practice of generative MIM pre-training implies that it is also possible to perform holistic visual understand-ing or recognition given only an input subset, as we believe visual generation and recognition are two sides of the same coin in essence. Since our approach also encourages ViT to implicitly conduct a kind of MIM during fine-tuning, it intro-duces a smaller gap between upstream MIM pre-training and downstream fine-tuning compared with the window attention and its variants.
+Another obstacle is the lack of pyramidal feature hier-archy in vanilla ViT, as well-established visual recognition task layers [32, 33, 22, 49] usually require multi-scale inputs.
+In this work, we don’t aim to re-design specific task lay-ers tailored for single-scale ViT, instead, we make minimal adaptations to re-introduce multi-scale representations from vanilla ViT for better leveraging the precious legacy of visual understanding study. Different from previous approaches, which treats the vanilla ViT as the whole feature extractor / backbone and artificially manipulates intermediate features to compromise with FPN [32], we consider ViT only as a part of a hierarchical backbone, i.e., the 3rd-stage, and a randomly initialized neat convolutional stem (ConvStem) supplants the pre-trained large kernel patchify stem as the 1th- and 2nd-stage. The newly introduced ConvStem is very compact (only 4.1M, less than 5% of the ViT-Base encoder’s size), and its intermediate features can directly serve as the higher resolution inputs of a feature pyramid network. The resulting feature extractor is essentially a ConvNet-ViT hy-brid architecture with a neat ConvStem as the earlier stage and a strong ViT as the later stage, which is also consistent with the current trends of the state-of-the-art visual encoder design methodology that tries to combine the strengths of two kinds of layers [52, 12].
+The odyssey of object detection research is like “a goose that laid the golden eggs” that can always inspire and gen-eralize well to the study of other visual understanding tasks.
+Therefore we choose the ubiquitous & canonical Mask R-CNN [22] as a touchstone for our design. The detector, named MIMDET (Masked Image Modeling for Detection,
+Figure 1b), enables MIM pre-trained vanilla ViTs to outper-form leading hierarchical architectures such as Swin Trans-former [35], MViTv2 [30] and ConvNeXt [36]. Moreover, our approach can achieve even better results compared with the previous best adapted vanilla ViT detector [31] based on
+the same MIM pre-trained representation [21] using a more modest fine-tuning recipe while being 2.8× faster in terms of converge speed. We also observe a promising scaling trend of our approach.
+Our study indicates that designing and pre-training spe-cific feature extractors for visual recognition may no longer be indispensable given the strong representation inside vanilla ViT, as long as we find the right way to unleash it. We believe a trend in future machine vision research is to better leverage the pre-trained representation via delicately adapting it using simple task layers. These observations are also aligned with those witnessed in natural language processing (NLP) [41, 14, 42, 40], and we hope this work can encourage the vision community to explore a similar trajectory. 2. Method
+The goal is to tame and unleash a MIM pre-trained vanilla
+ViT to achieve favorable performance in object-level recog-nition with feasible costs. To this end, we propose to (i) feed ViT with only the sampled partial inputs instead of the full input set, described in §2.1, and (ii) use a randomly initialized compact convolutional stem to replace the pre-trained patchify stem for a better pyramidal feature hierarchy, detailed in §2.2. Figure 1b illustrates our approach. 2.1. You Only Look at Partial Sequences
+Object-level recognition tasks usually benefit from higher resolution inputs, which are in general over one order of magnitude higher than the input size of image classification.
+While the vanilla ViT computes global attention for spatial features aggregation, and the computational and memory costs of global attention scale quadratically with the input resolutions. Hence the fine-tuning process will be largely slowed down if a vanilla ViT is directly fed with the full input set.
+We notice that vanilla ViT treats the input as a sequence of individual elements, therefore it is possible for a vanilla
+ViT to receive and process only a partial, discontinuous in-put sub-sequence given positional information (via position embeddings), which is intrinsically different from ConvNets as well as hierarchical ViT counterparts that manipulating on 2D continuous gird inputs. This property of vanilla ViT encourages us to act bold: we randomly sample a subset of patch embeddings serving as the input set of a MAE [21] pre-trained vanilla ViT encoder, i.e., the encoder only looks at one partial input sequence. Surprisingly, we find that with only 25% of the input sequence for the ViT-Base encoder, our detector can already achieve a very competitive accuracy that outperforms an augmented Swin Transformer under the same fine-tuning procedure. Furthermore, with 50% of the input, MIMDET can yield 51.7 APbox/ 46.1 APmask, outper-forming Swin by 2.5 APbox/ 2.6 APmask.
+To our knowledge, there is little literature to demonstrate that the challenging object-level recognition can be success-fully done with only randomly sampled partial inputs. Our motivation is: (i) The visual signal is highly redundant and loosely spans the spatial dimension, e.g., a vanilla ViT is able to re-cover the missing contextual information based only on a small set of visible content during MIM pre-training [5, 21, 61], which implies it understands the global context before generation. Therefore it is pos-sible to perform global visual understanding in com-plex scenes based on strong pre-trained representations given only partial observations. (ii) Our approach introduces a smaller gap between MIM pre-training and fine-tuning, i.e. we fine-tune the ViT in a similar vein as pre-training. As during pre-training,
+ViT learns a pretext task that requires global contex-tual reasoning with only a visible subset as inputs. Our fine-tuning process mimics the MIM pre-training that conducts global object-level understanding with only partial observations based on high-capacity representa-tions.
+This solution enables us to achieve a win-win scenario: it optimizes the accuracy-resource trade-off while introducing a smaller pre-training & fine-tuning gap as well as leveraging the pre-trained representations more judiciously. The output sequence fragments are then complemented with learnable tokens (special [MASK] tokens or feature embeddings, please refer to Table 6 for details), and processed by a lightweight
+MAE pre-trained ViT decoder (e.g., only 4× Transformer layers with reduced embedding dimension) to recover the full image feature.
+Another way to adapt vanilla ViT for high-resolution in-put is to re-introduce window attention or its variants during the fine-tuning stage [31], which can reduce the attention’s compute. More importantly, this kind of adaptation still treats the input as 2D continuous regular grids as ConvNets and hierarchical ViTs therefore also introducing 2D inductive biases, which is in principle beneficial to object- / region-level understanding. We also agree that the fine-tuning pro-cess would benefit from task-specific prior knowledge, espe-cially given relatively fewer data than pre-training. However, using window attention causes a discrepancy between pre-training and fine-tuning to some extent, as the vanilla ViT is pre-trained to process 1D partial sequences and the window partition along with its inductive biases never appears in the pre-training stage. In the next section, we present a smarter way to inject 2D inductive biases into our detector. 2.2. You Only Pre-train the Third Stage
+ConvStem for Hierarchical Features Construction. Well-established visual understanding task layers usually receive multi-scale features as inputs to deal with the large scale and
+size variations of objects, while the MIM pre-trained single-scale vanilla ViT demonstrates compelling scalability and transfer learning performances in the image- and video-level recognition tasks compared with its hierarchical counter-parts [16, 5, 21, 55]. Therefore it is quite promising for an object detector to enjoy the best of two worlds. However, the multi-scale features do not naturally exist in a vanilla ViT.
+If we can find a sensible way to re-introduce the pyramidal feature hierarchy for it, then re-design specific task layers tailored for the single-scale ViT is no longer needed, and the heritage of visual recognition study can be largely inherited.
+Trace to its source, the lack of the feature hierarchy in vanilla ViT is rooted in its early visual signal processing, which is too aggressive for a detector: ViT “patchifies” the input image into 16×16 non-overlapping patches and then embeds them to form the Transformer encoder’s input. The downsampling rate is so high that a visual entity of inter-est in the input image smaller than 16×16 pixels will no longer exist in the spatial dimension of Transformer en-coder’s input embeddings. Artificially dividing vanilla ViT into multiple stages and upsampling the downsampled inter-mediate feature [1, 31] is kind of a compromise to construct a feature pyramid for the detector, since there is no explicit evidence that those disappeared visual entities as well as the low-level details in the spatial dimension will re-appear in their original location faithfully (please also refer to the visualization results in Appendix), especially when typical region-based detectors extract and process object’s features based on spatial feature alignment as well as translation & scale equivariance [44, 22].
+To mitigate the aforementioned issues, our solution is to throw away the pre-trained large-stride patchify stem, and use a randomly initialized neat convolutional stem (Con-vStem) as a replacement. We adopt a minimalist ConvStem design by simply stacking 3×3 convolutions with a stride of 2 and doubled feature dimensions. Each convolutional layer is followed by a layer normalization [2] and a GELU activa-tion [24]. The detailed architectural configurations are given in the Appendix. Our ConvStem progressively reduces the spatial dimension as well as enriches the channel dimension.
+The output embedding, which has the same shape as the original patchified embedding, serves as the input (before the random sampling process described in §2.1) for the ViT encoder.
+The newly introduced ConvStem is very compact, in terms of the model size, our ConvStem only has 4.1M pa-rameters, which is less than 5% of the ViT-Base encoder’s size. Small as it is, the pyramidal feature hierarchy naturally exists in our ConvStem’s intermediate layers. We select the features with strides of {4, 8} pixels with respect to the input image as the input features of a standard FPN’s first two stages (i.e., the input of P2 and P3) [32], while the output of pre-trained ViT decoder (with a stride of 16, detailed in
+§2.1) serves as the input of FPN’s P4, and the input for P5 is simply obtained via a parameter-less mean pooling upon the output of ViT decoder. Now, we successfully obtain a feature pyramid network for object detection.
+A ConvNet-ViT Hybrid Architecture. Previous attempts regard the pre-trained ViT as the whole feature extrac-tor [1, 31], while we treat the ViT as only a part of it, i.e., the 3rd-stage. In essence, our feature extractor turns out to be a ConvNet-ViT hybrid architecture with a shallow & neat ConvNet / ConvStem as the earlier stage and a deep & strong ViT as the later stage. This is also consistent with current trends of the state-of-the-art visual encoder design methodology that tries to combine the strengths of two kinds of architectures [52, 12], i.e., the ConvNet / ConvStem is more suitable for early visual signal processing, and intro-duces 2D inductive biases for the ViT encoder & detector, while the single-scale vanilla ViT is more scalable and tends to have a larger model capacity.
+Notice that our ConvStem is used only during fine-tuning and does not need to be pre-trained, which is different from
+[58]. In general, the ConvStem cannot be pre-trained via
+MIM and also does not support conventional MIM pre-training (BEiT, MAE, SimMIM, etc.) for visual encoders, since dense-slid convolutions with kernel size larger than stride propagate information across tokens, causing informa-tion leakage and impeding the MIM. This work shows that the pre-trained early stage is not a sine qua non for a detector to achieve favorable performances during fine-tuning, i.e., you only need to pre-train the 3rd-stage. training sampling ratio (↓) 12.5% inference sampling ratio (↓) 50% 75% 25% 12.5% 25% 50% 75% 100% 43.0 / 38.7 46.1 / 41.7 46.8 / 42.2 47.5 / 42.9 49.4 / 44.2 49.5 / 44.3 47.9 / 43.2 50.0 / 44.7 51.0 / 45.2 51.0 / 45.6 100% 47.6 / 43.0 49.9 / 44.7 51.5 / 46.0 51.8 / 46.3 51.8 / 46.2 training time mem† 16.0 h 14.2 G 16.5 h 15.9 G 20.3 h 19.9 G 27.2 h 28.5 G 31.0 h‡ 43.2 G‡
+Table 1: Random sampling ratio for training and inference. Numbers of cells in the upper triangular represent “APbox/ APmask” of
+MIMDET. †: measured with batch size of 1. ‡: measured on A100 GPUs.
+1st-stage ft 50% rand 50% rand 2nd-stage ft
+✗ full set
+APbox 51.5 51.4
+APmask 46.0 46.0 training 50% rand 50% grid inference full set full set
+APbox 51.5 48.7
+APmask 46.0 44.0
+Table 2: Study of additional fine-tuning with full input set.
+Fine-tuning once with a sampling ratio of 50% is sufficient.
+Table 3: Random sampling vs. grid sampling. Random sampling generalizes well during full input set inference.
+# eval × ratio
+APbox/ APmask 1×100% 51.5 / 46.0 1×50% rand 2×50% rand 4×50% rand 8×50% rand 49.5 / 44.3 50.3 / 44.8 50.9 / 45.3 51.0 / 45.2
+Table 4: Study of different inference strategies. “# eval × ratio”: the ensemble result of several independent evaluations with a specific sampling ratio, e.g., “2×50% rand” means the ensemble accuracy of inference twice with a random sampling ratio of 50%. 3. Experiment
+General Setting. We conduct our experiments on the
+COCO dataset [34] using the Detectron2 library [57].
+Models are trained on the train2017 split and evaluated on the val2017 split. For reference, COCO test-dev results are available in Appendix. For MIMDET, we perform exper-iments mainly on ViT-Base / MIMDET-Base model using 32× 32G V100 GPUs with a total batch size of 64 optimized by AdamW [37] with a learning rate of 8e-5. We initialize the vanilla ViT part via MAE [21] pre-trained weight on
+ImageNet-1K [45] only. Mask R-CNN [22] with FPN [32] is chosen as the detection task layer following [31]. Since the vanilla ViT encoder is already pre-trained while the task layer is trained from scratch, the learning rate of the ViT en-coder part is divided by a factor of 2 and the learning rate for the task layer is multiplied by 2. We use a modest fine-tuning recipe following Swin Transformer [35], which is a 36-epoch schedule using multi-scale training (scale the shorter side in
+[480, 800] while the longer side is smaller than 1333) and random crop augmentation. “pt” & “ft” means pre-training
+& fine-tuning. The detailed settings and configurations are available in Appendix.
+For the evaluation metrics, we report APbox for object detection and APmask for instance segmentation, with a par-ticular focus on the fine-tuning epochs / wall-clock time, as we care about how efficiently a set of general upstream vi-sual representations can be adapted to a specific downstream task. 3.1. Study and Analysis
+We study and analyze the main properties of MIMDET-Base via ablating the default configuration .
+Sampling Ratio and Type for ViT Encoder. We study different random sampling ratio combinations for training & inference in Table 1. In general, our MIMDET can achieve better performance if the inference sampling ratio is higher than the training sampling ratio.
+Specifically, under the scenario of inference with full in-put, we find with only 25% of the input for the ViT encoder during training, MIMDET can already achieve a very com-pelling performance that outperforms the upgraded Swin
+Transformer (detailed in §3.2 and Table 9).
+Furthermore, with 50% of the input for the ViT encoder during training, MIMDET obtains very competitive results which are similar to the 100% input training & inference setting, striking a good trade-off between accuracy and re-sources. From another perspective, in Table 2 we show that adding an additional short fine-tuning stage (6-epoch) with full inputs after the fine-tuning procedure (36-epoch) with sampled inputs does not help further improve the accuracy.
+These results indicate that training with 50% randomly sam-pled inputs is sufficient to achieve satisfactory performance.
+The compelling results of using only 50% input for train-ing are not a coincidence, as we believe it is closely related to the use of ConvStem. Specifically, the receptive field size of our ConvStem is 31, approximately 2× of the stem’s output (also the ViT encoder’s input) feature’s stride. That means if we sample with a stride of 2 on the input feature of ViT encoder (i.e., grid sampling with a ratio of 50%), the sampled feature map can almost cover all locations of the original input image. In practice, we find uniform random sampling generalizes much better than grid sampling in the full input set inference scenario, as shown in Table 3.
+Inference Strategy. We study the appropriate inference strategy for MIMDET in Table 4. Under the scenario of inference with sampled inputs, we find the ensemble of more trials generally improves the performance compared with inference only once with sampling. Meanwhile, inference with the full input set, which can be also regarded as an ensemble of input features for ViT encoder since it is pre-trained with only partial observations, is more performant.
+These results imply that the ensemble of input features works better than the ensemble of output results for our approach.
+To summarize, results in Table 1, 2, 3 and 4 indicate that our default training and inference strategies are nearly optimal.
+ConvStem Type. In Table 5, we study whether increasing the capacity of the convolutional earlier stage is beneficial to the detection performance, and the answer is negative. We choose the recent state-of-the-art ConvNeXt’s [36] earlier stage design2 as a replacement of our default / naïve de-sign, and we observe no further improvement. This implies 2We directly adopt the configuration / pre-trained weights of the first two stages of ConvNeXt-Large, since this design has matched model size as well as output channels.
+ConvStem naïve
+ConvNeXt
+ConvNeXt pt?
+✗
+✗
+✓
+APbox 51.5 51.3 51.4
+APmask 46.0 45.8 45.8 dec input feat
+[MASK] token
+ConvStem feat
+APbox 51.5 51.7
+APmask 46.0 46.1
+Table 5: Study of the ConvStem type. The naïve design ( §2.2) with random initialization is sufficient.
+Table 6: Study of the decoder input feature type of all unsampled positions. ConvStem feature is slightly better.
+# dec layers 1 2 4 8
+# params training time 1.00× (118 M) 1.00× (15.5 h) 1.03× (121 M) 1.12× (17.3 h) 1.08× (127 M) 1.16× (20.3 h) 1.18× (140 M) 1.74× (27.0 h)
+Table 7: Study of the number of decoder layers. †: measured with a batch size of 1. training mem† 1.00× (12.2 G) 1.18× (14.4 G) 1.63× (19.9 G) 2.39× (29.2 G)
+APmask 44.6 45.2 46.0 46.1
+APbox 49.9 50.6 51.5 51.6 that for the earlier stage, its convolutional property matters more than its strength. As the FPN can help fuse different-level features to have strong semantics at all scales [32], the expressiveness of high-resolution features for object-level recognition shouldn’t be a worry.
+Decoder Input Feature. Since we only encode partial in-puts, to obtain the full set of features, we need to fill in all unsampled locations for the decoder as well as the task layer, as studied in Table 6. One straightforward solution is to fill the blank with [MASK] tokens, as the decoder is pre-trained to process them. While we find using the ConvStem output feature is slightly better.
+Using ConvStem features at unsampled locations is an analogy of stochastic depth [26], as we “randomly drop a subset of layers (i.e., all unsampled embeddings of the
+ViT encoder) and bypass them with the identity function (i.e., ConvStem features) [26].” Therefore, this training and inference strategy also aligns with the motivation of “train short networks and use deep networks at test time.” as well as “an implicit ensemble of network of different depths [26].”
+Since using the ConvStem feature brings nearly cost-free improvement, we use it for comparisons with other leading approaches in Table 9.
+Number of Decoder Layers. We study the impact of the number of MAE pre-trained decoder layers in Table 7. The lightweight decoder is used to recover full features given en-coded partial observations. We find a decoder with 4 layers achieves the best trade-off. If we randomly initialize the de-coder, the training diverges using our default configuration.
+It is usually believed that the MAE encoder learns gen-eral representations that transfer well, while by analogy with
+BERT [14] from NLP, we believe the MAE decoder is actu-ally trained to be a BERT encoder, and the MAE encoder is more like a BERT tokenizer that maps the raw input signal to BERT encoder’s input embeddings. To our knowledge,
+MIMDET is the first work to leverage the MAE pre-trained decoder in downstream tasks. What the MAE decoder learns during pre-training is still unclear, and its property of it deserves more attention in future research.
+ViT’s & FPN’s Input Form. In Table 8, we conduct abla-tion studies on MIMDET-Base with only one decoder layer (row2) to align with the budgets of row3 and row4. row2 & row3 show that randomly sampled inputs can achieve better performance than window partitioned in-puts [35, 31] in MIMDET given similar budgets. Also notice that row3 is a counterpart of Swin Transformer3. Com-pared with the well-established Swin in Table 9 (49.2 APbox/ 43.5 APmask), row3 with a ConvNet (rand.init.) & ViT (pre-trained) hybrid architecture can obtain higher accuracy, indi-cating that pre-training specific feature extractor for visual recognition may no longer be indispensable given the strong representation inside vanilla ViT. row3 → row4 demonstrates that the performance will suffer if the higher resolution inputs of FPN are from the intermediate features of ViT encoder [1, 31] instead of Con-vStem, which implies the convolutional feature is more ben-eficial to object-level understanding tasks. We show some qualitative results in the next section that can help us gain an intuitive sense. 3The #Transformer layers of different stages in Swin-Base is {2, 2, 18, 2}. Therefore both Swin-Base and MIMDET-Base in row3 of Table 8 have a deep & strong 3rd-stage with window attention, as well as a shallow & compact early stage. hybrid FPN?
+✓
+✓
+✓
+✗ rand sample?
+✓
+✓
+✗
+✗ row1 row2 row3 row4
+# dec layers 4 1 0 0
+APbox 51.5 49.9 49.5 48.9
+APmask 46.0 44.6 44.5 43.9
+# params 127 M 118 M 113 M 120 M time 20.3 h 15.5 h 17.5 h 18.4 h
+Table 8: Study of the ViT’s & FPN’s input form. “hybrid FPN?”: the FPN’s P2 & P3 features come from ConvStem’s intermediate features (✓) or ViT’s intermediate features [1, 31] (✗). “rand sample”: the ViT encoder’s input comes from the 50% randomly sampled
+ConvStem’s output (✓) or window partitioned ConvStem’s output with a window size of 7×7 [35, 31] (✗).
+backbone
+• representative hierarchical architecture
+Swin-Base [35]
+MViTv2-Base [30]
+• adapted vanilla Vision Transformer
+Li et al.-Base [31]
+ViTDet-Base [29]
+MIMDET-Base (Ours) backbone
+• representative hierarchical architecture
+MViTv2-Large [30]
+MViTv2-Large [30]
+• adapted vanilla Vision Transformer
+Li et al.-Large [31]
+ViTDet-Large [29]
+MIMDET-Large (Ours) pt config ft epochs data aug rel pos?
+APbox
+APmask sup-1K sup-1K
+MAE-1K
+MAE-1K
+MAE-1K 36 36 100 100 36 resize & crop resize & crop
+LSJ1024
+LSJ1024 resize & crop
+✓
+✓
+✓
+✗
+✗ (a) Results of base-sized models with Mask R-CNN. 49.2 51.0 50.3 51.2 51.7 43.5 45.7 44.9 45.5 46.1 pt config ft epochs data aug rel pos?
+APbox
+APmask sup-1K sup-21K
+MAE-1K
+MAE-1K
+MAE-1K 36 36 100 100 36 resize & crop resize & crop
+LSJ1024
+LSJ1024 resize & crop
+✓
+✓
+✓
+✗
+✗ (b) Results of large-sized models with Mask R-CNN. 51.8 52.7 53.3 54.6 54.3 46.2 46.8 47.2 48.6 48.2
+Table 9: COCO object detection and instance segmentation results using Mask R-CNN. “rel pos”: using relative position biases [43, 46], which usually improves ∼1 AP but adds training time and memory. “LSJ1024”: large scale jittering [20] on a 1024×1024 canvas. “sup-21K”: pre-training using ImageNet-21K [13] with supervision. backbone
+• representative hierarchical architecture
+Swin-Base
+ConvNeXt-Base
+MViTv2-Base
+• adapted vanilla Vision Transformer
+UViT-Base+ [10]
+UViT-Base+ [10] (w/ self-training)
+MIMDET-Base (Ours) pt config ft epochs data aug rel pos?
+APbox
+APmask sup-1K sup-1K sup-1K sup-1K sup-1K
+MAE-1K 36 36 36 n.a. n.a. 36 resize & crop resize & crop resize & crop resize & crop resize & crop resize & crop
+✓
+N.A.
+✓
+✗
+✗
+✗ 51.9 52.7 54.1 52.5 53.9 54.2 45.0 45.6 46.8 44.8 46.1 46.9 (a) Results of base-sized models with Cascade Mask R-CNN. backbone
+• representative hierarchical architecture
+Swin-Large
+ConvNeXt-Large
+MViTv2-Large
+• adapted vanilla Vision Transformer
+MIMDET-Large (Ours) pt config ft epochs data aug rel pos?
+APbox
+APmask sup-21K sup-21K sup-21K
+MAE-1K 36 36 50 36 resize & crop resize & crop
+LSJ1024 resize & crop
+✓
+N.A.
+✓
+✗ 53.9 54.8 55.8 56.3 46.7 47.6 48.3 48.7 (b) Results of large-sized models with Cascade Mask R-CNN.
+Table 10: COCO object detection and instance segmentation results using Cascade Mask R-CNN. Results of Swin Transformer are taken from [30, 36]. “rel pos”: using relative position biases [43, 46], which usually improves ∼1 AP but adds training time and memory.
+“LSJ1024”: large scale jittering [20] on a 1024×1024 canvas. “sup-21K”: pre-training using ImageNet-21K [13] with supervision. 3.2. Comparisons with Current Leading
+Approaches
+Table 9 shows the comparisons with the Mask R-CNN detector. Our MIMDET can successfully adapt a MAE pre-trained representation to achieve strong APbox and APmask, better than some representative well-established hierarchi-cal ViT architectures [35, 30] under the same fine-tuning procedure. MIMDET-Base (Table 9a) without relative posi-tion biases can outperform the previous best adapted vanilla
+ViT [31] given the same initial representation [21] with a more modest data augmentation strategy (resize & crop v.s.
+LSJ), while only requiring 2.8× fewer epochs (36 ep v.s. 100 ep) to coverage and being 2.7× faster (20.3 h v.s. 54.0 h) in training. Moreover, we observe a promising scaling trend of our approach, i.e., our MIMDET-Large (Table 9b) without relative position biases can achieve 54.3 APbox/ 48.2 APmask, outperforming the best large model in [31] as well as strong
+backbone
+• representative hierarchical architecture
+Swin-Base
+Focal-Base
+• adapted vanilla Vision Transformer
+MIMDET-Base (Ours) pt config ft epochs data aug rel pos?
+APbox sup-1K sup-1K
+MAE-1K 36 36 36 resize & crop resize & crop resize & crop
+✓
+✓
+✗ 45.8 46.9 50.4
+Table 11: COCO object detection and instance segmentation results using RetinaNet. The results in row-1 & row-2 directly come from
+Table 4 of Focal Transformer [63]. hierarchical competitors [30]. MIMDET is also competitive with the concurrent ViTDet [29].
+Table 10 shows the comparisons using the stronger Cas-cade Mask R-CNN [8] detector. Our approach can beat cur-rent leading feature extractors such as Swin Transformer,
+ConvNeXt as well as MViTv2 with ImageNet-21K pre-training. 3.3. MIMDET with RetinaNet
+As shown in Table 11, MIMDET can also outperform other leading approaches such as Swin Transformer and
+Focal Transformer with the single-stage RetinaNet detector.
+We would like to emphasize that to implement MIMDET using RetinaNet in Table 11 and Cascade Mask R-CNN 10, we only need to change the model config files, i.e., there is no need to change the backbone architecture of MIMDET. And we use the same Mask R-CNN training recipe and hyper-parameters in our paper for both RetinaNet and Cascade
+Mask R-CNN without further tuning. 4.

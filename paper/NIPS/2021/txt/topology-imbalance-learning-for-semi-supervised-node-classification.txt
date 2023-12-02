@@ -1,0 +1,218 @@
+Abstract
+The class imbalance problem, as an important issue in learning node representations, has drawn increasing attention from the community. Although the imbalance considered by existing studies roots from the unequal quantity of labeled examples in different classes (quantity imbalance), we argue that graph data expose a unique source of imbalance from the asymmetric topological properties of the labeled nodes, i.e., labeled nodes are not equal in terms of their structural role in the graph (topology imbalance). In this work, we ﬁrst probe the previously unknown topology-imbalance issue, including its characteristics, causes, and threats to semi-supervised node classiﬁcation learning. We then provide a uniﬁed view to jointly analyzing the quantity- and topology- imbalance issues by considering the node inﬂuence shift phenomenon with the Label Propagation algorithm. In light of our analysis, we devise an inﬂuence conﬂict detection–based metric Totoro to measure the degree of graph topology imbalance and propose a model-agnostic method
+ReNode to address the topology-imbalance issue by re-weighting the inﬂuence of labeled nodes adaptively based on their relative positions to class boundaries.
+Systematic experiments demonstrate the effectiveness and generalizability of our method in relieving topology-imbalance issue and promoting semi-supervised node classiﬁcation. The further analysis unveils varied sensitivity of different graph neural networks (GNNs) to topology imbalance, which may serve as a new perspective in evaluating GNN architectures.1 1
+
+Introduction
+Graph is a widely-used data structure [51], where the nodes are connected to each other through natural or handcrafted edges. Similar to other data structures, the representation learning for node clas-siﬁcation faces the challenge of quantity-imbalance issue, where the labeling size varies among classes and the decision boundaries of trained classiﬁers are mainly decided by the majority classes [46].
+There have been a series of studies [35, 11, 49] handling the Quantity-Imbalance Node Representation
+Learning (short as QINL). However, different with other data structures, graph-structured data suffers from another aspect of the imbalance problem: the imbalance caused by the asymmetric and uneven topology of labeled nodes, where the decision boundaries are driven by the labeled nodes close to the topological class boundaries (left of Figure 1) thus interfering with the model learning.
+Present Work. For the ﬁrst time, we recognize the Topology-Imbalance Node Representation
+Learning (short as TINL) as a graph-speciﬁc imbalance learning topic, which mainly focus on the 1The code is available at https://github.com/victorchen96/ReNode. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: Schematic diagram of the topology-imbalance issue in node representation learning. The color and the hue denote the type and the intensity of each node’s received inﬂuence from the labeled nodes, respectively. The left shows that nodes close to the boundary have the risk of information conﬂict and nodes far away from labeled nodes have the risk of information insufﬁcient. The right shows that our method can decrease the training weights of labeled nodes (R1) close to the class boundary and increase the weights of labeled nodes (B and R2) close to the class centers, thus relieving the topology-imbalance issue. decision boundaries shift phenomena driven by the topology imbalance in graph and is an essential component for node imbalance learning. Comparing with the well-explored QINL that studies the imbalance caused by the numbers of labeled nodes, TINL explores the imbalance caused by the positions of labeled nodes and owns the following characteristics:
+• Ubiquity: Due to the complex connections of the graph nodes, the topology structure of nodes in different categories is naturally asymmetric, which makes TINL an essential characteristic in node representation learning. Hence, it is difﬁcult to construct a completely symmetric labeling set even with an abundant annotation budget.
+• Perniciousness: The inﬂuence from labeled nodes decays with the topology distance [3].
+The asymmetric topology of labeled nodes in different classes and the uneven distribution of labeled nodes in the same class will cause the inﬂuence conﬂict and inﬂuence insufﬁcient problems (left of Figure 1) respectively, resulting in a shift of decision boundaries.
+• Orthogonality: Quantity-imbalance studies [49, 8, 5] usually treat the labeled nodes of the same class as a whole and devise solutions based on the total numbers of each class, while TINL explores the inﬂuence of the unique position of each labeled node on decision boundaries. Thus, TINL is independent of QINL in terms of the object of study.
+Exploring TINL is of great importance for node representation learning due to its ubiquity and perniciousness. However, the methods [17, 22] for quantity imbalance can be hardly applied to TINL because of the orthogonality. To remedy the topology-imbalance issue, thus promoting the node classiﬁcation, we propose a model-agnostic training framework ReNode to re-weight the labeled nodes according to their positions. We devise the conﬂict detection-based Topology Relative Location (Totoro) metric to leverage the interaction among labeled nodes across the whole graph to locate their structural positions. Based on the Totoro metric, we further increase the training weights of nodes with small conﬂict that are highly likely to be close to topological class centers to make them play a more pivotal role during training, and vice versa (right of Figure 1). Empirical results of various imbalance scenarios (TINL, QINL, large-scale graph) and multiple graph neural networks (GNNs) demonstrate the effectiveness and generalizability of our method. Besides, we provide the sensitivity to topology imbalance as a new evaluation perspective for different GNN architectures. 2 Topology-Imbalance Node Representation Learning 2.1 Notations and Preliminary
+In this work, we follow the well-established semi-supervised node classiﬁcation setting [47, 18] to conduct analyses and experiments. Given an undirected and unweighted graph G = (V, E, L), where V is the node set represented by the feature matrix X ∈ Rn∗d (n = |V| is the node size and d is the node embedding dimension), E is the edge set which is represented by an adjacency matrix
+A ∈ Rn∗n, L ⊂ V is the labeled node set and usually we have |L| (cid:28) |V|, the node classiﬁcation 2
+(a) Predictions of GCN and LP (b) Uniform Sampling (c) Quantity-balanced Sampling
+Figure 2: Node inﬂuence and boundary shift caused by quantity- and topology-imbalance. (a):
+The prediction results of GCN and LP are highly consistent (t-SNE [39] visualization of the CORA dataset). (b): The node inﬂuence boundary (the yellow dotted line) is shifted towards the small class from the true class boundary (the black dotted line) under the quantity- and topology-imbalance scene. (c): The node inﬂuence boundary is shifted towards the large class under the quantity-balanced, topology-imbalanced scene. We regard the large class as positive class to indicate the results. task is to train a classiﬁer F (usually a GNN) to predict the class label y for the unlabeled node set
+U = V − L. The training sets for different classes are represented by (C1, C2, · · · , Ck) and k is the number of classes. The labeling ratio δ = L/V is the proportion of labeled nodes in all nodes. In this work, we focus on TINL in homogeneously-connected graphs and hope to inspire future studies on the critical topology-imbalance issue. 2.2 Understanding Topology Imbalance via Label Propagation
+From Figure 1, we can intuitively perceive the imbalance brought by the positions of labeled nodes; in this part, we further explore the nature of topology imbalance with the well-known
+Label Propagation [50] algorithm (short as LP) and provide a uniform analysis framework for the comprehensive node imbalance issue. In LP, labels are propagated from the labeled nodes and aggregated along edges, which can also be viewed as a random walk process from labeled nodes. The convergence result Y after repeated propagation is regarded as the nodes soft-labels:
+Y = α(I − (1 − α)A(cid:48))−1Y 0, (1) where I is the identity matrix, α ∈ (0, 1] is the random walk restart probability, A(cid:48) = D− 1 2 is the adjacency matrix normalized by the diagonal degree matrix D, Y 0 is the initial label distribution where labeled nodes are represented by the one-hot vectors. The prediction label for the i-th node is qi = arg maxj Yij. LP is a simple yet successful model [37] and can be uniﬁed with GNN models owning the message-passing mechanism [41]. From Figure 2(a), we can empirically ﬁnd that there is a signiﬁcant correlation between the results of LP and GCN (T/F indicates prediction is True/False). 2 AD− 1
+The LP prediction q can be viewed as the distribution of the (labeled) node inﬂuence [41] (i.e. each node is mostly inﬂuenced by which class’s information); hence the boundaries of the node inﬂuence can act as an effective reﬂection for the GNN model decision boundaries considering the high consistency between LP and GNN. Moreover, node inﬂuence offers a uniﬁed view of TINL and
+QINL: ideally, the node inﬂuence boundaries should be consistent with the true class boundaries, but both the labeled nodes’ numbers (QINL) and positions (TINL) can cause a shift of the node inﬂuence boundaries from the true one, resulting in deviation of the model decision boundaries.
+Node imbalance issue is composed of topology- and quantity-imbalance. Figure 2 illustrates two examples of node inﬂuence boundary shift. In Figure 2(b), when the uniform selection is adopted to generate training set, both the quantity and the topology are imbalanced for model training; then the large class with more total nodes (denotes by blue color) will own stronger inﬂuence than the small class with fewer total nodes (denotes by red color) due to the quantity advantage and the node inﬂuence boundary is shifted towards the small class. In Figure 2(c), when the quantity-balanced strategy is adopted for sampling training nodes, it will be easier for the small class to has more labeled nodes close to the class boundary and the boundary of the node inﬂuence is shifted into the large class. We can ﬁnd that even when the training set is quantity-balanced, the topology-imbalance issue still exists and hinders the node classiﬁcation learning. Hence, we can conclude that node imbalance 3
+Figure 3: Effectiveness of Totoro at (a) Node Level: labeled nodes (t-SNE visualization of the CORA dataset) with less inﬂuence conﬂict (lighter color) are farther-away from class boundaries than those with high conﬂict (darker color), and (b) Dataset Level: There is a signiﬁcant negative correlation between the GNN (GCN) performance and overall conﬂict of the training set (the Pearson correlation coefﬁcient is −0.618 over 50 randomly selected training sets with the p value smaller than 0.01). learning is caused by the joint effect of TINL and QINL. Separately considering TINL or QINL will lead to a one-sided solution to node imbalance learning. 2.3 Measuring Topology Imbalance by Inﬂuence Conﬂict
+Although we have realized that the imbalance of node topology interferes with model learning, how to measure the labeled node’s relative topological position to its class (being far away from or close to the class center) remains the key challenge in handling the topology-imbalance issue due to the complex graph connections and the unknown class labels for most nodes in the graph. As the nodes are homogeneously connected when constructing the graph, even nodes close to the class boundaries own similar characteristics to their neighbors. Thus it is unreliable to leverage the difference between the characteristics of one labeled node and its surrounding subgraphs to locate its topological position.
+Instead, we propose to utilize the node topology information by considering the node inﬂuence conﬂict across the whole graph and devise the Conﬂict Detection-based Topology Relative Location metric (Totoro).
+Similar to Eq (1), we calculate the Personalized PageRank [27] matrix P to measure node inﬂuence distribution from each labeled node:
+P = α(I − (1 − α)A(cid:48))−1. (2)
+Node inﬂuence conﬂict denotes topological position. According to related studies [41, 19, 2], P can be viewed as the distribution of inﬂuence exerted outward from each node. We assume that if a labeled node v ∈ V encounters strong heterogeneous inﬂuence from the other classes’ labeled nodes in the subgraph around node v where node v itself owns great inﬂuence, we have the conclusion that node v meets large inﬂuence conﬂict in message passing and it is close to topological class boundaries, and vice versa. Based on this hypothesis, we take the expectation of the inﬂuence conﬂict between the node v and the labeled nodes from other classes when node v randomly walks across the entire graph as a measurement of how topologically close node v is to the center of the class it belongs to. The Totoro value of node v is computed as:
+Tv = Ex∼Pv,: [ (cid:88) j∈[1,k],j(cid:54)=yv 1
+|Cj| (cid:88) i∈Cj
+Pi,x], (3) where yv is the ground-truth label of node v, Pv indicates the personalized PageRank probability vector for the node v. A larger Totoro value Tv indicates that node v is topologically closer to class boundaries, and vice versa. The normalization item 1/|Cj | is added to make the inﬂuence from the different classes comparable when computing conﬂict.
+We visualize the node labels and the Totoro values (scaled to [0, 1]) of labeled nodes in Figure 3(a). We can ﬁnd that the labeled nodes with smaller Totoro values are farther away from the class boundaries, demonstrating the effectiveness of Totoro in locating the positions of labeled nodes. Besides, we sum 4
+the conﬂict of all the labeled nodes (cid:80) b∈L Tv to measure the overall conﬂict of the dataset, which can be viewed as the metric for the overall topology imbalance given the graph G and the training set L. Figure 3(b) shows that there is a signiﬁcant negative correlation between the overall conﬂict and the model performance, which further demonstrates the effectiveness of Totoro in measuring the intensity of topology imbalance at the dataset level. 2.4 Alleviate Topology Imbalance by Instance-wise Node Re-weighting
+In this section, we introduce ReNode, a model-agnostic training weight schedule mechanism to address TINL for general GNN encoder in a plug-and-play manner. Inspired by the analysis in
+Section 2.2, the ReNode method is devised to promote the training weights of the labeled nodes that are close to the topological class centers, so as to make these nodes play a more active role in model learning, and vice versa. Speciﬁcally, we devise a cosine annealing mechanise 2 for the training node weights based on their Totoro values: wv = wmin + 1 2 (wmax − wmin)(1 + cos(
+Rank(Tv)
+|L|
+π)), v ∈ L (4) where wv is the modiﬁed training weight for the labeled node v, wmin, wmax are the hyper-parameters indicating the lower bound and upper bound of the weight correction factor, Rank(Tv) is the ranking order of Tv from the smallest to the largest. The training loss LT for the quantity-balanced, topology-imbalanced node classiﬁcation task is computed by the following equations:
+LT = − 1
+|L| k (cid:88) (cid:88) wv v∈L c=1 v log gc y∗c v, g = softmax(F(X, A, θ)), (5) where F denotes any GNN encoder, θ is the parameter of F, gi is the GNN output for node i, y∗ i is the gold label for node i in one-hot embedding. By encouraging the positive effects of the labeled nodes near the class topological centers, and reducing the negative effects of those near the topological class boundaries, our ReNode method is expected to minimize the deviation between the node inﬂuence boundaries and the true class boundaries, so as to correct the class imbalance caused by the positions of labeled nodes.
+ReNode to Jointly Handle TINL and QINL In this part, we introduce the application of the
+ReNode method in a more general graph imbalance scenario where both the topology- and quantity-imbalance issues exist. As analyzed in previous sections, the TINL and QINL are orthogonal problems. Therefore, we propose that our ReNode method based on (labeled) node topology can be seamlessly combined with the existing methods designed for the quantity-imbalance learning.
+Without loss of generality, we present how our ReNode method can be combined with the vanilla class frequency-based re-weight method [17]. The training loss LQ for the quantity-imbalanced, topology-imbalanced node classiﬁcation task is formalized in the following equation:
+LQ = − 1
+|L| (cid:88) v∈L wv
+¯|C|
+|Cj| k (cid:88) c=1 v log gc y∗c v, (6) where ¯|C| is the average number of the class training sizes. With this method, the ﬁnal weight of the labeled node is affected by two perspectives: training examples of the minority classes will have higher weights than that of the majority classes; training examples close to the topological class centers will have higher weights than those are close to the topological class boundaries.
+ReNode for Large-scale Graph There are mainly two challenges when applying ReNode to large-scale graphs: (1) how to calculate the PageRank matrix, and (2) how to train the GNN model in an inductive setting [13]. In this work, we follow the PPRGo method [2] to implement our method on the large-scale graph, which can decouple the feature learning process from the information transmission process to resolve the dependence on the global graph topology structure and can be carried out much efﬁciently. Following PPRGo, the Personalized PageRank matrix ˆP and the corresponding training
+ReNode factor ˆw are generated by the estimation method from Andersen et al. [1] and then ˆP is 2We also try other schedules and the cosine method works best. More details can be found in Appendix B. 5
+Table 1: ReNode (short as RN) for the pure topology-imbalance issue. We report Weighted-F1 (W-F,
+%), Macro-F1 (M-F, %) and the corresponding standard deviation for each group of experiments. ∗ and ∗∗ represent the result is signiﬁcant in student t-test with p < 0.05 and p < 0.01, respectively.
+Model
+Training
+W-F
+GCN
+GAT
+PPNP
+SAGE
+CHEB
+SGC
+±0.9 w/o RN 79.1±1.1 w/ RN 79.8∗∗ w/o RN 76.0±1.7 w/ RN 77.7∗∗ w/o RN 80.5±1.6 w/ RN 81.9∗∗ w/o RN 75.1±1.7 w/ RN 75.7∗∗ w/o RN 74.5±1.1 w/ RN 75.3∗∗ w/o RN 74.9±2.1 w/ RN 77.0∗∗
+±2.0
+±0.6
+±1.7
+±1.1
+±1.1
+CORA
+CiteSeer
+PubMed
+Photo
+M-F 77.8±1.5 78.6∗∗ 74.9±1.9 76.2∗∗ 79.1±1.4 80.5∗∗ 74.6±1.4 75.1∗∗ 73.4±1.1 74.0∗∗ 73.8±2.1 76.0∗∗
+±1.2
+±1.8
+±0.8
+±1.4
+±1.1
+±1.1
+W-F 66.2±1.0 66.9∗
+±1.1 66.3±2.8 67.1∗
+±1.9 67.5±1.8 68.1∗
+±1.4 67.0±1.4 67.3±1.4 66.8±1.8 67.5∗∗ 65.7±1.6 67.2∗∗
+±1.6
+±1.3
+M-F 62.0±1.3 62.8∗
+±1.4 62.4±2.6 63.2∗
+±1.6 63.2±1.6 63.7∗
+±2.0 63.0±1.4 63.5∗
+±1.2 63.2±1.6 63.8∗∗ 61.8±1.6 62.9∗∗
+±1.5
+±1.8
+±1.5
+W-F 74.6±2.1 76.1∗∗ 73.9±2.2 75.2∗∗ 74.6±1.9 76.0∗∗ 74.2±2.2 74.9∗∗ 75.1±1.8 76.2∗∗ 72.9±2.3 73.7∗∗
+±2.0
+±2.0
+±1.9
+±1.4
+±2.8
+±1.8
+M-F 74.7±1.9 76.1∗∗ 73.9±2.1 75.1∗∗ 74.7±1.7 76.1∗∗ 74.2±2.1 78.2∗∗ 75.2±1.1 76.3∗∗ 73.1±2.6 73.8∗∗
+±2.5
+±2.2
+±2.3
+±1.2
+±2.1
+±2.2
+±2.0
+W-F 86.8±2.0 87.7∗∗ 88.3±2.0 89.1∗∗ 89.3±1.3 89.7∗
+±1.0 86.2±2.6 86.5±1.7 82.1±2.2 84.8∗∗ 87.1±1.3 87.4±1.5
+±2.4
+±1.9
+±2.0
+M-F 84.7±1.7 85.4∗∗ 86.2±2.2 87.1∗∗ 86.8±1.4 87.2∗
+±1.3 83.9±2.4 84.1±1.7 79.4±3.5 82.1∗∗ 84.9±1.1 85.2±1.5
+±2.8
+±2.3
+Computers
+M-F 73.6±2.9 74.5∗∗ 78.8±2.3 78.7±2.0 77.7±1.7 78.3∗
+±1.1 71.6±2.5 72.3∗∗ 68.4±3.4 68.6±3.4 76.8±1.8 77.8∗∗
+W-F 74.2±2.6 74.7∗
+±2.2 79.0±2.1 78.8±1.9 78.7±1.5 79.0∗
+±1.1 73.5±3.4 74.9∗∗ 70.3±4.0 70.5±4.0 77.4±1.7 78.2∗∗
+±3.0
+±1.8
+±2.5
+±1.2
+Table 2: Result of different dataset conﬂict levels (High/Middle/Low). Our ReNode method improve the GNN (GCN) performance most when the conﬂict level of graph is high.
+W-F(%) CORA-H CORA-M CORA-L
+CiteSeer-H CiteSeer-M CiteSeer-L
+PubMed-H PubMed-M PubMed-L w/o RN 76.5±1.3 w/ RN 78.7∗∗
+±0.8 78.4±0.7 79.3∗∗
+±0.6 79.7±0.8 80.4∗∗
+±0.6 62.6±1.5 63.8∗∗
+±1.3 65.3±0.6 66.0∗∗
+±0.8 67.3±1.1 67.5±1.4 72.1±2.4 74.3∗∗
+±2.1 74.7±1.8 75.6∗∗
+±1.9 78.3±1.8 78.8∗
+±1.5 directly employed as the aggregation weights from all the other nodes regardless of their topology distance from the current node: g(cid:48) = softmax( ˆP F (cid:48)(X, θ(cid:48))), (7) where F (cid:48) can be a linear layer or a multi-layer perceptron with parameter θ(cid:48). The ﬁnal training loss for large-scale graph LL follows Eq (5) and (6), and replaces w and g with ˆw and g(cid:48). 3 Experiments
+In this section, we will ﬁrst introduce the experimental datasets for both transductive and inductive semi-supervised node classiﬁcation. Then we introduce the experiments to verify the effectiveness of the proposed ReNode method in three different imbalance situations: (1) TINL only, (2) TINL and
+QINL, (3) Large-scale Graph. 3.1 Datasets
+We adopt two sets of graph datasets to conduct experiments. For the transductive setting [13], we take the widely-used Plantoid paper citation graphs [33] (CORA,CiteSeer, Pubmed) and the Amazon co-purchase graphs [24] (Photo,Computers) to verify the effectiveness of our method. For the inductive setting, we conduct experiments on the popular Reddit dataset [13] and the enormous MAG-Scholar dataset (coarse-grain version) [2] which owns millions of nodes and features. For each of these datasets, we repeat experiments on 5 different datasets splittings [34] and we run 3 times for each splitting to reduce the random variance. More details about the datasets and experiment settings are presented in Appendix A. 3.2 ReNode for the Pure Topology-imbalance Issue
+Settings When considering topology-imbalance only, the labeling set takes a balanced setting and the annotation size for each class is all equal to |L|/k. Following the most widely-used semi-supervised setting in node classiﬁcation studies [47, 18], we randomly select 20 nodes in each class for training and 30 nodes per class for validation; all the remaining nodes form the test set. We display the experiment results for the 5 transductive datasets on 6 widely-used GNN models: GCN [18],
+GAT [40], PPNP [19], GraphSAGE [13] (short as SAGE), ChebGCN [9] (short as CHEB) and
+SGC [43]. We strictly align the hyperparameters in each group of experiments to show the pure improvement brought by our ReNode method (similarly hereinafter). The training loss LT from section 2.4 is adopted. 6
+Table 3: ReNode method for the compound scene of TINL and QINL. The imbalance ratio ρ is set to different levels ([5, 10]) to test the effect of our method under different imbalance intensities.
+Macro-F1(%)
+CORA
+CiteSeer
+PubMed
+Photo
+Computers
+Imbalance Ratio 5
+CE
+DR-GCN
+RA-GCN
+G-SMOTE
+RW (w/o RN)
+RW (w/ RN)
+FOCAL (w/o RN)
+FOCAL (w/ RN)
+CB (w/o RN)
+CB (w/ RN) 60.9±1.5 67.7±1.1 69.0±1.5 68.1±0.9 69.1±1.4 70.0∗
+±1.3 66.4±1.6 68.7∗∗
+±0.7 69.8±1.5 71.1∗∗
+±0.6 10 41.0±3.5 51.3±1.4 51.7±1.7 49.6±1.1 49.7±1.6 50.1±1.7 5 53.6±2.1 54.7±1.7 55.6±1.3 54.0±1.6 10 47.6±2.8 52.5±2.6 52.7±2.1 51.8±1.3 53.6±2.3 55.2∗∗
+±1.8 52.9±2.6 54.0∗∗
+±2.5 51.9±1.8 52.6∗∗
+±1.9 54.3±1.3 54.6±1.2 51.5±1.5 51.9∗
+±1.2 54.1±1.3 54.7∗
+±1.6 54.0±1.9 54.7∗
+±1.5 53.5±0.8 54.3∗∗
+±2.3 5 10 5 61.0±1.9 49.7±2.6 79.4±1.2 80.6±1.8 79.7±1.2 80.5±1.5 81.2∗
+±1.0 80.5±0.7 80.9∗
+±0.8 80.6±0.8 81.2∗
+±1.8 78.0±1.6 78.1±2.1 76.4±1.5 78.0±2.0 78.5∗
+±2.2 78.0±1.6 78.7∗∗
+±1.4 77.6±1.6 78.3∗∗
+±2.6 62.0±2.7 80.8±2.3 81.4±2.6 82.2±1.8 80.5±2.7 83.9∗∗
+±2.1 79.3±1.9 80.0∗∗
+±2.3 77.9±2.6 79.6∗∗
+±2.7 10 40.7±3.4 79.5±2.8 79.4±3.2 77.5±2.1 80.4±3.3 81.3∗∗
+±3.2 79.2±2.2 80.7∗∗
+±2.9 78.8±3.1 80.4∗∗
+±3.3 5 50.4±2.6 66.9±3.5 71.2±2.8 71.9±2.5 70.5±3.2 72.4∗∗
+±2.6 65.8±2.7 68.6∗∗
+±3.1 69.6±2.2 73.1∗∗
+±3.1 10 35.5±3.2 67.4±3.6 68.7±3.0 61.3±3.2 67.8±4.2 70.2∗∗
+±2.4 63.9±2.6 65.5∗∗
+±3.5 64.8±2.9 66.5∗∗
+±3.6
+Results From Table 1, we can ﬁnd that our ReNode method can effectively improve the overall performance (Weighted-F1) and the class-balance performance (Macro-F1) for all the 6 experiment
+GNNs in most cases, which proves the effectiveness and generalizability of our method. Our method considers the graph-speciﬁc topology imbalance issue which has been usually neglected in existing methods and conducts a ﬁne-grained and self-adaptive adjustment to the training node weights based on their topological positions. We notice that the improvement for the CiteSeer dataset is less than the other datasets. We analyze the reason lies in that the connectivity of CiteSeer is poor, which makes the conﬂict detection–based method fail to reﬂect the node topological position well. To verify the motivation of relieving topology-imbalance, we set training sets with different levels of topology-imbalance to test our method3. Table 2 displays that our ReNode method improves the performance of GNN (GCN) most when the dataset is highly topologically imbalanced, which demonstrates that our method can effectively alleviate topology-imbalance and improve GNN performance. 3.3 ReNode for the Compound Scene of TINL and QINL
+Settings When jointly considering both topology- and quantity-imbalance issues, following existing studies [5, 4], we take the step imbalance setting, in which all the minority classes have the same labeling size ni and all the majority classes have the same labeling size na = ρ ∗ ni. The imbalance ratio ρ denotes the intensity of quantity imbalance which is equal to the ratio of the node size of the most frequent to least frequent class. In this work, the imbalance ratio ρ is set to [5, 10] for each dataset. The fraction of the majority classes is µ, and for all experiments, we set µ = 0.5 and round down the result µ ∗ k. The training loss LQ from section 2.4 is adopted. We implement two groups of baselines for comparison: (1) Popular quantity-imbalance methods for general scenarios:
+Re-weight [17] (RW), Focal Loss [22] (Focal) and Class Balanced Loss [8] (CB); (2) Graph-speciﬁc quantity-imbalance methods: DR-GCN [35], RA-GCN [11] and GraphSMOTE [49]. To jointly handle the topology- and quantity-imbalance issues and demonstrate the orthogonality of them, we combine our ReNode method with these three general quantity-imbalance methods (RW, Focal, CB)4.
+The backbone model is GCN [18], and the labeling ratio δ is set to 5%.
+Results From Table 3 (Macro-F1 is reported here for a fair comparison with these methods designed for class-balance performance), we can ﬁnd that our ReNode method signiﬁcantly outperforms both the general and the graph-speciﬁc quantity-imbalance methods in most situations by simultaneously alleviating the topology- and quantity-imbalance issues. Even when the training set is severely quantity-imbalanced (ρ=10), our method still effectively alleviates the imbalance issue and promotes model performance well. The performance of the quantity-imbalance methods from the general
+ﬁeld (RW, Focal, CB) is on par with or less effective than the graph-speciﬁc quantity-imbalance methods (DR-GCN, RA-GCN, G-SMOTE), while the combination of our ReNode method and these general quantity-imbalance methods can surpass the graph-speciﬁc quantity-imbalance methods, which demonstrates that the node imbalance learning can be further solved by jointly handling the topology- and quantity-imbalance issues instead of considering the quantity-imbalance issue only. 3The settings of the dataset topology-imbalance levels is shown in Appendix C. 4The three graph-speciﬁc methods have special operations for the training loss, which can be hardly combined with our method. 7
+Figure 4: Experimental results (Weighted-F1,%) on the large-scale Reddit and MAG-Scholar graphs.
+Our ReNode method can effectively improve the model performance under different labeling sizes.
+Figure 5: Evaluating GNNs from the aspect of topology-imbalance sensitivity (Metric: Weighted-F1 (%)). We can summarize the ranking of topology-imbalance sensitivity: GCN > PPNP > GAT. 3.4 ReNode for Large-scale Graphs
+Settings We conduct experiments on the two large-scale datasets: Reddit and MAG-Scholar, to verify the effectiveness of our ReNode method in the inductive setting. We conduct experiments with different labeling sizes (20/50/100 training nodes per class) and imbalance settings (TINL-only, TINL and QINL). The backbone GNN model is PPRGo [2] 5. For QINL, we take the uniform selection to sample training nodes to be consistent with PPRGo. The training loss LL from section 2.4 is adopted.
+Both baseline and our methods are not combined with any quantity-imbalance method.
+Results
+In Figure 4, we present the experiment results with different labeling sizes and imbalance settings, we can ﬁnd that our method can effectively promote the performance on the large-scale graphs comparing to the popular PPRGo model across different settings, which demonstrates the applicability of our method for extremely-large graphs. We also notice that our method can bring greater improvement when the labeling size is large. We explain the reason lies in that when the labeling size is large, the positions located by the conﬂicts among nodes will be more accurate, thus bringing more reasonable weight adjustments. On the other hand, when the labeling ratio is extremely small (especially for the enormous MAG-Scholar graph) and the inﬂuence conﬂict between the labeled nodes is negligible, our method exhibits the cold start problem. 4 Discussions 4.1 Evaluating GNNs from the Aspect of Topology-Imbalance Sensitivity
+In Figure 5, we evaluate the GNN’s capability for handling topology-imbalance and ﬁnd that different
+GNNs present signiﬁcant difference in the topology-imbalance sensitivity across multiple datasets.
+The GCN model is susceptible to the topology-imbalance level of the graph and its performance decays greatly when the topology-imbalance increases. On the opposite, the GAT model is less sensitive to the topology-imbalance level and can achieve the best results when the topology-imbalance level is high. The PPNP model can achieve ideal performance when the topology-imbalance level is low, and its performance does not drop as sharply as GCN when the topology-imbalance level is high.
+We analyze the reason lies in that: (1) the aggregation operation of GCN is equivalent to directly 5We do not implement other inductive backbone GNN models like Cluster-GCN [7] or APPNP [19] due to the low efﬁciency [2] of them when handling the enormous MAG-Scholar dataset. 8
+averaging neighbor features [45] that lacks the noise ﬁltering mechanism, so it is more sensitive to the topology-imbalance level of the graph; (2) the GAT model can dynamically adjust the aggregation weight from different neighbors, which increases its robustness to the high topology-imbalance situation but hinders the model performance when the graph topology-imbalance level is low and there is less need to ﬁlter neighbor information; (3) the inﬁnite convolution mechanism of the PPNP model makes it possible to aggregate the information from distant nodes to enhance its robustness to the graph topology imbalance.
+Shchur et al. [34] notice that the performance ranking of GNNs varies with the training set selection.
+Hence, existing node classiﬁcation studies [32, 14] usually repeat experiments multiple times with different training sets to reduce this randomness. The results from Figure 5 inspire us that the topology imbalance can partly explain the randomness of GNN performance caused by the training set selection and we can adopt the topology-imbalance sensitivity as a new aspect in evaluating the performance of different GNN architectures. 4.2 Limitations of Method
+Although our ReNode method has proven effective in multiple scenarios, we also notice some limitations of it because of the complexity of node imbalance learning. First, the ReNode method is devised for homogeneously-connected graphs (linked nodes are expected to be similar, such as the various datasets in experiments), and it needs a further update for heterogeneously-connected graphs (such as protein networks). Besides, the ReNode method improves less when the graph connectivity is poor (Section 3.2) or the labeling ratio is extremely low (Section 3.3) because in these cases, the conﬂict level among nodes is low thus the nodes topological positions are insufﬁciently reﬂected. 5

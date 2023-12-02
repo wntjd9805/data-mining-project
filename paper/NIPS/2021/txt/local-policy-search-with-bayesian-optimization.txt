@@ -1,0 +1,144 @@
+Abstract
+Reinforcement learning (RL) aims to ﬁnd an optimal policy by interaction with an environment. Consequently, learning complex behavior requires a vast number of samples, which can be prohibitive in practice. Nevertheless, instead of systemat-ically reasoning and actively choosing informative samples, policy gradients for local search are often obtained from random perturbations. These random sam-ples yield high variance estimates and hence are sub-optimal in terms of sample complexity. Actively selecting informative samples is at the core of Bayesian optimization, which constructs a probabilistic surrogate of the objective from past samples to reason about informative subsequent ones. In this paper, we propose to join both worlds. We develop an algorithm utilizing a probabilistic model of the objective function and its gradient. Based on the model, the algorithm decides where to query a noisy zeroth-order oracle to improve the gradient estimates. The resulting algorithm is a novel type of policy search method, which we compare to existing black-box algorithms. The comparison reveals improved sample complex-ity and reduced variance in extensive empirical evaluations on synthetic objectives.
+Further, we highlight the beneﬁts of active sampling on popular RL benchmarks. 1
+
+Introduction
+Reinforcement learning (RL) is a notoriously data-hungry machine learning problem, where state-of-the-art methods easily require tens of thousands of data points to learn a given task [1]. For every data point, the agent has to carry out potentially complex interactions with its environment, either in simulation or in the physical world. This expensive data collection motivates the development of sample-efﬁcient algorithms. Herein, we consider policy search problems, a type of RL technique where we directly optimize the parameters of a policy with respect to the cumulative reward over a
+ﬁnite episode. The collected data is utilized to estimate the direction of local policy improvement, enabling the use of powerful optimization techniques such as stochastic gradient descent. Policy gradient methods (e.g., [2–5]) usually rely on random perturbations for data generation, e.g., in the form of exploration noise in the action space or stochastic policies, and do not reason about uncertainty in their gradient estimation. However, innate in the RL setting is the ability to actively generate data, allowing the agent to decide on informative queries, thereby potentially reducing the amount of data needed to ﬁnd a (local) optimum. Active sampling has the potential to allow those algorithms to improve sample complexity, reducing the number of environment interactions.
+∗Equal contribution 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+In contrast to random sampling, Bayesian op-timization (BO) [6] is a paradigm to optimize expensive-to-evaluate and noisy functions in a sample-efﬁcient manner. At the core of BO is the question of how to query the objective function efﬁciently to maximize the information contained in each sample. By building a prob-abilistic model of the objective using past data and, critically, prior knowledge, the algorithm can reason about how to query a noisy oracle to solve the optimization task. Since RL can be framed as a black-box optimization problem, we can use BO to learn policies in a sample-efﬁcient way. However, even though BO has been used to tackle RL, these approaches are often restricted to low-dimensional problems. One reason is that
+BO aims to ﬁnd a global optimum; hence, with-out further assumptions, BO algorithms need to model and search the entire domain, which needs a lot of data and gets exponentially more difﬁcult as the dimensionality increases. Additionally, as the amount of data grows so does the computational complexity of probabilistic models, which becomes a signiﬁcant problem. However, the success of RL algorithms using policy gradient methods indicates that for many problems it is sufﬁcient to ﬁnd a locally optimal policy.
+Figure 1: Estimation of a Jacobian GP model (bottom) of a 1-dimensional objective function (top). The model has function observations (black crosses), but is able to form a posterior belief over the gradient. Uncertainty for the Jacobian model is reduced between samples. An active sample strategy can improve gradient estimates.
+Our proposed algorithm combines the strength of gradient-based policy optimization with active sampling of policy parameters using BO. We thereby improve the computational complexity of BO methods on the one hand, and the sample-inefﬁciency of gradient-based methods on the other hand, especially when proper prior knowledge is available. We achieve these improvements by explicitly learning a probabilistic model of the objective in the form of a Gaussian process (GP) [7]. From this model, we can jointly infer the objective and its gradients with a tractable probabilistic posterior. The resulting Jacobian estimate includes all data points, rendering data usage more efﬁcient. Further, the algorithm infers informative queries from the uncertainty of the probabilistic model to improve the estimate of the local gradient. While in this paper we adapt the setting of Mania et al. [1] and assume access to zeroth-order information only, the algorithm extends straightforwardly to policy gradient algorithms where additional ﬁrst-order information is available. In summary, the contribution of this paper is a local BO-like optimizer called Gradient Information with BO (GIBO). The queries of
+GIBO are chosen optimally to minimize uncertainty about the Jacobian. GIBO uses a local GP model for active sampling and gradient estimation and can be used with existing policy search algorithms.
+Using only zeroth order information, GIBO is able to
+• signiﬁcantly improves sample complexity in extensive within-model comparisons, i.e., when accurate prior knowledge is available;
+• is able to solve RL benchmark problems in a sample efﬁcient manner; and
+• reduces variance in the rewards when compared to non-active sampling baselines. 2 Preliminaries
+This work presents a local optimizer with active sampling. The objective function and its derivative’s joint distribution are modeled using a GP. Since we have developed the optimizer with the RL application in mind, we also introduce the RL problem. For the sake of brevity, we refer the reader to
+[7] and [8] for an introduction into GPs and BO, respectively. 2.1 Problem setting
+In the following we phrase policy search as a black-box optimization problem. For a parameterized policy πθ : Θ × S → A that maps states s ∈ S and the static policy parameters θ ∈ Θ to actions a ∈ A, we use the same performance measure as in policy gradient methods for the episodic case. 2
+Hence, the objective function J : Rd → R is deﬁned as
+I
+J(θ) = Eπθ (cid:34) ri
+, (cid:35) i=0 (cid:88) where Eπθ is the expectation under policy πθ, ri is the reward at time step i, and I the length of the episode. A BO query is equivalent to the return of one rollout following the policy πθ in the environment. The expected episodic reward is entirely determined by choice of policy parameters (and the initial conditions). Thus, the optimizer explores the reward function in the parameter space rather than in the action space. Since initial conditions might vary and the environment can be non-deterministic, reward evaluations are noisy.
+Policy search herein is abstracted as a zeroth-order optimization problem of the form
+θ∗ = arg max
+J(θ), (1)
+θ
+Θ
+∈ where θ is the variable and Θ ⊂ Rd a bounded set. To solve (1), an optimization algorithm can query an oracle for a noisy function evaluation y = J(θ) + ω. We assume an i.i.d. noise variable ω ∈ R to follow a normal distribution ω ∼ N (0, σ2) with variance σ2. We do not assume access to gradient information or other higher-order oracles for conciseness. Albeit, GIBO requires that the following critical assumption is fulﬁlled:
+Assumption 1. The objective function J is a sample from a known GP prior J ∼ GP (m(θ), k(θ, θ(cid:48))), where the mean function is at least once differentiable and the covariance function k is at least twice differentiable, w.r.t. θ.
+This is the standard setting for BO with the addition that the mean and kernel need to be differentiable, which is satisﬁed by some of the most common kernels such as the squared exponential (SE) kernel.
+In the empirical section, we investigate the performance of the developed algorithm with and without
+Assumption 1 holding true. 2.2
+Jacobian GP model
+Since GPs are closed under linear operations, the derivative of a GP is again a GP [7]. This enables us to derive an analytical distribution for the objective’s Jacobian, which we can use as a proxy for gradient estimates and enable gradient-based optimization.
+Following Rasmussen and Williams [7], the joint distribution between a GP and its derivative at the point θ is
+∗
+¯y
+∇θ (cid:20)
+∗
+J
+∗(cid:21)
+∼ N (cid:18)(cid:20) m(X) m(θ
+∇θ
+∗
+,
+)
+∗ (cid:21) (cid:20)
+K(X, X) + σ2I ∇θ
+, X) ∇2
+∇θ
+θ
+K(θ
+∗
+∗
+K(X, θ
+∗
+, θ
+K(θ
+∗
+∗
+)
+)
+, (cid:21)(cid:19) (2)
+∗
+∗ where ¯y are the n zeroth-order observations, X ⊂ Θ are the locations of these observations X =
+[θ1, . . . , θn], and K the covariance matrix given by the kernel function k : Θ × Θ → R. The posterior can be derived by conditioning the joint Gaussian prior distribution on the observation [7] p
+∇θ
+∗
+µ(cid:48)
+∗
+= ∇θ (cid:0)
+∗
+Σ(cid:48)
+∗
+= ∇2 (cid:124)
+θ
+∗
+J
+θ
+∗
+∗ m(θ (cid:12) (cid:12)
+Rd
+∗
+∈
+K(θ (cid:123)(cid:122)
+Rd
+∈
+×
+, X, ¯y
+)
++ ∇θ (cid:1)
+∗
+)
+∼ N (µ(cid:48)
+∗
+, X)
+, Σ(cid:48)
+∗
+K(X, X) + σ2I
+K(θ 1
+− (¯y − m(X))
+∈ Rd
+∈
+− ∇θ
+) (cid:124)
+, θ (cid:125)
+∗
+∗ d
+∗ n
+Rd
+×
+K(θ (cid:123)(cid:122)
+∗
+Rd
+∈
+× (cid:0)
+, X) (cid:125) (cid:124)
+∗ n
+Rn n
+×
+∈ (cid:1)
+K(X, X) + σ2I (cid:125) (cid:123)(cid:122) 1
+− (cid:124)
+Rn
+∈
+∇θ (cid:123)(cid:122)
+∗
+K(X, θ (cid:125)
+∗
+∈ Rd d.
+×
+) (cid:0)
+Rn
+× n
+∈ (cid:1)
+Rn d
+×
+∈ (3) (cid:124)
+Remark 1. Note that the term (K(X, X) + σ2I)− 1 with the highest computational cost (O(N 3)) is (cid:123)(cid:122) the same term that is used to compute the posterior over J. Therefore, calculating the Jacobian does not add to the computational complexity once a GP posterior has been computed. (cid:123)(cid:122) (cid:123)(cid:122) (cid:123)(cid:122) (cid:124) (cid:125) (cid:124) (cid:125) (cid:125) (cid:125) (cid:124)
+Any twice differentiable kernel is sufﬁcient for the presented framework, but we assume a SE kernel for the remainder of the paper. For the derivatives of the SE kernel function see Appendix A.1. For a visual example of function- and the Jacobian-posterior, refer to Fig. 1. The ﬁgure indicates that 3
+a zeroth-order oracle is enough to form a reasonable belief over the function’s gradient. Moreover,
+Fig. 1 shows that the uncertainty about the Jacobian gets reduced between query points more so than at the query points themselves. To minimize uncertainty about the Jacobian at a speciﬁc point, it intuitively makes sense to space out query points in its immediate surrounding. Herein, we formalize this intuition and formulate an optimization problem that sequentially decides on query points that provide the most information about the Jacobian. 2.3

@@ -1,0 +1,47 @@
+Abstract
+Applying differentiable programming techniques and machine learning algorithms to foreign programs requires developers to either rewrite their code in a machine learning framework, or otherwise provide derivatives of the foreign code. This pa-per presents Enzyme1, a high-performance automatic differentiation (AD) compiler plugin for the LLVM compiler framework capable of synthesizing gradients of statically analyzable programs expressed in the LLVM intermediate representation (IR). Enzyme synthesizes gradients for programs written in any language whose compiler targets LLVM IR including C, C++, Fortran, Julia, Rust, Swift, MLIR, etc., thereby providing native AD capabilities in these languages. Unlike traditional source-to-source and operator-overloading tools, Enzyme performs AD on opti-mized IR. On a machine-learning focused benchmark suite including Microsoft’s
+ADBench, AD on optimized IR achieves a geometric mean speedup of 4.2 times over AD on IR before optimization allowing Enzyme to achieve state-of-the-art performance. Packaging Enzyme for PyTorch and TensorFlow provides convenient access to gradients of foreign code with state-of-the-art performance, enabling foreign code to be directly incorporated into existing machine learning workﬂows. 1
+
+Introduction
+Machine learning (ML) frameworks such as PyTorch [48] and TensorFlow [1] have become widespread as the primary workhorses of the modern ML community. Computing gradients necessary for algorithms such as backpropagation [32], Bayesian inference, uncertainty quantiﬁcation [60], and probabilistic programming [16] requires all of the code being differentiated to be written in these frameworks. This is problematic for applying ML to new domains as existing tools like physics simulators [23, 10, 17, 18, 35], game engines, and climate models [58] are not written in the domain speciﬁc languages (DSL’s) of ML frameworks. The rewriting required has been identiﬁed as the quintessential challenge of applying ML to scientiﬁc computing [4]. As stated by Rackauckas [50]
+“this is [the key challenge of scientiﬁc ML] because, if there is just one part of your loss function that isn’t AD-compatible, then the whole network won’t train.”
+To remedy this issue, the trend has been to either create new DSL’s [35, 17, 43] that make the rewriting process easier or to add differentiation as a ﬁrst-class construct in programming languages [44, 9, 61, 37]. This results in efﬁcient gradients, but still requires rewriting in either the DSL or the differentiable programming language. Developers may want to use code foreign to a ML framework to either re-use existing tools or write loss functions in a language with an easier abstraction for their use case. While there exist reverse-mode automatic differentiation (AD) frameworks for various languages, using them automatically on foreign code for an ML framework is difﬁcult as they still require rewriting and have limited support for cross-language AD and libraries[61, 33, 30, 36]. The two primary approaches to computing gradients are as follows. 1Code and documentation at https://github.com/wsmoses/Enzyme and https://enzyme.mit.edu. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+float mag(const float* x);//Compute magnitude in O(N) void norm(float* out, float* in) {
+// float res = mag(in); code motion optimization can move outside the loop for(int i=0; i<N; i++) { out[i] = in[i]/mag(in); }
+}
+// LICM, then AD, O(N) void ∇norm(float* out, float* d_out,
+// AD, then LICM O(N^2) void ∇norm(float* out, float* d_out, float* in, float* d_in) { float* in, float* d_in) { float res = mag(in); for (int i=0; i<N; i++) { out[i] = in[i]/res;
+} float d_res = 0; for (int i=0; i<N; i++) { d_res += -in[i]*in[i]/res * d_out[i]; d_in[i] += d_out[i]/res;
+}
+∇mag(in, d_in, d_res);
+} float res = mag(in); for (int i=0; i<N; i++) { out[i] = in[i]/res;
+} for (int i=0; i<N; i++) { float d_res = -in[i]*in[i]/res \
+* d_out[i]; d_in[i] += d_out[i]/res;
+∇mag(in, d_in, d_res);
+}
+}
+Figure 1: Top: An O(N 2) function norm which normalizes a vector. Running loop-invariant-code-motion (LICM) [45, Sec. 13.2] moves the O(N ) call to mag outside the loop, reducing norm’s runtime to O(N ). Left: An O(N ) ∇norm resulting from running LICM before AD. Both mag and its adjoint
+∇mag are outside the loop. Right: An O(N 2) ∇norm resulting from running LICM after AD. ∇mag remains inside the loop as it uses a value computed inside the loop, making LICM illegal.
+Operator-overloading computes derivatives by providing differentiable versions of existing language constructs. Examples include Adept [33]/ADOL-C [27], C++ libraries providing differentiable types; and JAX [9]/Autograd [44], Python libraries providing derivatives of NumPy-style functions. These approaches, however, require rewriting programs to use differentiable operators in place of standard language utilities. This prevents differentiation of many libraries and code in other languages.
+Source-rewriting [26] analyzes the source code of programs and emits source code deﬁning the gradient. Examples of tools include Tapenade [30, 47] for C and Fortran; ADIC [46] for C and C++; and Zygote [36, 38, 37] for Julia. Users must provide all code being differentiated to the tool ahead-of-time and must write programs in a speciﬁc subset of the language. This makes source-rewriting hard to use with header-only libraries and impossible to use with precompiled libraries.
+Both operator-overloading and source-rewriting AD systems differentiate programs before optimiza-tion. Performing AD on unoptimized programs, however, may result in complicated gradients that cannot be simpliﬁed by future optimization. As an example, the gradient of norm in Figure 1 runs in
+O(N ) if optimization is run before AD and O(N 2) if optimization is run after AD.
+Traditional AD systems have not operated on optimized intermediate representation (IR) as doing so requires either re-implementing all of the optimizations or working at a low-level after which opti-mization has already been performed. Conventional wisdom says that producing efﬁcient gradients for low-level IR is difﬁcult as it lacks high-level information many tools rely upon: “AD is more effective in high-level compiled languages (e.g. Julia, Swift, Rust, Nim) than traditional ones such as
+C/C++, Fortran and LLVM IR [...]” – Innes [36]. This paper challenges that wisdom by creating an efﬁcient AD tool for LLVM [41], a low-level IR and set of optimizations used by many compilers.
+This paper presents Enzyme, an efﬁcient cross-platform compiler plugin for automatic differentiation that operates on LLVM IR [41] and makes the following contributions:
+• Enzyme, a compiler plugin for LLVM that can synthesize fast gradients of statically analyzable
+LLVM IR, including IR generated by compiler frontends for C, C++, Fortran, Rust, Swift, etc.
+• PyTorch-Enzyme/TensorFlow-Enzyme, a foreign-function interface that allows machine learning researchers to use foreign code written in LLVM-compiled languages in PyTorch and TensorFlow.
+• Enzyme.jl, a Julia package that uses Enzyme to synthesize gradients of code written in a dynamic high-level language using only low-level information.
+• Multisource AD and static library support by leveraging link-time optimization (LTO) [41, 39].
+• A study demonstrating that running AD after optimization results in signiﬁcant performance gains on a standard machine learning benchmark suite [57] and achieves state-of-the-art performance. 2
+void f(void* dst, void* src) { memcpy(dst, src, 8); }
+// Gradient memcpy for double inputs void grad_f(double* dst, double* ddst,
+// Gradient memcpy for float inputs void grad_f(float* dst, float* ddst, double* src, double* dsrc) { float* src, float* dsrc) {
+// Forward pass memcpy(dst, src, 8);
+// Reverse pass dsrc[0] += ddst[0]; ddst[0] = 0;
+// Forward pass memcpy(dst, src, 8);
+// Reverse pass dsrc[0] += ddst[0]; ddst[0] = 0; dsrc[1] += ddst[1]; ddst[1] = 0;
+}
+}
+Figure 2: Top: Call to memcpy for an unknown 8-byte object. Left: Gradient for a memcpy of 8 bytes of double data. Right: Gradient for a memcpy of 8 bytes of ﬂoat data.

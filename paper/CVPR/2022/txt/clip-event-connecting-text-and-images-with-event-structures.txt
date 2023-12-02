@@ -1,0 +1,245 @@
+Abstract
+Vision-language (V+L) pretraining models have achieved great success in supporting multimedia applications by un-derstanding the alignments between images and text. While existing vision-language pretraining models primarily focus on understanding objects in images or entities in text, they often ignore the alignment at the level of events and their argument structures. In this work, we propose a contrastive learning framework to enforce vision-language pretraining models to comprehend events and associated argument (par-ticipant) roles. To achieve this, we take advantage of text in-formation extraction technologies to obtain event structural knowledge, and utilize multiple prompt functions to contrast difficult negative descriptions by manipulating event struc-tures. We also design an event graph alignment loss based on optimal transport to capture event argument structures.
+In addition, we collect a large event-rich dataset (106,875 images) for pretraining, which provides a more challenging image retrieval benchmark to assess the understanding of complicated lengthy sentences1. Experiments show that our zero-shot CLIP-Event outperforms the state-of-the-art su-pervised model in argument extraction on Multimedia Event
+Extraction, achieving more than 5% absolute F-score gain in event extraction, as well as significant improvements on a variety of downstream tasks under zero-shot settings. 1.
+
+Introduction
+Real-world multimedia applications require an under-standing of not only entity knowledge (i.e., objects and ob-ject types), but also event knowledge (i.e., event types) with event argument structures (i.e., entities involved and their roles). For example, 89% images include events in contem-*The work is done when the first author was an intern at Microsoft. 1The data and code are publicly available for research purpose in https://github.com/limanling/clip-event.
+Figure 1. Examples of visual event ATTACK with different argu-ments. Groundings are bounding-boxes colored to match roles. porary multimedia news data2. Furthermore, recognizing the arguments (participants) is critical for news comprehension, since events might be contradictory if the arguments play different roles. For example, both Fig. 1(a) and Fig. 1(b) are about the same event type ATTACK and contain entities protester and police, but their argument roles are different, i.e., the protester plays the role of ATTACKER in the first event and the role of TARGET in the second event, and vice versa for the police. Different argument roles for the same group entity result in the differentiation of two attack events.
+However, existing vision-language pretraining models [4, 12, 18, 26, 31, 41] focus on the understanding of images or entities, ignoring the event semantics and structures. As a result, apparent failures happen in the circumstances requir-ing verb comprehension [10]. Thus, we focus on integrating event structural knowledge into vision-language pretraining.
+Previous work primarily represents visual events as verbs with subjects and objects [13, 19, 30, 33, 36, 43]. However, events contain structural knowledge, with each event being assigned to an event type that represents a set of synony-mous verbs. Each argument is grounded to text or images, and associated with an argument role that the participant is playing. As shown in Fig. 2, the carry event is typed as TRANSPORT, with protesters as AGENT, injured man as 2We randomly check 100 images at https://www.voanews.com/.
+Figure 2. Architecture of CLIP-Event. We take advantage of event structural knowledge in captions to contrast hard negatives about event types and argument roles (in blue), which is then used to supervise image event understanding (in yellow) as a cross-media transfer of event knowledge. The negative event structures are highlighted in orange. The events and objects are from automatic system output.
+ENTITY and stretcher as INSTRUMENT.
+There has been little research [17, 25] on extracting event structures from news images, yielding limited support for event knowledge acquisition needed in downstream appli-cations. Thus, we propose to leverage text information ex-traction technologies, which have been well researched in natural language processing, to automatically extract event structures from captions. The captions essentially refer to the same event as the images in news data, e.g., 87% captions describe the events in the images3. Therefore, we design a self-supervised contrastive learning framework, CLIP-Event, using the rich event knowledge in captions as distant supervision to interpret events in the associated images, to effectively transfer event knowledge across modalities.
+In addition, in order to train robust representations capa-ble of discriminating subtle differences between event types (e.g. TRANSPORT and ARREST) and argument roles (e.g.
+ATTACKER and VICTIM) using only images, we propose to generate hard negatives by manipulating event structures,
+We translate both correct and manipulated event structures into text descriptions using an extensive set of event prompt functions. Following the state-of-the-art vision-language pre-training model CLIP [26], we optimize a contrastive learning objective between images and event-aware text descriptions.
+Furthermore, to transfer knowledge of argument struc-tures, we explicitly construct event graphs consisting of event types and argument roles in vision and text. We introduce a fine-grained alignment between two event graphs, aligning the objects in images with the corresponding text entities and their argument roles. We employ optimal transport to encourage a global alignment based on the structures of two graphs, which enables the model to capture the interactions between arguments. For example, objects with similar visual 3The statistics are on those mentioned above 100 images from VOA [1]. features tend to be aligned to the same argument role.
+Our evaluations mainly focus on zero-shot settings, since it is crucial to understand new or previously unidentified events in real-world applications. Traditional methods based on limited pre-defined event ontologies are inapplicable in dealing with open-world events. Our pretrained model, on the other hand, is able to identify event structure using the natural language description of any unseen type and argu-ment role, enabling zero-shot multimedia event extraction.
+The evaluations on Multimedia Event Extraction [17] and
+Grounded Situation Recognition [25] show that CLIP-Event significantly outperforms state-of-the-art vision-language pretraining models, under both zero-shot settings and super-vised settings. Furthermore, it and achieves significant gains in various downstream tasks under zero-shot settings such as image retrieval [7], visual commonsense reasoning [40] and visual commonsense reasoning in time [24].
+In summary, this paper makes the following contributions:
+• We are the first to exploit the visual event and argument structure information in vision-language pretraining.
+• We introduce a novel framework by contrasting with negative event descriptions, which are generated by various prompt functions conditioned on hard negative events and arguments.
+• We propose event graph alignment based on optimal transport, extending previous image or object alignment to event structure aware alignment.
+• We release an event-rich image-caption dataset with 106,875 images, including the extracted event knowl-edge, which can serve as a challenging image retrieval benchmark for evaluating the ability to understand com-plex and lengthy sentences in real-world applications.
+2. Our Approach
+Our goal is to incorporate event structured knowledge into vision-language pretraining. In the following we will address two primary questions regarding the model design: (1) How can the structural event knowledge be acquired? (2)
+How can the semantics and structures of events be encoded?
+We define the symbols used in this paper in Tab. 2. 2.1. Event Structural Knowledge Extraction
+Text and Visual Knowledge Extraction. We use a state-of-the-art text information extraction system [16, 20] to ex-tract events of 187 types4, covering a wide range of news-worthy events. For images, we apply Faster R-CNN [27] trained on Open Images [15] to detect objects.
+Primary Event Detection. When there are multiple events in the caption, the image typically depicts the pri-mary event of the caption. We detect the primary event as the event that is closer to the root of dependency parsing tree [23], and has a larger number of arguments, higher event type frequency, and higher similarity between trigger word and the image using the pretrained CLIP model [26]. We rank events according to these criteria, and perform majority voting. For example, in Fig. 2, there are two events carry and clashes in the caption. We select carry as the primary event since it is the root of the dependency tree, and it has three arguments, as well as higher similarity with the image. 2.2. Event Structure Driven Negative Sampling
+To force the Text and Vision Encoders to learn robust features about event types and argument roles, we design the following strategies to generate challenging negatives.
+Negative Event Sampling. We compute the confusion matrix for the event type classifier of the state-of-the-art vision-language pretraining model CLIP [26] on the pretrain-ing image-caption dataset. The classifier is based on the similarity scores between the event type labels ϕv ∈ ΦV (such as TRANSPORT) and the input image i, and select the top one as the predicted event type ϕ⋆ v.
+T · i,
+ϕ⋆
+ϕv v = arg max
+ϕv∈ΦV
+Negative Argument Sampling. For argument roles, since each event by definition has multiple arguments, we manipulate the order of arguments by performing a right-rotation of the argument role sequence. In detail, we first order existing argument roles following the ontology defi-nition, such as “AGENT, ENTITY, INSTRUMENT” in Fig. 2.
+After that, we right rotate the argument role sequence by one step, resulting in “INSTRUMENT, AGENT, ENTITY”. As a result, each argument is re-assigned to a manipulated role, e.g., injured man, the second argument, is manipulated from
+ENTITY to AGENT. If there is only one argument for the event, we sample a negative role according to the argument confusion matrix of the text argument extraction system [20].
+Description Generation. To encode the positive and negative event structures using the Text Encoder, we design multiple prompt functions, as shown in Tab. 1: (1) Sin-gle Template-based Prompt encodes all arguments in one sentence. (2) Composed Template-based Prompt uses a short sentence to each argument. (3) Continuous Prompt employs learnable prepended tokens [Xi]. (4) Caption Edit-ing has minimum information loss by only altering event (5) GPT-3 based trigger word or switching arguments.
+Prompt generates a semantically coherent natural language description conditioned on the event structure. We employ
+GPT-3 [8] and use five manual event description examples as few-shot prompts [8] to control the generation. The in-put to GPT-3 is the concatenation of the example events ([ex v]) with arguments ([ex a]), the example descrip-tions ([ex desp]), and the target events ([input v]) with arguments ([input a]). The output of GPT-3 is the tar-get description ([output desp]). The description is more natural compared to template-based methods.
+Figure 3. Architecture of GPT-3 based prompt. where the bold symbols stand for the representations from the Text and Vision Encoders in Fig. 2, and we follow CLIP to use Text and Vision Transformers. The confusion matrix is computed by comparing the predicted event type with the type of the primary event for the image. As a result, the negative event types are the challenging cases in image event typing, i.e., the event types whose visual features are am-biguous with the primary event type. For example, in Fig. 2,
+ARREST is sampled as a negative event type, since its visual features are similar to TRANSPORT. 4The system uses DARPA AIDA ontology, which is the most fine-grained text event ontology, as attached in the Appendix. 2.3. Event Graph Alignment via Optimal Transport
+Each event and its arguments can be organized as a graph, as shown in Fig. 2, where the central node is the event node (triangle nodes), and it’s connected to entities (circle nodes) via argument roles. Encoding event graph structures enables the model to capture the interactions between events and arguments. For example, the injured man should be aligned with the ENTITY being transported, rather than the AGENT. 1. Image-level Alignment. We compute cosine similarity s(t, i) and distance d(t, i) between the text t and image i: s(t, i) = cos(t, i), d(t, i) = c(t, i),
+Prompt
+Single
+Template
+Composed
+Template
+Continuous
+Prompt
+Caption
+Editing
+Template
+⟨arg1⟩ transported ⟨arg2⟩ in ⟨arg3⟩ instrument from ⟨arg4⟩ place to ⟨arg5⟩ place.
+Example descriptions of Fig. 2 with arrest as negative event
+Positive
+Protesters transported an injured man in a stretcher instrument.
+Negative-Evt Protesters arrested an injured man in a stretcher place.
+Negative-Arg An injured man transported a stretcher in protesters instrument.
+Template
+The image is about TRANSPORT. The AGENT is ⟨arg1⟩. The ENTITY is ⟨arg2⟩. The INSTRUMENT in ⟨arg3⟩. The ORIGIN is
+⟨arg4⟩. The DESTINATION is ⟨arg5⟩.
+Positive
+The image is about TRANSPORT. The AGENT is protesters. The ENTITY is an injured man. The INSTRUMENT is a stretcher.
+Negative-Evt The image is about ARREST. The AGENT is protesters. The DETAINEE is an injured man. The PLACE is a stretcher.
+Negative-Arg The image is about TRANSPORT. The AGENT is an injured man. The ENTITY is a stretcher. The INSTRUMENT is protesters.
+Template
+[X0]TRANSPORT [X1]AGENT[X2]⟨arg1⟩[X3]ENTITY[X2]⟨arg2⟩[X3]INSTRUMENT[X2]⟨arg3⟩[X3]ORIGIN [X2]⟨arg4⟩
+[X3]DESTINATION [X2]⟨arg5⟩[X3]
+Positive
+[X0]TRANSPORT [X1]AGENT [X2]protesters [X3]ENTITY [X2]an injured man [X3]INSTRUMENT [X2]a stretcher [X3]
+Negative-Evt
+[X0] ARREST [X1] AGENT [X2] protesters [X3] DETAINEE [X2] an injured man [X3] PLACE [X2] a stretcher [X3]
+Negative-Arg [X0]TRANSPORT [X1]AGENT [X2]an injured man[X3]ENTITY[X2]a stretcher [X3]INSTRUMENT [X2]protesters[X3]
+Positive
+Antigovernment protesters carry an injured man on a stretcher after clashes with riot police on Independence Square in ...
+Negative-Evt Antigovernment protesters arrest an injured man on a stretcher after clashes with riot police on Independence Square in ...
+Negative-Arg An injured man carry a stretcher on antigovernment protesters after clashes with riot police on Independence Square in ...
+Positive
+Protesters transported an injured man with a stretcher.
+GPT-3
+Negative-Evt Protesters arrested an injured man with a stretcher.
+Negative-Arg An injured man transported a stretcher and protesters.
+Table 1. The automatically generated positive and negative descriptions for Fig. 2. We use bold to represent events, and underline stands for arguments. The corrupted event type and arguments are in orange, and templates are in blue. [Xi] is learnable prepended token.
+Symbol
+Meaning
+⟨i, t⟩ o, ϕo, io e, ϕe, te v, ϕv, tv a ∈ A(v)
+Gi, Gt t+, t− v , t− a image i and its caption text t object, object type, object bounding box entity, entity type, entity text mention event, event type, event text mention argument role; A(v) is the Argument role set of event v, defined by the IE ontology3 event graph from image i and text t positive description, negative event description, negative argument description apply average pooling over the tokens in the entity men-tion te. Similarly, io is the bounding box of object o and io is its embedding contextualized on the image, based on the average pooling over the Vision Transformer represen-tations of the patches covered in the bounding box. ϕe and
+ϕo are the type representations encoded by the Text Trans-former. For example, ϕe = PERSON for e = injured man and ϕo = PERSON for o =
+. Therefore, the distance between the aforementioned entity and object is:
+Table 2. List of symbols. d(e, o) = c(injured man,
+) + c(PERSON, PERSON), where c(·, ·) = 1 − cos(·, ·) is the cosine distance function, and t is obtained from the Text Transformer and i is obtained from the Vision Transformer. 2. Entity-level Alignment. The cosine distance between text entity e and image object o considers both the mention similarity and type similarity. d(e, o) = c(te, io) + c(ϕe, ϕo), where te is the text mention of entity e, and te is its em-bedding contextualized on the sentence. We encode the sentence using the Text Transformer following [26], and 3. Event-level Alignment. To obtain a global alignment score based on the structures of two graphs, we use the optimal transport [29] to get the minimal distance d(Gt, Gi) between text event graph Gt and image event graph Gi, d(Gt, Gi) = minT T ⊙ C, where ⊙ represents the Hadamard product. T ∈ Rn×m denotes the transport plan, learned to optimize a soft node alignment between two graphs. n and m are the numbers of nodes in Gt and Gi, respectively. Namely, each node in
++
+text graph Gt can be transferred to multiple nodes in image graph Gi with different weights.
+C is the cost matrix. We define cost between event nodes, and between argument nodes. For event nodes, the cost is the cosine distance between the image i and trigger word v,
+C(v, i) = c(tv, i) + c(ϕv, i).
+For example, in Fig. 2, v = carry and ϕv = TRANSPORT,
+C(v, i) = c(carry,
+) + c(TRANSPORT,
+).
+The representation tv is also from the Text Transformer, contextualized on the text sentence.
+The cost between each argument ⟨a, e⟩ and each bound-ing box o is based on the similarity of object o with both argument role a and text entity e.
+C(⟨a, e⟩, o) = d(a, o) + d(e, o)
+= c(ta, io) + c(te, io) + c(ϕe, ϕo), where ta is the argument description. For example, for the argument role a = ENTITY of entity e = injured man,
+C(⟨a, e⟩, o) = c(ENTITY of TRANSPORT,
+)
++ c(injured man,
+) + c(PERSON, PERSON).
+The optimal T ∈ Rn×m that solves d(Gt, Gi) = minT T ⊙ C can be approximated by a differentiable
+Sinkhorn-Knopp algorithm [5, 29] following [35],
++
+T = diag(p) exp(−C/γ) diag(q), where p ∈ Rn×1
++ and q ∈ Rm×1 vector q0 to perform the following iteration:
++ . Starting with any positive for i = 0, 1, 2, . . . until convergence, any number of positive and negative descriptions. Also, we include the descriptions of other images in the same batch as negative descriptions.
+We also minimize the distance between two event graphs,
+L2 = (cid:88)
+⟨t,i⟩ d(Gt, Gi).
+The contrastive learning of event and argument description and the alignment of event graphs are jointly optimized:
+L = λ1L1 + λ2L2.
+We set λ1 and λ2 as 1 in this paper. 3. Evaluation Tasks 3.1. Multimedia Event Extraction (M2E2 )
+Task Setting. Multimedia Event Extraction [17] aims to (1) classify images into eight event types, and (2) localize argument roles as bounding boxes in images. We choose this task as a direct assessment of event structure understanding.
+Our Approach. Zero-shot Setting: We evaluate the models’ ability to handle open vocabulary events, as required by real-world applications. Also, zero-shot evaluation provides a direct comparison of the effectiveness of event knowledge encoding during pretraining. As shown in Fig. 4a, we select the event type with the highest similarity score s(i, t) with the image, and for each bounding box, we rank candidate ar-gument roles of the selected event type. Supervised Setting:
+We include the supervised setting to prove the effectiveness of the model architecture at encoding event knowledge in the presence of direct supervision, with details in Appendix
+A.3.
+Evaluation Metrics. We follow [17] to use F-scores to evaluate event typing and argument extraction. pi+1 = 1 ⊘ (Kqi), qi+1 = 1 ⊘ (K⊤pi+1), 3.2. Grounded Situation Recognition (GSR) where ⊘ denotes element-wise division. K = exp(−C/γ).
+A computational T k can be obtained by iterating for a finite number k times,
+T k := diag(pk)Kdiag(qk). 2.4. Contrastive Learning Objective
+We optimize the cosine similarity between image i and positive description t+ to be close to 1, while negative de-scriptions t− to be close to 0,
+L1 = (cid:88)
+⟨t,i⟩
+DKL(s(t, i) || 1t∈T +), where DKL(·||·) is the Kullback-Leibler divergence, and 1t∈T + is the indicator function showing whether the descrip-tion is a positive description. It enables our model to handle
+Task Setting. Grounded Situation Recognition [25] selects an event type from 504 verbs, and predicts the entity name and the bounding box for each argument role.
+Our Approach. The implementation is similar to M2E2 in Fig. 4a, with details in Appendix A.4.
+Evaluation Metrics. We follow [25] as detailed in the Ap-pendix. 3.3. Image Retrieval
+Task Setting. Image retrieval ranks images for each given caption, which is a direct evaluation on the image-text align-ment.
+Our Approach. We perform the alignment of image and text d(i, t), and event graphs across two modalities d(Gi, Gt).
+Evaluation Metrics. We use conventional image retrieval measures including Recall@1, Recall@5 and Recall@10.
+(a) Architecture of event extraction (M2E2 and GSR). Event typing (in purple) ranks event type descriptions given the image, and argument extraction (in yellow) rank argument descriptions given the bounding box. (b) Architecture of VCR and VisualCOMET. We rank ⟨question, answer⟩ and
+⟨input event, temporal condition, intent⟩ respectively given the image. We calculate both the image-text level alignment and the event graph alignment.
+Figure 4. Architecture for evaluation tasks. 3.4. Visual Commonsense Reasoning (VCR) tails are included in the Appendix.
+Task Setting. Given a question, the task contains two sub-tasks: (1) Answer Prediction from four options; (2) Rationale
+Prediction from four options to support the answer.
+Our Approach. To evaluate the quality of pretraining mod-els, as shown in Fig. 4b, we adopt zero-shot settings solely relying on image-text alignment for a fair comparison, with details described in Appendix A.5.
+Evaluation Metrics. We use F-scores to evaluate both of answer prediction and rationale prediction, following [40]. 3.5. Visual Commonsense Reasoning in Time
+Task Setting. Given an image and the event involved with its participants, VisualCOMET [24] aims to generate “intents” of the participants, as detailed in Appendix A.6.
+Our Approach. As shown in Fig. 4b, we rank candidate intents based on the image-text similarity (Appendix A.6).
+Evaluation Metrics. We adopt Accuracy@50 following the perplexity evaluation of the state-of-the-art model [24]. 4. Experiments 4.1. Pretraining Details
+A New Dataset. We collect 106,875 image-captions that are rich in events from news websites [1]. It provides a new challenging image-retrieval benchmark, where each sentence may contain multiple events with a complicated linguistic structure. The average caption length is 28.3 tokens, com-pared to 13.4 for Flickr30k and 11.3 for MSCOCO. The data statistics are shown in Tab. 3, with structural event knowl-edge extracted automatically following Sec. 2.1.
+Dataset
+Split
+#image
+#event
+#arg
+#ent
+VOANews
+Train
+Test
+No-event 76,256 18,310 12,309 84,120 21,211
+-148,262 39,375
+-573,016 87,671
+-Table 3. Data statistics of VOANews.
+Parameter Settings. We utilize the Text and Vision Trans-formers of “ViT-B/32” to initialize our encoders. More de-4.2. Baselines
+State-of-the-art Multimedia Pretraining Models. We com-pare with CLIP [26] by running the public release of “ViT-B/32” and report the scores in the following experiments for a fair comparison. We further pretrain CLIP using the image-captions in the same dataset in Tab. 3 for a fair comparison in terms of data resources.
+State-of-the-art Event Extraction Models. The state-of-the-art event extraction models, such as WASE [17] for Mul-timedia Event Extraction task, JSL [25] for Grounded Situa-tion Recognition task.
+Ablation Study: CLIP-Event w/o Optimal Transport is included as a variant of our model in which we remove the alignment between event graphs. It is trained only on the contrastive loss L1.
+Ablation Study: Each Prompt Function is used solely dur-ing training, for the purpose of comparing its effectiveness. 4.3. Analysis on Event Extraction Tasks
+Under zero-shot settings, we achieve 5.5% absolute F-score gain on event extraction, and 33.3% relative gain on argument extraction on M2E2 , as shown in Tab. 4.
+The gains achieved by pretraining on news data are signif-icantly amplified with the help of structural event knowledge.
+For example, CLIP pretrained on news achieves 1.9% im-provement compared to the vanilla CLIP on M2E2 . Our
+CLIP-Event significantly boosts the gain to 3.89 times.
+Zero-shot CLIP-Event outperforms the state-of-the-art weakly supervised model on argument extraction on M2E2 dataset, showing that the proposed optimal transport align-ment effectively captures the argument structures, which previous vision-language pretraining models fail.
+For argument localization, CLIP-Event achieves a higher gain on M2E2 than SWiG, due to the fact that SWiG uses a different argument bounding box grounding strategy. SWiG merges all objects that play the same role into a single large bounding box. As shown in Fig. 5b, our approach detects argument roles for each object first, and then merges those objects of the same role into the a large bounding box. In
+Multimedia Event Extraction (M2E2)
+Grounded Situation Recognition (SWiG)
+Setting
+Model
+Zero-shot
+CLIP
+CLIP pretrained on news
+CLIP-Event w/o OptimalTransport
+Single Template
+Composed Template
+Continuous Prompt
+Caption Editing
+GPT-3 Prompt
+P 29.5 31.7 36.4 35.0 32.3 33.9 33.6 30.9 34.2
+Supervised 43.1
+State-of-the-Art [17, 25]
+CLIP finetuned on SWiG 38.1
+CLIP-Event+SWiG w/o OptimalTransport 41.3 40.3
+Event
+R 65.7 64.7 70.8 59.3 71.4 72.8 75.7 71.4 76.5 59.2 71.6 72.8 71.3
+F1 40.7 42.6 48.1 44.1 44.4 46.3 46.5 43.2 47.3 49.9 49.8 52.7 51.5
+Argument
+R 12.7 13.1 16.0 12.6 15.6 15.3 16.7 13.8 16.8 10.1 12.8 13.1 13.0
+F1 10.7 11.1 14.8 11.9 13.2 13.9 13.3 12.6 14.1 11.9 15.9 17.1 16.0
+P 9.2 9.7 13.9 11.0 11.9 12.7 11.1 11.6 12.1 14.5 20.9 21.1 20.8
+Event verb 28.3 29.9 31.4 30.2 30.4 30.9 30.4 30.1 31.1 39.9 42.6 45.6 44.7
+Argument value value-all ground ground-all 13.3 14.0 14.9 14.2 14.4 14.5 14.0 13.9 14.9 31.4 32.6 33.1 32.9 7.6 8.2 9.2 8.4 8.6 8.8 8.3 8.2 9.1 18.9 19.2 20.1 19.4 11.2 12.0 12.8 12.3 12.4 12.4 12.1 12.3 12.7 24.9 25.2 26.1 24.4 3.8 4.3 5.2 4.4 4.7 4.8 4.3 4.4 5.2 9.7 10.2 10.6 10.1
+Table 4. Evaluation results and ablation studies on image event extraction. We follow the evaluation measures (%) of each benchmark.
+Model
+Flickr30k MSCOCO VOANews
+CLIP
+CLIP pretrained on news
+CLIP-Event w/o OptimalTransport 62.2 64.3 67.0 65.6 81.9 81.2 82.6 80.5 30.3 32.2 34.0 32.5 50.3 50.8 51.3 51.0 21.2 23.5 27.5 25.5 23.4 25.1 28.7 26.9
+Table 5. R@1(%) on text-to-image (left) and image-to-text (right) retrieval on Flickr30k (1k test), MSCOCO (5k test) and VOANews.
+Model
+VCR
+VisualCOMET
+Answer F1 Rationale F1 Accuracy@50
+Perplexity in [24]
+CLIP
+CLIP pretrained on news
+CLIP-Event w/o OptimalTransport
+-51.1 51.8 52.4 52.0
+-46.8 47.2 49.2 48.6 18.2 20.1 20.9 22.4 21.1
+Table 6. Results (%) on zero-shot VCR and VisualCOMET. comparison, M2E2 allows multiple objects with the same argument role, which is consistent with our approach to use objects aligning with argument roles, as shown in Fig. 5a. 4.4. Analysis on Downstream Tasks
+Image Retrieval. (1) VOANews presents a greater chal-lenge due to the various events in the captions and the more difficult sentence structures compared to Flickr30k and MSCOCO, as shown in Fig. 6. The improvement on
+VOANews is much higher than the gains on Flickr30k and
+MSCOCO, proving that our model is capable of handling lengthy sentences, particularly those with many events. (a) An example result on M2E2 . (b) An example result on SWiG.
+Figure 5. Example results of event extraction tasks.
+Figure 6. Example results of text-to-image retrieval on VOANews, with the visualizations of the optimal transport plan. (2) Downstream tasks benefit from fine-grained event graph alignments. For example, in Fig. 6, the strong alignment between objects and investigators and destroyed car enables the image to be successfully ranked higher.
+VCR. (1) On VCR, the rationale F1 improves more than answer F1. Rationale prediction is more challenging since it refers to the details of the scene, which our fine-grained
+alignment well captures. (2) Event knowledge is particularly beneficial for downstream tasks. In Fig. 7, only the correct answer corresponds to the event type of the input image. models, demonstrating deficiencies in tasks related to verb comprehension [10]. We are the first to encode structural event knowledge to enhance vision-language pretraining.
+Visual Event Understanding. Previous work simpli-fies visual events as verbs using Subject-Verb-Object triples
+[2, 6, 9, 13, 19, 21, 28, 30, 33, 36, 43]. Situation Recogni-tion [25, 37] aims to detect argument roles and Multimedia
+Event Extraction [17] categorizes verbs into event types.
+However, their limited event ontologies fail to handle open-world events in real applications. In contrast, our proposed pretraining model supports zero-shot event extraction and demonstrate good performance on other downstream tasks requiring image event reasoning.
+Cross-media Alignment. Existing pretraining models [3, 4, 18, 31, 41] maximize the alignment across two modalities without taking into account the structure of text and images.
+Image structures [17, 39] that are analogous to text linguistic structures are proposed. There is, however, a gap between complicated linguistic structures and image structures. We propose to use the text event graph structures to fill in the gap and compute a global alignment over two event graphs. 6. Conclusions and Future Work
+This paper proposes to integrate structural event knowl-edge into vision-language pretraining. We perform cross-media transfer of event knowledge, by automatically extract-ing event knowledge from captions and supervising image event structure understanding via contrastive learning. We generate hard negatives by manipulating event structures based on confusion matrices, and design event prompt func-tions to encode events into natural sentences. To transfer argument structural knowledge, we propose an event graph alignment loss via optimal transport, obtaining a global align-ment based on argument structures. It outperforms the state-of-the-art vision-language pretraining models on event ex-traction and downstream tasks under zero-shot settings. In the future, we will expand this capability to videos to com-prehend the evolution of events using argument tracking.
+Acknowledgement
+We thank the anonymous reviewers helpful suggestions.
+This research is based upon work supported by U.S. DARPA
+AIDA Program No. FA8750-18-2-0014, U.S. DARPA
+KAIROS Program No. FA8750-19-2-1004. The views and conclusions contained herein are those of the authors and should not be interpreted as necessarily representing the of-ficial policies, either expressed or implied, of DARPA, or the U.S. Government. The U.S. Government is authorized to reproduce and distribute reprints for governmental purposes notwithstanding any copyright annotation therein.
+Figure 7. VCR can benefit from event (in blue) understanding.
+VisualCOMET. We compare our results to the perplexity of the state-of-the-art model, which is also retrieval-based. The baseline is trained using the training set of VisualCOMET, but our model is an unsupervised model, which achieves su-perior performance, demonstrating that our model is capable of comprehending events in the images. 4.5. Ablation Studies
+Effect of Event Graph Alignment via Optimal Transport. (1) Removing optimal transport (“w/o OptimalTransport”) generally lowers the performance on all evaluation tasks, since it ignores the event graph structures and their cross-media alignment, but relies solely on the overly simplistic image and sentence features. (2) The performance gain on argument extraction task is the highest, since it requires the fine-grained alignment of text and images. (3) We visualize the transport plan in Fig. 6 to bring insights into the learned alignment. It is a global decision that takes the argument structures of two event graphs into account. Thus, distinct argument roles tend to be associated with diverse objects with different visual features in order to achieve a low global transport cost. For instance, investigators match objects dressed in white, but not soldier objects, due to the dissimilar visual features. Additionally, one argument role tends to be aligned with objects that have similar visual features, e.g., two investigators are both dressed in white protection suits.
+Comparison between prompt functions. As shown in
+Tab. 4, GPT3 provides the optimal performance among prompt functions. It leverages the knowledge encoded in
+GPT3, thus generating natural descriptions with precise event information. Other prompt functions also demonstrate their effectiveness in supporting event understanding. 5.

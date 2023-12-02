@@ -1,0 +1,325 @@
+Abstract
+Hamiltonian Monte Carlo (HMC) has emerged as a powerful Markov Chain Monte
+Carlo (MCMC) method to sample from complex continuous distributions. However, a fundamental limitation of HMC is that it can not be applied to distributions with mixed discrete and continuous variables. In this paper, we propose mixed HMC (M-HMC) as a general framework to address this limitation. M-HMC is a novel family of MCMC algorithms that evolves the discrete and continuous variables in tandem, allowing more frequent updates of discrete variables while maintaining HMC’s ability to suppress random-walk behavior. We establish M-HMC’s theoretical properties, and present an efﬁcient implementation with Laplace momentum that introduces minimal overhead compared to existing HMC methods. The superior performances of M-HMC over existing methods are demonstrated with numerical experiments on Gaussian mixture models (GMMs), variable selection in Bayesian logistic regression (BLR), and correlated topic models (CTMs). 1
+
+Introduction
+Markov chain Monte Carlo (MCMC) is one of the most powerful methods for sampling from probability distributions. The Metropolis-Hastings (MH) algorithm is a commonly used general-purpose MCMC method, yet is inefﬁcient for complex, high-dimensional distributions because of the random walk nature of its movements. Recently, Hamiltonian Monte Carlo (HMC) [13, 22, 2] has emerged as a powerful alternative to MH for complex continuous distributions due to its ability to follow the curvature of target distributions using gradients information and make distant proposals with high acceptance probabilities. It enjoyed remarkable empirical success, and (along with its popular variant No-U-Turn Sampler (NUTS) [16]) is adopted as the dominant inference strategy in many probabilistic programming systems [8, 27, 3, 25, 14, 10]. However, a fundamental limitation of
+HMC is that it can not be applied to distributions with mixed discrete and continuous variables.
+One existing approach for addressing this limitation involves integrating out the discrete variables(e.g. in Stan[8], Pyro[3]), yet it’s only applicable on a small-scale, and can not always be carried out automatically. Another approach involves alternating between updating continuous variables using
+HMC/NUTS and discrete variables using generic MCMC methods (e.g. in PyMC3[27], Turing.jl[14]).
+However, to suppress random walk behavior in HMC, long trajectories are needed. As a result, the discrete variables can only be updated infrequently, limiting the efﬁciency of this approach. The most promising approach involves updating the discrete and continuous variables in tandem. Since naively making MH updates of discrete variables within HMC results in incorrect samples [22], novel variants of HMC (e.g. discontinuous HMC (DHMC)[23, 29], probabilistic path HMC (PPHMC) [12]) are developed. However, these methods can not be easily generalized to complicated discrete state spaces (DHMC works best for ordinal discrete parameters, PPHMC is only applicable to phylogenetic trees), and as we show in Sections 2.5 and 3, DHMC’s embedding and algorithmic structure are inefﬁcient. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+In this paper, we propose mixed HMC (M-HMC), a novel family of MCMC algorithms that better addresses this limitation. M-HMC provides a general mechanism, applicable to any distributions with mixed support, to evolve the discrete and continuous variables in tandem. It allows more frequent updates of discrete variables while maintaining HMC’s ability to suppress random walk behavior, and adopts an efﬁcient implementation (using Laplace momentum) that introduces minimal overhead compared to existing HMC methods. In Section 2, we review HMC and some of its variants involving discrete variables, present M-HMC and rigorously establish its correctness, before presenting its efﬁcient implementation with Laplace momentum and an illustrative application to 1D GMM. We demonstrate M-HMC’s superior performances over existing methods with numerical experiments on
+GMMs, BLR and CTMs in Section 3, before concluding with discussions in Section 4. 2 Mixed Hamiltonian Monte Carlo (M-HMC)
+Our goal is to sample from a target distribution π(x, qC) discrete variables x = (x1, . . . , xND ) e−U (x,qC) on Ω
+Ω and continuous variables qC = (qC
+∝
+RNC with mixed
+× 1 , . . . , qC
+NC )
+RNC .
+∈
+∈ 2.1 Review of HMC and some variants of HMC that involve discrete variables
+For a continuous target distribution π(qC) mentum variables pC
+π(qC) by sampling from the joint distribution π(qC)χ(pC)(χ(pC) e−U (qC), the original HMC introduces auxiliary mo-RNC associated with a kinetic energy function K C, and draws samples for e−KC(pC)) with simulations of
+∝
+∈ dqC(t) dt
+=
+∇
+K C(pC), dpC(t) dt
+=
+−∇
+∝
+U (qC) (Hamiltonian dynamics)
+Ω =
+A foundational tool in applying HMC to distributions with discrete variables is the discontinuous variant of HMC, which operates on piecewise continuous potentials. This was ﬁrst studied in [24], e−U (x) for where the authors proposed binary HMC to sample from binary distributions π(x)
+ND . The idea is to embed the binary variables x into the continuum by introducing x 1, 1
+}
+RND associated with a conditional distribution auxiliary location variables qD
+∈ (cid:80)Nd e− 1 e− (cid:80)ND i=1(qD i=1 |qD i |
+If sign(qD (Exponential) i ) = xi, (Gaussian)
+ψ(qD i = 1,
+ψ(qD
+, N D
+
+ i )2
+{−
+· · · (cid:40)
+∝
+∈
+∀ 2
+Otherwise x) :
+|
+
+ψ(qD x)
+∝
+| x) = 0
+| i=1(pD
+RND . The distribution Ψ(qD) = (cid:80) i )2/2, and operates on the joint distribution Ψ(qD)ν(pD)(ν(pD)
+RND associated with a kinetic energy
+Binary HMC introduces auxiliary momentum variables pD
+K D(pD) = (cid:80)ND e−KD(pD)) on Σ = RND x) gives rise to a piecewise
+| continuous potential, and [24] developed a way to exactly integrate Hamiltonian dynamics for
+Ψ(qD)ν(pD), taking into account discontinuities in the potential. x and qD are coupled through signs of qD in ψ, so we can read out samples for x from the signs of binary HMC samples for qD. We show in supplementary that binary HMC is a special case of M-HMC, with Gaussian/exponential binary HMC corresponding to two particular choices of kD (deﬁned in Section 2.2) in M-HMC. x∈Ω π(x)ψ(qD
+∝
+×
+∈
+[21] later made the key observation that we can analytically integrate Hamiltonian dynamics with piecewise continuous potentials near a discontinuity while perserving the total (potential and kinetic) energy. The trick is to calculate the potential energy difference ∆E across an encountered disconti-⊥, the component of pD that’s perpendicular to the discontinuity nuity, and either refract (replace pD (cid:113) 1
+∆E(pD 2 > ∆E), pD pD 2
+⊥/ boundary, by
+⊥||
+⊥||
+⊥) if there is not enough kinetic energy ( 1 or reﬂect (replace pD pD
+∆E). Reﬂec-⊥ by 2 || tion/refraction HMC (RRHMC) combines the above observation with the leapfrog integrator, and generalizes binary HMC to arbitrary piecewise continuous potentials with discontinuities across afﬁne boundaries. However, RRHMC is computationally expensive due to the need to detect all encountered discontinuities, and by itself can not directly handle distributions with mixed support.
+)) if there’s enough kinetic energy ( 1 2 pD
+⊥|| pD
+⊥||
+|| 2 ||
+≤ 2 ||
+−
+−
+[23] proposed DHMC as an attempt to address some of the issues of RRHMC. It uses Laplace momentum to avoid the need to detect encountered discontinuities, and handles discrete variables (which it assumes take positive integer values, i.e. x
++ ) by an embedding into 1D spaces
+ZND
+∈ 2
+qD i ∈
+⇐⇒ (an, an+1], 0 = a1 (xi = n
+) and a coordinate-wise integrator (a special case of M-HMC with Laplace momentum as shown in Section 2.4). In Sections 2.5 and 3, using numerical experiments, we show that DHMC’s embedding is inefﬁcient and sensitive to ordering, and it can not easily generalize to more complicated discrete state spaces; furthermore, its need to update all discrete variables at every step makes it computationally expensive for long HMC trajectories.
+≤ · · · a2
+≤ 2.2 The general framework of M-HMC i ∈ {
+).
+} (0, τ )ND , x remains
+|
+∈
+∈
+∈
+RNC i=1 kD(pD
+∈
+RNC for qC
+Σ, where Σ = TND
+RND
+×
+×
+RND for x
+×
+TND and momentum variables pD
+RNC
+Formally, M-HMC operates on the expanded state space Ω
+× with auxiliary location variables qD
+Ω, and
+∈
+RNC . Here TND = RND /τ ZND denotes the auxiliary momentum variables pC
+ND-dimensional ﬂat torus, and is identiﬁed as the hypercube [0, τ ]ND with the 0’s and τ ’s in different
+TND and dimensions glued together. We associate qD with a ﬂat potential U D(qD) = 0, qD
+∈
+∀ pD with a kinetic energy K D(pD) = (cid:80)ND
+RND where kD : R
+R+ is some i ), pD
+R+. Use Qi, i = 1, . . . , ND to denote kinetic energy, and pC with a kinetic energy1 K C : RNC
+ND irreducible single-site MH proposals, where Qi(˜x
+= i, and
+Qi(x x) = 0. In other words, Qi only changes the value of xi, and always moves away from x.
+Intuitively, M-HMC also “embeds” the discrete variables x into the continuum (in the form of qD).
+However, the “embedding” is done by combining the original discrete state space Ω with the ﬂat torus
+TND : instead of relying on the embedding structure (e.g. the sign of qD in binary HMC, or the value i of qD in DHMC) to determine x from qD, in M-HMC we explicitly record the values of x as we can i not read out x from qD. TND bridges x with the continuous Hamiltonian dynamics, and functions like a “clock”: the system evolves qD i and makes an attempt to move to a different state for xi when qD reaches 0 or τ . Such mixed embedding makes M-HMC i easily applicable to arbitrary discrete state spaces, but also prevents the use of methods like RRHMC.
+For this reason, M-HMC introduces probabilistic proposals Qi’s to move around Ω, and probabilistic reﬂection/refraction actions to handle discontinuities (which now happen at qD
+∈
+→ x) > 0 only when ˜xj = xj,
+| i with speed determined by the momentum pD j
+∀
+→ 0, τ
+More concretely, M-HMC evolves according to the following dynamics: If qD unchanged, and qD, pD and qC, pC follow the Hamiltonian dynamics
+∈ (cid:40) dqD dpD(t)
+Discrete i ), i = 1, . . . , ND i (t) dt = (kD)(cid:48)(pD dt =
+K C(pC)
+∇
+−∇qC U (x, qC)
+Qj( 0, τ
+·|
+∼ j ) > ∆E(cid:1):
+π(˜x,qC)Qj (x|˜x) , and either refract if there’s enough kinetic energy (cid:0)kD(pD dt = dt =
+), we propose a new ˜x
+}
+If qD hits either 0 or τ at site j (i.e. qD
+∆E = log π(x,qC)Qj (˜x|x)
+U D(qD) = 0
+Continuous j ∈ { dpC(t)
+−∇ x), calculate (1) (cid:40) dqC(t)
+τ x
+−
+← j ← j ← j , pD qD j )(kD)−1(kD(pD sign(pD
+˜x, qD j )
+−
+∆E(cid:1): x or reﬂect if there is not enough kinetic energy (cid:0)kD(pD x, qD j ) j ←
+For the discrete component, because of the ﬂat potential U D, we can exactly integrate the Hamiltonian dynamics with arbitrary kD. For the continuous component, given a discrete state x and some time
+RNC to denote a reversible, volume-R+ t > 0, use I(
+· preserving integrator2 that’s irreducible and aperiodic and approximately evolves the continuous part of the Hamiltonian dynamics in Equation 1 for time t. Given the current state x(0), qC(0), a full
+M-HMC iteration ﬁrst resamples the auxiliary variables
+∆E) j , pD qD x, U, K C) : RNC j ← −
+, t
+|
+· pD j .
+RNC
+RNC
+←
+→
+×
+×
+≤
+×
+, qD(0) i
+Uniform([0, τ ]), pD(0) i
+∼
+ν(p)
+∼
+∝ e−kD(p) for i = 1, . . . , ND, pC(0)
+χ(p)
+∝
+∼ e−KC(p) then evolves the discrete variables (using exact integration) and continuous variables (using the integrator I) in tandem for a given time T , before making a ﬁnal MH correction like in regular HMC.
+A detailed description of a full M-HMC iteration is given in Section 1 in the supplementary materials.
+Note that if we use conditional distributions for Qi, ∆E would always be 0, the discrete dynamics in
+Equation 1 plays no role, and M-HMC reduces to the incorrect case of naively making Gibbs updates within HMC. However, the requirement Qi(x x) = 0 (which is more efﬁcient [19]) means Qi is
+| always sufﬁciently different from the conditional distribution and guarantees correctness of M-HMC. (pC i )2 1The simplest choice for K C is K C(pC) = (cid:80)NC 2 2An example is the commonly used leapfrog integrator i=1
+, but M-HMC can work with any kinetic energy. 3 (cid:54)
+2.3 M-HMC samples from the correct distribution
+∝
+For notational simplicity, deﬁne Θ = (qD, pD, qC, pC). To prove M-HMC samples from the correct distribution π(x, qC), we show that a full M-HMC iteration preserves the joint invariant distribution
+π(x, qC)e−[U D(qD)+KD(pD)+KC(pC)] and establish its irreducibility and aperiodicity.
+ϕ((x, Θ))
+At each iteration, the resampling can be seen as a Gibbs step, where we resample the auxiliary variables qD, pD, qC from their conditional distribution given x, qC. This obviously preserves ϕ. So we only need to prove detailed balance of the evolution of x and qC in an M-HMC iteration (described in detail in the M-HMC function in Section 1 of the supplementary materials) w.r.t. ϕ. Formally,
+T > 0, the M-HMC function (section 1 of supplementary) deﬁnes a transition probability kernel
+∀
+RT ((x, Θ), B) = P (M-HMC(x, Θ, T ) (x, Θ)
+Σ measurable. For all A x
+Theorem 1. (Detailed Balance) The M-HMC function (Section 1 of supplementary) satisﬁes detailed balance w.r.t. the joint invariant distribution ϕ, i.e. for any measurable sets A, B
+Ω
+⊂
+×
+. We have
+}
+Ω
+Ω : (x, Θ)
+Σ, deﬁne A(Θ) =
+Σ measurable, Θ
+Σ and B
+B) ,
+∈
+∈
+×
+×
+⊂
+A
+Ω
+∈
+∈
+∈
+∀
+{
+Σ,
+Ω (cid:90) (cid:88)
+Σ x∈A(Θ)
+RT ((x, Θ), B)ϕ((x, Θ))dΘ = (cid:90) (cid:88)
+Σ x∈B(Θ)
+⊂
+×
+RT ((x, Θ), A)ϕ((x, Θ))dΘ
+Proof Sketch. Use s = (x, qD, pD, qC, pC), s(cid:48) = (x(cid:48), qD (cid:48), pD (cid:48), qC (cid:48), pC (cid:48))
+Σ to denote 2 points.
+Ω
+∈
+×
+Sequence of proposals and probabilistic paths Starting from s
+Σ, for a given travel time
+T , a concrete M-HMC iteration involves a ﬁnite sequence of realized discrete proposals Y . If we ﬁx
+Y , the M-HMC iteration (without the ﬁnal MH correction) speciﬁes a deterministic mapping from s to some s(cid:48). For a given Y , we introduce an associated probabilistic path ω(s, T, Y ) (containing information on Y , indices/times and accept/reject decisions for discrete updates, and evolution of s) to describe the deterministic trajectory going from s to s(cid:48) in time T through the M-HMC iteration.
+×
+Ω
+∈ (cid:80)
+Countable number of probabilistic paths and decomposition of RT (s, B) Since T and Ω are
+ﬁnite, traveling from s for time T gives a countable number of possible destinations s(cid:48). This implies there can only be a countable number of valid probabilistic paths, and we can decompose
+RT (s, B) = (cid:80)
+Y rT,Y (s, s(cid:48)). Here we sum over all possible destinations s(cid:48) and all valid Y ’s s(cid:48) for which ω(s, T, Y ) brings s to s(cid:48). rT,Y (s, s(cid:48)) denotes the transition probability along ω(s, T, Y ).
+Proof of detailed balance Using similar proof techniques as in RRHMC, we can prove detailed balance for rT,Y (Lemma 4 in supplementary). This in turn proves detailed balance of M-HMC. (cid:3)
+We defer detailed deﬁnitions and proofs to the supplementary. Combining the above theorem with irreducibility and aperiodicity (which follow from irreducibility and aperiodicity of the integrator I, and the irreducibility of the Qi’s) proves that M-HMC samples from the correct distribution π(x, qC). 2.4 Efﬁcient M-HMC implementation with Laplace momentum
+We next present an efﬁcient implementation of M-HMC using Laplace momentum kD(p) = p
+.
+|
+|
+While M-HMC works with any kD, using a general kD requires detection of all encountered disconti-nuities, similar to RRHMC. However, with Laplace momentum, qD i ’s speed (given by (kD)(cid:48)(pD i )) becomes a constant 1, and we can precompute the occurences of all discontinuities at the beginning of each M-HMC iteration. In particular, we no longer need to explicitly record qD, pD, but can instead keep track of only the kinetic energies associated with x. Note that we need to use τ to orchestrate discrete and continuous updates. Here, instead of explicitly setting τ , we propose to alternate discrete and continuous updates, specifying the total travel time T , the number of discrete updates L, and the number of discrete variables to update each time nD. The step sizes are properly scaled (effectively setting τ ) to match the desired total travel time T . To reduce integration error and ensure a high acceptance rate, we specify a maximum step size ε. A detailed description of the efﬁcient implementation is given in Algorithm 1. See Section 2 of supplementary for a detailed discussion on how each part of Algorithm 1 can be derived from the original M-HMC function in Section 1 of supplementary. The coordinate-wise integrator in DHMC corresponds to setting nD = ND with Qi’s that are implicitly speciﬁed through embedding. However, the need to update all discrete variables at each step is computationally expensive for long HMC trajectories. In contrast,
+M-HMC can ﬂexibly orchestrate discrete and continuous updates depending on models at hand, and introduces minimal overhead (x updates that are usually cheap) compared to existing HMC methods. 4
+Algorithm 1 M-HMC with Laplace momentum
+Require: U , target potential; Qi, i = 1, . . . , ND, single-site proposals; ε, maximum step size; L, #
+Exponential(1), i = 1, . . . , ND, pC(0) of times to update discrete variables; nD, # of discrete sites to update each time input x(0), current discrete state; qC(0), current continuous location; T , travel time output x, next discrete state; qC, next continuous location 1: function M-HMCLaplaceMomentum(x(0), qC(0), T 2: 3: 4: 5: 6: 7: 8: 9: 10: for s from 1 to Mt do qC, pC for s from 1 to nD do x, kD
+U (cid:0)x, qC(cid:1) + (cid:80)ND kD(0) i x
+←
+Λ
+∼ (η, M )
+← for t from 1 to L do
+∼ x(0), kD kD(0), qC qC(0), pC
+←
+← 1, . . . , ND
+RandomPermutation(
+{ leapfrog(qC, pC, ηt) end for
+DiscreteStep(x, kD, qC, Λ[(t−1)nD+s] mod ND ) end for
+U (cid:0)x(0), qC(0)(cid:1) + (cid:80)ND
+U, Qi, i = 1, . . . , ND, ε, L, nD)
+|
+N (0, 1), i = 1, . . . , NC
+GetStepSizesNSteps(ε, T, L, ND, nD) # Deﬁned in Section 2 of supplementary i ∼ pC(0) i + K C(pC), E(0) i=1 kD(0)
+←
+←
+←
+)
+} i
++ K C(pC(0))
+← x(0), qC
+← qC(0) end if
+←
+← i=1 kD end for
+E if Uniform([0, 1]) >= e−(E−E(0)) then x 11: return x, qC 12: 13: end function 14: function leapfrog(qC, pC, ˜ε) 15: 16: 17: end function 18: function DiscreteStep(x, kD, qC, j)
+∇qC U (x, qC)/2; qC pC pC
+˜ε return qC, pC
+←
+←
+− qC + ˜εpC; pC pC
+∇qC U (x, qC)/2
+˜ε
+−
+←
+·| 19: x); ∆E
+˜x
+Qj(
+∼
+← if kD j > ∆E then x return x, kD 20: 21: 22: end function log e−U (x,qC )Qj (˜x|x) e−U (˜x,qC )Qj (x|˜x) kD j −
+˜x, kD j ←
+←
+∆E end if
+Illustrative application of M-HMC to 1D Gaussian mixture model (GMM) 2.5
+In this section, we illustrate some important aspects of M-HMC by applying M-HMC to a concrete 1D GMM with 4 mixture componets. Use x to denote the discrete variable, and qC
+µx, Σ), where φ1 = 0.15, φ2 = φ3 = 0.3, φ4 = 0.25, Σ = 0.1, and µ1 =
+∈ {
+R to denote the continuous variable. We study the 1D GMM π(x, qC) = φxN (qC 2, µ2 = 0, µ3 = 2, µ4 = 4. 1, 2, 3, 4
+∈
+}
+|
+More frequent discrete updates within HMC are beneﬁcial The essential idea of M-HMC is to evolve discrete and continuous variables in tandem, allowing more frequent discrete updates within
+HMC. Figure 2(a) visualizes the evolution of x, qC in an M-HMC iteration on our 1D GMM, and intuitively shows the beneﬁts of such more frequent discrete updates: M-HMC can make frequent attempts to move to a different mixture component; such attempts can often succeed when M-HMC gets close to a different mixture component while traversing the current one; the ability to move to different mixture components within an M-HMC iteration allows M-HMC to make distant proposals, which are accepted with high probabilities due to the use of HMC-like mechanisms. Figure 2(a) demonstrates one such distant proposal in which M-HMC moves across all 4 mixture components in one iteration. Such distant proposals are unlikely to happen in methods that alternate between
+HMC and discrete updates, limiting the efﬁciency of such methods. In Section 3, we would further demonstrate the efﬁciency of M-HMC when compared with alternatives using numerical experiments.
+−
+Figure 1: Samples histograms (blue) and true density (red) on 1D GMM for M-HMC and DHMC 5
+Naively making discrete updates within HMC is incorrect Figure 2(left) compares naive MH within HMC (MHwHMC) and M-HMC for 1D GMM. The seemingly trivial distinction naturally comes out of Algorithm 1 with 1 discrete variable, yet corrects the inherent bias in MHwHMC (see
+Figure 2(b)(c)). This demonstrates the necessity to use the M-HMC framework to evolve discrete and continuous variables in tandem. See Section 3 of supplementary materials for more details.
+M-HMC is applicable to arbitrary distributions with mixed support, unlike DHMC DHMC does not easily generalize to complicated discrete state spaces due to its 1D embedding. A simple illustration is to apply DHMC to 1D GMM, but instead with µ2 = 2, µ3 = 0. While the model remains exactly the same, as shown in red curves in Figures 1(b)(c), due to its sensitivity to the ordering of discrete states, DHMC failed to sample all components even after 107 samples (Figure 1(c)), even 106 samples in the original setup (Figure 1(b)). In contrast, M-HMC though it can ﬁt well with 5 suffers no such issue, and works well in both cases with 106 samples (Figures 1(a) and 2(c)), and in general for arbitrary distributions with mixed support. See Section 3.3 for another example.
+× 3 Numerical experiments
+In this section, we empir-ically verify the accuracy of M-HMC, and compare the performances of vari-ous samplers for GMMs, variable selection in BLR, and CTM. In addition to
+DHMC and M-HMC, we also compare NUTS (using
+Numpyro [25], for GMMs),
+HMC-within-Gibbs (HwG),
+NUTS-within-Gibbs (NwG, implemented as a com-pound step in PyMC3 [27]), and specialized Gibbs sam-plers (adapting [26] for variable selection in BLR, and adapting [9] for CTM).
+Our implementations of
+DHMC, M-HMC and HwG rely on JAX [6].
+For
+Gibbs samplers, we com-bine NUMBA [28] with the package pypolyagamma3.
+The exact parameter values for different samplers can be found in the supplemen-tary, and in the code to re-produce the results4.
+Figure 2: Proposed M-HMC kernel and comparison of MHwHMC and
+M-HMC on 1D GMM. Figure 2(a): Evolution of x (in the form of
+µx, blue) and qC (orange) in an M-HMC iteration.

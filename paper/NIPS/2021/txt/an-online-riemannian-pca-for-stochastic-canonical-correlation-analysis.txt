@@ -1,0 +1,189 @@
+Abstract
+We present an efficient stochastic algorithm (RSG+) for canonical correlation anal-ysis (CCA) using a reparametrization of the projection matrices. We show how this reparametrization (into structured matrices), simple in hindsight, directly presents an opportunity to repurpose/adjust mature techniques for numerical optimization on Riemannian manifolds. Our developments nicely complement existing methods for this problem which either require O(d3) time complexity per iteration with
+O( 1√
+) convergence rate (where d is the dimensionality) or only extract the top t 1 component with O( 1 t ) convergence rate. In contrast, our algorithm offers an improvement: it achieves O(d2k) runtime complexity per iteration for extracting the top k canonical components with O( 1 t ) convergence rate. While our paper focuses more on the formulation and the algorithm, our experiments show that the empirical behavior on common datasets is quite promising. We also explore a potential application in training fair models with missing sensitive attributes. 1
+
+Introduction
+Canonical correlation analysis (CCA) is a classical method for evaluating correlations between two sets of variables. It is commonly used in unsupervised multi-view learning, where the multiple views of the data may correspond to image, text, audio and so on, Rupnik and Shawe-Taylor [2010],
+Chaudhuri et al. [2009], Luo et al. [2015], and has been applied to manifold-valued data also Kim et al. [2014]. Classical formulations have also been extended to leverage advances in representation learning, for example, Andrew et al. [2013] showed how the CCA can be interfaced with deep neural networks enabling modern use cases. Many results over the last few years have used CCA or its variants for problems including measuring representational similarity in deep neural networks Morcos et al. [2018] and speech recognition Couture et al. [2019].
+The goal in CCA is to find linear combinations within two random variables X and Y which have maximum correlation with each other. Formally, the CCA problem is defined as follows. Let
+X ∈ RN ×dx and Y ∈ RN ×dy be N samples respectively drawn from pair of random variables X (dx-variate random variable) and Y (dy-variate random variable), with unknown joint probability distribution. The goal is to find the projection matrices U ∈ Rdx×k and V ∈ Rdy×k, with k ≤ min{dx, dy}, such that the correlation is maximized:
+F = trace (cid:0)U T CXY V (cid:1)
+U T CX U = Ik, V T CY V = Ik s.t. (1)
+N Y T Y are the sample covariance matrices, and CXY = 1
+N X T Y max
+U,V
+Here, CX = 1 denotes the sample cross-covariance.
+N X T X and CY = 1
+The objective in (1) is the expected cross-correlation in the projected space and the constraints specify that different canonical components should be decorrelated. Let us define the whitened covariance
+∗Equal contribution 35th Conference on Neural Information Processing Systems (NeurIPS 2021), virtual.
+X CXY C −1/2
+T := C −1/2
+T . It is known Golub and Zha [1992] that the optimum of (1) is achieved at U ∗ = C −1/2
+V ∗ = C −1/2 and Φk (and Ψk) contains the top-k left (and right) singular vectors of
+X Φk,
+Y Ψk. We can compute U ∗, V ∗ by applying a k-truncated SVD to T .
+Y
+Runtime and memory considerations. The above procedure is simple but is only feasible when the data matrices are small. In modern applications, not only are the datasets large but also the dimension d (let d = max{dx, dy}) of each sample can be large, especially if representations are learned using deep models. As a result, the resource needs of the algorithm can be high. This has motivated the study of stochastic optimization routines for solving CCA, and many efficient strategies have been proposed. For example, Ge et al. [2016], Wang et al. [2016] present Empirical Risk Minimization (ERM) models which optimize the empirical objective. More recently, Gao et al. [2019], Bhatia et al.
+[2018], Arora et al. [2017] describe proposals that optimize the population objective. To summarize the approaches, if we are satisfied with the top 1 component of CCA, effective schemes with O( 1 t ) convergence rate are available by utilizing either extensions of the Oja’s rule Oja [1982] to the generalized eigenvalue problem Bhatia et al. [2018] or the alternating SVRG algorithm Gao et al.
+[2019]. Otherwise, a stochastic approach will use an explicit whitening operation which can cost d3 operations for each iteration Arora et al. [2017] and the convergence rate for the stochastic scheme depends on its specific steps and calculations, e.g., O( 1√ t
+) in Arora et al. [2017] (Thm 2.3, pp 5).
+Observation. Most approaches either directly optimize (1) or instead a reparameterized or regularized form Ge et al. [2016], Allen-Zhu and Li [2016], Arora et al. [2017]. Often, the search space for U and
+V corresponds to the entire Rd×k (ignoring the constraints for the moment). But if the formulation could be cast in a form which involved approximately writing U and V as a product of structured matrices, we may be able to obtain specialized routines which are tailored to exploit those properties.
+Such a reformulation is not difficult to derive – where the matrices used to express U and V can be identified as objects that live in well studied geometric spaces. Then, utilizing the geometry of the space and borrowing relevant tools from differential geometry could lead to an efficient approximate scheme for top-k CCA which optimizes the population objective in a streaming fashion.
+Contributions. (a) First, we re-parameterize the top-k CCA problem as an optimization problem on specific matrix manifolds, and show that it is equivalent to the original formulation in (1). (b)
+Informed by the geometry of the manifold, we derive stochastic gradient descent (SGD) algorithms for solving the re-parameterized problem with O(d2k) cost per iteration and provide convergence rate guarantees. (c) This analysis gives a direct mechanism to obtain an upper bound on the number of iterations needed to guarantee an ϵ error w.r.t. the population objective for the CCA problem. (d)
+The algorithm works in a streaming manner so it easily scales to large datasets and we do not need to assume access to the full dataset at the outset. (e) We present empirical evidence for the standard
+CCA model and the DeepCCA setting Andrew et al. [2013], describing advantages and limitations. 2 Stochastic CCA: Reformulation, Algorithm and Analysis
+Let us review the objective for CCA as given in (1). We denote X ∈ RN ×dx as the matrix consisting of the samples {xi} drawn from a zero mean random variable X ∼ X and Y ∈ RN ×dy denotes the matrix consisting of samples {yi} drawn from a zero mean random variable Y ∼ Y. For simplicity, we assume that dx = dy = d although the results hold for general dx and dy. Also recall that CX (and CY resp.) is the covariance matrix of X (and Y resp.) and CXY is the cross-covariance matrix between X and Y. Let U ∈ Rd×k (V ∈ Rd×k) be the matrix consisting of {uj} ({vj}) , where ({uj} , {vj}) are the canonical directions. The constraints in (1) are called whitening constraints.
+Reformulation: In the CCA formulation, the matrices consisting of canonical correlation directions, i.e., U and V , are unconstrained, hence the search space is the entire Rd×k. Now, we reformulate the
+CCA objective by reparameterizing U and V . In order to do that, let us take a brief detour and recall the objective function of principal component analysis (PCA): (cid:98)U = arg max
+U ′ trace( (cid:98)R) subject to (cid:98)R = U ′T CX U ′; U ′T U ′ = Ik (2)
+Observe that by performing PCA and assigning U = (cid:98)U (cid:98)R − 1/2 in (1) (analogous for V using CY ), we can satisfy the whitening constraint. Of course, writing U = (cid:98)U (cid:98)R − 1/2 does satisfy the whitening constraint, but such a U (and V ) will not maximize trace (cid:0)U T CXY V (cid:1), the objective of (1). Hence, 2
+additional work beyond the PCA solution is needed. Let us start from (cid:98)R but relax the PCA solution by using an arbitrary (cid:101)R instead of diagonal (cid:98)R (this will still satisfy the whitening constraint).
+Write U = (cid:101)U (cid:101)R with (cid:101)U T (cid:101)U = Ik and (cid:101)R ∈ Rk×k. Thus we can approximate CCA objective (we will later check how good this approximation is) as (cid:16) (cid:17) (cid:17) (cid:16) trace (cid:0)U T CXY V (cid:1) (cid:123)(cid:122) (cid:125) (cid:124) (cid:101)F
++ trace (cid:124) (cid:101)U T CX (cid:101)U
++ trace (cid:123)(cid:122) (cid:101)Fpca (cid:101)V T CY (cid:101)V s.t.
+U T CX U =Ik
+V T CY V =Ik (cid:125) max (cid:101)U , (cid:101)V ∈St(k,d)
+Ru,Rv∈Rk×k
+U = (cid:101)U Ru; V = (cid:101)V Rv (3)
+Here, St(k, d) denotes the manifold consisting of d × k (with k ≤ d) column orthonormal matrices, i.e., St(k, d) = (cid:8)X ∈ Rd×k|X T X = Ik (cid:9). Observe that in (3), we approximate the optimal U and
+V as a linear combination of (cid:101)U and (cid:101)V respectively. Thus, the aforementioned PCA solution can act as a feasible initial solution for (3).
+As the choice of Ru and Rv is arbitrary, we can further reparameterize these matrices by constraining them to be full rank (of rank k) and using the RQ decomposition Golub and Reinsch [1971] which gives us the following reformulation.
+A Reformulation for CCA max (cid:101)U , (cid:101)V ,Su,Sv,Qu,Qv
+U = (cid:101)U SuQu; V = (cid:101)V SvQv trace (cid:0)U T CXY V (cid:1) (cid:123)(cid:122) (cid:125) (cid:124) (cid:101)F
++ trace (cid:124) (cid:16) (cid:101)U T CX (cid:101)U (cid:17)
++ trace (cid:123)(cid:122) (cid:101)Fpca (cid:16) (cid:101)V T CY (cid:101)V (cid:17) (cid:125) subject to U T CX U = Ik
+V T CY V = Ik (cid:101)U , (cid:101)V ∈ St(k, d); Qu, Qv ∈ SO(k)
+Su, Sv is upper triangular (4a) (4b) is
+Here, SO(k) i.e., SO(k) = the space of k × k special orthogonal matrices, (cid:8)X ∈ Rk×k|X T X = Ik; det(X) = 1(cid:9). Before evaluating how good the aforementioned approxima-tion is, we first point out some useful properties of the reformulation (4): (a) in the reparametrization of U and V , all components are structured, hence, the search space becomes a subset of Rk×k (b) we can essentially initialize with a PCA solution and then try to optimize (4) via some scheme.
+Why (4) helps? First, we note that CCA seeks to maximize the total correlation under the constraint that different components are decorrelated. One difficulty in the optimization is to ensure decorre-lation, which leads to a higher complexity in existing streaming CCA algorithms. On the contrary, in (4), we separate (1) into finding the PCs, (cid:101)U , (cid:101)V (by adding the variance maximization terms) and finding the linear combination (SuQu and SvQv) of the principal directions. After optimizing for these variables, the whitening constraints are, up to a rescaling, automatically satisfied. Here, we can (almost) utilize an efficient off-the-shelf streaming PCA algorithm. We will defer describing the specific details of the individual steps until the next sub-section. First, we will show why substituting (1) with (4) is sensible under some assumptions.
+Why the solution of the reformulation makes sense? We start by stating some mild assumptions needed for the analysis. Assumptions: (a) The random variables X ∼ N (0, Σx) and Y ∼ N (0, Σy) with covariance Σx ⪯ cId and covariance Σy ⪯ cId for some c > 0. (b) The samples X and Y drawn from X and Y respectively have zero mean. (c) For a given k ≤ d, Σx, Σy have non-zero top-k eigen values.
+We show how the presented solution, assuming access to an effective numerical procedure, approxi-mates the CCA problem presented in (1). We formally state the result in the following theorem with a sketch of proof (appendix includes the full proof) by first stating the following proposition.
+Definition 1. A random variable X is called sub-Gaussian if the norm given by ∥X∥⋆ := inf {d ≥ 0|EX [exp (trace(X T X)/d2)] ≤ 2} is finite. Let U ∈ Rd×k, then XU is sub-Gaussian Ver-shynin [2017].
+Proposition 1 (Reiß et al. [2020]). Let X be a random variable which follows a sub-Gaussian distribution. Let (cid:98)X be the approximation of X ∈ RN ×d (samples drawn from X ) with the top-k 3
+principal vectors. Let (cid:101)CX be the covariance of (cid:98)X. Also, assume that λi is the ith eigen value of
+CX for i = 1, · · · , d − 1 and λi ≥ λi+1 for all i. Then, the PCA reconstruction error, denoted by
+Ek = EX∥X − (cid:98)X∥ (in the Frobenius norm sense) can be upper bounded as follows
+Ek ≤ min (cid:18)√ 2k∥∆∥2, (cid:19) 2∥∆∥2 2
+λk − λk+1
+, ∆ = CX − (cid:101)CX .
+The aforementioned proposition suggests that the error between the data matrix X and the recon-structed data matrix (cid:98)X using the top-k principal vectors is bounded.
+Recall from (1) and (4) that the optimal value of the true and approximated CCA objective is denoted by F and (cid:101)F respectively. The following theorem states that we can bound the error, E = ∥F − (cid:101)F ∥ (proof in the appendix). In other words, if we start from PCA solution and can successfully optimize (4) without leaving the feasible set, we will obtain a good solution.
+Theorem 1. Using the hypothesis and assumptions above, the approximation error E = ∥F − (cid:101)F ∥ as a function of N is bounded and goes to zero as N → ∞ while the whitening constraints in equation 4b are satisfied.
+Sketch of the Proof. Let U ∗ and V ∗ be the true solution of CCA, i.e., of (1). Let U = (cid:101)U SuQu, V = (cid:101)V SvQv be the solution of (4), with (cid:101)U , (cid:101)V be the PCA solutions of X and Y respectively.
+Let (cid:98)X = X (cid:101)U (cid:101)U T and (cid:98)Y = Y (cid:101)V (cid:101)V T be the reconstruction of X and Y using principal vec-tors. Let SuQu = (cid:101)U T U ∗ and SvQv = (cid:101)V T V ∗. Then we can write (cid:101)F = trace (cid:0)U T CXY V (cid:1)
+= trace
+. As (cid:98)X and (cid:98)Y
+. Similarly we can write F = trace (cid:16) 1
+N (XU ∗)T Y V ∗(cid:17) (cid:98)XU ∗(cid:17)T (cid:98)Y V ∗ 1
+N (cid:18) (cid:19) (cid:16) are the approximation of X and Y respectively using the principal vectors, we use Prop. 1 to bound the error ∥F − (cid:101)F ∥. Now observe that (cid:98)XU can be rewritten into X (cid:101)U (cid:101)U T U (similar for (cid:98)Y V ). Thus, as long as the solution SuQu and SvQv respectively well-approximate (cid:101)U T U and (cid:101)V T V , (cid:101)F is a good approximation of F .
+Now, the only unresolved issue is an optimization scheme for equation 4a that keeps the constraints in equation 4b satisfied by leveraging the geometry of the structured solution space. 2.1 How to numerically optimize (4a) satisfying constraints in (4b)?
+Overview. We now describe how to maximize the formulation in (4a)–(4b) with respect to (cid:101)U , (cid:101)V , Qu,
+Qv, Su and Sv. We will first compute top-k principal vectors to get (cid:101)U and (cid:101)V . Then, we will use a gradient update rule to solve for Qu, Qv, Su and Sv to improve the objective. Since all these matrices are “structured”, care must be taken to ensure that the matrices remain on their respective manifolds – which is where the geometry of the manifolds will offer desirable properties. We re-purpose a
+Riemannian stochastic gradient descent (RSGD) to achieve this task, so call our algorithm RSG+. Of course, more sophisticated Riemannian optimization techniques can be substituted in. For instance, different Riemannian optimization methods are available in Absil et al. [2007] and optimization schemes for many manifolds are offered in PyManOpt Boumal et al. [2014].
+The algorithm block is in Algorithm 1. Recall that (cid:101)Fpca = trace (cid:0)U T CX U (cid:1) + trace (cid:0)V T CY V (cid:1) is the contribution from the principal directions which we used to ensure the “whitening constraint”.
+Moreover, (cid:101)F = trace (cid:0)U T CXY V (cid:1) is the contribution from the canonical correlation directions (note that we use the subscript ‘cca’ for making CCA objective explicit). The algorithm consists of four main blocks denoted by different colors, namely (a) the Red block deals with gradient calculation of the objective function where we calculate the top-k principal vectors (denoted by (cid:101)Fpca) with respect to (cid:101)U , (cid:101)V ; (b) the Green block describes calculation of the gradient corresponding to the canonical directions (denoted by (cid:101)F ) with respect to (cid:101)U , (cid:101)V , Su, Sv, Qu and Qv; (c) the Gray block combines the gradient computation from both (cid:101)Fpca and (cid:101)F with respect to unknowns (cid:101)U , (cid:101)V , Su, Sv, Qu and Qv; and finally (d) the Blue block performs a batch update of the canonical directions (cid:101)F using Riemannian gradient updates. 4
+Gradient calculations. The gradient update for (cid:101)U , (cid:101)V is divided into two parts (a) The (Red block) gradient updates the “principal” directions (denoted by ∇ (cid:101)V (cid:101)Fpca), which is specifically designed to satisfy the whitening constraint. This requires updating the principal subspaces, so, the gradient descent needs to proceed on the manifold of k-dimensional subspaces of Rd, i.e., on the
+Grassmannian Gr(k, d). (b) The (green block) gradient from the objective function in (4), is denoted by ∇ (cid:101)V (cid:101)F . In order to ensure that the Riemannian gradient update for (cid:101)U and (cid:101)V stays on the manifold St(k, d), we need to make sure that the gradients, i.e., ∇ (cid:101)V (cid:101)F lies in the tangent space of St(k, d). To do so, we need to first calculate the Euclidean gradient and then project on to the tangent space of St(k, d). (cid:101)U (cid:101)Fpca and ∇ (cid:101)U (cid:101)F and ∇ (cid:101)U (cid:101)F and ∇
+The gradient updates for Qu, Qv, Su, Sv are given in the green block, denoted by ∇Qu (cid:101)F , ∇Qv (cid:101)F ,
+∇Su (cid:101)F and ∇Sv (cid:101)F . Note that unlike the previous step, this gradient only has components from canonical correlation calculation. As before, this step requires first computing the Euclidean gradient and then projecting on to the tangent space of the underlying Riemannian manifolds involved, i.e.,
+SO(k) and the space of upper triangular matrices.
+Finally, we get the gradient to update the canonical directions by combining the gradients which is shown in the gray block. With these gradients we can perform a batch update as shown in the blue block. A schematic diagram is given in Fig. 1.
+Using results presented next in Propositions 2– 3, this scheme can be shown (under some as-sumptions) to approximately optimize the CCA objective in (1).
+We can now move to the convergence properties of the algorithm. We present two results stating the asymptotic proof of convergence for top-k principal vectors and canonical directions in the algorithm.
+Proposition 2 (Chakraborty et al. [2020]). (Asymptotically) If the samples, X, are drawn from a Gaussian distribution, then the gradient update rule presented in Step 5 in Algorithm 1 returns an orthonormal basis – the top-k principal vectors of the covariance matrix CX .
+Proposition 3. (Bonnabel [2013]) Consider a connected Riemannian manifold M with injectivity radius bounded from below by I > 0. Assume that the sequence of step sizes (γl) satisfy the condition l < ∞ (b) (cid:80) γl = ∞. Suppose {Al} lie in a compact set K ⊂ M. We also suppose that (a) (cid:80) γ2
+∃D > 0 such that, gAl
+Figure 1: Schematic diagram of the proposed CCA algorithm, here (cid:101)Ftot = (cid:101)F + (cid:101)Fpca, where (cid:101)F is the approximated objective value for CCA (as in (4))
+≤ D. Then ∇Al (cid:101)F → 0 and l → ∞.
+∇Al (cid:101)F , ∇Al (cid:101)F (cid:16) (cid:17)
+Notice that in our problem, the injectivity radius bound in Proposition 3 is satisfied as “I” for Gr(p, n), 2, π/2 respectively. So, in order to apply Proposition 3, we need
+St(p, n) or SO(p) is π/2 to guarantee the step sizes satisfy the aforementioned condition. One example of the step sizes that satisfies the property is γl = 1 2, π/2
+√
+√ l+1 . 2.2 Convergence rate and complexity of the RSG+ algorithm (cid:16) (cid:17)
+−γt∇At (cid:101)F
+In this section, we describe the convergence rate and complexity of the algorithm proposed in
+Algorithm 1. Observe that the key component of Algorithm 1 is a Riemannian gradient update. Let
+At be the generic entity needed to be updated in the algorithm using the Riemannian gradient update
+, where γt is the step size at time step t. Also assume {At} ⊂ M for
+At+1 = ExpAt a Riemannian manifold M. The following proposition states that under certain assumptions, the
+Riemannian gradient update has a convergence rate of O (cid:0) 1
+Proposition 4. (Nemirovski et al. [2009], Bécigneul and Ganea [2018]) Let {At} lie inside a geodesic ball of radius less than the minimum of the injectivity radius and the strong convexity radius of M. Assume M to be a geodesically complete Riemannian manifold with sectional curvature lower bounded by κ ≤ 0. Moreover, assume that the step size {γt} diverges and the squared step size (cid:17) converges. Then, the Riemannian gradient descent update given by At+1 = ExpAt
+−γt∇At (cid:101)F (cid:1). (cid:16) t 5
+Algorithm 1: Riemannian SGD based algorithm (RSG+) to compute canonical directions 1 Input: X ∈ RN ×dx , Y ∈ RN ×dy , k > 0 2 Output: U ∈ Rdx×k, V ∈ Rdy ×k 3 Initialize (cid:101)U , (cid:101)V , Qu, Qv, Su, Sv 4 Partition data X, Y into batches of size B. Let jth batch be denoted by Xj and Yj 5 for j ∈ (cid:8)1, · · · , ⌊ N
+B ⌋(cid:9) do
+Gradient for top-k principal vectors: calculating ∇ (cid:101)U (cid:101)Fpca, ∇ (cid:101)V (cid:101)Fpca 1. Partition Xj (Yj) into L (L = ⌊ B k ⌋) blocks of size dx × k (dy × k); l (Z y 2. Let the lth block be denoted by Z x l ( ˆZ y 3. Orthogonalize each block and let the orthogonalized block be denoted by ˆZ x l ); y l ∈ Gr(k, dx) (and ˆZ 4. Let the subspace spanned by each ˆZ x l ∈ Gr(k, dy)); (cid:16) ˆZ (cid:88) l (and ˆZ y (cid:16) ˆZ (cid:17) l ) be ˆZ (cid:88) l );
+∇
+∇ (cid:17) x x l y l (cid:101)V (cid:101)Fpca = − (cid:101)U (cid:101)Fpca = −
+Exp−1 (cid:101)V
+Exp−1 (cid:101)U l l (5)
+Gradient from equation 4: calculating ∇
+T
+∇ (cid:101)U (cid:101)F = ∂ (cid:101)F
+∂ (cid:101)U
+∇Qu (cid:101)F = ∂ (cid:101)F
+∂Qu
+∇Su (cid:101)F = Upper
+− (cid:101)U ∂ (cid:101)F
+∂ (cid:101)U
+− ∂ (cid:101)F
+∂Qu (cid:16) ∂ (cid:101)F
+∂Su (cid:17) (cid:101)U ∇
+T (cid:101)V (cid:101)F = ∂ (cid:101)F
+∂ (cid:101)V
+∇Qv (cid:101)F = ∂ (cid:101)F
+∂Qv
+∇Sv (cid:101)F = Upper (cid:101)U (cid:101)F , ∇
+− (cid:101)V ∂ (cid:101)F
+∂ (cid:101)V
+− ∂ (cid:101)F
+∂Qv (cid:16) ∂ (cid:101)F
+∂Sv (cid:17)
+T (cid:101)V (cid:101)F , ∇Qu (cid:101)F , ∇Qv (cid:101)F , ∇Su (cid:101)F , ∇Sv (cid:101)F (cid:101)V
+T
+Here, Upper returns the upper triangular matrix of the input matrix and ∂ (cid:101)F
+∂ (cid:101)U
+Euclidean gradients, which are provided in appendix.
+, ∂ (cid:101)F
+∂ (cid:101)V
+, ∂ (cid:101)F
+∂Qu
+, ∂ (cid:101)F
+∂Qv
+, ∂ (cid:101)F
+∂Su
+, ∂ (cid:101)F
+∂Sv give the
+Gradient to update canonical directions
+∇
+∇X (cid:101)Ftot = ∇X (cid:101)F where, X is a generic entity: X ∈ {Qu, Qv, Su, Sv}; (cid:101)V (cid:101)Fpca + ∇ (cid:101)U (cid:101)Fpca + ∇ (cid:101)V (cid:101)Ftot = ∇ (cid:101)U (cid:101)Ftot = ∇ (cid:101)V (cid:101)F ; (cid:101)U (cid:101)F
+∇
+Batch update of canonical directions
+A = ExpA
+−γj∇A (cid:101)Ftot (cid:16) (cid:17) where, A is a generic entity: A ∈ { (cid:101)U , (cid:101)V , Qu, Qv, Su, Sv}; 6 7 8 9 10 end for 11 U = (cid:101)U QuSu and V = (cid:101)V QvSv; with a bounded ∇At (cid:101)F , i.e., ∥∇At (cid:101)F ∥ ≤ C < ∞ for some C ≥ 0, converges in the rate of O (cid:0) 1 (cid:1) with the number of iterates bounded by O(N + D/ϵ2), for some tolerance ϵ > 0 and for the Lipschitz bound D of the objective function (cid:101)F . t
+For this result to be applicable, we need the CCA objective function to be geodesically convex as a function of U and V (proof in the appendix). All Riemannian manifolds we needed, i.e., Gr(k, d),
+St(k, d) and SO(k) are geodesically complete, and these manifolds have non-negative sectional curvatures, i.e., lower bounded by κ = 0. Moreover the minimum of convexity and injectivity radius for Gr(k, d), St(k, d) and SO(k) are π/2 2. Now, as long as the Riemannian updates lie inside the geodesic ball of radius less than π/2 2, the convergence rate for RGD applies in our setting.
+√
+√
+Running time. To evaluate time complexity, we must look at the main compute-heavy steps needed.
+The basic modules are Exp and Exp−1 maps for St(k, d), Gr(k, d) and SO(k) manifolds (see Table 1 in appendix for a detailed specification of these maps). Observe that the complexity of these modules is influenced by the complexity of svd needed for the Exp map for the St and Gr manifolds.
+Our algorithm involves structured matrices of size d × k and k × k, so any matrix operation should not exceed a cost of O(max(d2k, k3)), since in general d ≫ k. Specifically, the most expensive calculation is SVD of matrices of size d × k, which is O(d2k), see Golub and Reinsch [1971]. All other calculations are dominated by this term. 6
+Table 1: Wall-clock runtime of one pass through the data of our RSG+ and MSG on MNIST,
+Mediamill and CIFAR (average of 5 runs).
+Time (s)
+RSG+ (Ours)
+MSG k = 1 4.16 35.32
+MNIST k = 2 4.24 42.09 k = 4 4.71 49.17
+Mediamill k = 2 1.60 14.21 k = 4 1.44 17.34 k = 1 1.89 11.59 k = 1 14.80 80.21
+CIFAR k = 2 17.22 100.80 k = 4 22.10 106.55 3 Experiments
+We first evaluate RSG+ for extracting top-k canonical components on three benchmark datasets and show that it performs favorably compared with Arora et al. [2017]. Then, we show that RSG+ also fits into feature learning in DeepCCA Andrew et al. [2013], and can scale to large feature dimensions where the non-stochastic method fails. Finally, we show that RSG+ can be used to improve fairness of deep neural networks without full access to labels of protected attributes during training. 3.1 CCA on Fixed Datasets
+Datasets and baseline. We conduct experiments on three benchmark datasets (MNIST LeCun et al.
+[2010], Mediamill Snoek et al. [2006] and CIFAR-10 Krizhevsky [2009]) to evaluate the performance of RSG+ to extract top-k canonical components. To our knowledge, Arora et al. [2017] is the only previous work which stochastically optimizes the population objective in a streaming fashion and can extract top-k components, so we compare our RSG+ with the matrix stochastic gradient (MSG) method proposed in Arora et al. [2017] (note: there are two methods proposed in Arora et al. [2017] and we choose MSG because it performs better in the experiments in Arora et al. [2017]). The details regarding the three datasets and how we process them are as follows:
+MNIST. LeCun et al. [2010]: MNIST contains grey-scale images of size 28 × 28. We use its full training set containing 60K images. Every image is split into left/right half, which are used as the two views. Mediamill. Snoek et al. [2006]: Mediamill contains around 25.8K paired features of videos and corresponding commentary of dimension 120, 101 respectively. CIFAR-10. Krizhevsky [2009]:
+CIFAR-10 contains 60K 32 × 32 color images. Like MNIST, we split the images into left/right half and use them as two views.
+Evaluation metric. We choose to use Proportion of Correlations Captured (PCC) which is widely used Ma et al. [2015], Ge et al. [2016], partly due to its efficiency, especially for relatively large datasets. Let ˆU ∈ Rdx×k, ˆV ∈ Rdy×k denote the estimated subspaces returned by RSG+, and
+U ∗ ∈ Rdx×k, V ∗ ∈ Rdy×k denote the true canonical subspaces (all for top-k). The PCC is defined as PCC = TCC(X ˆU,Y ˆV )
+TCC(XU ∗,Y V ∗) , where TCC is the sum of canonical correlations between two matrices.
+Performance. We run our algorithm with step sizes chosen from {1, 0.1, 0.01, 0.001, 0.0001, 0.00001}. The performance in terms of PCC as a function of the number of seen samples (shown in a streaming manner) are shown in Fig. 2, and our RSG+ achieves around 10× runtime improvement over MSG (see Table 1). Our RSG+ captures more correlation than MSG Arora et al. [2017] while being 5 − 10 times faster. One case where our RSG+ underperforms Arora et al. [2017] is when the top-k eigenvalues are dominated by the top-l eigenvalues with l < k (Fig. 2b): on Mediamill dataset, the top-4 eigenvalues of the covariance matrix in view 1 are: 8.61, 2.99, 1.15, 0.37. The first eigenvalue is dominantly large compared to the rest and our RSG+ performs better for k = 1 and worse than Arora et al. [2017] for k = 2, 4. Runtime of RSG+ for different data dimensions (set dx = dy = d) and number of total samples (from a joint Gaussian distribution) is in the appendix. 3.2 CCA for Deep Feature Learning

@@ -1,0 +1,236 @@
+Abstract
+Neural Architecture Search (NAS), together with model scaling, has shown remarkable progress in designing high accuracy and fast convolutional architecture families. How-ever, as neither NAS nor model scaling considers sufﬁcient hardware architecture details, they do not take full advan-tage of the emerging datacenter (DC) accelerators. In this paper, we search for fast and accurate CNN model families for efﬁcient inference on DC accelerators. We ﬁrst analyze
+DC accelerators and ﬁnd that existing CNNs suffer from insufﬁcient operational intensity, parallelism, and execu-tion efﬁciency and exhibit FLOPs-latency nonproportional-ity. These insights let us create a DC-accelerator-optimized search space, with space-to-depth, space-to-batch, hybrid fused convolution structures with vanilla and depthwise con-volutions, and block-wise activation functions. We further propose a latency-aware compound scaling (LACS), the ﬁrst multi-objective compound scaling method optimizing both accuracy and latency. Our LACS discovers that network depth should grow much faster than image size and net-work width, which is quite different from the observations from previous compound scaling. With the new search space and LACS, our search and scaling on datacenter acceler-ators results in a new model series named EfﬁcientNet-X.
+EfﬁcientNet-X is up to more than 2X faster than Efﬁcient-Net (a model series with state-of-the-art trade-off on FLOPs and accuracy) on TPUv3 and GPUv100, with comparable accuracy. EfﬁcientNet-X is also up to 7X faster than re-cent RegNet and ResNeSt on TPUv3 and GPUv100. Source code is at https://github.com/tensorflow/tpu/tree/ master/models/official/efficientnet/tpu 1.
+
+Introduction
+As Moore’s Law is slowing down, more specialized datacenter (DC) accelerators such as GPUs [43, 14] and
+TPUs [32, 20, 15, 42] have been developed to keep up with the increasing demand of machine learning (ML) models.
+With the increasing complexity of ML model architectures and accelerator architectures, there is a fast-widening gap between achieved performance and available performance.
+Figure 1: Uniﬁed accelerator-optimized NAS and Latency-aware Compound Scaling (LACS) to search model families optimized for TPUs and GPUs. The same multi-objective with both latency and accuracy is used for both NAS and model scaling. For a given accelerator, a base model (m1) is obtained via NAS with a new search space tailored to
+DC accelerators. The new latency-aware compound scaling (LACS) searches for scaling coefﬁcients on m1 to form the model family. Both processes are executed separately on
+TPU and GPU, resulting in two families of ﬁnal models.
+Neural Architecture Search (NAS) [65, 9, 66, 11], a new paradigm of assembling models automatically, has the poten-tial to bridge the gap. Modern NAS usually aims at designing a family of models for different accuracy-speed trade-offs for different use cases. Because of the high cost associated with searching for the entire family of models, model scaling is commonly used to achieve this goal by scaling [25, 57] up from a base model to form a model family. However, on specialized DC accelerators the fast-widening gap remains even with NAS and model scaling, because they do not have sufﬁcient visibility into hardware architecture details and thus cannot design optimal model families for them.
+In this paper, we aim at bridging this gap and design-ing model families with high accuracy and inference speed, by taking into consideration hardware architecture details of TPUs and GPUs for both NAS and model scaling. We
+ﬁrst analyze DC accelerators to ﬁnd performance bottle-necks. Our analysis reveals the root cause of the recent observed FLOPs-latency nonpropotionality [51]. We dis-cover that SOTA CNNs suffer from low operational intensity 18085
+and parallelism, which causes low computation rate (i.e.,
+FLOPs/sec or Ops/sec1) and sub-optimal inference latency and throughput on TPU/GPU accelerators. With these in-sights, we augment state-of-the-art (SOTA) NAS with DC accelerator optimized search space to improve CNN model operational intensity and efﬁciency. Concretely, we create a new search space with accelerator-friendly operations in-cluding space-to-depth, space-to-batch, fused convolution structures, and block-wise searchable activation as shown in Figure 1. We propose latency-aware compound scaling (LACS) that uses a multi-objective of both accuracy and infer-ence speed to search for scaling factors to generate a model family. LACS is the ﬁrst compound scaling method with a multi-objective including both latency and accuracy.
+With the improved NAS and LACS, we search for high ac-curacy CNNs for efﬁcient inference on TPUv3 [20, 15, 42] and GPUv100 [14]. Our search results in a new model family named EfﬁcientNet-X (with differences on TPU and
+GPU) that achieve a better accuracy and latency trade-offs than the state-of-the-art. EfﬁcientNet-X models are up to more than 2X faster on TPUv3 and GPUv100 respectively than EfﬁcientNet [57] with comparable accuracy. Moreover,
+EfﬁcientNet-X models achieve 30% more speedup compared to EfﬁcientNet when moving from TPUv2 to TPUv3, demon-strating the generality of our search method across differ-ent accelerator generations. EfﬁcientNet-X is also faster than other SOTA models, with on average (geo-mean) 82% and 48% faster than RegNet and ResNeSt respectively on
+GPUv100 and 7X and 48% faster than RegNet and ResNeSt respectively on TPUv3.
+In summary, this paper makes the following contributions: 1. We conduct quantitative analysis to reveal the root cause of FLOPs-latency nonproportionality on DC accelera-tors. Although recent work [51] has observed the similar behavior, our rooﬂine model and analysis is the ﬁrst to show the fundamental reasons for latency to be much less correlated to FLOPs on GPUs and TPUs than on CPUs.
+Moreover, our analysis also discovers the performance bottlenecks of CNNs and inspires enhancements for both
+NAS and compound model scaling. 2. We design a DC-accelerator-optimized search space, with space-to-batch, space-to-depth, fused convolution struc-tures, and block-wise activation functions, to compose
+CNNs with higher operational intensity and efﬁciency for better accuracy and speed trade-offs. 3. We propose latency-aware compound scaling (LACS), the ﬁrst compound scaling method with accuracy and latency as the multi-objective. After taking latency into account, our LACS discovers network depth should grow 1When operations are done in different data types such as bﬂoat16 [15],
+ﬂoat16 [14], and tf32 [43], the computation rate is usually denoted as OPS, i.e., OPs/Second. Hereafter in this paper, we use FLOPs/sec and Ops/sec interchangeably unless noted otherwise. much faster than image size and network width, which is quite different from previous compound model scaling results [57]. 4. Our uniﬁed NAS and LACS produce EfﬁcientNet-X, with up to 2X speedup over the EfﬁcientNet and up to 7X speedup over RegNet/ResNeSt on TPUs and GPUs. 2. Rethink model speed on DC accelerators:
+Why FLOPs and latency do not correlate
+Emerging datacenter accelerators, including TPUs [32, 15] and GPUs [14], have been using new hardware architec-tures to keep up with the fast-increasing demand of comput-ing power from ML models. In particular, because matrix-multiplication is the core operation in neural networks, the most special feature of these accelerators is the matrix-multiply-and-accumulate units, called tensor cores [14] in
+GPUs and matrix multiply units [32, 42] in TPUs. These new hardware architectures have changed the way ML models ex-ecute on the accelerators. For example, recent work [51] has observed that FLOPs and latency do not correlate on these accelerators. However, with these empirical observations, there is yet no in-depth analysis to reveal the root cause.
+In this section, we ﬁnd the root cause of the FLOPs-latency nonpropotionality and provide principles for design-ing high speed ML models on DC accelerators. To rethink the implications of the DC accelerators on model speed in-cluding the FLOPs-latency nonpropotionality, we build a generic performance model as shown in Equation 1.
+Latency =
+W
+C
+=
+W
+Cideal ⇥ E
+,
+I =
+W
+Q
+Cideal =
+I ⇥ b
+Cmax ( if I < Ridge Point else (1) where W (in FLOPs) is the amount of computation required by an ML model, Q (in Bytes) is the memory trafﬁc (bytes of memory transfers) incurred during the execution, and I is the operational intensity of the model (in FLOPs/Byte). C (in FLOPs/sec) is the computation rate determined by the ideal computation rate (Cideal) and the execution efﬁciency E, where Cideal is determined by I, accelerator memory band-width b, and accelerator peak computation rate Cmax. Note that b and Cmax are accelerator hardware constants. Details of I and C are shown in Figure 2. The execution efﬁciency
+E is deﬁned as the achieved C / Cideal. The end-to-end infer-ence latency of a model is a nonlinear function of W , I, and
+E, instead of only W — the FLOPs. This is the root cause of FLOPs-latency nonproportionality.
+To dive deeper into the operational intensity and efﬁ-ciency, we adapt the simple rooﬂine analysis (as shown in
+Figure 2) that originated from high-performance comput-ing (HPC)[59] and has been used in ML [60, 32, 42]. The rooﬂine model reasonably assumes that applications are ei-ther compute-bound or memory-(bandwidth)-bound as they 28086
+/
+) c e
+S s p
+O a r e
+T (
+S
+P
+O
+T 100 10 1 0 1 10 100 1000
+Operational Intensity (Ops/Byte)
+Figure 2: Rooﬂines of TPUv3, Volta SMX2 GPU, and Xeon
+Skylake CPU. TPU and GPU have overlapped rooﬂines because of their similar peak computation rate and memory bandwidth. don’t ﬁt in on-chip memories. The Y-axis is computation rate C in FLOPs/sec or Ops/sec, thus the peak computation rate forms the saturation region of the rooﬂine. The X-axis is operational intensity I in FLOPs per memory byte accessed.
+The memory bytes include weights, activations, and interme-diate values. The slope of the linear part can be easily derived to be memory bandwidth (Bytes/Sec). An ML model can achieve peak FLOPs/sec on the accelerators only when its operational intensity is sufﬁcient to push it into the saturation (i.e., compute-bound) region in the rooﬂine. Otherwise, the
+ML model is memory-bandwidth-bound. The ridge point is the transition point from the memory-bandwidth-bound per-formance region to the compute-bound performance region.
+With the rooﬂine analysis and understanding of datacenter accelerator architectures, we can obtain a few key principles for designing high speed ML models on DC accelerators:
+• Compute is signiﬁcantly cheaper on DC accelerators than on previous systems because of the new matrix-multiply-and-accumulate units, which results in the ∼35X higher
+TeraOps/sec of GPUv100 and TPUv3 than typical of CPU as shown as the saturation regions in Figure 2.
+• ML models need have high operational intensity on TPUs and GPUs to be in the compute-bound region to reach close-to-peak performance. This is because, for TPUs and GPUs, their peak computation rate (TeraOps/s) grows much faster than memory bandwidth (Bytes/s). Thus,
+TPUs and GPUs have ridge points farther to the right than
+CPUs. However, as shown in Figure 2 EfﬁcientNets’ oper-ational intensity is an order of magnitude lower than that of the TPU/GPU ridge point (and even ResNet), which is too low to tap into the full potential of the DC accelerators despite their signiﬁcantly reduced FLOPs. Speciﬁcally, Ef-ﬁcientNet has∼10X FLOPs reduction compared to other models such as ResNet at comparable accuracy.
+• Parallelism is critical for high speed models. TPU/GPU accelerators are optimized for throughput with the new ma-trix/tensor units. These matrix/tensor units require large parallelism to achieve high performance. For example, a convolution operation needs to have adequately sized depth, batch, and spatial dimensions to provide enough parallelism to achieve high execution efﬁciency on matrix units. Additionally, because many vector/element opera-tions such as activation functions run on vector units (e.g.,
+CUDA cores in GPUs and vector units in TPUs) instead of matrix units, sufﬁcient parallelism between matrix and vector units is also important for ML models to achieve high performance on GPUs and TPUs. 3. Optimize search space for DC accelerators
+Based on the analysis and optimization principles in the previous section, we optimize NAS to improve operational intensity and parallelism to design fast models. NAS has three pillars: the search algorithms governing the search pro-cess, the objectives determining the trade-offs of the search results, and the search space as the key link between model architectures and accelerator architectures. Thus, specializ-ing the search space for DC accelerators is crucial to give
+NAS more visibility to DC accelerator details. Our opti-mized search space includes three key new components: accelerator-friendly space-to-depth/batch, fused convolution structures, and block-wise activation functions. 3.1. Efﬁcient space-to-depth and space-to-batch
+As pointed out in Section 2, convolutions need high paral-lelism in all dimensions (depth, batch, and spatial) to achieve high speed on TPUs and GPUs. However, insufﬁcient paral-lelism because of the small depth and batch is the usual cause of low utilization and low performance on matrix units. We augment the search space with accelerator-friendly space-to-depth and space-to-batch ops to increase depth and batch dimensions while keeping the total tensor volume the same.
+For space-to-depth ops, instead of using the memory-copy-reshape based ops provided by frameworks such as Ten-sorFlow [7] and Pytorch [45], we customize an n × n convo-lution with stride-n to perform the space-to-depth operation, reshaping an H × W × C tensor to an H/n × W/n × C ∗ n2 tensor. This approach has two advantages: 1) convolutions are much preferred by TPUs and GPUs because of their high operational intensity and execution efﬁciency; 2) in addition to reshaping the input tensor to improve operational intensity and efﬁciency, the n × n convolutions can also be trained to contribute to the model’s capacity. For space-to-batch ops, we have to use the memory-intensive copy-reshape ops provided by common frameworks [7, 45]. 3.2. Fused convolution structures
+As they are the dominant operations in CNNs, it is impor-tant to ensure that convolutions in the search space are opti-mized for accelerator architectures. As the baseline search space already includes a rich set of convolutions with differ-ent types, sizes, and shapes, we augment the search space with fused convolution macro structures. With 4-mode input 38087  
+tensor I and output tensor O of N × C × H × W 2, the total computation load W (in FLOPs) and operational intensity I for convolution and depthwise convolution are in Equation 2.
+From Equation 1 and 2, it is clear that although depthwise convolutions have fewer FLOPs, they also have lower opera-tional intensity to potentially hurt computation rate and thus hurt latency.
+W_Conv2 = N ⇥ H ⇥ W ⇥ C 2
+⇥ K 2
+,
+I_Conv2 =
+N ⇥ H ⇥ W ⇥ C 2 ⇥ K 2 2 ⇤ N ⇥ H ⇥ W ⇥ C + C 2 ⇥ K 2 ,
+),
+W_DWConv = N ⇥ H ⇥ W ⇥ C ⇥ (C + K 2 (2)
+I_DWConv =
+N ⇥ H ⇥ W ⇥ C ⇥ (C + K 2 (4 ⇤ N ⇥ H ⇥ W ⇥ C + C ⇥ K 2 + C 2)
+)
+This trade-off is more complicated in convolution macro structures such as mobile inverted bottleneck conv (MB-Conv) [53], an important convolution structure in the base-line search space. MBConv is a macro block that includes a expansion layer of 1x1 convolutions, a depthwise convo-lution, and a projection layer of 1x1 convolutions, together with activation, batch normalization, and skip-connections.
+A fused variant of MBConv (fused MBConv) combines the depthwise convolutions with the expansion or projection layer as a vanilla convolution. These trade-offs involving
+W , I, and E (as shown in Equation 1 and 2) are too compli-cated for manual optimization but are well-suited for NAS to explore. Concretely, fused MBConv has higher operational intensity (good for speed) but higher FLOPs (bad for speed) than MBConv. Thus, fused MBConv can possibly be either faster or slower than MBConv, depending on the shape and size of weights and activations of the macro op. Moreover, the MBConv and fused MBConv contribute differently to the
+ﬁnal model accuracy. Thus, we added the fused MBConv into the baseline factorized search space [57]. Although recently NAS for mobile devices [22] also uses a similar op, our work is the ﬁrst to provide the in-depth analysis and employ such ops into the DC accelerator search spaces. 3.3. Block-wise searchable activation functions
+While activation functions have been studied thoroughly for their impact on accuracy [48, 8], their impact on speed is less well understood. With the high computing capacity on TPUs and GPUs, the FLOPs difference among different activation functions is negligible. However, because of the low operational intensity of all activation functions and the shape of rooﬂines (Figure 2) of TPU and GPU, all activation functions are memory-bound [5] on TPUv3 and GPUv100.
+These memory-bound activation functions can have large negative performance impact to the end-to-end model speed, 2For simplicity, we assume that 1) input depth (Cin) is the same as output depth (Cout), 2) input height and weight (Hin and Win) are the same as output height and width (Hout and Wout), and 3) stride-1 square kernels with size K × K. N is the batch size. because they can drag the overall model into the slope region of the rooﬂines (where ML model performance is far away from the TPU/GPU peak performance as shown in Figure 2.
+The most important optimization for activation functions is fusing [1, 5] an activation function with its associated convolutions to avoid accessing memory just for computing the activation function. Because activation functions (being element-wise operations) usually run on vector units, their execution can be in parallel with the execution of convolu-tions when convolutions run on matrix unit. In theory, the fused activation functions can be completely hidden by the execution of convolutions. But, in practice, the software stack plays an crucial role for such optimizations, which manifests as important model accuracy and speed trade-offs.
+Therefore, we enhance the baseline factorized search space [57, 56] with searchable activation functions, includ-ing ReLU and swish. To make the search space manageable, we make the activation searchable at the block level in the fac-torized search space, i.e., different blocks can have different activation functions but all layers within the same block use the same activation function. More details of the TPU/GPU-optimized search space can be found in Appendix A. 4. Latency-aware compound scaling (LACS)
+The optimized search space in previous section helps our goal to compose CNN model families with optimal accuracy and inference latency on different DC accelerators as shown in Figure 1. Particularly, our goal can be deﬁned generally with Equation 3. max
+Shj ,mi,hj
+⇣Accuracy(mi,hj ), Latencyhj (mi,hj )⌘ (3)
+O
+Given a set of k DC hardware accelerators h1, h2, . . . hk ∈
+H of accelerators, we aim at searching for a family of mod-els denoted as m1,hj , m2,hj , . . . mn,hj ∈ Mhj . Models in
+Mhj specialize in different DC architectures in H and in-crease in accuracy at the cost of latency to serve different use cases. The search process is governed by the accuracy and la-tency multi-objective O, evaluating all models in the family of Mhj on accelerator hj. The model family Mhj is com-posed with a model search space of Shj tailored for a given accelerator hj. In this work, the DC hardware accelerator set H focuses on TPUs and GPUs.
+Even with state-of-the-art NAS and our enhanced search space as described in Section 3, it is too costly to search an entire family of models. Therefore, model scaling is com-monly used together with NAS. Model scaling has changed from simple scaling [25, 63, 28] to more sophisticated com-pound scaling [57]. Compound scaling [57] is essentially a search algorithm as it searches for the best scaling factors for depth, width, and resolution, under a given objective and constraint. However, although the SOTA compound scaling has demonstrated better results than simple scaling, by sys-tematically scaling depth, width, and resolution of CNNs, 48088
+there is still a major hurdle preventing it from harvesting the full potential of hardware and working optimally with
+NAS. Concretely, by using accuracy as the sole objective3 during searching for scaling factors, the existing SOTA com-pound scaling method cannot consider the performance (e.g., inference latency) impact for the resulted model families.
+As we seek to design end-to-end model family search as described in Equation 3 and Figure 1, we propose latency-aware compound scaling (LACS). Unlike existing compound scaling that uses accuracy as the sole objective, LACS em-ploys accuracy and latency as the multi-objective when searching for scaling factors of depth, width, and resolution of CNNs for better latency and accuracy trade-offs. Search-ing for scaling factors with LACS amounts to approximating the solution to the following optimization problem for each accelerator hj: dhj , whj , rhj
+= arg max
+O d,w,r
+⇣
+Accuracy(mi,hj ), Latencyhj (mi,hj ) (4)
+⌘ w.r.t. Latency(G(mi,hj , d, w, r)) = Tmi+1,hj where d, w, r are scaling coefﬁcients for model’s depth, width, and input resolution respectively while preserving is the target latency basic network architecture. Tmi+1,hj for the (i + 1)th model of the family on hj. d, w, r are de-termined by a compound coefﬁcient φ to scale the network uniformly: d = αφ, w = βφ, r = γφ; s.t. α ≥ 1, β ≥ 1, γ ≥ 1 (5)
+φ controls how many more resources are available for model scaling. In the original compound scaling that uses accuracy as the sole objective, φ means the extra FLOPs for model scaling. Whereas, in our latency-aware compound scaling,
+φ means the latency budget for model scaling, with α, β and
+γ controlling how the latency budget is allocated to scale depth, width, and resolution, respectively. α, β and γ can be determined by a grid search. LACS is the ﬁrst multi-objective compound scaling, which enables streamlined in-tegration with multi-objective NAS with the same uniﬁed multi-objective reward including both model accuracy and latency as shown in Figure 1. 5. Searching and scaling optimized model fam-ilies on DC accelerators
+This section describes our process of searching and scal-ing to design model families on TPUs and GPUs with the uniﬁed NAS and LACS. We ﬁrst use NAS with the new search space tailored for DC accelerators to search for the base model. We then use LACS to ﬁnd scaling factors to compose model families on TPUs and GPUs. 3Although compound model scaling also uses FLOPs as the constraints of the scaling factors, the model accuracy is the only objective when search-ing for the compound scaling factors. 5.1. NAS for base models
+We use a NAS infrastructure similar to [56, 57], where we employ the same RNN-based controller. We build an infrastructure to retrieve TPU and GPU hardware latency directly during search and run NAS on TPUv3[20, 15] and
+GPUv100 [14]. We used data parallelism for distributed training and searching on both TPUs and GPUs.
+To establish solid baseline for comparison, we ﬁrst use the original search space from EfﬁcientNet [57] but replace total computation load (FLOPs) with inference latency of TPUv3 and GPUv100 as the performance objective. Our search ﬁnds no model better than EfﬁcientNet-B0 with ReLU. Thus, in the original EfﬁcientNet search space without our TPU/GPU-optimized operations such as space-to-depth/batch, fused
+MBConv, and searchable activation functions, the FLOPs-optimized models and latency-optimized models converge to the same model architecture as EfﬁcientNet-B0 with ReLU4.
+This observation further necessitates the design of the new search space customized for TPUs and GPUs.
+We then performance NAS on our proposed new search space as described in Section 3. We use the same multi-objective reward mechanism as in [56] to ensure fair com-parison, although different objective function forms, such as additive forms [10], can potentially produce even better results. The multi-objective reward combines accuracy and latency as ACCU RACY (m) × to ap-proximate the Pareto-optimal results on both accuracy and latency. The factor w decides the weight of latency in the reward. We re-calibrate the factor w to make the reward de-sign suitable for TPUv3 and GPUv100. Particularly, we use a larger weight factor w = −0.09 because model accuracy is less sensitive to latency variations on TPUs and GPUs than on mobile platforms (original w = −0.07 in [56]).
+LAT EN CY (m)
+T arget h i w
+Our search produces EfﬁcientNet-X-B0, a fast net-work on TPUs and GPUs, as shown in Table 1.
+The
+EfﬁcientNet-X-B0 demonstrates the effectiveness of the new accelerator-optimized search space, compared to the baseline EfﬁcientNet-B0 [57]. Firstly, a space-to-depth op using convolution-2x2 with stride-2 is inserted before the second stage, which can improve the channel depth of sub-sequent layers to improve speed. Secondly, EfﬁcientNet-X-B0 uses hybrid MBConv, with fused-MBConv in stage 4 and 5 and non-fused MBConv in the rest of the stages.
+Thirdly, EfﬁcientNet-X-B0 employs different activation func-tion strategy on TPUs and GPUs. On TPUs, EfﬁcientNet-X-B0 uses swish in stages with fused-MBConv but ReLU in stages with MBConv. On GPUs, EfﬁcientNet-X-B0 selects
+ReLU for all stages. Lastly, NAS designs EfﬁcientNet-X-B0 4Note that when searching on the original EfﬁcientNet search space, we always used ReLU because the original EfﬁcientNet search space did not support searching for activation functions. In the original EfﬁcientNet [57],
+EfﬁcientNet-B0 was searched with ReLU and manually set to use swish for all layers after the search was done 58089
+Table 1: EfﬁcientNet-X-B0 architecture. The architecture in-cludes multiple stages, with each row representing a stage. Each stage includes operators, number of repeated layers denoted as
+#L, (input/hidden) resolution, output channel size denoted as #OC, squeeze-and-excite (SE) ratio [30], and activation functions denoted as AF. Activation functions differ on TPUs from GPUs.
+Stage
+Operator
+Resolution
+#OC #L
+SE
+AF(TPU/GPU) 1 2 3 4 5 6 7 8 9 10
+Conv3x3
+Conv2x2 for reshaping†
+MBConv1, k3x3
+Fused MBConv6, k3x3
+Fused MBConv6, k5x5
+MBConv6, k3x3
+MBConv6, k5x5
+MBConv6, k5x5
+MBConv6, k3x3
+Conv1x1 & Pooling & FC 224 × 224 112 × 112 56 × 56 56 × 56 56 × 56 28 × 28 14 × 14 14 × 14 7 × 7 7 × 7 32 128 64 24 40 80 112 192 320 1280 1 1 1 2 2 3 3 4 1 1
+N/A
+N/A 1 0.5 0.25 0.25 0.25 0.25 0.25
+N/A swish/ReLU
+ReLU/ReLU
+ReLU/ReLU swish/ReLU swish/ReLU
+ReLU/ReLU
+ReLU/ReLU
+ReLU/ReLU
+ReLU/ReLU
+ReLU/ReLU with bigger squeeze-and-excite layers than EfﬁcientNet-B0.
+All the new model architectures in EfﬁcientNet-X-B0 show the effectiveness of the DC accelerator optimized search space. We use the selection of the activation func-tions as an example to shed more light. The usage of swish and ReLU in EfﬁcientNet-X-B0 is the opposite of that in mobilenetv3 [27]. Swish has ∼4X more FLOPs than ReLU, making it very expensive on mobile platforms. MobilenetV3 uses swish only in later layers, because the cost of applying nonlinearity decreases in deeper layers of the network.
+However, as describe in Section 3, because of the high computing capacity of TPUs and GPUs, the FLOPs differ-ences between swish and ReLU are negligible. Instead, acti-vation functions are optimized with fusion and run on vector units in parallel with convolutions that usually run on ma-trix units. However, the software stack on GPUs only fuses
+ReLU (but not swish) with associated convolutions, which leads to signiﬁcant slow down for GPU models with swish.
+As a result, EfﬁcientNet-X-B0 on GPU chooses ReLU for all layers. In contrast, since TPU has swish fused with con-volutions through XLA [1], EfﬁcientNet-X-B0 uses swish in many layers. Our proﬁling results with Cloud TPU Pro-ﬁler [6] reveal that depthwise convolutions on TPU run on vector units5 instead of matrix units. Thus, severe contention on vector units happens between depthwise convolutions and swish, as swish has 4X more FLOPs than ReLU despite its beneﬁts in improving model accuracy. Therefore, when searching on TPUs with our new search space, NAS auto-matically pairs ReLU with stages containing depthwise con-volutions to avoid competition on vector units. Appendix B shows more ablation studies on EfﬁcientNet-X-B0. 5.2. Scaling to form model families with LACS
+With the searched base model EfﬁcientNet-X-B0, we use
+LACS to search for scaling factors to build the model family.
+As described in Section 4, we perform Pareto frontier search to ﬁnd best α, β, and γ. We start with initial grid search 5Coincidentally, recent experiment [2] discovers the similar behavior on
+GPU. Depthwise convolutions run in vector units, i.e., CUDA cores, instead of the tensor cores on GPUs.
+Table 2: Comparison of LACS scaling factors with existing SOTA compound scaling using accuracy as the sole objective (i.e., Efﬁ-ciencNet’s scaling factors). α, β, and γ are the base term of the exponential scaling for depth, width, and resolution respectively, as shown in Equation 1.
+Scaling Type
+α (depth)
+β (width)
+γ (resolution)
+Accuracy-only
+LACS on GPU
+LACS on TPU 1.2 1.29 1.29 1.1 1.16 1.14 1.15 1.07 1.08 for coefﬁcient triplets of α, β, and γ using the same multi-objective (i.e., ACCU RACY (m) ×
+) as used in NAS when searching for the base model. We search on TPUv3 and GPUv100 and ﬁnd different optimal scaling coefﬁcients as shown in Table 2.
+LAT EN CY (m)
+T arget h i w
+LACS discovers network depth should grow much faster than image resolution, which is quite different from the pre-vious SOTA compound scaling results using accuracy as the single objective. Faster increase on network depth than on image resolutions can slow down the memory inﬂation due to activation and intermediate tensors, which improves model speed by making a model more compute bound than mem-ory bound. As shown in Section 2, DC accelerators prefer models to be compute-bound to achieve high performance.
+We also perform direct search on TPUv3 and GPUv100 with the same latency target as EfﬁcientNet-X-B1 and ﬁnd the same model architectures as obtained by LACS, which conﬁrms that LACS can ﬁnd the same model as the direct multi-objective NAS when given the same latency target, but with much fewer accelerator resources. Appendix C shows more ablation studies on LACS. 6. Experiments
+We present the accuracy and performance results on the new EfﬁcientNet-X model family on TPUs and GPUs, to demonstrate the effectiveness of the uniﬁed NAS and LACS method. Table 3 shows the speed and accuracy on Ima-geNet [52] of EfﬁcientNet-X models and comparisons with other SOTA CNN models, where a few key observations can be made. First, EfﬁcientNet-X models are the fastest among each model group on TPUs and GPUs, with compa-rable accuracy. Speciﬁcally, EfﬁcientNet-X models are up to more than 2X faster than EfﬁcientNet. EfﬁcientNet-X is on average (geomean) 82% and 48% faster than RegNet and
+ResNeSt respectively on GPUv100 and 7X; it is 48% faster than RegNet and ResNeSt respectively on TPUv3. Second, all models except for Efﬁcient-X models in Table 3 are polar-ized. On one extreme, the EfﬁcientNet family has the fewest
+FLOPs but the lowest operational intensity I. On the other extreme, other models such as ResNet and Inception fami-lies have the highest operational intensity but most FLOPs.
+While lower FLOPs improves inference speed, lower op-erational intensity hurts inference speed. In contrast, the 68090
+Table 3: EfﬁcientNet-X inference speed and accuracy results on ImageNet on TPUv3 and GPUv100. ConvNets with similar top-1 accuracy are grouped together. ?Original reported model accuracies in papers are used in the comparisons. †Following common practices, #FLOPs refer to #multiply-and-add operations. ‡E is the execution efﬁciency measured on TPUv3, w.r.t to rooﬂine instead of peak hardware
+FLOPs/sec as shown in Equation 1. Only in the compute-bound region as shown in Figure 2, the rooﬂine and hardware peak hardware
+FLOPs/sec are the same. §The inference latency are measured for inferencing 128 images on TPUv3 and GPUv100, with mini batch size of 128. All the measured speed is veriﬁed to be the same or faster than the reported results in original papers with the same batch size to ensure fair and correct measurements. Note that the results are to demonstrate the effectiveness of our uniﬁed search and scaling method on different DC accelerators. And direct comparing TPU and GPU results is not meaningful and beyond the scope of this paper, because we focus on evaluating the model architecture themselves on different DC accelerators and run models directly on both GPUs and TPUs without extra ofﬂine model optimizations (e.g., TensorRT [3] and model tuning [50]).
+Models
+EfﬁcientNet-X-B0
+EfﬁcientNet-B0 [57]
+ResNet-50 [25]
+RegNetY-800MF [47]
+EfﬁcientNet-X-B1
+EfﬁcientNet-B1
+Inception-v3 [55]
+RegNetY-4.0GF [47]
+EfﬁcientNet-X-B2
+EfﬁcientNet-B2
+Inception-v4 [54]
+RegNetY-8.0GF [47]
+EfﬁcientNet-X-B3
+EfﬁcientNet-B3
+EfﬁcientNet-X-B4
+EfﬁcientNet-B4
+NASNet-A [66]
+ResNeSt-101 [63]
+EfﬁcientNet-X-B5
+EfﬁcientNet-B5
+ResNeSt-200 [63]
+EfﬁcientNet-X-B6
+EfﬁcientNet-B6
+EfﬁcientNet-X-B7
+EfﬁcientNet-B7
+ResNeSt-269 [63]
+Acc.? 77.3% 77.3% 76.0% 76.3% 79.4% 79.2% 78.8% 79.4% 80.0% 80.3% 80.0% 79.9% 81.4% 81.7% 83.0% 83.0% 82.7% 83.0% 83.7% 83.7% 83.9% 84.4% 84.4% 84.7% 84.7% 84.5%
+#Params (Million)
+#FLOPs† (Billion)
+I (Ops/Byte) 7.6 5.3 26 6.3 10.4 7.8 24 26 11.5 9.2 48 39.2 16 12 34 19 89 48 60 30 70 137 43 199 66 111 0.91 0.39 4.1 0.8 1.58 0.70 5.7 4.0 1.89 1.0 13 8.0 4.3 1.8 10.4 4.2 24 13 22.2 9.9 36.3 52 19 93 37 77 63.8 19.7 122.5 12.7 65.5 21.4 94.6 19.4 73.0 24.1 148.5 27.9 84.0 26.1 101.5 31.29 55.2 71.7 126.1 39.7 68.7 167.5 43.9 194.3 48.3 72.9
+E‡ 57.3% 52.4% 57.2% 30% 59.2% 51.3% 34.5% 29.2% 54.8% 48.8% 35.3% 32.4% 51.2% 51.3% 47.7% 47.8% 43.8% 28.1% 47.8% 46.8% 69.9% 36.2% 45.0% 39.4% 43.4% 70.2%
+Inference Latency§(ms) (TPUv3 / GPUv100) 8.71 / 22.5 13.4 / 38.1 35.1 / 35.6 45.1 / 33.9 13.6 / 34.4 22.3 / 60.5 104.8 /55.6 109.5 / 75.1 15.7 / 45.5 29.8 / 77.2 75.1 / 119.9 190.5 / 122.1 31.9 / 66.6 48.1 / 128.8 64.9 / 149.2 102.6 / 310.7 269.5 / 481.2 92.3 / 149.4 125.9 / 290.2 192.5 / 640.1 244.3 / 415.6 258.1 / 467.2 334.2 / 1040.6 396.1 / 847.7 621.4 / 1471.3 501.9 / 864.9
+EfﬁcientNet-X models strike a balance between computation load and computation rate, having both FLOPs and oper-ational intensity in the middle between the two extremes, which makes EfﬁcientNet-X to be the fastest in each group.
+Figure 3 shows the speedup details due to our new search and scaling method. Overall, EfﬁcientNet-X achieves up to 2X+ speedup on TPUv3 and GPUv100 over EfﬁcientNet, with geometric mean speedup as 56% and 91% on TPUs and GPUs respectively. Figure 3 also shows the ablation study on the speedup breakdown due to NAS with the new search space and LACS. EfﬁcientNet-X-single-objective-scaling composes the model family using EfﬁcientNet-X-B0 as the base model but the EfﬁcientNet’s orginal scal-ing factors that are obtained by single-objective compound scaling with accuracy as the sole objective. Thus, the speedup on EfﬁcientNet-X-B0 over EfﬁcientNet-B0 shows the beneﬁts of the NAS with new search space, and the rela-tive speedup of EfﬁcientNet-X over EfﬁcientNet-X-single-objective-scaling in Figure 3 indicates the beneﬁts of LACS over previous SOTA compound scaling with accuracy as the only objective. Concretely, NAS with new search space gen-erates ∼50% speedup on TPUv3 and GPUv100, respectively.
+LACS further increases performance by 14% and 25% aver-age (geometric mean) on TPUs and GPUs respectively, atop 78091
+p u d e e p
+S 2.5 2.0 1.5 1.0 0.5 0.0
+EfficientNet
+EfficientNet-X-single-objective-scaling
+EfficientNet-X
+B0 B1 B2 B3 B4 B5 B6 B7 GM
+B0 B1 B2 B3 B4 B5 B6 B7 GM
+TPUv3                                    GPUv100
+Figure 3: Speedup of EfﬁcientNet-X and EfﬁcientNet-X-single-objective-scaling over the baseline EfﬁcientNet. EfﬁcientNet-X-single-objective-scaling forms the model family use EfﬁcientNet-X-B0 as the base model but uses original EfﬁcientNet’s scaling factors that are obtained by compound scaling with accuracy as the sole objective. GM is geometric mean. the speedup due to the new search space. The more detailed ablation studies on search space and LACS can be found in
+Appendix B and C respectively.
+Moreover, the DC accelerator-friendliness of EfﬁcientNet-X generalizes well across accelerator generations. TPUv3 has 3X of the TPUv2’s peak performance. When migrating from TPUv2 to TPUv3 as shown in Figure 4, EfﬁcientNet-X models achieve ∼1.9X average (geometric mean) speedup while EfﬁcientNet models only achieve ∼1.5X speedup.
+In other words, EfﬁcientNet-X materializes ∼30% better speedup than EfﬁcientNet when migrating from TPUv2 to
+TPUv3, demonstrating good generality.
+All these results demonstrate the effectiveness of our method. Speciﬁcally, our method, including NAS with the search space optimized for DC-accelerators and LACS, em-phasizes on simultaneously optimizing total computation W , operational intensity I, and execution efﬁciency E.
+We also perform search and model scaling on Xeon Plat-inum 8180 CPUs that are representative server-class CPUs in datacenters. The results on CPUs are similar to that on
+DC accelerators when the vector units/instructions [4] are en-abled on CPUs. However, when the vector units/instructions are disabled, the results on CPUs are very different. The detailed results on CPUs can be found in Appendix D. 7.

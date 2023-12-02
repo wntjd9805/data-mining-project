@@ -1,0 +1,412 @@
+Abstract
+We launch EVA, a vision-centric foundation model to
+Explore the limits of Visual representation at scAle using only publicly accessible data. EVA is a vanilla ViT pre-trained to reconstruct the masked out image-text aligned vision features conditioned on visible image patches. Via this pretext task, we can efficiently scale up EVA to one billion parameters, and sets new records on a broad range of representative vision downstream tasks, such as image recognition, video action recognition, object detection, in-stance segmentation and semantic segmentation without heavy supervised training. Moreover, we observe quanti-tative changes in scaling EVA result in qualitative changes in transfer learning performance that are not present in other models. For instance, EVA takes a great leap in the challeng-ing large vocabulary instance segmentation task: our model achieves almost the same state-of-the-art performance on
+LVIS dataset with over a thousand categories and COCO dataset with only eighty categories. Beyond a pure vision en-coder, EVA can also serve as a vision-centric, multi-modal pivot to connect images and text. We find initializing the vision tower of a giant CLIP from EVA can greatly stabi-lize the training and outperform the training from scratch counterpart with much fewer samples and less compute, pro-viding a new direction for scaling up and accelerating the costly training of multi-modal foundation models. 1.
+
+Introduction
+Scaling up pre-trained language models (PLMs) [9,64,76] has revolutionized natural language processing (NLP) in the past few years. The key to this success lies in the simple and scalable self-supervised learning task of masked signal
+†Interns at Beijing Academy of Artificial Intelligence (BAAI).
+‡Corresponding authors: Yue Cao (caoyue10@gmail.com), Xin-long Wang (xinlong.wang96@gmail.com) and Xinggang Wang (xgwang@hust.edu.cn). prediction [29, 74], with which Transformer models [99] could be scaled up to billions of parameters using nearly unlimited unlabelled data, and generalize well to a wide range of downstream tasks with little tuning. With further scaling on compute, data, and model sizes, PLMs have led to not only continuous performance improvements [50, 75, 76], but also a surprising emergence of in-context learning capability [9, 25, 104, 105].
+Motivated by the success of model scaling in NLP, it is ap-pealing that we can also translate this success from language to vision, i.e., to scale up a vision-centric foundation model that is beneficial for both vision & multi-modal downstream tasks. Recently, masked image modeling (MIM) [5, 39, 113] has boomed as a viable approach for vision model pre-training and scaling. However, the most competitive billion-sized vision pre-trained models [31, 65, 71, 119] still heavily rely on supervised or weakly-supervised training with hun-dreds of millions of (often publicly inaccessible) labeled data. MIM is somewhat only adopted as an initialization stage before the heavily supervised pre-training [65], or a pure MIM pre-trained model could not achieve favorable performance at billion-scale model sizes [114]. We regard this gap stems from the fact that natural images are raw and information-sparse. Meanwhile, an ideal vision pretext task needs the abstraction of not only the low-level geometry & structure information, but also high-level semantics, which is hardly captured by pixel-level recovery tasks [112].
+In this work, we seek a suitable MIM pretext task for large scale vision representation learning and explore its limits at the scale of one billion parameters with tens of millions of unlabeled data. Recently, there are a few trials leveraging the semantic information from image-image or image-text contrastive learning [13, 22, 73] for MIM pre-training [43, 106, 124], which perform fairly well in vision downstream tasks. However, there remains a debate that (i) tokenized semantic features could provide better supervision signal for masked modeling in vision [5, 70, 101], and (ii) good performances could be also achieved via a simple post-IN-1K ft model
+Florence —-SwinV2-G —-prev. best 89.6a
+EVA image & video classification (§) object detection (det) & instance segmentation (seg) semantic segmentation
+IN-1K lin IN-1K zs avg. zs K400 86.5
+—-86.8
+—-87.8d 82.3b
+—-—-73.1c
+—-—-78.0c
+K600 87.8
+—-88.3e
+K700
+—-—-80.4e
+COCO det (test/val) COCO seg (test/val) LVIS seg COCO-Stuff ADE20K 62.4e/ 62.0 63.1e/ 62.5 64.5f/ 64.2g 62.4e- 62.0 54.4e/ 53.7 55.4h/ 54.5i
+—-—-52.3k
+—-—-49.2j 89.7(+0.1) 86.5(+4.2) 78.5(+0.5) 75.7(+2.6) 89.7(+1.9) 89.8(+1.5) 82.9(+2.5) 64.7e/ 64.5(+0.2/+0.3) 55.5e/ 55.0(+0.1/+0.5) 55.0(+5.8) 53.4(+1.1)
+—-59.9 62.8a 62.3(-0.5)
+Table 1. Summary of EVA performance on various mainstream vision benchmarks. EVA is performant compared with previous best / leading approaches. “§”: methods / results that only exploit publicly accessible data / academic resources. “ft”: end-to-end fine-tuning.
+“lin”: linear probing. “zs”: zero-shot classification. “avg. zs”: averaged zero-shot classification performance on 8 image and 4 video datasets with contrastive language-image pre-training. (timestamp: Nov 10, 2022) methods / results reference. a: BEiT-3 [101], b: iBOT [124], c: Open CLIP-H [47], d: Text4Vis [109], e: MaskFeat [103], f: Group DETRv2 [19], g: FocalNet [116], h:
+FD-SwinV2-G [107], i: Mask DINO [57], j: LVIS 2021 competition 1st [35], k: ViT-Adapter [23]. distillation process without masked prediction tasks [107].
+Through a pilot empirical study, we find that simply us-ing image-text aligned (i.e., CLIP [73]) vision features as the prediction targets in MIM scales up well and achieves satisfactory performances on a broad range of downstream benchmarks. This pre-training task draws the benefits from both the high-level semantic abstraction of image-text con-trastive learning as well as the good capture of geometry & structure in masked image modeling, which typically covers the information needed for most visual perception tasks.
+Via this MIM pretext task, we can efficiently scale up a vanilla ViT encoder [31], dubbed EVA, to one billion param-eters with strong visual representations that transfers well to a wide range of downstream tasks. Using 29.6 million pub-lic accessible unlabeled images for pre-training, EVA sets new records on several representative vision benchmarks, such as image classification on ImageNet-1K [28] (89.7% top-1 accuracy), object detection and instance segmentation on
+LVIS [38] (62.2 APbox & 55.0 APmask on val) and COCO [62] (64.5
+APbox & 55.0 APmask on val, 64.7 APbox & 55.5 APmask on test-dev), tokenize? [70]
+✗
+✓
+✓
+✗ pt epochs
+-300 1600 800
+ImageNet-1K top-1 acc. 85.0 85.0 85.5 85.5
+ADE20K mIoUss 52.6 52.7 53.1 53.3 (a) (Additional) semantic feature tokenization is not required for achieving good downstream performance. distill.? [107]
+✗
+✓
+✓
+✗ pt epochs
+-300 800 800
+ImageNet-1K top-1 acc. 85.0 85.1 85.1 85.5
+ADE20K mIoUss 52.6 52.5 52.7 53.3 (b) Feature distillation fails to achieve consistent performance gain as the pre-training becomes longer.
+Table 2. Pilot experiment. We evaluate different pre-training approaches using ViT-B and report their performance on ImageNet-1K image classification (top-1 accuracy) and ADE20K semantic segmentation (single-scale mIoU). Numbers in grey refer to the results of directly fine-tuning CLIP vision encoder on correspond-ing downstream tasks. Default settings for EVA pre-training are marked in purple , i.e., directly regressing the masked out CLIP vision features conditioned on visible image patches. semantic segmentation on COCO-stuff [11] (53.4 mIoUss) and
+ADE20K [123] (62.3 mIoUms), and video action recognition on Kinetics-400 [51] (89.7% top-1 accuracy), Kinetics-600 [14] (89.8% top-1 accuracy), Kinetics-700 [15] (82.9% top-1 accuracy).
+Notably, different from other state-of-the-art billion-scale vision foundation models that demand tens of millions of or even billions of labeled images, such as SwinV2-G us-ing ImageNet-21K-ext-70M [65] and ViT-g/G using JFT-3B [119], EVA does not need a costly supervised training stage and only leverage images from open-sourced datasets for academic reproducibility.
+Moreover, we observe quantitative changes in scaling
+EVA result in qualitative changes in transfer learning perfor-mance that are not observed in other smaller-scale models, e.g., EVA makes a significant breakthrough in the challeng-ing large vocabulary object-level recognition task: our model achieves almost the same performance on LVIS [38], an in-stance segmentation benchmark with more than 1,200 cate-gories, as COCO [62], which almost shares the same image set as LVIS but with only 80 categories annotated. This emergent ability well matches the expectation of model scal-ing [105], that larger capability of model results in not only predictable performance improvements on standard bench-marks, but also unpredictable phenomenons and capabilities for resolving more challenging tasks.
+Going beyond a pure vision encoder, EVA can also serve as a vision-centric, multi-modal pivot that builds a bridge between vision and language. We show that initializing the image encoder via pre-trained EVA in a 1.1 billion parame-ters CLIP model can outperform the training from scratch counterpart on a broad range of zero-shot image / video clas-sification benchmarks with much fewer samples and less compute. Moreover, EVA can greatly stabilize the giant
+CLIP’s training & optimization process. Since large CLIP models usually suffer from training instability and ineffi-ciency issues [2, 47], we hope our solution opens up a new direction for scaling up and accelerating the costly training of multi-modal foundation models.
+By scaling up vision-centric foundation models with MIM pre-training to achieve strong performance on broad down-stream tasks, we hope EVA would bridge the gap between vision and language with masked signal modeling, and con-tributes to the big convergence across different modalities.
+patch size #layers hidden dim mlp dim attn heads #param. dataset total size 14×14 40 1408 6144 16 1011M
+ImageNet-21K, CC12M, CC3M, Object365, COCO, ADE 29.6M images (a) EVA architecture configurations. (b) datasets for pre-training EVA. image size batch size optimizer peak lr 2242 4096
+AdamW 1e-3 (β1, β2) (0.9, 0.98) pt epochs precision
+ZeRO #gpus samples / sec. max mem. pt days 150 fp16 stage-1 128
+∼3150
+∼26.5GB
+∼14.5 (c) some pre-training settings and hyper-parameters. (d) basic statistics of EVA pre-training.
+Table 3. A brief summary of pre-training settings and configurations for EVA. 2. Fly EVA to the Moon
+We first conduct a series of pilot experiments for choosing an ideal vision pretext task in §2.1, then we scale up EVA pre-training via the chosen pre-training objective in §2.2.
+Finally, we evaluate the pre-trained representation on various downstream tasks in §2.3. Detailed experimental settings and configurations are in Appendix. 2.1. The Feature Instrumentality Project
+In this section, we seek a MIM vision pretext task with compelling transfer performance. Based on previous liter-ature on vision pre-training, we study two promising can-didates: (i) recovering the masked out tokenized semantic vision features [5, 70, 101], and (ii) feature distillation from strong pre-trained representation as in [107]. Both of them exploit pre-trained image-text aligned vision features (i.e.,
+CLIP [73] vision features). Via a series of pilot experiments shown in Table 2, we find that: (i) the (additional) CLIP feature tokenization process is unnecessary for achieving good downstream performance (ii) feature distillation fails to provide consistent performance gain as the pre-training becomes longer. Instead, we find that simply reconstructing the masked out CLIP vision features conditioned on visible image patches is highly performant, which is chosen for scaling up EVA.
+We clarify that this MIM pretext task is not originally pro-posed by us. Regressing the masked out image-text aligned vision features for MIM pre-training has been studied in
+MVP [106] and recently has been revisited by MILAN [43].
+In this work, we show that this pretext task can scale up to billion-scale parameters and tens of millions of unlabeled images for vision-centric representation learning without (i) semantic feature quantization / tokenization [5, 70], and (ii) explicitly using image-text paired pre-training data and large corpora as in BEiT-3 [101]. 2.2. Pre-training
+Architecture. The architecture configurations of EVA are in Table 3a. EVA is a vanilla ViT [31] with 1.0B parameters.
+The shape of her follows ViT giant [119] and the vision encoder of BEiT-3 [101]. We do not use relative positional embeddings [89] and layer-scale [97] during pre-training.
+Pre-training objective. EVA is pre-trained to reconstruct the masked out image-text aligned vision features condi-tioned on visible image patches. We corrupt the input patches with [MASK] tokens, and we use block-wise masking with a masking ratio of 40% following [5, 70, 101]. The target for MIM pre-training is from the publicly available Ope-nAI CLIP-L/14 vision tower trained on 224×224 pixel im-ages [73]. The output feature of EVA is first normalized [3] and then projected to the same dimension as the CLIP fea-ture via a linear layer. We use negative cosine similarity as the loss function.
+Pre-training data. The data we used for pre-training
+EVA are summarized in Table 3b. For CC12M [16] and
+CC3M [88] datasets, we only use the image data without captions. For COCO [62] and ADE20K [123] datasets, we only use the train set data. ImageNet-21K [28] and Ob-ject365 [87] image data are also used. All these data are publicly accessible. The merged dataset for pre-training has 29.6 million images in total.
+Pre-training settings & hyper-parameters. As shown in
+Table 3c, EVA is optimized via Adam [52] with decoupled weight decay [67] of 0.05. The peak learning rate is 1e-3 and decays according to a cosine learning rate schedule. We employed stochastic depth [45] with a rate of 0.1 for regular-ization and RandResizeCrop (0.2, 1) for data augmentation.
+Color jitter is not used.
+Pre-training infrastructure and statistics. Some basic pre-training statistics are available in Table 3d. The GPU we use is NVIDIA A100-SXM4-40GB. Pre-training code is based on BEiT [5] written in PyTorch [69]. We also adopt
+DeepSpeed optimization library [80] with ZeRO stage-1 op-timizer [77] to save memory. We find using fp16 format with dynamic loss scaling is stable enough during the whole course of pre-training while using bfloat16 format is un-necessary. Since we use fp16 precision, EVA can also be pre-trained using 16× NVIDIA 24GB (32GB) GPUs with (without) gradient checkpointing [20]. 2.3. Evaluation on Downstream Tasks
+In this section, we extensively evaluate pre-trained EVA on several representative benchmarks, such as image clas-sification (§2.3.1), video action recognition (§2.3.2), object detection & instance segmentation (§2.3.3), semantic seg-mentation (§2.3.4), and contrastive image-text pre-training with zero-shot evaluation (§2.3.5). EVA achieves state-of-the-art performance on a broad range of downstream tasks.
+model
+#param. extra labeled data image size top-1 acc. using private labeled data
+SwinV2-G [65]
+ViT-G [119]
+ViT-g (CoCa) [117] 3.0B 1.8B 1.0B
+IN-21K-ext-70M
+JFT-3B
+JFT-3B+ALIGN
+CoAtNet-4 [27]
+MaxViT-XL [98]
+MViTv2-H [61]
+FD-CLIP-L [107]
+BEiT-3 [101]
+EVA
+EVA using public labeled data 275M 475M 667M 304M 2.0B 1.0B 1.0B
+IN-21K (14M)
+IN-21K (14M)
+IN-21K (14M)
+IN-21K (14M) 35M img-txt pairs
+IN-21K (14M)
+IN-21K (14M) 6402 5182 5762 5122 5122 5122 3362 3362 3362 5602 90.2 90.5 91.0 88.6 88.7 88.8 89.0 89.6 89.6 89.7
+Table 4. Comparisons of image classification performance on
+ImageNet-1K validation set. With only publicly available data,
+EVA creates a new state-of-the-art ImageNet-1K image classifica-tion result with a canonical linear classifier. 2.3.1 Image Classification
+Datasets. For image classification task, we evaluate EVA on
+ImageNet-1K (IN-1K) [28] validation set. We also evaluate the robustness & generalization capability of EVA along with our training settings & hyper-parameters using ImageNet-V2 matched frequency (IN-V2) [81], ImageNet-ReaL (IN-ReaL) [7],
+ImageNet-Adversarial (IN-Adv.) [42], ImageNet-Rendition (IN-Ren.) [41], ImageNet-Sketch (IN-Ske.) [100].
+Training Settings. Following the conventional setting [5, 70, 101], we first perform intermediate fine-tuning on ImageNet-21K [28] for 60 epochs with an image resolution of 2242, then EVA is further fine-tuned on ImageNet-1K training set for 10 epochs. Different from [117, 119] that use multi-head attention pooling and BEiT-3 that exploits an additional pre-trained giant language tower as the image classification task layer, we simply adopt a linear layer as the classifier [31].
+Notice that the supervised intermediate fine-tuning consumes only ∼1/5 of the time & compute of the MIM pre-training stage. While for other billion-scale vision models such as
+SwinV2-G-3B, the supervised training phase costs ∼1.5× resources than the MIM pre-training.
+Results. Table 4 compares EVA with some state-of-the-art models on ImageNet-1K validation set. EVA achieves 89.6% top-1 accuracy with 3362 inputs, comparable to BEiT-3. Us-ing a larger image resolution of 5602 can further boost the top-1 accuracy to 89.7%. Notice that BEiT-3 treats image classification as an image-to-text retrieval task. Therefore they leverage an additional one billion parameters pre-trained language encoder along with 35 million image-text data (21M pairs from CC12M, CC3M, SBU, COCO, VG and 14M pairs from
+ImageNet-21K) as well as 160GB text data in total. Mean-while, we simply use a linear classifier on top of EVA with only ImageNet-21K image-tag data used for additional fine-tuning. With only publicly available data, EVA creates a new state-of-the-art image classification result on ImageNet-1K with a much neater architecture.
+Robustness & generalization ability evaluation. We eval-model
+ConvNeXt
+SwinV2
+MAE
+DeiT3
+Eff-L2-NS
+BEiTv2
+BEiT
+EVA
+IN-1K IN-V2 IN-ReaL IN-Adv.
+IN-Ren. 87.5 87.5 87.8 87.7 88.4 88.4 88.6 89.6 77.7 77.3 79.2 79.1 80.5 80.1 79.9 81.6 90.5 90.2 90.3 90.2 90.6 90.3 90.7 90.8 70.8 73.9 76.7 79.2 84.8 76.2 81.7 86.2 67.0 67.7 66.5 70.6 74.7 76.4 73.2 88.3 50.9 52.3 53.7
+IN-Ske. avg. ∆↓ 74.5 13.0 74.8 12.7 75.2 12.6 77.0 10.7 77.8 10.6 78.3 10.1 78.5 10.1 5.6 84.0 58.3 54.9 56.8 47.6 67.7
+Table 5. Robustness & generalization capability evaluation on
+ImageNet-1K variants. We test each model on different ImageNet-1K validation sets, without any specialized fine-tuning. “avg.”: the averaged top-1 accuracy on 6 different ImageNet-1K validation set variants. “∆↓”: The gap between the averaged top-1 accuracy on 6 variants (i.e., IN-{1K, V2, ReaL, Adv., Ren., Ske.}) and the original
+ImageNet-1K validation set top-1 accuracy (the lower the better). uate the robustness and generalization capability of EVA trained with an image size of 3362 on 6 different ImageNet-1K validation set variants. In Table 5, we compare EVA with some top open-sourced models collected by the timm library [108]. Following the evaluation procedure in [39], all these models are first fine-tuned on the original ImageNet-1K training set and then evaluated on different validation sets using the same fine-tuned model without further hyper-parameter selection and specialized fine-tuning.
+As shown in Table 5, EVA is the most competitive one in terms of absolute top-1 accuracies. However, these model various in pre-train data (from ImageNet-1K, ImageNet-21K to JFT-300M), input resolutions (from 2242 to 8002), model sizes (from hundreds of millions to one billion parameters) as well as architec-tures (ConvNets, vanilla & hierarchical ViTs), etc. Therefore their absolute accuracies are not directly comparable. Instead, we are more interested in the gap between the averaged top-1 accuracy on 6 validation set variants and the original
+ImageNet-1K validation set top-1 accuracy (the lower the better), i.e., we care about whether a model along with its training settings biases towards the original validation set and generalize well on other variants. From this perspective,
+EVA not only achieves the highest averaged accuracy, but also has the smallest performance gap, which reflects the excellent robustness and generalization ability of EVA. 2.3.2 Video Action Recognition
+Datasets. For video action recognition, we evaluate EVA on
+Kinetics-400 (K-400) [51], Kinetics-600 (K-600) [14] and
+Kinetics-700 (K-700) [15] benchmarks. We first conduct intermediate fine-tuning on a merged dataset coined Kinetics-722 (K-722) that integrates videos from K-400, K-600 and
+K-700. We remove leaked as well as repeated videos in both training and validation sets. After this data de-duplicating
+Source: link (timestamp: Nov 10, 2022). The detailed model config-urations are (arch-model size-img resolution-data): ConvNeXt-XL-384px-21K [66], SwinV2-L-384px-21K [65], MAE-H-448px-1K [39], DeiT3-L-384px-21K [96], EfficientNet-L2&NS-800px-JFT300M [110], BEiTv2-L-224px-21K [70], BEiT-L-512px-21K [5], EVA-g-336px-merged30M&21K.
+model
+MAE [34]
+SwinV2-G [65]
+Florence [118]
+MaskFeat [103]
+VideoMAE [95]
+X-CLIP [68]
+CoVeR [120]
+CoCa [117] (frozen)
+CoCa [117] (finetuned)
+EVA
+Kinetics-400 86.8 86.8 86.8 87.0 87.4 87.7 87.2 88.0 88.9 89.7 top-1 accuracy
+Kinetics-600
+--88.0 88.3
+-88.3 87.9 88.5 89.4 89.8
+Kinetics-700
+---80.4
+--78.5 81.1 82.7 82.9
+Table 6. Video action recognition. With only publicly available
+K-400, K-600 and K-700 as video pre-training data, EVA is also quite performant in video action recognition tasks. process, K-722 has 0.63M training videos in total with 722 action classes. A similar approach is also used in [58].
+Training & evaluation settings. EVA processes video data simply via spatial-temporal attention as [34, 95] with no specific architectural adaptation for video related tasks. We first train EVA using K-722 training set for 40 epochs with 8 frames and 2242 resolution, then we fine-tune EVA on each dataset for only 1 or 2 epochs. We set frame×crop×clip to 16×3×4 for fine-tuning and evaluation for all datasets. The frame resolution is 2242.
+Results. As shown in Table 6, EVA achieves better perfor-mance compared with some recent video-specific or large foundation models in video recognition. For reference, di-rectly adapting image-only pre-trained EVA to K-400 with-out K-722 intermediate fine-tuning can also achieve a very competitive top-1 accuracy of 88.4%. 2.3.3 Object Detection & Instance Segmentation
+Datasets. We evaluate the object detection and instance segmentation performance of EVA on both COCO [62] and
+LVIS [38]. COCO is a widely used object-level recognition benchmark with 80 common object categories. LVIS is an emerging large-vocabulary object-level recognition bench-mark, which has more than 1,200 object categories as well as more than 2 million high quality instance segmentation masks (nearly 2× of COCO). Notably, COCO and LVIS almost use the same set of images, and both train and val split of
+LVIS have a huge overlap with COCO train and val split.
+Meanwhile, COCO has much fewer object categories than
+LVIS (i.e., 80 v.s.1,200+). Therefore it is meaningful to evaluate models’ performance on both COCO and LVIS.
+Training & evaluation settings. EVA uses Cascade Mask
+R-CNN [12] as the detector and adopts the training settings (e.g., LSJ data augmentation [36]) & architecture config-urations (e.g., interleaved window & global attention) of
+ViTDet [60]. Following the common practice [65, 101, 121], we first conduct intermediate fine-tuning for the whole detec-tor using Objects365 [87] dataset with a resolution of 10242, then we fine-tune the detector on COCO and LVIS train split respectively with 12802 inputs.
+We report single-scale evaluation and multi-scale evalua-tion / test-time augmentation (tta) results of EVA for compar-ison. For COCO, Soft-NMS [8] is also applied. For instance segmentation task, the classification score is calibrated [46] via maskness [102].
+The model architecture as well as the hyper-parameters for COCO and LVIS are almost the same (i.e., the hyper-parameters are nearly “zero-shot” transferred from COCO to LVIS), ex-pect we use federated loss [125] and repeat factor sam-pling [38] following ViTDet on LVIS.
+Results. Perhaps COCO is the most fierce vision benchmark.
+Table 7 compares EVA with some leading approaches on
+COCO. Our model creates new state-of-the-art results on both object detection and instance segmentation tasks.
+Compared with ViTDet-H [60] that uses Cascade Mask
+R-CNN [12] as well, EVA shows that with a larger model and better encoder & detector pre-training, the performance can be greatly improved with the same detector.
+Compared with FocalNet [116] and Group DETRv2 [19] that choose better-established and highly-optimized DINO detector [121], EVA demonstrates that with sufficient model size, data and pre-training, better performance can be also achieved via the classic R-CNN framework [37]. On the other hand, FocalNet and Group DETRv2 are incapable of instance segmentation due to using DINO.
+Compared with SwinV2-Giant [65] and FD-SwinV2-Giant [107] that also adopt a (stronger HTC++ [17]) detector from the R-CNN family but with ∼3× model size of EVA, our approach streamlines the pre-training processes and pulls off a “Giant-killing” act via better representations.
+Compared with BEiT-3, EVA shows that is possible to build a state-of-the-art object-level recognition system with-out exploiting (i) semantic feature quantization / tokeniza-tion [5, 70], and (ii) image-text paired pre-training data and large corpora during pre-training.
+Analyzing the performance gap between LVIS and
+COCO. Evaluating models on both COCO and LVIS bench-marks is essential, as they share nearly the same image set but differ in the number of annotated object categories. COCO has only 80 annotated categories, while LVIS annotates over 1,200 object categories, resulting in a long-tail distribution that more closely resembles challenging real-world scenar-ios [38]. In general, LVIS is considered a much more difficult benchmark than COCO for object-level recognition, with conventional methods typically experiencing a significant performance drop on LVIS.
+In Table 8a, we analyze the performance gap between the LVIS and COCO benchmarks for EVA and other state-of-the-art approaches. For previous leading methods, such as ViTDet, the performance gap for APbox is around 8, and
+model / method
+Soft-Teacher [115]
+GLIP [59]
+GLIPv2 [122]
+ViTDet-H [60]
+Florence [118]
+SwinV2-G [65]
+DINO [121]
+Mask DINO [57]
+BEiT-3 [101]
+FD-SwinV2-G [107]
+FocalNet [116]
+Group DETRv2 [19]
+EVA
+EVA detector
+HTC++ [17]
+DyHead [26]
+DyHead [26]
+CMask R-CNN [12]
+DyHead [26]
+HTC++ [17]
+--CMask R-CNN [12]
+HTC++ [17]
+DINO [121]
+DINO [121]
+CMask R-CNN [12]
+CMask R-CNN [12] pre-training data encoder
+IN-21K (14M)
+IN-21K (14M)
+FLD-900M
+IN-1K (1M)
+FLD-900M
+#param.-284M
+≥ 284M
+≥ 637M 692M
+≥ 637M
+≥ 3000M IN-21K-ext-70M
+IN-21K (14M)
+IN-21K (14M) merged datab 218M 223M 1074M
+≥ 3000M IN-21K-ext-70M
+IN-21K (14M)
+IN-1K (1M) merged-30M merged-30M 746M 629M 1074M 1074M detector
+COCO(unlabeled)+O365 4ODs+GoldG+Cap12M merged dataa
+-merged dataa
+O365
+O365
+O365
+O365
+O365
+O365
+O365
+O365
+O365
+COCO val
+COCO test-dev tta? APbox APmask APbox APmask
+✓ 53.0
+✓
+-✓
+-✓
+-✓
+-✓ 54.4
+✓
+-✓ 54.7
+✓ 54.8
+✓ 55.4
+✓
+-✓
+-✗ 55.5
+✓
+-52.5
+--53.1
+-53.7
+-54.5
+----55.0
+-60.7 60.8
+-61.3 62.0 62.5 63.2
+---64.2
+-64.2 64.5 61.3 61.5 62.4
+-62.4 63.1 63.3
+-63.7 64.2 64.4 64.5 64.4 64.7
+Table 7. Object detection & instance segmentation on results COCO dataset. EVA establishes new state-of-the-art results in object detection and instance segmentation tasks on both COCO val and test-dev splits with the canonical R-CNN [37] object detection & segmentation framework. “tta” refers to test-time augmentation. (timestamp: Nov 10, 2022)
++ “merged dataa”: FourODs + INBoxes + GoldG + CC15M + SBU, + “merged datab”: IN-21K (14M) + Image-Text (35M) + Text (160GB).
+APbox
+APmask model
+COCO LVIS ∆↓ COCO LVIS ∆↓ (a) evaluation using COCO & LVIS official annotations respectively
+Copy-Paste [36]
+ViTDet-H [60] prev. best
+EVA (single-scale test) 57.0a 61.3a 63.2a 64.1a 41.6a 15.4 53.4a 7.9 53.4b 9.8 62.2a 1.9 (b) evaluation using LVIS val-5K annotations 68.3a 48.9a 53.1a 54.5c 55.0a 59.6a 69.6a 1.3
+EVA (single-scale test) 38.1a 10.8 48.1a 5.0 49.2d 5.3 55.0a 0.0 59.8a
+-0.2
+Table 8. LVIS & COCO performance gap on val set. “prev. best” refers to the best individual model / result in each benchmark (a: DINO [121], b: ViTDet-H [60], c: Mask DINO [57], d: 2021 competition 1st [35]) “∆↓”: the performance gap between LVIS and COCO (the lower the better). for APmask, it is around 5. However, when using the same detector (Cascade Mask R-CNN) and nearly identical settings as those in ViTDet pre-trained via MAE-Huge (ViTDet-H), EVA not only achieves state-of-the-art results on both LVIS and
+COCO benchmarks simultaneously but also significantly reduces the performance gap between them, particularly for the instance segmentation task. EVA attains the same performance on LVIS and COCO using single-scale evalu-ation. In comparison with ViTDet-H, we demonstrate that a slightly larger model with stronger representations can greatly improve performance on the challenging large vo-cabulary instance segmentation benchmark, with one caveat described below.
+Note that the Merged-30M unlabeled images include 15K out of 20K LVIS val set images (the Merged-30M images con-tain all the COCO training images, and the LVIS validation split also includes 15k images from the COCO training set). Although a recent study [33] shows that including unlabeled images from the development / test set for MIM pre-training has minimal im-pact on the final performance, we conduct a more rigorous analysis of the LVIS and COCO performance gap to elimi-nate potential data contamination issues: We evaluate both model
+HorNet [79]
+SeMask [48]
+SwinV2-G [65]
+Mask DINO [57]
+FD-SwinV2-G [107]
+ViT-Adapter [23]
+BEiT-3 [101]
+EVA
+ADE20K crop size mIoUss mIoUms 57.5 57.0 59.3 59.5
+-61.2 62.0 61.5 6402 6402 8962 8962 8962 8962 8962 8962 57.9 58.3 59.9 60.8 61.4 61.5 62.8 62.3
+COCO-Stuff mIoUss
+-----52.3
+-53.4
+Table 9. Semantic segmentation performance on ADE20K and
+COCO-Stuff-164K dataset. “mIoUss”: mIoU of single-scale evaluation, “mIoUms”: mIoU using multi-scale evaluation.
+COCO and LVIS models using the 5K images present in both the COCO and LVIS val sets, denoted as LVIS val-5K. The
+COCO results are measured using the 80-category COCO subset of LVIS with the higher-quality LVIS annotations (a similar approach also employed in [53], but for a different purpose). The results are shown in Table 8b, and we find that the conclusion remains unchanged. 2.3.4 Semantic Segmentation
+Dataset. We evaluate EVA on ADE20K [123] and COCO-Stuff-164K [11] datasets for semantic segmentation task.
+ADE20K includes 150 semantic categories, and has 20k images for training & 2k images for validation. COCO-Stuff-164K augments 164K complex images from COCO with pixel-level annotations that span over 172 categories including 80 things, 91 stuff, and 1 unlabeled class. Com-pared with ADE20K, COCO-Stuff is a more challenging but under-explored semantic segmentation benchmark.
+Training & evaluation settings. We follow the task transfer pipelines of ViT-Adapter [23]+mask2former [24] but with a weakened model adaptation processes due to GPU memory
+model precision
+OpenAI CLIP-L float16
+ALIGN bfloat16
+Open CLIP-H bfloat16
+Open CLIP-g bfloat16
+EVA CLIP-g float16 total image
+#param. #param. #param. text clip training data samples seen image size patch size batch size gpus for training 430M 304M 124M CLIP-400M [73] 834M 480M 354M ALIGN-1.8B [73] 1.0B 1.3B 1.1B 632M 354M 354M 1.0B 124M LAION-400M [86] 1.0B
+LAION-2B [85]
+LAION-2B [85] 12B 22B 32B 12B 11B 2242 2892 2242 2242 2242 14×14
+-14×14 14×14 14×14 32k 16k 79k 64k 41k 256×V100 (32GB) 1024×TPUv3 824×A100 (40GB) 800×A100 (40GB) 256×A100 (40GB) (a) CLIP model configurations. EVA CLIP-g can be stably trained via fp16 precision with fewer image-text pairs (7B v.s. 12B / 32B) sampled from a smaller data pool (LAION-400M v.s. LAION-2B) on ∼1/3×GPUs compared with other open-sourced billion-scale competitors.
+] 8 2
+[
+K 1
+-t e
+N e g a m
++I s t e s a t a d
+] 2 8
+[ 2
+V
+-t e
+N e g a m
++I
+] 2 4
+[
+. v d
+A
+-t e
+N e g a m
++I
+] 1 4
+[
+. n e
+R
+-t e
+N e g a m
++I
+] 0 0 1
+[
+. e k
+S
+-t e
+N e g a m
++I
+] 6
+[ t e
+N t c e j b
++O
+] 4 5
+[ 0 1
+-R
+A
+F
+I
++C
+] 4 5
+[ 0 0 1
+-R
+A
+F
+I
++C
+] 2 9
+[ 1 0 1
+-F
+C
++U
+] 1 5
+[ 0 0 4
+-s c i t e n i
++K
+] 4 1
+[ 0 0 6
+-s c i t e n i
++K
+] 5 1
+[ 0 0 7
+-s c i t e n i
++K model image classification
+∆↓ video classification avg. all 70.8 69.9
+OpenAI CLIP-L 75.5
+ALIGN 76.4
+Open CLIP-H 78.0
+Open CLIP-g 76.6
+EVA CLIP-g 78.5(+1.9) 71.5(+1.9) 73.6(+16.4) 92.5(+3.8) 67.3(+2.1) 72.3(+4.8) 98.3(+1.2) 88.7(+4.8) 2.5 76.1(-1.6) 65.2(+3.5) 64.4(+2.2) 58.4(+3.4) 75.7(+3.8) 3.4 76.4 5.8 77.7 5.7 78.2 72.2 73.1 63.1 61.7 71.9 64.5 87.8 88.7 70.9 89.3 70.1 92.2 69.6 97.1 57.2 62.2 95.6 66.6 67.5 59.3 59.6 97.5 56.1 72.2 57.7 63.6 64.8 55.0 64.2 75.8 69.7 65.2 69.0 83.9 75.9 84.7
+--------(b) Summary of zero-shot image / video classification performance. “∆↓”: The gap between the averaged performance of ImageNet-{1K, V2, Adv., Ren.,
+Ske.} & ObjectNet that with natural distribution shifts and the original ImageNet-1K validation accuracy. Our model suffers from the smallest performance drop (only 2.5% top-1 accuracy gap) while maintaining the highest zero-shot classification accuracy averaged on all 12 benchmarks (72.7% top-1 accuracy).
+Table 10. EVA as a vision-centric, multi-modal pivot. We evaluate a billion-scale contrastive language-image pre-trained (CLIP) model with the vision tower initialized from pre-trained EVA, which largely accelerates the contrastive training efficiency and shows promising zero-shot classification performance across a wide range of image / video benchmarks. The statistics & performance of EVA’s MIM teacher (OpenAI CLIP-L) are also presented for reference. limitation (40GB of VRAM): (i) relative position biases [90] are not applied. (ii) We use 8× decoders in mask2former segmentation head instead of 9×. (iii) The feature dimension in mask2former head is ∼0.6× of EVA encoder. tasks, but also a multi-modal pivot that builds a bridge be-tween vision and language. To demonstrate that, we train
+& evaluate EVA as a billion-scale CLIP’s vision tower in various zero-shot image / video classification benchmarks.
+Results. We compare EVA with other leading semantic segmentation methods in Table 9. EVA achieves strong results in both ADE20K and COCO-Stuff-164K datasets.
+On the other hand, the segmentation performance of EVA is slightly lower compared with BEiT-3 on ADE20K, we suspect this is partially due to our weakened architectural configurations. 2.3.5 Contrastive Language-Image Pre-training with Zero-shot Classification Evaluation
+CLIP (Contrastive Language-Image Pre-training) [47, 49, 72, 73] is a type of multi-modal foundation model that connects vision and language via contrastive image-text pre-training.
+CLIP can be applied to any image classification benchmark by simply providing the names of the visual categories to be recognized [1]. Thus the introduction of CLIP essentially reshapes the landscape of visual recognition. Meanwhile,
+CLIP features also play a central role in representation lean-ing [70, 101], AI generated content [78, 83, 84] and large dataset filtering [10, 85, 86], etc.
+Baselines and major challenges in CLIP model scaling.
+We compare our CLIP (dubbed EVA CLIP) with other open-sourced strong CLIP competitors that exploit publicly acces-sible data / academic resources only. Model configurations and statistics are detailed in Table 10a.
+There are two well-known major challenges of CLIP model training and scaling: (i) Large-scale Open CLIP mod-els (e.g., Open CLIP-H & Open CLIP-g [2, 47]) usually suffer from severe training instability issues [2] and have to use bfloat16 format for optimization. (ii) The training efficiency is low, which may hinder model scaling and down-stream performance. For instance, Open CLIP-g is heavily under-trained due to its large compute requirement, and its performance is even worse than the sufficiently-trained Open
+CLIP-H with a smaller model size.
+Compared with our CLIP model, Open CLIP-H & -g are trained from scratch with much more image-text pairs (∼2.9× and ∼1.1× of ours) sampled from a much larger dataset (∼5× of ours) on ∼3× of GPUs. While by leveraging EVA, billion-scale CLIP model training can be accelerated with improved zero-shot classification performance, described next.
+In this section and Table 10, we show that EVA is not only a strong encoder for a wide range of vision downstream
+Training settings. For our CLIP model, we initialize the vi-sion encoder via pre-trained EVA and the language encoder
+model (SSL) prev. best
+EVA zero-shot 78.0a 78.5a linear probing 82.3b 86.5b fine-tuning 89.1c 89.4c
+Table 11. Zero-shot, linear probing and fine-tuning performance of EVA-CLIP on ImageNet-1K. Notice that the linear probing and fine-tuning results are from the vision encoder of EVA-CLIP.
+Our approach establishes the new state-of-the-art results among all existing self-supervised learning (SSL) methods. (timestamp: Nov 10, 2022) results reference. a: Open CLIP-H [47], b: iBOT [124], c: dBOT [63]. from OpenAI CLIP-L. The pre-training implementation is based on Open CLIP [47]. We also adopt DeepSpeed opti-mization library [80] with ZeRO stage-1 optimizer [77] to save memory. We find using fp16 format with dynamic loss scaling is stable enough during the whole course of training while using bfloat16 format is unnecessary. These modi-fications allow us to train a 1.1B CLIP with a batch size of 41k on 256× NVIDIA A100 40GB GPUs.
+Evaluation settings. We evaluate zero-shot image / video classification performance of each CLIP model on 12 bench-marks and report top-1 accuracy for comparisons.
+[42], (ImageNet-Adv.)
+For zero-shot image classification task, we choose 8 benchmarks, i.e., ImageNet-1K [28], ImageNet-V2 [81],
+ImageNet-Adversarial
+ImageNet-Rendition (ImageNet-Adv.) [41], ImageNet-Sketch (ImageNet-Ske.) [100], ObjectNet [6], CIFAR-10 and CIFAR-100 [54].
+We are also interested in the robustness of CLIP models, evaluated via the performance gap between the averaged performance of ImageNet-{1K, V2, Adv., Ren., Ske.}
+& ObjectNet that with natural distribution shifts and the original ImageNet-1K validation accuracy.
+For zero-shot video classification task, we choose 4 bench-marks, namely UCF-101 [92], Kinetics-400 [51], Kinetics-600 [14], and Kinetics-700 [15].
+Results. Table 10b shows the comparison. Our EVA CLIP achieves the highest averaged accuracy, and performs the best in 10 out of 12 zero-shot classification benchmarks. No-tably, the ImageNet-1K validation zero-shot top-1 accuracy is 78.2% without using any of its training set labels, match-ing the original ResNet-101 [40]. Moreover, our model is quite robust and suffers from the smallest performance drop when facing natural distribution shifts in ImageNet.
+At last, in Table 11 we provide zero-shot, linear probing
+& end-to-end fine-tuning top-1 accuracy of EVA-CLIP on
+ImageNet-1K validation set for reference. Our approach creates the new state-of-the-art results among all existing self-supervised learning methods.
+Notice that EVA CLIP’s vision branch learns from Ope-nAI CLIP-L, while language branch initialized from the same CLIP-L model. Therefore, starting from a CLIP-L with only 430M parameters, we progressively scale up a 1.1B EVA CLIP-g with large performance improvements.
+This implies that interleaved MIM & image-text contrastive pre-training could be an efficient and scalable CLIP training approach. To our knowledge, EVA CLIP-g is the largest per-formant CLIP model trained via publicly accessible data and resources. We hope our practice on scaling and improving
+CLIP can also inspire and transfer to the study of other large scale multi-modal foundation models. 3.

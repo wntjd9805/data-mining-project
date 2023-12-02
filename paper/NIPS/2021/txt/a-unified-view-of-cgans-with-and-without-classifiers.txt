@@ -1,0 +1,245 @@
+Abstract
+Conditional Generative Adversarial Networks (cGANs) are implicit generative models which allow to sample from class-conditional distributions. Existing cGANs are based on a wide range of different discriminator designs and training objectives. One popular design in earlier works is to include a classiﬁer during training with the assumption that good classiﬁers can help eliminate samples gen-erated with wrong classes. Nevertheless, including classiﬁers in cGANs often comes with a side effect of only generating easy-to-classify samples. Recently, some representative cGANs avoid the shortcoming and reach state-of-the-art per-formance without having classiﬁers. Somehow it remains unanswered whether the classiﬁers can be resurrected to design better cGANs. In this work, we demonstrate that classiﬁers can be properly leveraged to improve cGANs. We start by using the decomposition of the joint probability distribution to connect the goals of cGANs and classiﬁcation as a uniﬁed framework. The framework, along with a classic energy model to parameterize distributions, justiﬁes the use of classiﬁers for cGANs in a principled manner. It explains several popular cGAN variants, such as ACGAN, ProjGAN, and ContraGAN, as special cases with different levels of approximations, which provides a uniﬁed view and brings new insights to under-standing cGANs. Experimental results demonstrate that the design inspired by the proposed framework outperforms state-of-the-art cGANs on multiple benchmark datasets, especially on the most challenging ImageNet. The code is available at https://github.com/sian-chen/PyTorch-ECGAN. 1
+
+Introduction
+Generative Adversarial Networks [GANs; 10] is a family of generative models that are trained from the duel of a generator and a discriminator. The generator aims to generate data from a target distribution, where the ﬁdelity of the generated data is “screened” by the discriminator. Recent studies on the objectives [2, 37, 29, 25, 36, 26, 38], backbone architectures [41, 50], and regularization techniques [13, 35, 51] for GANs have achieved impressive progress on image generation, making
+GANs the state-of-the-art approach to generate high ﬁdelity and diverse images [3]. Conditional
+GANs (cGANs) extend GANs to generate data from class-conditional distributions [33, 39, 34, 16].
+The capability of conditional generation extends the application horizon of GANs to conditional image generation based on labels [39] or texts [43], speech enhancement [32], and image style transformation [18, 53].
+One representative cGAN is Auxiliary Classiﬁer GAN [ACGAN; 39], which decomposes the condi-tional discriminator to a classiﬁer and an unconditional discriminator. The generator of ACGAN is expected to generate images that convince the unconditional discriminator while being classiﬁed to 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+the right class. The classiﬁer plays a pivotal role in laying down the law of conditional generation for ACGAN, making it the very ﬁrst cGAN that can learn to generate 1000 classes of ImageNet images [6]. That is, ACGAN used to be a leading cGAN design. While the classiﬁer in ACGAN indeed improves the quality of conditional generation, deeper studies revealed that the classiﬁer biases the generator to generate easier-to-classify images [45], which in term decreases the capability to match the target distribution.
+Unlike ACGAN, most state-of-the-art cGANs are designed without a classiﬁer. One representative cGAN without a classiﬁer is Projection GAN [ProjGAN; 34], which learns an embedding for each class to form a projection-based conditional discriminator. ProjGAN not only generates higher-quality images than ACGAN, but also accurately generates images in target classes without relying on an explicit classiﬁer. In fact, it was found that ProjGAN usually cannot be further improved by adding a classiﬁcation loss [34]. The ﬁnding, along with the success of ProjGAN and other cGANs without classiﬁers [15, 4], seem to suggest that including a classiﬁer is not helpful for improving cGANs.
+In this work, we challenge the belief that classiﬁers are not helpful for cGANs, with the conjecture that leveraging the classiﬁers appropriately can beneﬁt conditional generation. We propose a framework that pins down the roles of the classiﬁer and the conditional discriminator by ﬁrst decomposing the joint target distribution with Bayes rule. We then model the conditional discriminator as an energy function, which is an unnormalized log probability. Under the energy function, we derive the corresponding optimization term for the classiﬁer and the conditional discriminator with the help of Fenchel duality to form the uniﬁed framework. The framework reveals that a jointly generative model can be trained via two routes, from the aspect of the classiﬁer and the conditional discriminator, respectively. We name our framework Energy-based Conditional Generative Adversarial Networks (ECGAN), which not only justiﬁes the use of classiﬁers for cGANs in a principled manner, but also explains several popular cGAN variants, such as ACGAN [39], ProjGAN [34], and ContraGAN [16] as special cases with different approximations. After properly combining the objectives from the two routes of the framework, we empirically ﬁnd that ECGAN outperforms other cGAN variants across different backbone architectures on benchmark datasets, including the most challenging ImageNet.
+We summarize the contributions of this paper as:
+• We justify the principled use of classiﬁers for cGANs by decomposing the joint distribution.
+• We propose a cGAN framework, Energy-based Conditional Generative Adversarial Net-works (ECGAN), which explains several popular cGAN variants in a uniﬁed view.
+• We experimentally demonstrate that ECGAN consistently outperforms other state-of-the-art cGANs across different backbone architectures on benchmark datasets.
+The paper is organized as follows. Section 2 derives the uniﬁed framework that establishes the role of the classiﬁers for cGANs. The framework is used to explain ACGAN [39], ProjGAN [34], and ContraGAN [16] in Section 3. Then, we demonstrate the effectiveness of our framework by experiments in Section 4. We discuss related work in Section 5 before concluding in Section 6. 2 Method
+Given a K-class dataset (x, y) ∼ pd, where y ∈ {1 . . . K} is the class of x and pd is the underlying data distribution. Our goal is to train a generator G to generate a sample G(z, y) following pd(x|y), where z is sampled from a known distribution such as N (0, 1). To solved the problem, a typical cGAN framework can be formulated by extending an unconditional GAN as: max
+D min
+G (cid:88) y
+E pd(x|y)
+D(x, y) − E p(z)
+D(G(z, y), y) (1) where G is the generator and D is a discriminator that outputs higher values for real data. The choice of D leads to different types of GANs [10, 2, 29, 8].
+At ﬁrst glance, there is no classiﬁer in Eq. (1). However, because of the success of leveraging label information via classiﬁcation, it is hypothesized that a better classiﬁer can improve conditional generation [39]. Motivated by this, in this section, we show how we bridge classiﬁers to cGANs by
+Bayes rule and Fenchel duality. 2
+2.1 Bridge Classiﬁers to Discriminators with Joint Distribution
+A classiﬁer, when viewed from a probabilistic perspective, is a function that approximates pd(y|x), the probability that x belongs to class y. On the other hand, a conditional discriminator, telling whether x is real data in class y, can be viewed as a function approximate pd(x|y). To connect pd(y|x) and pd(x|y), an important observation is through the joint probability: log p(x, y) = log p(x|y) + log p(y)
+= log p(y|x) + log p(x). (2) (3)
+The observation illustrates that we can approximate log p(x, y) in two directions: one containing p(x|y) for conditional discriminators and one containing p(y|x) for classiﬁers. The ﬁnding reveals that by sharing the parameterization, updating the parameters in one direction may optimize the other implicitly. Therefore, we link the classiﬁer to the conditional discriminator by training both objectives jointly. 2.2 Learning Joint Distribution via Optimizing Conditional Discriminators
+Since p(y) is usually known a priori (e.g., uniform) or able to easily estimated (e.g., empirical counting), we focus on learning p(x|y) in Eq.(2). Speciﬁcally, since log p(x, y) ∈ R, we parameterize it via fθ(x), such as a neural network with K real value outputs, where exp(fθ(x)[y]) ∝ p(x, y) .
+Similar parameterization is also used in exponential family [48] and energy based model [23].
+Therefore, the log-likelihood log p(x|y) can be modeled as: log pθ(x|y) = log (cid:18) exp (fθ(x)[y])
+Zy(θ) (cid:19)
+= fθ(x)[y] − log Zy(θ), (4) x(cid:48) exp (fθ(x(cid:48))[y]) dx(cid:48). where Zy(θ) = (cid:82)
+Optimizing Eq. (4) is challenging because of the intractable partition function Zy(θ). Here we introduce the Fenchel duality [48] of the partition function Zy(θ): log Zy(θ) = max
+E qy(x) where qy is a distribution of x conditioned on y and H(qy) = − Exf ∼qy(x) [log qy(x)] is the entropy of qy. The derivation is provided in Appendix A. By the Fenchel duality, we obtain our maximum likelihood estimation in Eq. (4) as: qy (cid:20) (cid:21)
+[fθ(x)[y]] + H(qy) (cid:20)
+E pd(x,y) max
+θ
+[fθ(x)[y]] − max qy (cid:20)
+E qy(x)
+[fθ(x)[y]] + H(qy)
+. (5) (cid:21)(cid:21)
+To approximate the solution of qy, in additional to density models, we can train an auxiliary generator qφ as in cGANs to estimate Eqy(x) via sampling. That is, we can sample x from qφ by x = qφ(z, y), where z ∼ N (0, 1). The objective (5) then becomes: (cid:88)
+[fθ(qφ(z, y))[y]] − H(qφ(·, y)), (6) max
+θ min
+φ y
+E pd(x|y)
+[fθ(x)[y]] − E p(z) which is almost in the form of Eq (1) except the entropy H(qφ(·, y)). We leave the discussion about the entropy estimation in Section 2.4. Currently, the loss function to optimize the objective without the entropy can be formulated as:
+Ld1(x, z, y; θ) = −fθ(x)[y] + fθ(qφ(z))[y]
+Lg1 (z, y; φ) = −fθ(qφ(z, y))[y] 2.3 Learning Joint Distributions via Optimizing Unconditional Discriminators & Classiﬁers
+Following Eq. (3), we can approximate log p(x, y) by approximating log p(y|x) and log p(x). With our energy function fθ, pθ(y|x) can be formulated as: pθ(y|x) = pθ(x, y) pθ(x)
+= exp(fθ(x)[y]) y(cid:48) exp(fθ(x)[y(cid:48)]) (cid:80)
+, 3
+which is equivalent to the y’th output of SOFTMAX(fθ(x)). Therefore, we can maximize the log-likelihood of pθ(y|x) by consider fθ as a softmax classiﬁer minimizing the cross-entropy loss:
+Lclf(x, y; θ) = − log (SOFTMAX (fθ(x)) [y])
+On the other hand, to maximize the log-likelihood of p(x), we introduce a reparameterization hθ(x) = log (cid:80) y exp(fθ(x)[y]): log pθ(x) = log (cid:32) (cid:88) y (cid:33) pθ(x, y)
+= log (cid:32) (cid:88) exp(fθ(x)[y]) y(cid:48) exp(fθ(x(cid:48))[y(cid:48)]) dx(cid:48) (cid:80) (cid:82) x(cid:48) (cid:33) (cid:32)
+= log exp(log((cid:80) x(cid:48) exp(log((cid:80)
+= hθ(x) − log(Z (cid:48)(θ)), (cid:82) y y exp(fθ(x)[y]))) y(cid:48) exp(fθ(x(cid:48))[y(cid:48)]))) dx(cid:48) (cid:33) (cid:18)
+= log exp(hθ(x)) (cid:82) x(cid:48) exp(hθ(x(cid:48))) dx(cid:48) (cid:19) (7) where Z (cid:48)(θ) = (cid:82) x exp(hθ(x)) dx. Similar to Eq. (5), we can rewrite log Z (cid:48)(θ) by its Fenchel duality: log Z (cid:48)(θ) = max q (cid:20)
+E q(x)
+[hθ(x)] + H(q) (cid:21) (8) where q is a distribution of x and H(q) is the entropy of q.
+Combining Eq. (7) and Eq. (8) and reusing the generator in Section 2.2, we obtain the optimization problem: max
+θ min
+φ
+E pd(x,y)
+[hθ(x)] − E p(z)
+[hθ(qφ(z, y))] − H(qφ) (9)
+Similar to Eq. (6), the objective of the unconditional discriminator is equivalent to typical GANs augmented with an entropy term. The loss function without considering the entropy can be formulated as:
+Ld2 (x, z, y; θ) = −hθ(x) + hθ(qφ(z))
+Lg2(z, y; φ) = −hθ(qφ(z, y)) 2.4 Entropy Approximation in cGANs
+In Section 2.2 and Section 2.3, we propose two approaches to train cGANs with and without classiﬁcation. Unsolved problems in Eq. (6) and Eq. (9) are the entropy terms H(qφ(·, y)) and H(qφ).
+In previous work, various estimators have been proposed to estimate entropy or its gradient [46, 42, 21, 27]. One can freely choose any approach to estimate the entropy in the proposed framework. In this work, we consider two entropy estimators, and we will show how they connect with existing cGANs.
+The ﬁrst approach is the naive constant approximation. Since entropy is always non-negative, we naturally have the constant zero as a lower bound. Therefore, we can maximize the objective by replacing the entropy term with its lower bound, which is zero in this case. This approach is simple but we will show its effectiveness in Section 4 and how it links our framework to ProjGAN and
+ContraGAN in Section 3.
+The second approach is estimating a variational lower bound. Informally, given a batch of data
+{(x1, y1), . . . , (xm, ym)}, an encoder function l, and a class embedding function e(y), the negative 2C loss used in ContraGAN [16],
+LC(xi, yi; t) = log (cid:18) d(l(xi), e(yi)) + (cid:80)m d(l(xi), e(yi)) + (cid:80)m k=1 yk = yi k (cid:54)= i (cid:75) (cid:74) k=1 (cid:74) d(l(xi), l(xk)) (cid:75) d(l(xi), (l(xk)) (cid:19)
+, (10) is an empirical estimate of a proper lower bound of H(X) [40], where d(a, b) = exp(a(cid:62)b/t) is a distance function with a temperature t. We provide the proof in Appendix B.
+The 2C loss heavily relies on the embeddings l(x) and e(y). Although we only need to estimate the entropy of generated data in Eq. (6) and Eq. (9), we still rely on true data to learn the embeddings in 4
+Softmax CE Loss: Lclf
+Cond. Adv. Loss: Ld1, Lg1
+Uncond. Adv. Loss: Ld2, Lg2
+C , Lfake
+Contrastive Loss: Lreal
+C
+Figure 1: The discriminator’s design of ECGAN. D1 can be any network backbone such as DCGAN,
+ResGAN, BigGAN. D2 is a linear layer with K outputs, where K is the number of classes. practice. Therefore, the loss function of Eq. (6) can be written as:
+LD1 (x, z, y; θ) = Ld1(x, z, y; θ) + λcLreal
+C
+LG1(z, y; φ) = Lg1 (x, y; φ) + λcLfake
+C , where λc is a hyperparameter controlling the weight of the contrastive loss, and Lreal contrastive loss calculated on a batch of real data and generated data respectively.
+C , Lfake
+C are the
+Similarly, the loss function of Eq. (9) becomes:
+LD2 (x, z, y; θ) = Ld2(x, z, y; θ) + λcLreal
+C
+LG2(z, y; φ) = Lg2 (x, y; φ) + λcLfake
+C ,
+The introduction of 2C loss allows us to accommodate ContraGAN into our framework. 2.5 Energy-based Conditional Generative Adversarial Network
+Previous work has shown that multitask training beneﬁts representation learning [30] and training discriminative and generative models jointly outperforms their purely generative or purely discrimi-native counterparts [11, 28]. Therefore, we propose a framework named Energy-based Conditional
+Generative Adversarial Network (ECGAN), which combines the two approaches in Section 2.2 and
+Section 2.3 to learn the joint distribution better. The loss function can be summarized as:
+C + λclfLclf(x, y; θ)
+LD(x, z, y; θ) = Ld1(x, z, y; θ) + αLd2 (x, z, y; θ) + λcLreal
+LG(z, y; φ) = Lg1 (z, y; φ) + αLg2(z, y; φ) + λcLfake
+C (12) where α is a weight parameter for the unconditional GAN loss. The discriminator’s design is illustrated in Fig 1. (11)
+Here we discuss the intuition of the mechanisms behind each component in Eq. (11). Ld1 is a loss function for conditional discriminator. It updates the y-th output when given a data pair (x, y). Ld2 guides to an unconditional discriminator. It updates all outputs according to whether x is real. Lclf learns a classiﬁer. It increases the y-th output and decreases the other outputs for data belonging to class y. Finally, Lreal play the roles to improve the latent embeddings by pulling the embeddings of data with the same class closer. and Lf ake
+C
+C
+Previously, we derive the loss functions Ld1 and Ld2 as the loss in Wasserstein GAN [2]. In practice, we use the hinge loss as proposed in Geometric GAN [26] for better stability and convergence. We use the following combination of Ld1 and Ld2:
+Hinge(fθ(xreal, y) + α · hθ(xreal), fθ(xfake, y) + α · hθ(xfake)). (13)
+For more discussion of the implementation of hinge loss, please check Appendix C. The overall training procedure of ECGAN is presented in Appendix E. 5
+3 Accommodation to Existing cGANs
+In this section, we show that our framework covers several representative cGAN algorithms, including
+ACGAN [39], ProjGAN [35], and ContraGAN [16]. Through the ECGAN framework, we obtain a uniﬁed view of cGANs, which allows us to fairly compare and understand the pros and cons of existing cGANs. We name the ECGAN counterparts ECGAN-0, ECGAN-C, and ECGAN-E, corresponding to ProjGAN, ACGAN, and ContraGAN, respectively. We summarize the settings in
+Table 1 and illustrate the discriminator designs in Appendix F.
+Existing cGAN ECGAN Counterpart α 0
+ProjGAN 0 > 0
+ACGAN 0
+ContraGAN
+ECGAN-0
+ECGAN-C
+ECGAN-E
+λclf 0 0
+λc 0 0
+> 0
+Table 1: A summary of cGANs and their closest ECGAN counterpart. 3.1 ProjGAN
+ProjGAN [34] is the most representative cGAN design that is commonly used in state-of-the-art research [3, 50]. Let the output of the penultimate layer in the discriminator be g(x). The output of
+ProjGAN’s discriminator is:
+D(x, y) = wT u g(x) + bu + wT y g(x) = (wu + wy)T g(x) + bu (14) where wu, bu are the parameters for the unconditional linear layer, and wy is the class embedding of y. On the other hand, the output of a discriminator in ECGAN is:
+D(x, y) = f (x)[y] = (WT g(x) + b)[y] = wT y g(x) + by (15) where W, b are the parameters of the linear output layer in fθ. As shown in Eq. (14) and Eq. (15), the architectures of ProjGAN and ECGAN are almost equivalent. In addition, the loss function of
+ProjGAN can be formulated as:
+LG = −D(G(z), y)
+LD = −D(x, y) + D(G(z), y), which is a special case of ECGAN while α = λc = λclf = 0. We name this case ECGAN-0, which is the simplest version of ECGAN. Compared with ProjGAN, ECGAN-0 has additional bias terms for the output of each class. 3.2 ACGAN
+ACGAN [39] is the most well-known cGAN algorithm that leverages a classiﬁer to achieve conditional generation. Given a K-class dataset, the discriminator of ACGAN is parameterized by a network with
+K + 1 outputs. The ﬁrst output, denoted as D(x), is an unconditional discriminator distinguishing between real and fake images. The remaining K outputs, denoted as C(x), is a classiﬁer that predicts logits for every class. The loss function of ACGAN can be formulated as:
+LG = −D(G(z)) + λgLclf(G(z), y; C)
+LD = −D(x) + D(G(z)) + λd(Lclf(x, y; C) + Lclf(G(z), y; C)) where G is the generator, λg and λd are hyperparameters to control the weight of cross-entropy loss.
+The formulation of ACGAN is similar to our ECGAN when α = λc = 0 and λclf > 0. We call the special case as ECGAN-C, with a sufﬁx ‘C’ for classiﬁcation loss. ECGAN-C uses a conditional discriminator which plays the role of a classiﬁer at the same time. Hence the generator in ECGAN-C learns from the conditional discriminator rather than the cross-entropy loss which is biased for generative objectives. 6
+Dataset
+# training
+# test
+# classes Resolution
+CIFAR-10
+Tiny ImageNet
+ImageNet 50,000 100,000 1,281,167 10,000 10,000 50,000 10 200 1,000 32 × 32 64 × 64 128 × 128
+# training data per class 5,000 500 1,281
+Table 2: Datasets for evaluation. 3.3 ContraGAN
+ContraGAN [16] proposed 2C loss, which we mentioned in Eq. (10), to capture the data-to-data relationship and data-to-label relationship. The 2C loss is applied in both discriminator and generator to achieve conditional generation. That is:
+LG = −D(G(z), y) + λcLfake
+C
+LD = −D(x, y) + D(G(z), y) + λcLreal
+C
+The loss functions are similar to ones in ECGAN with α = λclf = 0 and λc > 0. We call it ECGAN-E, where ‘E’ means entropy estimation. The main difference between ContraGAN and ECGAN-E is the output layer of their discriminators. While ContraGAN uses a single-output network, ECGAN uses a K-output network fθ which has higher capacity.
+We keep Eq. (11) and Eq. (12) as simple as possible to reduce the burden of hyperparameter tuning.
+Under the simple equations of the current framework, ECGAN-C and ECGAN-E are the closest counterparts to ACGAN and ContraGAN. The subtle difference (in addition to the underlying network architecture) is that ACGAN uses Ld2 instead of Ld1 (ECGAN-C); ContraGAN uses Ld2 , Lg2 instead of Ld1, Lg1 (ECGAN-E). One future direction is to introduce more hyperparameters in Eq. (11) and
+Eq. (12) to get closer counterparts. 4 Experiment
+We conduct our experiments on CIFAR-10 [20] and Tiny ImageNet [22] for analysis, and ImageNet [6] for large-scale empirical study. Table 2 shows the statistics of the datasets. All datasets are publicly available for research use. They were not constructed for human-related study. We do not speciﬁcally take any personal information from the datasets in our experiments.
+In our experiment, we use two common metrics, Frechet Inception Distance [FID; 14] and Inception
+Score [IS; 44], to evaluate our generation quality and diversity. Besides, we use Intra-FID, which is the average of FID for each class, to evaluate the performance of conditional generation. 4.1 Experimental Setup
+We use StudioGAN1 [16] to conduct our experiments. StudioGAN is a PyTorch-based project distributed under the MIT license that provides implementation and benchmark of several popular
+GAN architectures and techniques. To provide reliable evaluation, we conduct experiments on
+CIFAR-10 and Tiny ImageNet with 4 different random seeds and report the means and standard deviations for each metric. We evaluate the model with the lowest FID for each trial. The default backbone architecture is BigGAN [3]. We ﬁx the learning rate for generators and discriminators to 0.0001 and 0.0004, respectively, and tune λclf in {1, 0.1, 0.05, 0.01}. We follow the setting λc = 1 in [16] when using 2C loss, and set α = 1 when applying unconditional GAN loss. The experiments take 1-2 days on single GPU (Nvidia Tesla V100) machines for CIFAR-10, Tiny ImageNet, and take 6 days on 8-GPU machines for ImageNet. More details are described in Appendix D. 4.2 Ablation Study
+We start our empirical studies by investigating the effectiveness of each component in ECGAN. We use symbols ‘U’ to represent unconditional GAN loss, ‘C’ to represent classiﬁcation loss, and ‘E’ 1https://github.com/POSTECH-CVLab/PyTorch-StudioGAN 7
+Dataset
+CIFAR-10
+Tiny ImageNet
+ECGAN Variant
+ECGAN-0
+ECGAN-U
+ECGAN-C
+ECGAN-UC
+ECGAN-UCE
+ECGAN-0
+ECGAN-U
+ECGAN-C
+ECGAN-UC
+ECGAN-UCE
+FID (↓) 8.049 ± 0.092 7.915 ± 0.095 7.996 ± 0.120 7.942 ± 0.041 8.039 ± 0.161 24.077 ± 1.660 20.876 ± 1.651 24.853 ± 3.902 18.919 ± 0.774 24.728 ± 0.974
+IS (↑) 9.759 ± 0.061 9.967 ± 0.078 9.870 ± 0.157 10.002 ± 0.120 9.898 ± 0.064 16.173 ± 0.671 15.318 ± 1.148 16.554 ± 1.500 18.442 ± 1.036 17.935 ± 0.619
+Intra-FID (↓) 41.708 ± 0.278 41.430 ± 0.326 41.715 ± 0.307 41.425 ± 0.221 41.371 ± 0.278 214.811 ± 3.627 215.117 ± 7.034 212.661 ± 8.135 203.373 ± 5.101 209.547 ± 1.968
+Table 3: Ablation study of ECGAN on CIFAR-10 and Tiny ImageNet. ECGAN-0 means the vanilla version of ECGAN where α = λclf = λc = 0. The label U stands for unconditional gan loss (α > 0).
+C means classiﬁcation loss (λclf > 0). E means entropy estimation loss via contrastive learning (λc > 0). to represent entropy estimation loss, which is 2C loss in our implementation. The concatenation of the symbols indicates the combination of losses. For example, ECGAN-UC means ECGAN with both unconditional GAN loss and classiﬁcation loss (α > 0 and λclf > 0). Table 3 shows the results of ECGAN from the simplest ECGAN-0 to the most complicated ECGAN-UCE. On
+CIFAR-10, ECGAN-0 already achieves decent results. Adding unconditional loss, classiﬁcation loss, or contrastive loss provides slightly better or on-par performance. On the harder Tiny Imagenet, the beneﬁt of unconditional loss and classiﬁcation loss becomes more signiﬁcant. While ECGAN-U already shows advantages to ECGAN-0, adding classiﬁcation loss to ECGAN-U further improves all metrics considerably. We also observe that directly adding classiﬁcation loss is not sufﬁcient to improve cGAN, which is consistent to the ﬁnding in [34]. The fact reveals that the unconditional
+GAN loss is a crucial component to bridge classiﬁers and discriminators in cGANs. We also ﬁnd that adding contrastive loss does not improve ECGAN-UC. An explanation is that the entropy estimation lower bound provided by the contrastive loss is too loose to beneﬁt the training. Furthermore, the additional parameters introduced by 2C loss make the optimization problem more complicated. As a result, we use the combination ECGAN-UC as the default option of ECGAN in the following experiments. 4.3 Comparison with Existing cGANs
+We compare ECGAN to several representative cGANs including ACGAN [39], ProjGAN [34], and
+ContraGAN [16], with three representative backbone architectures: DCGAN [41], ResNet [13], and
+BigGAN [3]. Table 4 compares the results of each combinations of cGAN algorithms and backbone architectures. The results show that ECGAN-UC outperforms other cGANs signiﬁcantly with all backbone architectures on both CIFAR-10 and Tiny ImageNet. We also noticed that ContraGAN, though achieves decent image quality and diversity, learns a conditional generator that interchanges some classes while generating, hence has low Intra-FID. Overall, the experiment indicates that
+ECGAN-UC can be a preferred choice for cGAN in general situations. 4.4 Comparisons between Existing cGANs and their ECGAN Counterpart
+Table 5 compares ProjGAN, ContraGAN, ACGAN to their ECGAN counterparts. As we described in Section 3, each of these representative cGANs can be viewed as special cases under our ECGAN framework. As mentioned in Section 3, ECGAN-0 has additional bias terms in the output layer compared to ProjGAN. The results in Table 5 shows that the subtle difference still brings signiﬁcant improvement to the generation quality, especially on the harder Tiny ImageNet.
+Compared to ContraGAN, ECGAN-E has the same loss but different design in the discriminator’s output layer. While the discriminator of ContraGAN has only single output, ECGAN-E has multiple outputs for every class. The difference makes ECGAN-E solve the label mismatching problem of
+ContraGAN mentioned in Section 4.3 and beneﬁts generation on CIFAR-10, but does not work well on Tiny ImageNet. It is probably because of the scarcity of training data in each class in Tiny
+ImageNet. Only 50 data are available for updating the parameters corresponding to each class. 8
+Dataset
+Backbone method
+DCGAN
+CIFAR-10
+ResGAN
+BigGAN
+Tiny ImageNet BigGAN
+FID (↓) 32.507 ± 2.174
+ACGAN 21.918 ± 1.580
+ProjGAN 28.310 ± 1.761
+ContraGAN
+ECGAN-UC 18.035 ± 0.788 10.073 ± 0.274
+ACGAN 10.195 ± 0.203
+ProjGAN 10.551 ± 0.976
+ContraGAN
+ECGAN-UC 9.244 ± 0.062 8.615 ± 0.146
+ACGAN 8.145 ± 0.156
+ProjGAN 8.617 ± 0.671
+ContraGAN
+ECGAN-UC 7.942 ± 0.041 29.528 ± 4.612
+ACGAN 28.451 ± 2.242
+ProjGAN 24.915 ± 1.222
+ContraGAN
+ECGAN-UC 18.780 ± 1.291
+IS (↑) 7.621 ± 0.088 8.095 ± 0.185 7.637 ± 0.125 8.487 ± 0.131 9.512 ± 0.050 9.268 ± 0.139 9.087 ± 0.228 9.651 ± 0.098 9.742 ± 0.041 9.840 ± 0.080 9.679 ± 0.210 10.002 ± 0.120 12.964 ± 0.770 12.213 ± 0.624 13.445 ± 0.371 17.475 ± 1.052
+Intra-FID (↓) 129.603 ± 1.212 68.164 ± 2.055 153.730 ± 9.965 59.343 ± 1.557 48.464 ± 0.716 46.598 ± 0.070 138.944 ± 12.582 43.876 ± 0.384 45.243 ± 0.129 42.110 ± 0.405 114.602 ± 13.261 41.425 ± 0.221 315.408 ± 1.171 242.332 ± 11.447 257.657 ± 3.246 204.830 ± 5.648
+Table 4: Comparison between cGAN variants with different backbone architectures on CIFAR-10 and Tiny ImageNet
+Dataset
+CIFAR-10
+Tiny ImageNet
+FID (↓) method 8.145 ± 0.156
+ProjGAN 8.049 ± 0.092
+ECGAN-0
+ContraGAN 8.617 ± 0.671 8.038 ± 0.102
+ECGAN-E 8.615 ± 0.146
+ACGAN 8.102 ± 0.039
+ECGAN-C 28.451 ± 2.242
+ProjGAN 24.077 ± 1.660
+ECGAN-0
+ContraGAN 24.915 ± 1.222 38.270 ± 1.174
+ECGAN-E 29.528 ± 4.612
+ACGAN 24.853 ± 3.902
+ECGAN-C
+IS (↑) 9.840 ± 0.080 9.759 ± 0.061 9.679 ± 0.210 9.876 ± 0.036 9.742 ± 0.041 9.980 ± 0.093 12.213 ± 0.624 16.173 ± 0.671 13.445 ± 0.371 12.576 ± 0.405 12.964 ± 0.770 16.554 ± 1.500
+Intra-FID (↓) 42.110 ± 0.405 41.708 ± 0.278 114.602 ± 13.261 41.155 ± 0.277 45.243 ± 0.129 41.109 ± 0.273 242.332 ± 11.447 214.811 ± 3.627 257.657 ± 3.246 239.184 ± 2.628 315.408 ± 1.171 212.661 ± 8.135
+Table 5: Compare between representative cGANs and their ECGAN counterparts.
+Last, we compare ECGAN-C to ACGAN. Both of them optimize a GAN loss and a classiﬁcation loss. However, ECGAN-C combines the discriminator and the classiﬁer, so the generator can directly optimize cGAN loss rather than the classiﬁcation loss. As a result, ECGAN-C demonstrates better performance on both CIFAR-10 and Tiny ImageNet. In sum, the comparisons show that through the uniﬁed view provided by ECGAN, we can improve the existing methods with minimal modiﬁcations. 4.5 Evaluation on ImageNet
+We compare our ECGAN-UC and ECGAN-UCE with BigGAN [3] and ContraGAN [16] on ImageNet.
+We follow all conﬁgurations of BigGAN with batch size 256 in StudioGAN. The numbers in Table 6 are reported after 200,000 training steps if not speciﬁed. The results show that ECGAN-UCE outperforms other cGANs dramatically. The comparison between ECGAN-UC and ECGAN-UCE indicates that the 2C loss brings more signiﬁcant improvement in the ECGAN framework than in
+ContraGAN. The proposed ECGAN-UCE achieves 8.49 FID and 80.69 inception score. To the best of our knowledge, this is a state-of-the-art result of GANs with batch size 256 on ImageNet. Selected generated images are shown in Appendix G. 5

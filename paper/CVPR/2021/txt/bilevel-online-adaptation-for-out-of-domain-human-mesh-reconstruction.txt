@@ -1,0 +1,271 @@
+Abstract
+Training Set
+This paper considers a new problem of adapting a pre-trained model of human mesh reconstruction to out-of-domain streaming videos. However, most previous methods based on the parametric SMPL model [36] underperform in new domains with unexpected, domain-speciﬁc attributes, such as camera parameters, lengths of bones, backgrounds, and occlusions. Our general idea is to dynamically ﬁne-tune the source model on test video streams with additional temporal constraints, such that it can mitigate the domain gaps without over-ﬁtting the 2D information of individual test frames. A subsequent challenge is how to avoid con-ﬂicts between the 2D and temporal constraints. We propose to tackle this problem using a new training algorithm named
+Bilevel Online Adaptation (BOA), which divides the opti-mization process of overall multi-objective into two steps of weight probe and weight update in a training iteration.
+We demonstrate that BOA leads to state-of-the-art results on two human mesh reconstruction benchmarks1. 1.
+
+Introduction
+Human mesh reconstruction is a hot topic in computer vision, where improving the generalization ability is one of the major challenges at present. We observe that previous models [21, 38, 25, 26, 1, 59, 15, 43] are prone to overﬁt the training dataset and usually underperform in out-of-domain testing scenarios. As shown in Figure 1, between differ-ent datasets, there usually exist large domain gaps in cam-era parameters, lengths of body bones, backgrounds, and occlusions, whose negative impact becomes even more se-vere when we apply the model to streaming data due to the rapidly changing environment of the test domain. In this work, we are interested in ﬁnding a good solution to adapt-ing human mesh reconstruction models to out-of-domain
+*Equal contribution
+†Corresponding authors: Yunbo Wang, Bingbing Ni 1The project website with code and video results is at https://
+.
+M 6 3 n a m u
+H
+W
+P
+D 3 p a
+G n i a m o
+D
+Streaming Data
+Test Set
+Bone Length (m) Focal Length (pixel)
+Camera Height (m)
+Human 3.6M 3DPW
+MPI-INF-3DHP
+Figure 1. Top: Learning to reconstruct human meshes from out-of-domain streaming videos. The main challenges include the domain gaps of plain/crowded backgrounds, with/without occlu-sions, etc. Bottom: Statistics of other typical domain gaps. Here, the bone length refers to the sum of lengths between body joints, whose topology is shared across datasets. video frames that arrive in a sequential order, which is a practical task in many downstream, real applications, e.g., augmented reality [3], and human-robot interaction [48].
+The most serious technical challenge of this task is the lack of 3D annotations of test data. To cope with this prob-lem, some optimization-based approaches [20, 36, 42] learn to update the model on each test frame using frame-wise losses, such as the pose re-projection loss [21, 26] of 2D keypoints2. However, the imperfect frame-based loss func-tions do not always lead to effective online learning direc-tions as expected by the 3D evaluation metric. There is a se-vere gap between them. As shown in Figure 2, it may cause severe ambiguity in the estimation of depth information, 2It is a common practice to use the ground-truth 2D keypoints for cross-sites.google.com/view/humanmeshboa domain human mesh/pose reconstruction 10472    
+Camera
+Image Plane (a) (b)
+Figure 2. Left: Adapting the model with 2D re-projection loss leads to depth ambiguity, where multiple 3D vertices are projected to the same 2D position. Right: A showcase that the uncertainty of depth information may lead to the wrong estimation of leg posture. thus worsening the quality of mesh reconstruction. More-over, due to the asynchronous arrival of streaming data, the online adaptation model is prone to over-ﬁtting, which will further amplify the difference between the 2D objectives and 3D evaluation metrics.
+A straightforward solution is to regularize the training process towards 2D pose objectives using temporal con-straints [25, 49, 22], such as the smoothness of mesh re-construction over time. If the temporal constraints are used properly, the ambiguity of depth estimation can be greatly reduced. However, empirically, a simple combination of 2D losses and temporal constraints tends to obtain undesir-able results due to the competition and incompatibility be-tween multiple objectives, in the sense that the gradient of 2D objectives may interfere with the training of the tempo-ral one. Further, solving this problem becomes even more urgent in online adaptation scenarios with streaming data, because without global knowledge of the test domain, the model can easily fall into a sub-optimal solution to either part of the loss functions that is more readily available.
+The above two concerns motivate us to tackle the chal-lenging problem of out-of-domain mesh reconstruction from a new perspective. We propose an algorithm named
+Bilevel Online Adaptation (BOA) that greatly beneﬁts joint
+It effectively learning of multiple objectives in this task. incorporates temporal consistency into the few-step online training by performing bilevel optimization on the stream-ing test data. Speciﬁcally, in BOA, the lower-level opti-mization step serves as a weight probe to rational model parameters under single-frame pose constraints, while the upper-level optimization step ﬁnds a feasible response to overall loss function with temporal constraints. On one hand, our approach avoids overﬁtting the temporal con-straints by retaining the 2D losses for the upper-level op-timization. On the other hand, it avoids overﬁtting the 2D losses by updating the model only at the upper-level optimization step with second-order derivatives. By this means, our approach effectively combines the beneﬁts of pose and temporal constraints. In experiments, we use Hu-man3.6M [19] as the source domain, and take 3DPW [56] and MPI-INF-3DHP [37] as target domains with streaming video frames. On both benchmarks, our approach consis-tently outperforms existing approaches [20, 36, 42], show-ing the excellent ability to tackle notable domain gaps. 2. Problem Setup
+A SMPL-based solution to human mesh reconstruction can be usually speciﬁed as a tuple of (X, Θ, Π, L), where
+X denotes the observation space3, and Θ is the parame-ter space of SMPL [36]. For each input frame xi ∈ X, a bβi, bθi} ∈ Θ. Then
+ﬁrst-stage model is trained to estimate { the SMPL model generates the corresponding mesh and re-covers 3D keypoints denoted by bJ i using a mesh-to-3D-skeleton mapping pre-deﬁned in SMPL. The third element in the tuple is a weak-perspective projection model for pro-bJ i), where bψi is jecting bJ i to 2D space, i.e., ˆji = Π bψi estimated from xi. The last one in the tuple deﬁnes a loss bβi, bθi, bψi, bJ i, bji) to learn the ﬁrst-stage function L(·) on ( model Mφ, usually in terms of neural networks. (
+In this work, we make two special modiﬁcations to the above task. First, we focus on out-of-domain scenarios, in the sense that large discrepancies may exist between the data distributions of the source training domain Dtr and the target test domain Dtest. Second, we speciﬁcally focus on dealing with streaming video frames at test time. These changes bring in two challenges: (1) The ground truth val-ues of the target domain parameters in (Θ, Π) are always unavailable throughout the learning process, which is dif-ferent from standard online learning. (2) The distribution of the target domain is difﬁcult to be estimated because the frames {xi}N i=1 ∈ X are sequentially available and their distributions are continuously changing, which is different from standard domain adaptation setups. 3. Bilevel Online Adaptation
+In this section, we ﬁrst formalize the online adaptation framework as a solution to out-of-domain human mesh re-construction from streaming sequential data. To make the online adaptation more effective, we then propose a bilevel optimization algorithm that incorporates unsupervised tem-poral constraints into the training paradigm. 3.1. Online Adaptation Framework
+Unlike the existing approaches [21, 9, 49] that try to solve the problem introduced in Section 2 by learning more generalizable features in the source domain Dtr, we here present an alternative solution that performs online test-time training directly on the target domain Dtest. A potential ben-eﬁt is that as it is solely performed on Dtest, it can be jointly 3We here consider {xi}N i=1 ∈ X as a set of consecutive video frames. 10473
+Algorithm 1 Bilevel Online Adaptation
+Input: sequential frames {xi}N model parameter ω0, learning rates α and η. i=1 from test set, the base model Mφ0 with model parameter φ0, a teacher model Tω0 with bβi, bθi}N i=1, camera parameters { bψi}N i=1
+Output: SMPL parameters { 1: Initialize ω0 ← φ0 2: for i = 1, . . . , N do 3: 4:
+φ0 i−1 ← φi−1 for t = 1, . . . , T do 5: 6: 7: 8: 9: 10: 11:
+Llow ← LF (xi; φt−1 i−1)
+φ(t−1)′ i−1 ← φt−1 i−1 − α∇φLlow
+Lup ← LF (xi; φ(t−1)′ i−1 ← φt−1
+φt end for
+φi ← φT
+ωi ← δωi−1 + (1 − δ)φi bβi, bθi}, Π bψi
+{ i−1 i−1 − η∇φLup
+← Mφi (xi) i−1 12: 13: end for
+) + LT (xi; ωi−1, φ(t−1)′ i−1
+⊲ For each bilevel optimization step
+⊲ Calculate lower-level loss with single-frame pose constraints
+⊲ Probe for rational weights under pose constraints
+)
+⊲ Calculate upper-level loss with temporal constraints
+⊲ Update model weights with second-order derivatives
+⊲ Update the teacher model
+⊲ Estimate the SMPL parameters and the camera parameter of xi using Mφi used with the state-of-the-art approaches that learn gener-alizable features from Dtr to further improve the quality of transfer learning.
+Alg. 1 shows the proposed online adaptation framework.
+Here we denote the pre-trained model from the source do-main as Mφ0 . Our framework does not have special re-quirements for the pre-training method, but typically, Mφ0 is trained ofﬂine to regress the ground truth SMPL parame-ters in a fully supervised manner. Given sequentially arrived target video frames {xi}N i=1 ∈ Dtest, a straight forward solution to quickly absorbing the domain-speciﬁc knowl-edge is to ﬁne-tuning M continuously on each individual xi, following the online adaptation paradigm proposed by
+Tonioni et al. [52]. We take it as a baseline algorithm that computes the unsupervised loss function L with pose con-straints4 on each xi, and performs a single optimization step as follows before the inference step:
+φi = φi−1 − α∇φL(xi; Mφi ), (1) where α is the learning rate of gradient descent.
+A potential disadvantage of the baseline algorithm is that although ﬁne-tuning a learned model on unlabeled target data may help to handle rapidly changing test environments, an imperfect unsupervised loss function may lead to wrong directions of the one-step gradient descent, and may harm the overall algorithm. It may cause catastrophic overﬁtting to some undesirable information of current observation that is unrelated to the reconstruction quality. To alleviate this issue, we propose the following spatiotemporal bilevel op-timization approach. 4We discuss more about the speciﬁc forms of L in Section 4. 3.2. Spatiotemporal Bilevel Optimization
+Considering the setting of out-of-domain streaming data, i.e., video frames arrive at a sequential order, there generally exists strong temporal dependency between frames, which can be leveraged to improve the quality of online adapta-tion. Let us suppose that we have two objectives respec-tively for frame-wise constraints and temporal consistency, denoted by LF and LT , whose speciﬁc forms will be dis-cussed later. Straightforward approaches to combine LF and LT include jointly optimizing them by adding them together or iteratively performing two-stage optimization (Figure 2b). However, these methods usually lead to sub-optimal results due to the competition and incompatibility between the objectives, in the sense that the gradient of the single-frame constraint may interfere with the training of the temporal one. We also observe that the single-frame constraint is usually optimized much faster than the tem-poral one. That is to say, in a small number of inference-stage optimization steps, the model may learn pose priors very quickly but then get stuck trying to learn temporal consistency. Therefore, the ﬁrst and foremost challenge we confront is to design an online optimization scheme to pre-vent overﬁtting to each objective and maximize the power of both single-frame and temporal constraints.
+Lower-level weight probe with single-frame constraints.
+We formulate the problem of identifying effective model weights under spatiotemporal multi-objectives as a bilevel optimization problem. In this setup, as shown in Figure 3, the lower-level optimization step serves as a weight probe to rational models under single-frame pose constraints, while the upper-level optimization step ﬁnds a feasible response to temporal constraints. Speciﬁcally, for the i-th test sam-10474
+Streaming data
+Time 𝑖 − 𝜏
+Time 𝑖
+…
+Results
+Time 𝑖 − 𝜏
+…
+Time 𝑖
+$
+!!
+𝛽 "
+$
+!!
+𝜃 "
+$
+!!
+𝜓"
+"#$
+𝛽 !!
+$
+"#$
+θ !!
+$
+"#$
+𝜓 !!
+$
+Upper-level weight update
+𝜙!"# − 	𝜂∇$!
+$(ℒ * + ℒ%)
+ℒ *
++
+ℒ%
+SMPL(𝛽", 𝜃")
+ℳ$!
+"
+𝛽 !!"#
+ℳ$!"#
+"
+𝜃!!"#
+ℒ%
+ℳ$!
+$
+"
+𝜓 !!"#
+𝜙!"# − 	𝛼∇$!"# ℒ%
+Lower-level weight probe
+Data flow or
+Weight flow
+Calculate loss
+Figure 3. A diagram of the proposed bilevel online adaptation method. For simplicity, we only show one iteration of bilevel optimization.
+The lower-level training step serves as a parameter probe to ﬁnd a feasible response to the frame-wise pose constraints. The upper-level training step minimizes the overall multi-objectives in space-time and updates the model with second-order derivatives. ple, the model from the last online adaptation step, denoted by Mφi−1 , is ﬁrstly optimized with the single-frame con-straints, LF , to obtain a set of temporary weights denoted by φ′ i. We name this procedure as the lower-level probe (Lines 5-6 in Alg. 1), in the sense that ﬁrst, φ′ i can be fea-sible responses to the easy component of multi-objectives, which best facilitates the rest of the learning procedure for temporal consistency; Second, φ′ i is not directly used to up-date Mφi−1 . At this level we focus on the spatial constraints on individual frames:
+LF = γ1||ji − bji||2 2 + γ2ρ( bβi, bθi) + γ3LS, (2) where {γ1, γ2, γ3} are the loss weights. The ﬁrst term in LF is a straightforward supervision of the re-projection error of 2D keypoints. The second term is the prior constraint on the shape and pose parameters, which is a common practice in mesh reconstruction. ρ(·) calculates the distance of the estimated bβi, bθi to their statistic priors5. The third term is the fully supervised loss with 3D keypoints on a randomly sampled source data, which has two beneﬁts: (1) preventing the catastrophic forgetting of the basic knowledge learned from Dtr. (2) providing the online updated model a contin-uous 3D supervision to keep it from overﬁtting the imper-fect unsupervised loss functions. After optimization at the lower level, we obtain the probe model Mφ′ i for subsequent upper-level learning. Note that, due to a lack of 3D super-visions in the target domain, the above LF is insufﬁcient to recover the 3D body. Therefore, it is essential to explore temporal correlations in streaming data to reduce the ambi-guity of mesh construction. 5These priors are obtained from a commonly-used third-party database.
+Upper-level weight update with temporal constraints.
+At an upper optimization level, we calculate the overall spatiotemporal multi-objectives using Mφ′ i obtained at the lower-level optimization step, and then back-propagate with second-order derivatives to update the original φi−1, as shown in Lines 7-8 in Alg. 1. As for the speciﬁc form the motion constraints, given two images xi, xi−τ at an inter-val τ with their 2D keypoints ji, ji−τ and the estimated bji, bji−τ , the motion loss is deﬁned as
+Lm = ||cmi − mi||2 2, (3) bji − bji−τ . Note that where mi = ji − ji−τ , and cmi = both bji and bji−τ are obtained from the probe model Mφ′ i .
+Furthermore, we maintain an exponential moving average of history models with a teacher model (similar to Mean-Teacher [50]), denoted by Tω. We regularize the output of
+Mφ′ i to be consistent with Tωi−1 :
+Lmt = ||Tωi−1 (x) − Mφ′ i (x)||2 2, (4) which is then combined with the motion loss to obtain the overall temporal constraints that focus on the consistency of both the sequentially updated model weights and the recon-struction results as well:
+LT = µ1Lm + µ2Lmt, (5) where µ1 and µ2 control the weights of the two temporal loss terms. From another perspective, these two losses are complementary with each other: the teacher model T main-tains long-term temporal information, and the motion loss
+Lm is a constraint on short-term motion consistency. 10475
+Alternatives for online adaptation schemes. As brieﬂy mentioned above, there are several single-level optimization alternatives of the spatiotemporal multi-objectives, e.g., (1) one-stage joint adaptation: online adapting the model with (2) two-stage adaptation: a combined loss of LF + LT . adapting the model iteratively with LF and LT in a cas-caded optimization manner. However, we observe that the joint adaptation scheme is prone to lead to ineffective train-ing of the temporal constraints due to the incompatibility between multiple objectives. The two-stage scheme adapts the model to individual frames under the single-frame con-straints repeatedly, which commonly leads to severe over-ﬁtting and drifting away from the ﬁnal 3D reconstruction metric. The key insights of BOA are as follows: First, it avoids overﬁtting the temporal constraints by retaining the pose prior loss for the upper optimization level. Second, it avoids overﬁtting the pose priors by updating the model weights only at the upper optimization level with second-order derivatives. By this means, BOA effectively combines the proﬁts of both single-frame and temporal constraints, achieving considerable improvement over its alternatives.
+Network architectures. Following the majority of previ-ous SMPL-based human reconstruction models, we use a
+ResNet-50 [16] pre-trained on ImageNet [8] for encoding individual video frames. The encoded features are then de-livered to two fully-connected layers with 1,024 neurons, followed by a dropout layer [47]. The ﬁnal layer of Mφ is a fully-connected layer with 85 neurons. During streaming adaptation, only one image is taken as input. As a result, we replace Batch Normalization [18] with Group Normal-ization [58] to estimate more accurate statistics. 4. Experiments
+Datasets. We use the Human3.6M dataset for training the source model and learn to adapt the model to the 3DHP and 3DPW datasets. Table 1 presents the statistics of typical domain gaps among these datasets.
+• Human3.6M [19] is captured in a controlled environ-ment, which has 11 subjects in total. Following the previous approaches [25, 21], we train the base model on 5 subjects (S1, S5, S6, S7, S8), and down-sample all videos from 50fps to 10fps.
+• 3DHP [37] is the test split of the MPI-INF-3DHP dataset. It consists of 2,929 valid frames from 6 sub-jects performing 7 actions, collected from both indoor and outdoor environments.
+• 3DPW [56] is a multi-person dataset captured by a handheld camera, where most videos are collected from outdoor environments. As 3DHP, we also use the test set of 3DPW as a streaming target domain.
+Dataset
+Focal len. (pixel)
+H3.6M 1146.8±2.0 3DPW 1962.2±1.5 1497.9±2.8 3DHP
+Bone len. (m) 3.9±0.1 3.7±0.1 3.7±0.1
+Camera dist. (m) 5.2±0.8 3.5±0.7 3.8±0.8
+Camera ht. (m) 1.6±0.1 0.6±0.8 0.8±0.4
+Table 1. Typical domain gaps among datasets in terms of focal length, bone length, camera distance, and camera height [57].
+Training details. We ﬁrst train the base model M on the
+Human3.6M dataset and take 3DPW and 3DHP as test sets.
+All video frames are cropped and then scaled to 224 × 224 pixels according to the bounding boxes calculated from 2D keypoints. For the base model M, we follow the same train-ing scheme as SPIN (more details can be found in [26]). For the training of BOA on 3DPW, we choose the Adam opti-mizer [24] with the learning rate η = 3e−6 (β1 = 0.5, β2 = 0.999). The loss weights in LF are γ1 = 10, γ2 = 1, and γ3 = 0.1. The loss weights in LT are µ1 = 0.1 and
+µ2 = 0.1. As for 3DHP, the learning rate is set to 2e−6 (β1 = 0.2, β2 = 0.999). We set γ1 = 10, γ2 = 1, γ3 = 0.1 in LF and µ1 = 0.1, µ2 = 0.1 in LT . Note that the order of streaming videos in 3DPW and 3DHP is pre-deﬁned (same for all compared models), and the batch size of online op-timization is 1. We set T = 1 (Alg. 1) for the efﬁciency of adaptation. Please refer to the supplementary material for more analyses of hyper-parameters.
+Baselines. We initially compare BOA with end-to-end methods, including frame-based methods [21, 27, 7, 26, 7, 38], video-based methods [22, 25], and those attempting to learn generalizable features from the training domain, such as Sim2Real [9] and DSD-SATN [49]. Given a video frame, end-to-end methods directly estimate its SMPL pa-rameters. We also include existing approaches that ﬁne-tune
+SMPL parameters β, θ [5, 2] or model parameters φ [20] on the target domain. Different from these approaches, BOA adapts φi in an online fashion, which is more challenging.
+Please refer to the supplementary material for more details.
+Evaluation metrics. Following previous works [21, 9, 61], we evaluate our model in terms of Mean Per Joint
+Position Error (MPJPE), Procrustes-Aligned MPJPE (PA-MPJPE), and the Percentage of Correct Keypoints (PCK) with a threshold of 150mm on 3DHP. 4.1. Quantitative Evaluation
+Results on 3DPW. Table 2 presents quantitative com-parisons on 3DPW in MPJPE and PA-MPJPE. Following
+HMMR or SPIN, most existing methods adopt two kinds of pre-processing protocols on 3DPW as illustrated in Ta-ble 3. These two protocols have signiﬁcant differences in the number of test images and SMPL annotations, which have a great impact on the evaluation. Please refer to the 10476
+VIBE
+Ours (BOA)
+Figure 4. A qualitative comparison of mesh reconstruction on 3DPW streaming data. We zoom in on the limbs for better visualization.
+Method
+Prot.
+PA-MPJPE↓ MPJPE↓
+Method 3DHP-Dtrain
+PA-MPJPE↓ MPJPE↓
+PCK↑
+HMR [21]
+Sim2Real [9]
+GraphCMR [27]
+SPIN [26]
+I2L-MeshNet [38]
+Pose2Mesh [7]
+DSD-SATN [49]
+HMMR [22]
+SMPLify [5]
+Arnab et al. [2]
+EFT [20]
+BOA
+BOA
+#PH
+#PH
+#PS
+#PS
+#PS
+#PS
+#PS
+#PH
+#PH
+#PH
+#PS
+#PH
+#PS 76.7 74.7 70.2 59.2 58.6 58.9 69.5 73.6 106.1 72.2 55.7 58.8 49.5 130.0
+--96.9 93.2 89.2
+-116.5 199.2
+--92.1 77.2
+Table 2. Results on 3DPW, including end-to-end approaches (top) and those ﬁne-tuned on the target domain (middle).
+Prot.
+SMPL annotation
+#Valid frames
+#PS (SPIN)
+#PH (HMMR)
+Original
+The ﬁts 35,515 26,234
+Table 3. Different protocols of pre-processing the 3DPW data by
+SPIN [26] and HMMR [22]. #PS uses the SMPL annotations from the original 3DPW as labels, while #PH uses the ﬁtted neutral re-sults (without gender information) as labels.
+Vnect
+HMR
+SPIN
+BOA
+!
+!
+!
+% 98.0 113.2 80.4 77.4 124.7 169.5 124.8 117.6 83.9 77.1 87.0 90.3
+Table 4. Results on 3DHP. All models but BOA are trained on the training split of MPI-INF-3DHP, while BOA performs best. does not require access to the training set. In addition, we do not include the results from VIBE [25] (56.5 in PA-MPJPE and 93.5 in MPJPE) in quantitative comparison, since it was evaluated on the same number of test images under #PH but uses the same SMPL annotations under #PS.
+Results on 3DHP. Table 4 gives the MPJPE and PA-PMJPE results on 3DHP, which is the test set of the entire
+MPI-INF-3DHP domain. Note that all models but BOA are directly trained on the training set Dtrain of MPI-INF-3DHP in an ofﬂine fashion, in the sense that the global knowledge from the test domain is more accessible to these compared models. Although BOA has never been trained on Dtrain, it still performs best on the corresponding test split, showing a strong adaptability to a rapidly changing test environment. 4.2. Qualitative Evaluation supplementary materials for more details. In Table 2, we mark the protocol used in the original literature of each compared method. Compared with other end-to-end meth-ods (top part), BOA achieves better performance in both
+#PS and #PH, and particularly outperforms the methods that are designed to learn generalizable features at training time [49, 21, 9], which indicates that our test-time adapta-tion approach can better mitigate the domain gap by prop-erly exploiting the streaming data from the test domain.
+Besides, we also observe that BOA outperforms the com-pared models that are ﬁne-tuned on the entire training set of 3DPW in an ofﬂine manner (middle part). Note that BOA
+Figure 4 presents a typical showcase of mesh reconstruc-tion on the challenging 3DPW dataset. The ﬁrst row refers to human meshes generated by VIBE [25], while the sec-ond row corresponds to our results. We zoom in on the limbs for better visualization and observe that the recon-struction quality of VIBE is less satisfying, e.g., the posi-tions of arms and legs are not correctly estimated. By con-trast, our model can capture the depth structure of the hu-man subject, which is mainly due to the proposed bilevel optimization scheme and spatiotemporal constraints. Fig-ure 5 presents a sequence of input videos with severe occlu-sions, where the subject of interest (the man in the middle) 10477
+Figure 5. Reconstruction results under severe occlusion. First row: the input frames. Second row: mesh reconstruction results. The subject of interest (the man in the middle) is occluded by the walking woman, which is challenging for out-of-domain mesh reconstruction.
+Index Optim. Llow
+Lup
+PA-MPJPE MPJPE
+Figure 6. Ablations on the number of optimization steps T (#PS on 3DPW). BOA has a more stable performance with the growth of T , compared with the its single-level counterpart. is covered by the walking woman. Still, BOA successfully estimates the occluded human body. 4.3. Ablation Study
+Ablations on the number of optimization steps. With the growth of the optimization steps (T in Alg. 1), as shown in Figure 6, the error of single-level training scheme, which combines LF and LT in a multi-objective, in both PA-MPJPE and MPJPE increases quickly. For comparison, the performance of BOA decreases at a much slower rate, which indicates that the single-level optimization is more likely to result in over-ﬁtting to the current video frame, and thus makes it difﬁcult for the model to quickly adapt to the next frame. This effect can be greatly alleviated by the proposed bilevel optimization method.
+Ablations on online optimization schemes. As shown in
+Table 5, we investigate the effectiveness of the proposed bilevel adaptation scheme and compare it with other vari-ants. Speciﬁcally, B1-B3 refer to the single-level, one-stage optimization scheme, while B4-B5 are trained by updating model parameters with alternate loss functions (i.e., Llow and Lup). Note that the major difference between two-stage and bilevel is whether the parameters in Mφi are obtained i−1 or Mφi−1 . We observe that, despite the use of from Mφ′ temporal constraints, B3 performs worse than B1, indicat-ing that the straightforward combination of multi-objectives
+B1
+B2
+B3
+B4
+B5 1-stage LF 1-stage LT 1-stage LF , LT
+---2-stage LF 2-stage LF
+B6
+Bilevel LF
+Final Bilevel LF
+LT
+LF , LT
+LT
+LF , LT 55.7 140.1 58.9 59.3 55.2 142.5 49.5 86.0 245.5 94.5 91.5 85.1 257.1 77.3
+Table 5. Ablation studies on the training schemes (#PS on 3DPW).
+B1-B3 update model parameters with constant forms of losses in a single optimization step. B4-B5 update model parameters with alternate loss functions. B6 and Final use bilevel optimization.
+Index LF
+Lm Lmt
+PA-MPJPE MPJPE
+! %
+B7
+! !
+B8
+Final ! !
+!
+%
+! 53.0 51.7 49.5 81.8 82.1 77.3
+Table 6. Ablations on BOA temporal constraints (#PS on 3DPW). leads to sub-optimal results. Even though we use the multi-objectives in a two-stage training scheme (B5), we can only observe a minor improvement over the vanilla B1 model.
+By contrast, the ﬁnal proposed BOA is shown to effectively combine the best of both constraints and achieve consider-able improvement over all compared baselines.
+Ablations on temporal constraints. Table 6 shows the ablation studies for the proposed two temporal constraints
+Lmt and Lm. By comparing B7 with Final, we can ob-serve that the ues of Lm reduces PA-MPJPE from 53.0mm to 49.5mm, while the use of LT B8 reduces PA-MPJPE from 51.7mm to 49.5mm. A possible reason is that the mo-tion loss Lm focuses on short-term temporal constraint and helps to recalibrate pose artifacts relative to the last frame.
+By comparing B8 with Final, we can ﬁnd that the use of
+Lmt signiﬁcantly reduces MPJPE, which indicates that the 10478
+indoor dataset generally do not have satisfying results [21] if tested on an in-the-wild dataset. To tackle this problem,
+Kanazawa et al. [21] propose an adversarial framework, uti-lizing the unpaired 3D annotations, to facilitate the recon-struction. Several researches [49, 53, 33, 40, 44] also show that the paired 3D annotation is not necessary, attempting to
+ﬁnd more representative temporal features [49, 53] or em-ploy more informative input such as RGB-D [33], and part segmentation [40, 44] to facilitate human mesh reconstruc-tion. However, there still exists a principled challenge in this task, where neither the unpaired 3D annotation nor the other mentioned intermediate representations could effec-tively ﬁll the gap between two largely different datasets. In this work, we propose to tackle this problem by using an online adaptation algorithm, named BOA. The key insight is BOA exploits the time constraints of test frames while avoiding overﬁtting with bilevel optimization.
+Unsupervised online adaptation. Unsupervised online adaptation refers to sequentially adapting a pre-trained model at test time in an unsupervised manner.
+It is an emerging technique to prevent model crashing when the test data is diverse from the training data. Previous meth-ods [10, 6, 4, 35, 41, 54, 52, 6, 51, 62, 34] use it for tasks other than mesh reconstruction, such as video segmenta-tion [54], tracking [41], and stereo matching [52, 51]. In this paper, we present a pilot study of unsupervised on-line adaptation in the context of human mesh reconstruc-tion. Beyond unsupervised online adaptation, many pre-vious approaches effectively learn generalizable features through meta-learning [12, 11], extracting domain-invariant representations [23, 39, 13, 29, 32, 30, 31], or learning with adversarial examples [45, 55] without requiring access to target labels. However, none of these approaches focus on how to adapt a pre-trained model to streaming data. 6. Conclusion
+In this paper, we presented a new research problem of re-constructing human meshes from out-of-domain streaming videos. We proposed a new online adaption algorithm that learns temporal consistency with bilevel optimization and demonstrated that it can greatly beneﬁt the multi-objective training process in space-time. Our approach outperforms the state-of-the-art mesh reconstruction methods on two benchmarks with rapidly changing test environments.
+Acknowledgement
+This work was supported by NSFC (U19B2035) and
+Shanghai Municipal Science & Technology Major Project (2021SHZDZX0102). This work was also supported by the
+NSFC grants U20B2072 and 61976137. 10479
+Figure 7. Correlations between the 2D pose re-projection loss and the evaluation metric. B1 uses frame-based losses only. B3 op-timizes the frame-based and temporal losses by integrating them in a uniﬁed loss function. Only with BOA, the MPJPE results are consistent with the frame-based loss, showing that BOA greatly reduces the 3D ambiguity of estimated meshes. long-term information carried by Lmt is beneﬁcial for con-sistent mesh reconstruction.
+It may help to mitigate the domain gaps caused by systematic biases such as the focal length and camera orientations.
+Analyses on loss-metric correlations.
+In Figure 7, the
+X-axis refers to the normalized 2D keypoint loss and the
+Y-axis is the MPJPE. The blue dots are the results of the vanilla baseline only trained with frame-based loss func-tions (B1), the yellow stars correspond to the baseline model trained with multi-objectives (B3), and the red dots indicate bilevel online adaptation. We can see that, ﬁrst, although a straightforward use of temporal constraints (B3) achieves comparable results in the 2D loss with B1, it harms the 3D evaluation metric. Second, with BOA, the model achieves MPJPE results that are more consistent with the frame-based loss, indicating that BOA can reduce 3D ambi-guity by using the temporal constraints more appropriately. 5.

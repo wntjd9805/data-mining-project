@@ -1,0 +1,222 @@
+Abstract
+Today’s state-of-the-art machine vision models are vulnerable to image corruptions like blurring or compression artefacts, limiting their performance in many real-world applications. We here argue that popular benchmarks to measure model robustness against common corruptions (like ImageNet-C) underestimate model robustness in many (but not all) application scenarios. The key insight is that in many scenarios, multiple unlabeled examples of the corruptions are available and can be used for unsupervised online adaptation. Replacing the activation statistics estimated by batch normalization on the training set with the statistics of the corrupted images consistently improves the robustness across 25 different popular computer vision models. Using the corrected statistics, ResNet-50 reaches 62.2% mCE on ImageNet-C compared to 76.7% without adaptation. With the more robust DeepAugment+AugMix model, we improve the state of the art achieved by a ResNet50 model up to date from 53.6% mCE to 45.4% mCE. Even adapting to a single sample improves robustness for the ResNet-50 and AugMix models, and 32 samples are sufﬁcient to improve the current state of the art for a ResNet-50 architecture. We argue that results with adapted statistics should be included whenever reporting scores in corruption benchmarks and other out-of-distribution generalization settings. 1
+
+Introduction
+Deep neural networks (DNNs) are known to perform well in the independent and identically dis-tributed (i.i.d.) setting when the test and training data are sampled from the same distribution.
+However, for many applications this assumption does not hold. In medical imaging, X-ray images or histology slides will differ from the training data if different acquisition systems are being used.
+In quality assessment, the images might differ from the training data if lighting conditions change or if dirt particles accumulate on the camera. Autonomous cars may face rare weather conditions like sandstorms or big hailstones. While human vision is quite robust to those deviations [1], modern machine vision models are often sensitive to such image corruptions.
+We argue that current evaluations of model robustness underestimate performance in many (but not all) real-world scenarios. So far, popular image corruption benchmarks like ImageNet-C [IN-C; 2] focus only on ad hoc scenarios in which the tested model has zero prior knowledge about the corruptions it encounters during test time, even if it encounters the same corruption multiple times. In the example of medical images or quality assurance, the image corruptions do not change from sample to sample
+∗Equal contribution. † Equal contribution.; Online version and code: domainadaptation.org/batchnorm 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+but are continuously present over a potentially large number of samples. Similarly, autonomous cars will face the same weather condition over a continuous stream of inputs during the same sand- or hailstorm. These (unlabeled) observations can allow recognition models to adapt to the change in the input distribution.
+Such unsupervised adaptation mechanisms are studied in the ﬁeld of domain adaptation (DA), which is concerned with adapting models trained on one domain (the source, here clean images) to another for which only unlabeled samples exist (the target, here the corrupted images). Tools and methods from domain adaptation are thus directly applicable to increase model robustness against common corruptions, but so far no results on popular benchmarks have been reported. The overall goal of this work is to encourage stronger interactions between the currently disjoint ﬁelds of domain adaptation and robustness towards common corruptions.
+We here focus on one popular technique in DA, namely adapting batch normalization [BN; 3] statistics [4–6]. In computer vision, BN is a popular technique for speeding up training and is present in almost all current state-of-the-art image recognition models. BN estimates the statistics of activations for the training dataset and uses them to normalize intermediate activations in the network.
+By design, activation statistics obtained during training time do not reﬂect the statistics of the test distribution when testing in out-of-distribution settings like corrupted images. We investigate and corroborate the hypothesis that high-level distributional shifts from clean to corrupted images largely manifest themselves in a difference of ﬁrst and second order moments in the internal representations of a deep network, which can be mitigated by adapting BN statistics, i.e. by estimating the BN statistics on the corrupted images. We demonstrate that this simple adaptation alone can greatly increase recognition performance on corrupted images.
+Our contributions can be summarized as follows:
+• We suggest to augment current benchmarks for common corruptions with two additional performance metrics that measure robustness after partial and full unsupervised adaptation to the corrupted images.
+• We draw connections to domain adaptation and show that even adapting to a single corrupted sample improves the baseline performance of a ResNet-50 model trained on IN from 76.7% mCE to 71.4%. Robustness increases with more samples for adaptation and converges to a mCE of 62.2%.
+• We show that the robustness of a variety of vanilla models trained on ImageNet [IN; 7, 8] substantially increases after adaptation, sometimes approaching the current state-of-the-art performance on IN-C without adaptation.
+• Similarly, we show that the robustness of state-of-the-art ResNet-50 models on IN-C consis-tently increases when adapted statistics are used. We surpass the best non-adapted model (52.3% mCE) by almost 7% points.
+• We show results on several popular image datasets and discuss both the generality and limitations of our approach.
+• We demonstrate that the performance degradation of a non-adapted model can be well predicted from the Wasserstein distance between the source and target statistics. We propose a simple theoretical model for bounding the Wasserstein distance based on the adaptation parameters. 2 Measuring robustness against common corruptions
+The ImageNet-C benchmark [2] consists of 15 test corruptions and four hold-out corruptions which are applied with ﬁve different severity levels to the 50 000 test images of the ILSVRC2012 subset of ImageNet [8]. During evaluation, model responses are assumed to be conditioned only on single samples, and are not allowed to adapt to e.g. a batch of samples from the same corruption. We call this the ad hoc or non-adaptive scenario. The main performance metric on IN-C is the mean corruption error (mCE), which is obtained by normalizing the model’s top-1 errors with the top-1 errors of AlexNet [9] across the C = 15 test corruptions and S = 5 severities (cf. 2): mCE(model) = 1
+C
+C (cid:88) c=1 2 (cid:80)S c,s s=1 errmodel s=1 errAlexNet c,s (cid:80)S
+. (1)
+Note that mCE reﬂects only one possible averaging scheme over the IN-C corruption types. We additionally report the overall top-1 accuracies and report results for all individual corruptions in the supplementary material and the project repository.
+In many application scenarios, this ad hoc evaluation is too restrictive. Instead, often many unlabeled samples with similar corruptions are available, which can allow models to adapt to the shifted data distribution. To reﬂect such scenarios, we propose to also benchmark the robustness of adapted models. To this end, we split the 50 000 validation samples with the same corruption and severity into batches with n samples each and allow the model to condition its responses on the complete batch of images. We then compute mCE and top-1 accuracy in the usual way.
+We consider three scenarios: In the ad hoc scenario, we set n = 1 which is the typically considered setting. In the full adaptation scenario, we set n = 50 000, meaning the model may adapt to the full set of unlabeled samples with the same corruption type before evaluation. In the partial adaptation scenario, we set n = 8 to test how efﬁciently models can adapt to a relatively small number of unlabeled samples. 3 Correcting Batch Normalization statistics as a strong baseline for reducing covariate shift induced by common corruptions
+We propose to use a well-known tool from domain adaptation—adapting batch normalization statis-tics [5, 6]—as a simple baseline to increase robustness against image corruptions in the adaptive evaluation scenarios. IN trained models typically make use of batch normalization [BN; 3] for faster convergence and improved stability during training. Within a BN layer, ﬁrst and second order statis-tics µc, σ2 c of the activation tensors zc are estimated across the spatial dimensions and samples for each feature map c. The activations are then normalized by subtracting the mean µc and dividing by
+σ2 c . During training, µc and σ2 c are estimated over the whole training dataset, typically using exponential averaging [10]. c are estimated per batch. During evaluation, µc and σ2
+Using the BN statistics obtained during training for testing makes the model decisions deterministic but is also problematic if the input distribution changes. If the activation statistics µc, σ2 c change for samples from the test domain, then the activations of feature map c are no longer normalized to zero mean and unit variance, breaking a crucial assumption that all downstream layers depend on.
+Mathematically, this covariate shift2 can be formalized as follows:
+Deﬁnition 1 (Covariate Shift, cf. 12, 13). There exists covariate shift between a source distribution with density ps : X × Y → R+ and a target distribution with density pt : X × Y → R+, written as ps(x, y) = ps(x)ps(y|x) and pt(x, y) = pt(x)pt(y|x), if ps(y|x) = pt(y|x) and ps(x) (cid:54)= pt(x) where y ∈ Y denotes the class label.
+Removal of covariate shift. order moments of the feature activations z = f (x), it can be removed by applying normalization:
+If covariate shift (Def. 1) only causes differences in the ﬁrst and second (cid:32) p f (x) − Es[f (x)] (cid:112)Vs[f (x)] (cid:12) (cid:12) (cid:12)x (cid:33) (cid:32) ps(x) ≈ p f (x) − Et[f (x)] (cid:112)Vt[f (x)] (cid:12) (cid:12) (cid:12)x (cid:33) pt(x). (2)
+Reducing the covariate shift in models with batch normalization is particularly straightforward: it sufﬁces to estimate the BN statistics µt, σ2 t on (unlabeled) samples from the test data available for adaptation. If the number of available samples n is too small, the estimated statistics would be too unreliable. We therefore leverage the statistics µs, σ2 s already computed on the training dataset as a prior and infer the test statistics for each test batch as follows,
+¯µ =
+N
+N + n
+µs + n
+N + n
+µt,
+¯σ2 =
+N
+N + n
+σ2 s + n
+N + n
+σ2 t . (3) 2Note that our notion of internal covariate shift differs from previous work [3, 11]: In i.i.d. training settings, Ioffe and Szegedy [3] hypothesized that covariate shift introduced by changing lower layers in the network is reduced by BN, explaining the empirical success of the method. We do not provide evidence for this line of research in this work: Instead, we focus on the covariate shift introduced (by design) in datasets such as
+IN-C, and provide evidence for the hypothesis that high-level domain shifts in the input partly manifests in shifts and scaling of internal activations. 3
+E
+C m 140 120 100 80 60 40
+RN50 AM
+N = ∞ (base)
+N = 0 (ours)
+N best (ours)
+DAug+AM (RN-50 SoTA)
+N = ∞ (base)
+N best (ours)
+E
+C m
+C
+N
+-I 100.0 90.0 80.0 70.0 60.0 50.0
+ResNet
+DenseNet
+ResNeXt
+WRN
+MNASnet
+MobileNet
+ShufﬂeNet
+GoogLeNet
+Inception
+VGG 1 8 512 64
+Batch size 50 000 20 30 25
+IN top1 error 35
+Figure 1: Sample size vs. performance tradeoff in terms of the mean corruption error (mCE) on
+IN-C for ResNet-50 and AugMix (AM). Black line corresponds to (non-adapted) ResNet50 state-of-the-art performance of DeepAug+AugMix.
+Figure 2: Across 25 model architectures in the torchvision library, the baseline mCE (◦) improves with adaptation (•), often on the order of 10 points. Best viewed in color.
+The hyperparameter N controls the trade-off between source and estimated target statistics and has the intuitive interpretation of a pseudo sample size (p. 117, 14) for samples from the training set. The case N → ∞ ignores the test set statistics and is equivalent to the standard ad hoc scenario while
+N = 0 ignores the training statistics. Supported by empirical and theoretical results (see results section and appendix), we suggest using N ∈ [8, 128] for practical applications with small n < 32. 4 Experimental Setup
+Models. We consider a large range of models (cf. Table 2, §B,E) and evaluate pre-trained variants of DenseNet [15], GoogLeNet [16], Inception and GoogLeNet [17], MNASnet [18], MobileNet [19],
+ResNet [20], ResNeXt [21], ShufﬂeNet [22], VGG [23] and Wide Residual Network [WRN, 24] from the torchvision library [25]. All models are trained on the ILSVRC2012 subset of IN comprised of 1.2 million images in the training and a total of 1000 classes [7, 8]. We also consider a ResNeXt-101 variant pre-trained on a 3.5 billion image dataset and then ﬁne-tuned on the IN training set [26]. We evaluate 3 models from the SimCLRv2 framework [27]. We additionally evaluate the four leading methods from the ImageNet-C leaderboard, namely Stylized ImageNet training [SIN; 28], adversarial noise training [ANT; 29] as well as a combination of ANT and SIN [29], optimized data augmentation using AutoAugment [AugMix; 30, 31] and Assemble Net [32]. For partial adaptation, we choose
+N ∈ {20, · · · , 210} and select the optimal value on the holdout corruption mCE.
+ImageNet-C [IN-C; 2] is comprised of corrupted versions of the 50 000 images in the
+Datasets.
+IN validation set. The dataset offers ﬁve severities per corruption type, for a total of 15 “test” and 4 “holdout” corruptions. ImageNet-A [IN-A; 33] consists of unmodiﬁed real-world images which yield chance level classiﬁcation performance in IN trained ResNet-50 models. ImageNet-V2 [IN-V2; 34] aims to mimic the test distribution of IN, with slight differences in image selection strategies.
+ObjectNet [ON; 35] is a test set containing 50 000 images like IN organized in 313 object classes with 109 unambiguously overlapping IN classes. ImageNet-R [IN-R; 36] contains 30 000 images with various artistic renditions of 200 classes of the original IN dataset. Additional information on the used models and datasets can be found in §B. For IN, we resize all images to 256 × 256px and take the center 224 × 224px crop. For IN-C, images are already cropped. We also center and re-scale the color values with µRGB = [0.485, 0.456, 0.406] and σ = [0.229, 0.224, 0.225]. 5 Results
+Adaptation boosts robustness of a vanilla trained ResNet-50 model. We consider the pre-trained
+ResNet-50 architecture from the torchvision library and adapt the running mean and variance on all corruptions and severities of IN-C for different batch sizes. The results are displayed in Fig. 1 where different line styles of the green lines show the number of pseudo-samples N indicating the 4
+Table 1: Adaptation improves mCE (lower is better) and Top1 accuracy (higher is better) on IN-C for different models and surpasses the previous state of the art without adaptation. We consider n = 8 for partial adaptation.
+Model
+Vanilla ResNet-50
+SIN [28]
+ANT [29]
+ANT+SIN [29]
+AugMix [AM; 30]
+Assemble Net [32]
+DeepAug [36]
+DeepAug+AM [36]
+DeepAug+AM+RNXt101 [36] w/o adapt 76.7 69.3 63.4 60.7 65.3 52.3 60.4 53.6 44.5
+IN-C mCE ((cid:38)) partial adapt 65.0 61.5 56.1 55.3 55.4 – 52.3 48.4 40.7 full adapt 62.2 59.5 53.6 53.6 51.0 50.1 49.4 45.4 38.0
+∆ (−14.5) (−9.8) (−9.8) (−7.0) (−14.3) (−1.2) (−10.9) (−8.2) (−6.6)
+Top1 accuracy ((cid:37)) partial adapt 48.6 51.6 56.1 56.8 56.3 – 59.0 62.2 68.2 full adapt 50.7 53.1 58.0 58.0 59.8 60.8 61.2 64.5 70.3
+∆ (+11.5) (+7.9) (+7.6) (+5.4) (+11.4) (+1.5) (+8.6) (+6.4) (+5.1) w/o adapt 39.2 45.2 50.4 52.6 48.3 59.2 52.6 58.1 65.2 inﬂuence of the prior given by the training statistics. With N = 16, we see that even adapting to a single sample can sufﬁce to increase robustness, suggesting that even the ad hoc evaluation scenario can beneﬁt from adaptation. If the training statistics are not used as a prior (N = 0), then it takes around 8 samples to surpass the performance of the non-adapted baseline model (76.7% mCE). After around 16 to 32 samples, the performance quickly converges to 62.2% mCE, considerably improving the baseline result. These results highlight the practical applicability of batch norm adaptation in basically all application scenarios, independent of the number of available test samples.
+Adaptation consistently improves corruption robustness across IN trained models. To evalu-ate the interaction between architecture and BN adaptation, we evaluate all 25 pre-trained models in the torchvision package and visualize the results in Fig. 2. All models are evaluated with N = 0 and n = 2000. We group models into different families based on their architecture and observe consistent improvements in mCE for all of these families, typically on the order of 10% points. We observe that in both evaluation modes, DenseNets [15] exhibit higher corruption robustness despite having a comparable or even smaller number of trainable parameters than ResNets which are usually considered as the relevant baseline architecture. A take-away from this study is thus that model architecture alone plays a signiﬁcant role for corruption robustness and the ResNet architecture might not be the optimal choice for practical applications.
+Adaptation yields new state of the art on IN-C for robust models. We now investigate if BN adaptation also improves the most robust models on IN-C. The results are displayed in Table 1.
+All models are adapted using n = 50 000 (vanilla) or n = 4096 (all other models) and N = 0.
+The performance of all models is considerably higher whenever the BN statistics are adapted. The
+DeepAugment+AugMix reaches a new state of the art on IN-C for a ResNet-50 architecture of 45.4% mCE. Evaluating the performance of AugMix over the number of samples for adaptation (Fig. 1, we ﬁnd that as little as eight samples are sufﬁcient to improve over AssembleNet [32], the current state-of-the-art ResNet-50 model on IN-C without adaptation. We have included additional results in
+§C. 6 Analysis and Ablation Studies
+Severity of covariate shift correlates with performance degradation. The relationship between the performance degradation on IN-C and the covariate shift suggests an unsupervised way of estimating the classiﬁcation performance of a model on a new corruption. Taking the normalized
+Wasserstein distance (cf. §A) between the statistics of the source and target domains3 computed on all samples with the same corruption and severity and averaged across all network layers, we
+ﬁnd a correlation with the top-1 error (Fig. 3 i–iii) of both non-adapted (i) and fully adapted model (ii) on IN-C corruptions. Within single corruption categories (noise, blur, weather, and digital), the relationship between top-1 error and Wasserstein distance is particularly striking: using linear 3For computing the Wasserstein metric we make the simplifying assumption that the empirical mean and covariances fully parametrize the respective distributions. 5
+100 r o r r e 1
+-p o
+T
+W e t a r e g v a 80 60 40 20 4 2 0 0 (i) µIN, ΣIN on IN-C (ii) µINC, ΣINC on IN-C (iii) µINC, ΣINC on IN 100 80 60 40 20 pred err 11.04 6.97 5.84 11.21 blur digital noise weather 100 80 60 40 20 pred err 5.65 4.14 4.14 7.80 blur digital noise weather pred err 13.43 12.97 13.08 8.98 blur digital noise weather 1 2 avg W (across layers) 3 4 1 5 1 2 3 (iv) 4 (v) 0 5 1 2 avg W (across layers) 3 4 0 1 2 avg W (across layers) 3 4 category blur digital noise weather clean defocus contrast
+Gaussian snow clean test corruptions motion glass pixelate elastic impulse – shot fog frost zoom jpeg brightness holdout
+Gaussian saturate speckle spatter
+Figure 3: The Wasserstein metric between optimal source (IN) and target (IN-C) statistics correlates well with top-1 errors (i) of non-adapted models on IN-C, (ii) of adapted models on IN-C, indicating that even after reducing covariate shift, the metric is predictive of the remaining source–target mismatch (iii) IN-C adapted models on IN, the reverse case of (i). Holdout corruptions can be used to get a linear estimate on the prediction error of test corruptions (tables). We depict input and downsample (iv) as well as bottlneck layers (v) and notice the largest shift in early and late downsampling layers. The metric is either averaged across layers (i–iii) or across corruptions (iv–v).
+Table 2: Improvements from adapting the
+BN parameters vanish for models trained with weakly supervised pre-training.
+Table 3: Fixup and GN trained models perform better than non-adapted BN models but worse than adapted
+BN models.
+ResNeXt101
+IN-C mCE ((cid:38))
+BN+adapt
+BN 66.6 32x8d, IN 51.7 32x8d, IG-3.5B 32x48d, IG-3.5B 45.7 56.7 (−9.9) 51.6 (−0.1) 47.3 (+1.6)
+Model
+Fixup GN
+BN BN+adapt
+IN-C mCE ((cid:38))
+ResNet-50
+ResNet-101
+ResNet-152 72.0 68.2 67.6 72.4 67.6 65.4 76.7 69.0 69.3 62.2 59.1 58.0 regression, the top-1 accuracy of hold-out corruptions can be estimated with around 1–2% absolute mean deviation (cf. §C.5) within a corruption, and with around 5–15% absolute mean deviation when the estimate is computed on the holdout corruption of each category (see Fig. 3, typically, a systematic offset remains). In Fig. 3(iv–v), we display the Wasserstein distance across individual layers and observe that the covariate shift is particularly present in early and late downsampling layers of the ResNet-50.
+Large scale pre-training alleviates the need for adaptation. Computer vision models based on the ResNeXt architecture [21] pretrained on a much larger dataset comprised of 3.5 × 109 Instagram images (IG-3.5B) achieve a 45.7% mCE on IN-C [26, 37]. We re-evaluate these models with our proposed paradigm and summarize the results in Table 2. While we see improvements for the small model pre-trained on IN, these improvements vanish once the model is trained on the full IG-3.5B dataset. This observation also holds for the largest model, suggesting that training on very large datasets might alleviate the need for covariate shift adaptation.
+Group Normalization and Fixup Initialization performs better than non-adapted batch norm models, but worse than batch norm with covariate shift adaptation. So far, we considered image classiﬁcation models with BN layers and concluded that using training dataset statistics in BN generally degrades model performance in out-of-distribution evaluation settings. We now consider models trained without BN and study the impact on corruption robustness, similar to Galloway et al.
+[38]. 6
+ImageNet V1 vs. V2
+ImageNet vs. ObjectNet
+ImageNet-R
+ImageNet
+Threshold
+Top
+Matched r o r r
+E 1 p o
+T 100 80 60 40 20
+ImageNet (1k classes)
+ObjectNet (109 classes)
+Baseline
+Deepaug+AM
+AM 1 8 64
+Batch size 512 4096 1 8 64
+Batch size 512 4096 1 8 64
+Batch size 512 4096
+Figure 4: Batch size vs. performance trade-off for different natural image datasets with no covariate shift (IN,
+IN-V2), complex and shufﬂed covariate shift (ObjectNet), complex and systematic covariate shift (ImageNet-R).
+Straight black lines show baseline performance (no adaptation). ImageNet plotted for reference.
+Table 4: GN and Fixup achieve the best results on
+ObjectNet (ON). After shufﬂing IN-C corruptions,
+BN adaptation does no longer decrease the error.
+Adaptation improves the performance of a vanilla
+ResNet50 on IN-R.
+ResNet50 top-1 top-5
+ON
+Mixed IN-C top-5 top-1
+IN-R top-1
+BN w/o adapt
+BN w/ adapt
+GroupNorm
+Fixup 78.2 76.0 70.8 71.5 60.9 58.9 49.8 51.4 61.1 60.9 57.3 56.8 40.8 40.3 36.0 35.4 63.8 59.9 61.2 65.0
+Table 5: Adaptation improves the performance (top-1 error) of robust models on IN-R (n=2048).
+Model base adapt
+ResNet50
+SIN
+ANT
+ANT+SIN
+AugMix (AM)
+DeepAug (DAug)
+DAug+AM
+DAug+AM+RNXt101 63.8 58.6 61.0 53.8 59.0 57.8 53.2 47.9 59.9 54.2 58.0 52.0 55.8 52.5 48.9 44.0
+∆
+-3.9
+-4.4
+-3.0
+-1.8
+-3.2
+-5.3
+-4.3
+-3.9
+First, using Fixup initialization [39] alleviates the need for BN layers. We train a ResNet-50 model on IN for 100 epochs to obtain a top-1 error of 24.2% and top-5 error of 7.6% (compared to 27.6% reported by Zhang et al. [39] with shorter training, and the 23.9% obtained by our ResNet-50 baseline trained with BN). The model obtains an IN-C mCE of 72.0% compared to 76.7% mCE of the vanilla
+ResNet-50 model and 62.2% mCE of our adapted ResNet-50 model (cf. Table 3). Additionally, we train a ResNet-101 and a ResNet-152 with Fixup initialization with similar results. Second,
+GroupNorm [GN; 40] has been proposed as a batch-size independent normalization technique. We train a ResNet-50, a ResNet-101 and a ResNet-152 architecture for 100 epochs and evaluate them on
+IN-C and ﬁnd results very similar to Fixup.
+Results on other datasets: IN-A, IN-V2, ObjectNet, IN-R We use N = 0 and vary n in all ablation studies in this subsection. The technique does not work for the case of “natural adversarial examples” of IN-A [33] and the error rate stays above 99%, suggesting that the covariate shift introduced in IN-A by design is more severe compared to the covariate shift of IN-C and can not be corrected by merely calculating the correct BN statistics. We are not able to increase performance neither on IN nor on IN-V2, since in these datasets, no domain shift is present by design (see Fig. 4).
+For ON, the performance increases slightly when computing statistics on more than 64 samples. In
+Table 4 (ﬁrst and second column), we observe that the GroupNorm and Fixup models perform better than our BN adaptation scheme: while there is a dataset shift in ON compared to IN, BN adaptation is only helpful for systematic shifts across multiple inputs and this assumption is violated on ON.
+As a control experiment, we sample a dataset “Mixed IN-C” where we shufﬂe the corruptions and severities. In Table 4 (third and fourth column), we now observe that BN adaptation expectedly no longer improves performance. On IN-R, we achieve better results for the adapted model compared to the non-adapted model as well as the GroupNorm and Fixup models, see Table 4 (last column).
+Additionally, on IN-R, we decrease the top-1 error for a wide range of models through adaptation (see 7
+Table 5). For IN-R, we observe performance improvements for the vanilla trained ResNet50 when using a sample size of larger than 32 samples for calculating the statistics (Fig. 4, right-most plot).
+A model for correcting covariate shift effects. We evaluate how the batch size for estimating the statistics at test time affects the performance on IN, IN-V2, ON and IN-R in Fig. 4. As expected, for
+IN the adaptation to test time statistics converges to the performance of the train time statistics in the limit of large batch sizes, see Fig. 4 middle. For IN-V2, we ﬁnd similar results, see Fig. 4 left. This observation shows that (i) there is no systematic covariate shift between the IN train set and the IN-V2 validation set that could be corrected by using the correct statistics and (ii) is further evidence for the i.i.d. setting pursued by the authors of IN-V2. In case of ON (Fig. 4 right), we see slight improvements when using a batch size bigger than 128.
+Figure 5: The bound suggests small optimal N for most param-eters (i) and qualitatively explains our empirical observation (ii).
+Choosing the number of pseudo-samples N offers an intuitive trade-off between estimating accurate target statistics (low N ) and relying on the source statistics (large N ). We propose a simple model to investigate optimal choices for
+N , disregarding all special structure of DNNs, and focusing on the statistical error introduced by estimating ˆµt and ˆσ2 t from a limited number of samples n. To this end, we estimate upper (U ) and lower (L) bounds of the expected squared Wasserstein distance W 2 2 as a function of N and the covariate shift which provides good empirical ﬁts between the estimated W and empirical performance for ResNet-50 for different N (Fig. 5; bottom row). Choosing N such that L or U are minimized (Fig. 5; example in top row) qualitatively matches the values we ﬁnd, see §D for all details.
+Proposition 1 (Bounds on the expected value of the Wasserstein distance between target and com-bined estimated target and source statistics). We denote the source statistics as µs, σ2 s , the true target statistics as µt, σ2 t . For normalization, we take a convex combination of the source statistics and estimated target statistics as discussed in
+Eq. 3. At a conﬁdence level 1 − α, the expectation value of the Wasserstein distance W 2 2 (¯µ, ¯σ, µt, σt) between ideal and estimated target statistics w.r.t. to the distribution of sample mean ˆµt and sample variance ˆσ2 t and the biased estimates of the target statistics as ˆµt, ˆσ2 t is bounded from above and below with L ≤ E[W 2 2 ] ≤ U , where (cid:32)
+L =
+σt − (cid:114) N
+N + n
+σ2 s + n − 1
+N + n
+σ2 t (cid:33)2
++
+U = L + σ5 t (n − 1) 2(N + n)2 (cid:18) N
+N + n
+σ2 s + 1
+N + n
+N 2 (N + n)2 (µt − µs)2 + (cid:19)−3/2 1−α/2,n−1σ2
+χ2 t n (N + n)2 σ2 t
+The quantity χ2 1−α/2,n−1 denotes the left tail value of a chi square distribution with n − 1 degrees of (cid:16) (cid:17)
+X ≤ χ2 1−α/2,n−1
+= α/2 for X ∼ χ2 n−1. Proof: See Appendix §D. freedom, deﬁned as P 7

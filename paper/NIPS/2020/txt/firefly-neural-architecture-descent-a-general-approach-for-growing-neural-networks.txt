@@ -1,0 +1,331 @@
+Abstract
+We propose ﬁreﬂy neural architecture descent, a general framework for progres-sively and dynamically growing neural networks to jointly optimize the networks’ parameters and architectures. Our method works in a steepest descent fashion, which iteratively ﬁnds the best network within a functional neighborhood of the original network that includes a diverse set of candidate network structures. By using Taylor approximation, the optimal network structure in the neighborhood can be found with a greedy selection procedure. We show that ﬁreﬂy descent can
+ﬂexibly grow networks both wider and deeper, and can be applied to learn accu-rate but resource-efﬁcient neural architectures that avoid catastrophic forgetting in continual learning. Empirically, ﬁreﬂy descent achieves promising results on both neural architecture search and continual learning. In particular, on a challenging continual image classiﬁcation task, it learns networks that are smaller in size but have higher average accuracy than those learned by the state-of-the-art methods. 1
+
+Introduction
+Although biological brains are developed and shaped by complex progressive growing processes, most existing artiﬁcial deep neural networks are trained under ﬁxed network structures (or architectures).
+Efﬁcient techniques that can progressively grow neural network structures can allow us to jointly optimize the network parameters and structures to achieve higher accuracy and computational efﬁciency, especially in dynamically changing environments. For instance, it has been shown that accurate and energy-efﬁcient neural network can be learned by progressively growing the network architecture starting from a relatively small network (Liu et al., 2019; Wang et al., 2019). Moreover, previous works also indicate that knowledge acquired from previous tasks can be transferred to new and more complex tasks by expanding the network trained on previous tasks to a functionally-equivalent larger network to initialize the new tasks (Chen et al., 2016; Wei et al., 2016).
+In addition, dynamically growing neural network has also been proposed as a promising approach for preventing the challenging catastrophic forgetting problem in continual learning (Rusu et al., 2016;
+Yoon et al., 2017; Rosenfeld & Tsotsos, 2018; Li et al., 2019).
+⇤Equal contribution. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Unfortunately, searching for the optimal way to grow a network leads to a challenging combinatorial optimization problem. Most existing works use simple heuristics (Chen et al., 2016; Wei et al., 2016), or random search (Elsken et al., 2017, 2018) to grow networks and may not fully unlock the power of network growing. An exception is splitting steepest descent (Liu et al., 2019), which considers growing networks by splitting the existing neurons into multiple copies, and derives a principled functional steepest-descent approach for determining which neurons to split and how to split them.
+However, the method is restricted to neuron splitting, and can not incorporate more ﬂexible ways for growing networks, including adding brand new neurons and introducing new layers.
+In this work, we propose ﬁreﬂy neural architecture descent, a general and ﬂexible framework for progressively growing neural networks. Our method is a local descent algorithm inspired by the typical gradient descent and splitting steepest descent. It grows a network by ﬁnding the best larger networks in a functional neighborhood of the original network whose size is controlled by a step size
+✏, which contains a rich set of networks that have various (more complex) structures, but are ✏-close to the original network in terms of the function that they represent. The key idea is that, when ✏ is small, the combinatorial optimization on the functional neighborhood can be simpliﬁed to a greedy selection, and therefore can be solved efﬁciently in practice.
+The ﬁreﬂy neural architecture descent framework is highly ﬂexible and practical and allows us to derive general approaches for growing wider and deeper networks (Section 2.2-2.3). It can be easily customized to address speciﬁc problems. For example, our method provides a powerful approach for dynamic network growing in continual learning (Section 2.4), and can be applied to optimize cell structures in cell-based neural architecture search (NAS) such as DARTS (Liu et al., 2018b) (Section 3). Experiments show that Fireﬂy efﬁciently learns accurate and resource-efﬁcient networks in various settings. In particular, for continual learning, our method learns more accurate and smaller networks that can better prevent catastrophic forgetting, outperforming state-of-the-art methods such as Learn-to-Grow (Li et al., 2019) and Compact-Pick-Grow (Hung et al., 2019a). 2 Fireﬂy Neural Architecture Descent
+In this section, we start with introducing the general framework (Section 2.1) of ﬁreﬂy neural architecture descent. Then we discuss how the framework can be applied to grow a network both wider and deeper (Section 2.2-2.3). To illustrate the ﬂexibility of the framework, we demonstrate how it can help tackle catastrophic forgetting in continual learning (Section 2.4). 2.1 The General Framework
+We start with the general problem of jointly optimizing neural network parameters and model structures. Let ⌦ be a space of neural networks with different parameters and structures (e.g., networks of various widths and depths). Our goal is to solve arg min f
+L(f ) s.t. f
+⌦, C(f ) 2
+
+⌘
+, (1) n o where L(f ) is the training loss function and C(f ) is a complexity measure of the network struc-ture that reﬂects the computational or memory cost. This formulation poses a highly challenging optimization problem in a complex, hierarchically structured space.
+We approach (1) with a steepest descent type algorithm that generalizes typical parametric gradient descent and the splitting steepest descent of Liu et al. (2019), with an iterative update of the form ft+1 = arg min f
+L(f ) s.t. f 2
+@(ft,✏ ),
+C(f )
+
+C(ft) + ⌘t
+, (2) n o where we ﬁnd the best network ft+1 in neighborhood set @(ft,✏ ) of the current network ft in ⌦, whose complexity cannot exceed that of ft by more than a threshold ⌘t. Here @(ft,✏ ) denotes a neighborhood of ft of “radius” ✏ such that f (x) = ft(x) + O(✏) for
+@(ft,✏ ). ✏ can be viewed as a small step size, which ensures that the network changes smoothly across iterations, and importantly, allows us to use Taylor expansion to signiﬁcantly simplify the optimization (2) to yield practically efﬁcient algorithms. 2 8 f
+The update rule in (2) is highly ﬂexible and reduces to different algorithms with different choices of ⌘t and @(ft,✏ ). In particular, when ✏ is inﬁnitesimal, by taking ⌘t = 0 and @(ft,✏ ) the typical 2
+Algorithm 1 Fireﬂy Neural Architecture Descent
+Input: Loss function L(f ); initial small network f0; search neighborhood @(f, ✏); maximum
+⌘t} increase of size
+.
+{
+Repeat: At the t-th growing phase: 1. Optimize the parameter of ft with ﬁxed structure using a typical optimizer for several epochs. 2. Minimize L(f ) in f
+@(f, ✏) without the complexity constraint (see e.g., (4)) to get a large
+“over-grown” network ˜ft+1 by performing gradient descent. 3. Select the top ⌘t neurons in ˜ft+1 with the highest importance measures to get ft+1 (see (5)). 2
+Euclidean ball on the parameters, (2) reduces to standard gradient descent which updates the network parameters with architecture ﬁxed. However, by taking ⌘t > 0 and @(ft,✏ ) a rich set of neural networks with different, larger network structures than ft, we obtain novel architecture descent rules that allow us to incrementally grow networks.
+In practice, we alternate between parametric descent and architecture descent according to a user-deﬁned schedule (see Algorithm 2.1). Because architecture descent increases the network size, it is called less frequently (e.g., only when a parametric local optimum is reached). From the optimization perspective, performing architecture descent allows us to lift the optimization into a higher dimensional space with more parameters, and hence escape local optima that cannot be escaped in the lower dimensional space (of the smaller models).
+In the sequel, we instantiate the neighborhood @(ft,✏ ) for growing wider and deeper networks, and for continual learning, and discuss how to solve the optimization in (2) efﬁciently in practice. 2.2 Growing Network Width
+We discuss how to deﬁne @(ft,✏ ) to progressively build increasingly wider networks, and then introduce how to efﬁciently solve the optimization in practice. We illustrate the idea with two-layer networks, but extension to multiple layers works straightforwardly. Assume ft is a two-layer neural m network (with one hidden layer) of the form ft(x) = i=1  (x, ✓i), where  (x, ✓i) denotes its i-th neuron with parameter ✓i and m is the number of neurons (a.k.a. width). There are two ways to introduce new neurons to build a wider network, including splitting existing neurons in ft and introducing brand new neurons; see Figure 1.
+P 2 into a set of neurons
+✓i`}
+` wi` (x, ✓i`). We shall require that
+Splitting Existing Neurons Following Liu et al. (2019), an essential approach to growing neural networks is to split the neurons into a linear combination of multiple similar neurons. Formally, wi`} amounts to replacing  (x, ✓i) splitting a neuron ✓i in ft with
+` so that the
+✏,
+✓i`  
+` wi` = 1 and k new network is ✏-close to the original network. As argued in Liu et al. (2019), when ft reaches a 0, it is sufﬁcient to consider a simple binary splitting scheme, parametric local optimum and wi`   which splits a neuron ✓i into two equally weighted copies along opposite update directions, that is,
+ (x, ✓i)
+, where  i denotes the update direction. with weights k2 
+✏ i)
+P
+P 8
+{
+{
+✓ 1 2
+)
+ (x, ✓i + ✏ i) +  (x, ✓i  
+ 
+ 
+Growing New Neurons Splitting the existing neurons yields a “local” change because the param-eters of the new neurons are close to that of the original neurons. A way to introduce “non-local” updates is to add brand new neurons with arbitrary parameters far away from the existing neurons.
+This is achieved by replacing ft with ft(x) + ✏ (x,  ), where   now denotes a trainable parameter of the new neuron and the neuron is multiplied by ✏ to ensure the new network is close to ft in function. i  (x; ✓i) wider, the neighborhood set @(ft,✏ ) can include functions of
+Overall, to grow ft(x) = the form f", (x) =
+ (x, ✓i + "i i) +  (x, ✓i  
+P m 1 2 i=1
+X
+⇣ m+m0
+"i i)
++
+"i (x,  i),
+⌘ i=m+1
+X where we can potentially split all the neurons in ft and add upto m0 new non-local neurons (m0 is a hyperparameter). Whether each new neuron will eventually be added is controlled by an 2A neuron is determined by both   and ✓. But since   is ﬁxed under our discussion, we abuse the notation and use ✓ to represent a neuron. 3
+existing neurons splitted neurons new neurons original network i. split existing neurons ii. grow new neurons iii. grow new layers
+Figure 1: An illustration of three different growing methods within ﬁreﬂy neural architecture descent.
+Both   and h are trainable perturbations.
+✏. If "i = 0, it means the corresponding new neuron individual step-size "i that satisﬁes is not introduced. Therefore, the number of new neurons introduced in f",  equals the `0 norm
+" k
+Under this setting, the optimization in (2) can be framed as
+I("i = 0). Here " = ["i]m+m0 and   = [ i]m+m0 k0 := m+m0 i=1
+"i| i=1 i=1
+|
+.
+P min
+", 
+L(f", ) s.t.
+"
+⌘t, k0 
+" k k 1 k2,
+  k where k1  n
+ ik2, which is constructed to prevent
+= maxi k o
+ ik2 from becoming arbitrarily large. k
+Optimization It remains to solve the optimization in (3), which is challenging due to the `0 constraint on ". However, when the step size ✏ is small, we can solve it approximately with a simple two-step method: we ﬁrst optimize   and " while dropping the `0 constraint, and then re-optimize " with Taylor approximation on the loss, which amounts to simply picking the new neurons with the largest contribution to the decrease of loss, measured by the gradient magnitude. 1  k 1
+, (3)
+✏,
+  k2,
+Step One. Optimizing   and " without the sparsity constraint
+⌘t, that is,
+[ ˜", ˜ ] = arg min
+", 
+L(f", ) s.t.
+" k k1  n
+" k
+✏, k0 
+  k k2, 1  o 1
+. (4)
+In practice, we solve the optimization with gradient descent by turning the constraint into a penalty.
+Because ✏ is small, we only need to perform a small number of gradient descent steps.
+Step Two. Re-optimizing " with Taylor approximation on the loss. To do so, note that when ✏ is small, we have by Taylor expansion:
+L(f", ˜ ) = L(f ) +
+"isi + O(✏2), si = m+m0
+˜"i 0 r⇣i L(f[ ˜"
+¬ i,⇣i], ˜ )d⇣i, 1
+˜"i Z i=1
+X where [ ˜" i,⇣ i] denotes replacing the i-th element of ˜" with ⇣i, and si is an integrated gradient
+¬ that measures the contribution of turning on the i-th new neuron. In practice, we approximate the 1 integration in si by discrete sampling: si ⇡ 1)/2n˜"i n and n a small integer (e.g., 3). Therefore, optimizing " with ﬁxed   = ˜  can be approximated by
+P i,cz], ˜ ) with cz = (2z z=1 rcz L(f[ ˜"
+  n
+¬ m+m0 n i=1
+X
+ˆ" = arg min
+"
+"isi s.t.
+" k k0 
+⌘t,
+" k k1 
+✏
+. (5) o si| is the increasing ordering of
+. Precisely, we have ˆ"i =
+It is easy to see that ﬁnding the optimal solution reduces to selecting the neurons with the largest s(1)| gradient magnitude s(2)|· · ·
+|
+It is possible to further re-optimize   with ﬁxed " and repeat the alternating optimization iteratively.
+However, performing the two steps above is computationally efﬁcient and already solves the problem reasonably well as we observe in practice. si| |
+. Finally, we take ft+1 = f ˆ", ˜ .
+) sign(si), where s(⌘t)| si|}
+✏ I(
+ 
+{|
+|
+|
+|
+Remark When we include only neural splitting in @(ft,✏ ), our method is equivalent to splitting steepest descent (Liu et al., 2019), but with a simpler and more direct gradient-based optimization rather than solving the eigen-problem in Liu et al. (2019); Wang et al. (2019). 4
+2.3 Growing New Layers
+We now introduce how to grow new layers under our framework. The idea is to include in @(ft,✏ ) deeper networks with extra trainable residual layers and to select the layers (and their neurons) that contribute the most to decreasing the loss using the similar two-step method described in Section 2.2.
+Assume ft is a d-layer deep neural network of form ft = gd  · · ·  composition. In order to grow new layers, we include in @(ft,✏ ) functions of the form denotes function g1, where
+  m0 f",  = gd   (I + hd 1)
+ 
+· · · (I + h2) g2  
+  (I + h1)
+  g1, with
+) = h`(
+·
+"`i (
+·
+,  `i), i=1
+X in which we insert new residual layers of form I + h`; here I is the identity map, and h` is a layer that can consist of upto m0 newly introduced neurons. Each neuron in h` is associated with a
+✏, ✏]. As before, the (`i)-th neuron is turned off
+[ trainable parameter  `i and multiplied by "`i 2
+ 
+[1, m0]. Therefore, the number if "`i = 0, and the whole layer h` is turned off if "`i = 0 for all i of new neurons introduced in f",  equals
+= 0), and the number of new layers
+" k0 := k
+= 0). Because adding new neurons and new layers have
+"`i|6
+,0 := added equals different costs, they can be controlled by two separate budget constraints (denoted by ⌘⌘t,0 and ⌘t,1, respectively). Then the optimization of the new network can be framed as
+` I(maxi | i` I(✏i` 6
+" k k1
+P
+P 2
+" k
+⌘t,0, k0  min
+", 
+L(f", ) s.t.
+" k
+ `ik2. This optimization can be solved with a similar two-step method to where the one for growing width, as described in Section 2.2: we ﬁrst ﬁnd the optimal [˜✏, ˜ ] without the
+⌘t,1), and then re-optimize " with a Taylor
+" complexity constraints (including k0, k approximation of the objective: n
+= max`,i k k1  k0 
+,0  1  1 
+⌘t,0,
+⌘t,1,
+" k
+  k
+  k k2, k2, k1
+✏, o 1
+" k 1
+, min
+"
+⇢ X`i
+✏`is`i s.t.
+" k k0 
+⌘t,0,
+" k k1
+The solution can be obtained by sorting
+| until the complexity constraint is violated. sti|
+,0 
+⌘t,1
+, where s`i = 1
+˜"`i Z in descending order and select the top-ranked neurons 0 r⇣`i L(f[ ˜"
+`i,⇣`i], ˜ )d⇣`i.
+ 
+¬
+˜"`i
+Remark In practice, we can apply all methods above to simultaneously grow the network wider and deeper. Fireﬂy descent can also be extended to various other growing settings without case-by-case mathematical derivation. Moreover, the space complexity to store all the intermediate variables is (N + m0), where N is the size of the sub-network we consider expanding and m0 is the number of
+O new neuron candidates.3 2.4 Growing Networks in Continual Learning
+Continual learning (CL) studies the problem of learning a sequence of different tasks (datasets) that arrive in a temporal order, so that whenever the agent is presented with a new task, it no longer has access to the previous tasks. As a result, one major difﬁculty of CL is to avoid catastrophic forgetting, in that learning the new tasks severely interferes with the knowledge learned previously and causes the agent to “forget” how to do previous tasks. One branch of approaches in CL consider dynamically growing networks to avoid catastrophic forgetting (Rusu et al., 2016; Li & Hoiem, 2017; Yoon et al., 2017; Li et al., 2019; Hung et al., 2019a). However, most existing growing-based CL methods use hand-crafted rules to expand the networks (e.g. uniformly expanding each layer) and do not explicitly seek for the best growing approach under a principled optimization framework. We address this challenge with the Fireﬂy architecture descent framework.
+Let Dt be the dataset appearing at time t and ft be the network trained for Dt. At each step t, we t maintain a master network f1:t consisting of the union of all the previous networks s=1, such that each fs can be retrieved by applying a proper binary mask. When a new task Dt+1 arrives, we construct ft+1 by leveraging the existing neurons in f1:t as much as possible, while adding a controlled number of new neurons to capture the new information in Dt+1. fs}
+{ 3Because all we need to store is the gradient, which is of the same size as the original parameters. 5
+task t+1 mask task 1:t weights task t+1 weights learnable weights locked neurons  unlocked neurons new neurons if cannot solve task t+1 new unlock network train on task t+1 growing network 
+Figure 2: Illustration of how Fireﬂy grows networks in continual learning.
+Speciﬁcally, we design ft+1 to include three types of neurons (see Figure 2): 1) Old neurons from f1:t, whose parameters are locked during the training of ft+1 on the new task Dt+1. This does not introduce extra memory cost. 2) Old neurons from ft, whose parameters are unlocked and updated during the training of ft+1 on Dt+1. This introduces new neurons and hence increases the memory size. It is similar to network splitting in Section 2.2 in that the new neurons are evolved from an old neuron, but only one copy is generated and the original neuron is not discarded. 3) New neurons introduced in the same way as in Section 2.2,4 which also increases the memory cost. Overall, assuming f1:t(x) = m i=1  (x; ✓i), possible candidates of ft+1 indexed by ",   are of the form:
+P m m+m0 f", (x) =
+ (x; ✓i + "i i) +
+"i (x;  i), i=1
+X i=m+1
+X
+[
+ 
+✏, ✏] again controls if the corresponding neuron is locked or unlocked (for i where "i 2
+[m]), or if the new neuron should be introduced (for i > m). The new neurons introduced into the memory
+= 0). The optimization of ft+1 can be framed as k0 =
+" are k m+m0 i=1
+I(" 2
+P ft+1 = arg min
+", 
+L(f", ; Dt+1) s.t.
+" k k0 
+⌘t,
+" k k1 
+✏,
+  k k2, 1  1
+, o n
+Dt+1) denotes the training loss on dataset Dt+1. The same two-step method in Section where L(f ; 2.2 can be applied to solve the optimization. After ft+1 is constructed, the new master network f1:t+1 is constructed by merging f1:t and ft+1 and the binary masks of the previous tasks are updated accordingly. See Appendix A for the detailed algorithm. 3 Empirical Results
+We conduct four sets of experiments to verify the effectiveness of ﬁreﬂy neural architecture descent.
+In particular, we ﬁrst demonstrate the importance of introducing additional growing operations beyond neuron splitting (Liu et al., 2019) and then apply the ﬁreﬂy descent to both neural architecture search and continual learning problems. In both applications, ﬁreﬂy descent ﬁnds competitive but more compact networks in a relatively shorter time compared to state-of-the-art approaches.
+Toy RBF Network We start with growing a toy single-layer network to demonstrate the importance of introducing brand new neurons over pure neuron splitting. In addition, we show the local greedy selection in ﬁreﬂy descent is efﬁcient by comparing it against random search. Speciﬁcally, we adopt a simple two-layer radial-basis function (RBF) network with one-dimensional input and compare various methods that grow the network gradually from 1 to 10 neurons. The training data consists of 1000 data points from a randomly generated RBF network. We consider the following methods: Firefly: ﬁreﬂy descent for growing wider by splitting neuron and adding upto m0 = 5 brand new neurons; Firefly (split): ﬁreﬂy descent for growing wider with only neuron splitting (e.g., m0 = 0); Splitting: the steepest splitting descent of Liu et al. (2019);
+RandSearch (split): randomly selecting one neuron and splitting in a random direction, repeated k times to pick the best as the actual split; we take k = 3 to match the time cost with our method; 4It is also possible to introduce new layers for continual learning, which we leave as an interesting direction for future work. 6 6
+(a) s s o
+L n i a r
+T 0.20 0.15 0.10 0.05 0.00
+SFratFh
+RandSearFh (split)
+Splitting
+)irefly (split)
+RandSearFh (split+new)
+)irefly 2 4 6 8 10 (neurons) (b) 0.20 0.15 0.10 0.05 0.00 (m'=0) (m'=1) (m'=2) (m'=5) (m'=10) 2 4 6 8 10 (neurons)
+Figure 3: (a) Average training loss of different growing methods versus the number of grown neurons. (b) Fireﬂy descent with different numbers of new neuron candidates.
+RandSearch (split+new): the same as RandSearch (split) but with 5 randomly initialized brand new neurons in the candidate during the random selecting; Scratch: training networks with
+ﬁxed structures starting from scratch. We repeat each experiment 20 times with different ground-truth
+RBF networks and report the mean training loss in Figure 3(a).
+As shown in Figure 3 (a), the methods with pure neuron splitting (without adding brand new neurons) can easily get stuck at a relatively large training loss and splitting further does not help escape the local minimum. In comparison, all methods that introduce additional brand new neurons can optimize the training loss to zero. Moreover, Firefly grows neural network the better than random search under the same candidate set of growing operations.
+We also conduct a parameter sensitivity analysis on m0 in Figure 3(b), which shows the result of
+Firefly as we change the number m0 of the brand new neurons. We can see that the performance improves signiﬁcantly by even just adding one brand new neuron in this case, and the improvement saturates when m0 is sufﬁciently large (m0 = 5 in this case).
+Growing Wider and Deeper Networks We test the effectiveness of ﬁreﬂy descent for both grow-ing network width and depth. We use VGG-19 (Simonyan & Zisserman, 2014) as the backbone network structure and compare our method with splitting steepest descent (Liu et al., 2019), Net2Net (Chen et al., 2016) which grows networks uniformly by randomly selecting the existing neurons in each layer, and neural architecture search by hill-climbing (NASH) (Elsken et al., 2017), which is a random sampling search method using network morphism on CIFAR-10. For Net2Net, the network is initialized as a thinner version of VGG-19, whose layers are 0.125 the original sizes. For splitting steepest descent, NASH, and our method, we initialize the VGG-19 with 16 channels in each layer.
+For ﬁreﬂy descent, we grow a network by both splitting existing neurons and adding brand new neurons for widening the network; we add m0 = 50 brand new neurons and set the budget to grow the size by 30% at each step of our method. See Appendix B.2 for more information on the setting.
+⇥ (a) 94 y c a r u c c
+A 92 90 88 0.04 0.02 0.00
+−0.02 (b) 1500 1378.9
+NHt2NHt
+Splitting
+FirHfly e m
+NASH
+BasHlinH T
+) s ( i 1000 500 3000 2000 402.83 1000 1Ht21Ht
+SSlitting 1ASH
+FirHfly 123.78 2% 4%
+−0.04 6% 8% 10% (size of full model) 1Ht21Ht SSlitting 1ASH
+FirHfly 1Ht21Ht SSlitting 1ASH
+FirHfly
+Figure 4: (a) Results of growing increasingly wider networks on CIFAR-10; VGG-19 is used as the backbone. (b) Computation time spent on growing for different methods.
+−0.04
+−0.02 0.00 0.02 0.04
+Figure 4 (a) shows the test accuracy, where the x-axis is the percentage of the grown model’s size over the standard VGG-19. We can see that the proposed method clearly outperforms the splittting steepest descent and Net2Net. In particular, we achieve comparable test accuracy as the full model with only 4% of the full model’s size. Figure 4(b) shows the average time cost of each growing method for one step, we can see that Firefly performs much faster than splitting the steepest descent and NASH.
+We also applied our method to gradually grow new layers in neural networks, we compare our method with NASH (Elsken et al., 2017) and AutoGrow (Wen et al., 2019). Due to the page limit, we defer the detailed results to Appendix B.2.
+Cell-Based Neural Architecture Search Next, we apply our method as a new way for improving cell-based Neural Architecture Search (NAS) (e.g. Zoph et al., 2018; Liu et al., 2018a; Real et al., 7    
+(a) 85 75 65 y c a r u c c
+A 55 0 0.04 0.02 0.00
+−0.02
+−0.04
+EWC
+DEN
+RCL
+LeDrn-to-Grow
+CPG
+FireFly 5 7 9 11 (MParams) (b) y c a r u c c
+A 92 90 88
+InGiviGual
+CPG
+FireIly 0.04 0.02 0.00
+−0.02
+−0.04 15 20 (task) 5 10
+−0.04
+−0.02 0.00 0.02 0.04
+−0.04
+−0.02 0.00 0.02 0.04
+Figure 5: (a) Average accuracy on 10-way split of CIFAR-100 under different model size. We compare against Elastic Weight Consolidation (EWC) (Kirkpatrick et al., 2017), Dynamic Expandable Network (DEN) (Yoon et al., 2017), Reinforced Continual Learning (RCL) (Xu & Zhu, 2018) and Compact-Pick-Grow (CPG) (Hung et al., 2019a). (b) Average accuracy on 20-way split of CIFAR-100 dataset over 3 runs. Individual means train each task from scratch using the Full VGG-16. 2019). The idea of cell-based NAS is to learn optimal neural network modules (called cells), from a predeﬁned search space, such that they serve as good building blocks to composite complex neural networks. Previous works mainly focus on using reinforcement learning or gradient based methods to learn a sparse cell structure from a predeﬁned parametric template. Our method instead gradually grows a small parametric template during training and obtains the ﬁnal network structure according to the growing pattern.
+Following the setting in DARTS (Liu et al., 2018b), we build up the cells as computational graphs whose structure is the directed DAG with 7 nodes. The edges between the nodes are linear combina-tions of different computational operations (SepConv and DilConv of different sizes) and the identity map. To grow the cells, we apply ﬁreﬂy descent to grow the number of channels in each operation by both splitting existing neurons and adding brand new neurons. During search, we compose a network by stacking 5 cells sequentially to evaluate the quality of the cell structures. We train 100 epochs in total for searching, and grow the cells every 10 epochs. After training, the operation with the largest number of channels on edge is selected into the ﬁnal cell structure. In addition, if the operations on the same edge all only grow a small amount of channels compared with the initial setting, we select the Identity operation instead. The network that we use in the ﬁnal evaluation is a larger network consisting of 20 sequentially stacked cells. More details of the experimental setup can be found in
+Appendix B.3.
+Table 1 reports the results comparing Firefly with several NAS baselines. Our method achieves a similar or better performance comparing with those RL-based and gradient-based methods like
+ENAS or DARTS, but with higher computational efﬁciency in terms of the total search time.
+Method
+NASNet-A (Zoph et al., 2018)
+ENAS (Pham et al., 2018)
+Random Search
+DARTS (ﬁrst order) (Liu et al., 2018b)
+DARTS (second order) (Liu et al., 2018b)
+Firefly
+Search Time (GPU Days) 2000 4 4 1.5 4 1.5
+Param (M) 3.1 4.2 3.2 3.3 3.3 3.3
+Error 2.83 2.91 3.29 3.00 2.76 2.78
+±
+±
+±
+± 0.15 0.14 0.09 0.05
+Table 1: Performance compared with several NAS baseline
+Continual Learning Finally, we apply our method to grow networks for continual learning (CL), and compare with two state-of-the-art methods, Compact-Pick-Grow (CPG) (Hung et al., 2019a) and
+Learn-to-grow (Li et al., 2019), both of which also progressively grow neural networks for learning new tasks. For our method, we grow the networks starting from a thin variant of the original VGG-16 without fully connected layers.
+Following the setting in Learn-to-Grow, we construct 10 tasks by randomly partitioning CIFAR-100 into 10 subsets. Figure 5(a) shows the average accuracy and size of models at the end of the 10 tasks learned by ﬁreﬂy descent, Learn-to-Grow, CPG and other CL baselines. We can see that ﬁreﬂy descent learns smaller networks with higher accuracy. To further compare with CPG, we follow the setting of their original paper (Hung et al., 2019a) and randomly partition CIFAR-100 to 20 subsets of 5 classes to construct 20 tasks. Table 2 shows the average accuracy and size learned at the end of 20 tasks. Extra growing epochs refers to the epochs used for selecting the neurons for the next upcoming tasks, and Individual refers to training a different model for each task. We can see that 8
+ﬁreﬂy descent learns the smallest network that achieves the best performance among all methods.
+Moreover, it is more computationally efﬁcient than CPG when growing and picking the neurons for the new tasks. Figure 5(b) shows the average accuracy over seen tasks on the ﬂy. Again, ﬁreﬂy descent outperforms CPG by a signiﬁcant margin.
+Method
+Individual
+CPG
+CPG w/o FC 5
+Fireﬂy
+Param (M) Extra Growing Epochs Avg. Accuracy (20 tasks) 2565 289 28 26
+-420 420 80 88.85 90.75 90.58 91.03
+Table 2: 20-way split continual image classiﬁcation on CIFAR-100. 4

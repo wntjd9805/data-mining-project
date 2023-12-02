@@ -1,0 +1,145 @@
+Abstract
+The log-likelihood of a generative model often involves both positive and negative terms. For a temporal multivariate point process, the negative term sums over all the possible event types at each time and also integrates over all the possible times.
+As a result, maximum likelihood estimation is expensive. We show how to instead apply a version of noise-contrastive estimation—a general parameter estimation method with a less expensive stochastic objective. Our speciﬁc instantiation of this general idea works out in an interestingly non-trivial way and has provable guarantees for its optimality, consistency and efﬁciency. On several synthetic and real-world datasets, our method shows beneﬁts: for the model to achieve the same level of log-likelihood on held-out data, our method needs considerably fewer function evaluations and less wall-clock time. 1
+
+Introduction
+Maximum likelihood estimation (MLE) is a popular training method for generative models. How-ever, to obtain the likelihood of a generative model given the observed data, one must compute the probability of each observed sample, which often includes an expensive normalizing constant. For example, in a language model, each word is typically drawn from a softmax distribution over a large vocabulary, whose normalizing constant requires a summation over the vocabulary.
+This paper aims to alleviate a similar computational cost for multivariate point processes. These generative models are natural tools to analyze streams of discrete events in continuous time. Their likelihood is improved not only by raising the probability of the observed events, but by lowering the probabilities of the events that were observed not to occur. There are inﬁnitely many times at which no event of any type occurred; to predict these non-occurrences, the likelihood must integrate the inﬁnitesimal event probability for each event type over the entire observed time interval. Therefore, the likelihood is expensive to compute, particularly when there are many possible event types.
+As an alternative to MLE, we propose to train the model by learning to discriminate the observed events from events sampled from a noise process. Our method is a version of noise-contrastive estimation (NCE), which was originally developed for unnormalized (energy-based) distributions and then extended to conditional softmax distributions such as language models. To our best knowl-edge, we are the ﬁrst to extend the method and its theoretical guarantees (for optimality, consistency and efﬁciency) to the context of multivariate point processes. We will also discuss similar efforts in related areas in section 4.
+On several datasets, our method shows compelling results. By evaluating fewer event intensities, training takes much less wall-clock time while still achieving competitive log-likelihood. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+2 Preliminaries 2.1 Event Streams and Multivariate Point Processes
+Given a ﬁxed time interval [0, T ), we may observe an event stream x[0,T ): at each continuous time t, the observation xt is one of the discrete types {∅, 1, . . . , K} where ∅ means no event. An non-∅ observation is called an event. A generative model of an event stream is called a multivariate point process.∗
+We wish to ﬁt an autoregressive probability model to observed event streams. In a discrete-time autoregressive model, events would be generated from left to right, where xt is drawn from a dis-tribution that depends on x0, . . . , xt−1. The continuous-time version still generates events from left to right,1 but at any speciﬁc time t we have p(xt = ∅) = 1, with only an inﬁnitesimal probability of any event. (For a computationally practical sampling method, see section 3.1.) The model is a stochastic process deﬁned by functions λk that determine a ﬁnite intensity λk(t | x[0,t)) ≥ 0 for each event type k (cid:54)= ∅ at each time t > 0. This intensity depends on the history of events x[0,t) that were drawn at times < t. It quantiﬁes the instantaneous rate at time t of events of type k. That is, λk(t | x[0,t)) is the limit as dt →+ 0 of 1 dt times the expected number of events of type k on the interval [t, t + dt), where the expectation is conditioned on the history.
+As the event probabilities are inﬁnitesimal, the times of the events are almost surely distinct. To en-sure that we have a point process, the intensity functions must be chosen such that the total number of events on any bounded interval is almost surely ﬁnite. Models of this form include inhomogeneous
+Poisson processes (Daley & Vere-Jones, 2007), in which the intensity functions ignore the history, as well as (non-explosive) Hawkes processes (Hawkes, 1971) and their modern neural versions (Du et al., 2016; Mei & Eisner, 2017).
+Most models use intensity functions that are continuous between events. Our analysis requires only
+Assumption 1 (Continuity). For any event stream x[0,T ) and event type k ∈ {1, . . . , K}, λk(t | x[0,t)) is Riemann integrable, i.e., bounded and continuous almost everywhere w.r.t. time t. 2.2 Maximum Likelihood Estimation: Usefulness and Difﬁculties
+In practice, we parameterize the intensity functions by θ. We write pθ for the resulting probability density over event streams. When learning θ from data, we make the conventional assumption that the true point process p∗ actually falls into the chosen model family:
+Assumption 2 (Existence). There exists at least one parameter vector θ∗ such that pθ∗ = p∗.
+Then as proved in Appendix A, such a θ∗ can be found as an argmax of (cid:2)log pθ(x[0,T ))(cid:3)
+JLL(θ) def= Ex[0,T )∼p∗ (1)
+Given assumption 1, the θ values that maximize JLL(θ) are exactly the set Θ∗ of values for which pθ = p∗: any θ for which pθ (cid:54)= p∗ would end up with a strictly smaller JLL(θ) by increasing the cross entropy −p∗ log pθ over some interval (t, t(cid:48)) for a set of histories with non-zero measure.
+If we modify equation (1) to take the expectation under the empirical distribution of event streams x[0,T ) in the training dataset, then JLL(θ) is proportional to the log-likelihood of θ. For any x[0,T ) that satisﬁes the condition in assumption 1, the log-density used in equation (1) can be expressed in terms of λk(t | x[0,t)): log pθ(x[0,T )) = (cid:88) t:xt(cid:54)=∅ log λxt(t | x[0,t)) − (cid:90) T
+K (cid:88) t=0 k=1
+λk(t | x[0,t))dt (2)
+Notice that the second term lacks a log. It is expensive to compute in the following cases:
+• The total number of event types K is large, making (cid:80)K
+• The integral (cid:82) T t=0 is slow to estimate well, e.g., via a Monte Carlo estimate T where each tj is randomly sampled from the uniform distribution over [0, T ). k=1 slow. (cid:80)J j=1
+J (cid:80)K k=1 λk(tj)
+• The chosen model architecture makes it hard to parallelize the λk(tj) computation over j and k.
+∗This paper uses endnotes instead of footnotes. They are found at the start of the supplementary material. 2
+2.3 Noise-Contrastive Estimation in Discrete Time
+For autoregressive models of discrete-time sequences, a similar computational inefﬁciency can be tackled by applying the principle of noise-contrastive estimation (Gutmann & Hyv¨arinen, 2010), def= x0x1 . . . xt−1 in training data, NCE trains the model pθ to as follows. For each history x0:t discriminate the actually observed datum xt from some noise samples whose distribution q is known.
+The intuition is: optimal performance is obtained if and only if pθ matches the true distribution p∗.
+More precisely, given a bag {x0 t }, where exactly one element of the bag was drawn from p∗ and the rest drawn i.i.d. from q, consider the log-posterior probability (via Bayes’ Theorem2) that t was the one drawn from p∗: x0 p∗(x0 m=0 p∗(xm
+The “ranking” variant of NCE (Jozefowicz et al., 2016) substitutes pθ for p∗ in this expression, and seeks θ (e.g., by stochastic gradient ascent) to maximize the expectation of the resulting quantity when x0 t are drawn i.i.d. from q(· | x0:t). t is a random observation in training data,3 x0:t is its history, and x1 t |x0:t) (cid:81)M t |x0:t) (cid:81) m=1 q(xm m(cid:48)(cid:54)=m q(xm(cid:48) t , . . . , xM t , . . . , xM t , x1 t |x0:t)
+|x0:t) log (3) (cid:80)M t
+This objective is really just conditional maximum log-likelihood on a supervised dataset of (M +1)-way classiﬁcation problems. Each problem presents an unordered set of M + 1 samples—one drawn from p∗ and the others drawn i.i.d. from q. The task is to guess which sample was drawn from p∗. Conditional MLE trains θ to maximize (in expectation) the log-probability that the model assigns to the correct answer. In the inﬁnite-data limit, it will ﬁnd θ (if possible) such that these log-probabilities match the true ones given by (3). For that, it is sufﬁcient for θ to be such that pθ = p∗.
+Given assumption 2, Ma & Collins (2018) show that pθ = p∗ is also necessary, i.e., the NCE task is sufﬁcient to ﬁnd the true parameters. Although the NCE objective does not learn to predict the full observed sample xt as MLE does, but only to distinguish it from the M noise samples, their theorem implies that in expectation over all possible sets of M noise samples, it actually retains all the information (provided that M > 0 and q has support everywhere that p∗ does).
+This NCE objective is computationally cheaper than MLE when the distribution pθ(· | x0:t) is a softmax distribution over {1, . . . , K} with large K. The reason is that the expensive normalizing constants in the numerator and denominator of equation (3) need not be computed. They cancel out because all the probabilities are conditioned on the same (actually observed) history. 3 Applying Noise-Contrastive Estimation in Continuous Time
+The expensive (cid:82) (cid:80) term in equation (2) is rather similar to a normalizing constant,4 as it sums over non-occurring events. We might try to avoid computing it5 by discretizing the time interval [0, T ) into ﬁnitely many intervals of width ∆ and applying NCE. In this case, we would be distinguishing the true sequence of events on an interval [i∆, (i + 1)∆) from corresponding noise sequences on the same interval, given the same (actually observed) history x[0,i∆). Unfortunately, the distribution pθ(· | x[0,i∆)) in the objective still involves an (cid:82) (cid:80) term where the integral is over [i∆, (i + 1)∆) and the inner sum is over k. The solution is to shrink the intervals to inﬁnitesimal width dt. Then our log-posterior over each of them becomes log pθ(x0 m=0 pθ(xm
+[t,t+dt) | x0
+[t,t+dt) | x0
+[0,t)) (cid:81)M
+[0,t)) (cid:81) m=1 q(x0 m(cid:48)(cid:54)=m q(xm(cid:48)
+[t,t+dt) | x0
+[t,t+dt) | x0
+[0,t))
+[0,t)) (cid:80)M (4) t , x1 t , . . . , xM
+We will deﬁne the noise distribution q in terms of ﬁnite intensity functions λq k, like the ones λk that deﬁne pθ. As a result, at a given time t, there is only an inﬁnitesimal probability that any of
+{x0 t } is an event. Nonetheless, at each time t ∈ [0, T ), we will consider generating a noise event (for each m > 0) conditioned on the actually observed history x[0,t). Among these t (cid:54)= ∅ (the observed events), or where uncountably many times t, we may have some for which x0 xm t (cid:54)= ∅ for some 1 ≤ m ≤ M (the noise events).
+Almost surely, the set of times t with a real or noise event remains ﬁnite. Our NCE objective is the expected sum of equation (4) over all such times t in an event stream, when the stream is drawn uniformly from the set of streams in the training dataset—as in section 6—and the noise events are then drawn as above. 3
+Our objective ignores all other times t, as they provide no information about θ. After all, when x0 t = · · · = xM t is the one drawn from the true model must be 1/(M + 1) by symmetry, regardless of θ. At these times, the ratio in equation (4) does reduce to 1/(M + 1), since all probabilities are 1. t = ∅, the probability that x0 t , . . . , xM t
+At the times t that we do consider, how do we compute equation (4)? Almost surely, exactly one is an event k for some k (cid:54)= ∅. As a result, exactly one factor in each product is of x0 inﬁnitesimal (dt times the λk or λq k intensity), and the other factors are 1. Thus, the dt factors cancel out between numerator and denominator, and equation (4) simpliﬁes to log
+λk(t|x0
+λk(t|x0
+[0,t))
+[0,t))+M λq k(t|x0
+[0,t)) if x0 t = k and log
+λq k(t|x0
+[0,t))
+[0,t))+M λq k(t|x0
+[0,t)) if x0 t = ∅
+λk(t|x0 (5)
+If x0
+When a gradient-based optimization method adjusts θ to increase equation (5), the intuition is as t = k, the model intensity λk(t) is increased to explain why an event of type k follows. t = ∅, the model intensity λk(t) is decreased to explain why occurred at this particular time t. If x0 an event of type k did not actually occur at time t (it was merely a noise event xm t = k, for some m (cid:54)= 0). These cases achieve the same qualitative effects as following the gradients of the ﬁrst and second terms, respectively, in the log-likelihood (2).
+Our full objective is an expectation of the sum of ﬁnitely many such log-ratios:6
+JNC(θ) def= E
+[0,T )∼p∗,x1:M x0
+[0,T )∼q
+
+ (cid:88) t:x0 t (cid:54)=∅ log
+λx0 t
+λx0 t (t|x0 (t|x0
+[0,t))
+[0,t)) +
+M (cid:88) (cid:88) m=1 t:xm t (cid:54)=∅ log
+λq xm t
+λxm t (t|x0 (t|x0
+[0,t))
+[0,t))
+
+ (6) k(t | x0
+[0,t)) + M λq
+[0,T ) from the training dataset, then draw noise events x1:M
+[0,t)) def= λk(t | x0 where λk(t | x0
+[0,t)). The expectation is estimated by sampling: we draw an observed stream x0
+[0,T ) from q conditioned on the preﬁxes (histories) given by this observed stream, as explained in the next section. Given these samples, the bracketed term is easy to compute (and we then use backprop to get its gradient w.r.t. θ, which is a stochastic gradient of the objective (6)). It eliminates the (cid:82) (cid:80) of equation (2) as desired, replacing it with a sum over the noise events. For each real or noise event, we compute only two intensities—the true and noise intensities of that event type at that time. 3.1 Efﬁcient Sampling of Noise Events
+The thinning algorithm (Lewis & Shedler, 1979; Liniger, 2009) is a rejection sampling method for drawing an event stream over a given observation interval [0, T ) from a continuous-time autoregres-sive process. Suppose we have already drawn the ﬁrst i − 1 times, namely t1, . . . , ti−1. For every future time t ≥ ti−1, let H(t) denote the context x[0,t) consisting only of the events at those times, and deﬁne λ(t | H(t)) def= (cid:80)K k=1 λk(t | H(t)). If λ(t | H(t)) were constant at λ, we could draw the next event time as ti ∼ ti−1 + Exp(λ). We would then set xt = ∅ for all of the intermediate times t ∈ (ti−1, ti), and ﬁnally draw the type xti of the event at time ti, choosing k with probability
+λk(ti | H(t)) / λ. But what if λ(t | H(t)) is not constant? The thinning algorithm still runs the foregoing method, taking λ to be any upper bound: λ ≥ λ(t | H(t)) for all t ≥ ti−1. In this case, there may be “leftover” probability mass not allocated to any k. This mass is allocated to ∅. A draw of xti = ∅ means there was no event at time ti after all (corresponding to a rejected proposal). Ei-ther way, we now continue on to draw ti+1 and xti+1, using a version of H(t) that has been updated to include the event or non-event xti. The update to H(t) affects λ(t | H(t)) and the choice of λ.
+How to sample noise streams. To draw a stream xm
+[0,t) of noise events, we run the thinning al-gorithm, using the noise intensity functions λq k. However, there is a modiﬁcation: H(t) is now deﬁned to be x0
+[0,t)—the history from the observed event stream, rather than the previously sampled noise events—and is updated accordingly. This is because in equation (6), at each time t, all of
+{x0 t } are conditioned on x0
+[0,t) (akin to the discrete-time case).7 The full pseudocode is given in Algorithm 1 in the supplementary material. t , . . . , xM t , x1
+Coarse-to-ﬁne sampling of event types. Although our NCE method has eliminated the need to integrate over t, the thinning algorithm above still sums over k in the deﬁnition of λq(t | H(t)).
+For large K, this sum is expensive if we take the noise distribution on each training minibatch to 4
+be, for example, the pθ with the current value of θ. That is a statistically efﬁcient choice of noise distribution, but we can make a more computationally efﬁcient choice. A simple scheme is to ﬁrst generate each noise event with a coarse-grained type c ∈ {1, . . . , C}, and then stochastically choose a reﬁnement k ∈ {1, . . . , K}:
+λq k(t | x0
+[0,t)) def=
+C (cid:88) c=1 q(k | c)λq c (t | x0
+[0,t)) for k = 1, 2, . . . , K (7) c=1 λq
+This noise model is parameterized by the functions λq c and the probabilities q(k | c). The total intensity is now λq(t | H(t)) = (cid:80)C c (t), so we now need to examine only C intensity functions, not K, to choose λ in the thinning algorithm. If we partition the K types into C coarse-grained clusters (e.g., using domain knowledge), then evaluating the noise probability (7) within the training objective (6) is also fast because there is only one non-zero summand c in equation (7). This simple scheme works well in our experiments. However, it could be elaborated by replacing q(k | c) with q(k | c, x0
+[0,t)), by partitioning the event vocabulary automatically, by allowing overlapping clusters, or by using multiple levels of reﬁnement: all of these elaborations are used by the fast hierarchical language model of Mnih & Hinton (2009).
+How to draw M streams. An efﬁcient way to draw the union of M i.i.d. noise streams is to run the thinning algorithm once, with all intensities multiplied by M . In other words, the expected number of noise events on any interval is multiplied by M . This scheme does not tell us which speciﬁc noise stream m generated a particular noise event, but the NCE objective (6) does not need to know that. The scheme works only because every noise stream m has the same intensities λq
+[0,t)) (not λq there is no dependence on the previous events from that stream.
+Amusingly, NCE can now run even with non-integer M .
+[0,t))) at time t: k(t | xm k(t | x0
+Fractional objective. One view of the thinning algorithm is that it accepts the proposed time ti with probability µ = λ(ti)/λ, and in that case, labels it as k with probability λk(ti)/λ(ti). To get a greater diversity of noise samples, we can accept the time with probability 1, if we then scale its term in the objective (6) by µ. This does not change the expectation (6) but may reduce the sampling variance in estimating it. Note that increasing the upper bound λ now has an effect similar to increasing M : more noise samples.8 3.2 Computational Cost Analysis
+State-of-the-art intensity models use neural networks whose state summarizes the history and is updated after each event. So to train on a single event stream x with I ≥ 0 events, both MLE and
+NCE must perform I updates to the neural state. Both MLE and NCE then evaluate the intensities
+λk(t | x[0,t)) of these I events, and also the intensities of a number of events that did not occur, which almost surely fall at other times.9
+Consider the number of intensities evaluated. For MLE, assume the Monte Carlo integration tech-nique mentioned in section 2.2. MLE computes the intensity λ for I observed events and for all
+K possible events at each of J sampled times. We take J = ρI (with randomized rounding to an integer), where ρ > 0 is a hyperparameter (Mei & Eisner, 2017). Hence, the expected total number of intensity evaluations is I + ρIK. 0 λ∗(t | x[0,t))dt, and E [J] = M · (cid:82) T
+For NCE with the coarse-to-ﬁne strategy, let J be the total number of times proposed by the thinning algorithm. Observe that E [I] = (cid:82) T 0 λ(t | x[0,t))dt. Thus,
+E [J] ≈ M · E [I] if (1) λ at any time is a tight upper bound on the noise event rate λq at that time and (2) the average noise event rate well-approximates the average observed event rate (which should become true very early in training). To label or reject each of the J proposals, NCE evaluates
+C noise intensities λq c ; if the proposal is accepted with label k (perhaps fractionally), it must also evaluate its model intensity λk. The noise and model intensities λq c and λk must also be evaluated for the I observed events. Hence, the total number of intensity evaluations is at most (C + 1)J + 2I, which ≈ (C + 1)M I + 2I in expectation.
+Dividing by I, we see that making (M + 1)(C + 1) ≤ ρK sufﬁces to make NCE’s stochastic objective take less work per observed stream than MLE’s stochastic objective. M = 1 and C = 1 is a valid choice. But NCE’s objective is less informed for smaller M , so its stochastic gradient 5
+carries less information about θ∗. In section 5, we empirically investigate the effect of M and C on
+NCE and compare to MLE with different ρ. 3.3 Theoretical Guarantees: Optimality, Consistency and Efﬁciency
+The following theorem implies that stochastic gradient ascent on NCE converges to a correct θ (if one exists):
+Theorem 1 (Optimality). Under assumptions 1 and 2, θ ∈ argmaxθ JNC(θ) if and only if pθ = p∗.
+This theorem falls out naturally when we rearrange the NCE objective in equation (6) as (cid:90) T (cid:88) t=0 x0
+[0,t) p∗(x0
+[0,t))
+λ∗ k(t | x0
+[0,t))
+K (cid:88) k=1 (cid:18) λ∗ k(t|x0 k(t|x0
+λ∗
+[0,t))
+[0,t)) log (cid:124)
+λk(t|x0
+λk(t|x0
+λq k(t|x0 k(t|x0
+λ∗
+[0,t))
+[0,t)) + M (cid:123)(cid:122) a negative cross entropy
+[0,t))
+[0,t)) log
+λq k(t|x0
+λk(t|x0
+[0,t))
+[0,t)) dt (cid:19) (cid:125) k is the intensity under p∗ and λ∗ where λ∗ k is deﬁned analogously to λk: see full derivation in Ap-pendix B.1. Obviously, pθ = p∗ is sufﬁcient to maximize the negative cross-entropy for any k given any history and thus maximize JNC(θ). It turns out to be also necessary because any θ for which pθ (cid:54)= p∗ would, given assumption 1, end up decreasing the negative cross-entropy for some k over some interval (t, t(cid:48)) given a set of histories with non-zero measure. A full proof can be found in
+Appendix B.2: as we’ll see there, although it resembles Theorem 3.2 of Ma & Collins (2018), the proof of our Theorem 1 requires new analysis to handle continuous time, since Ma & Collins (2018) only worked on discrete-time sequential data.
+Moreover, our NCE method is strongly consistent for any M ≥ 1 and approaches Fisher efﬁciency when M is large. These properties are the same as in Ma & Collins (2018) and the proofs are also similar. Therefore, we leave the related theorems together with their assumptions and proofs to
+Appendices B.3 and B.4. 4

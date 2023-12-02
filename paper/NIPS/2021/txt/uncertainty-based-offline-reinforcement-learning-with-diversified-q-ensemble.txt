@@ -1,0 +1,228 @@
+Abstract
+Ofﬂine reinforcement learning (ofﬂine RL), which aims to ﬁnd an optimal policy from a previously collected static dataset, bears algorithmic difﬁculties due to function approximation errors from out-of-distribution (OOD) data points. To this end, ofﬂine RL algorithms adopt either a constraint or a penalty term that explicitly guides the policy to stay close to the given dataset. However, prior methods typically require accurate estimation of the behavior policy or sampling from OOD data points, which themselves can be a non-trivial problem. Moreover, these methods under-utilize the generalization ability of deep neural networks and often fall into suboptimal solutions too close to the given dataset. In this work, we propose an uncertainty-based ofﬂine RL method that takes into account the conﬁdence of the Q-value prediction and does not require any estimation or sampling of the data distribution. We show that the clipped Q-learning, a technique widely used in online RL, can be leveraged to successfully penalize OOD data points with high prediction uncertainties. Surprisingly, we ﬁnd that it is possible to substantially outperform existing ofﬂine RL methods on various tasks by simply increasing the number of Q-networks along with the clipped Q-learning. Based on this observation, we propose an ensemble-diversiﬁed actor-critic algorithm that reduces the number of required ensemble networks down to a tenth compared to the naive ensemble while achieving state-of-the-art performance on most of the
+D4RL benchmarks considered. 1
+
+Introduction
+Over the recent years, deep reinforcement learning (deep RL) has achieved considerable success in various domains such as robotics [20], recommendation systems [6], and strategy games [26].
+However, a major drawback of RL algorithms is that they adopt an active learning procedure, where training steps require active interactions with the environment. This trial-and-error procedure can be prohibitive when scaling RL to real-world applications such as autonomous driving and healthcare, as exploratory actions can cause critical damage to the agent or the environment [19]. Ofﬂine RL, also known as batch RL, aims to overcome this problem by learning policies using only previously collected data without further interactions with the environment [2, 11, 19].
+Even though ofﬂine RL is a promising direction to lead a more data-driven way of solving RL problems, recent works show ofﬂine RL faces new algorithmic challenges [19]. Typically, if the coverage of the dataset is not sufﬁcient, vanilla RL algorithms suffer severely from extrapolation
+∗First two authors have equal contributions
+†Corresponding author 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+error, overestimating the Q-values of out-of-distribution (OOD) state-action pairs [15]. To this end, most ofﬂine RL methods apply some constraints or penalty terms on top of the existing RL algorithms to enforce the learning process to be more conservative. For example, some prior works explicitly regularize the policy to be close to the behavior policy that was used to collect the data [11, 15]. A more recent work instead penalizes the Q-values of OOD state-action pairs to enforce the Q-values to be more pessimistic [16].
+While these methods achieve signiﬁcant performance gains over vanilla RL methods, they either require an estimation of the behavior policy or explicit sampling from OOD data points, which themselves can be non-trivial to solve. Furthermore, these methods do not utilize the generalization ability of the Q-function networks and prohibit the agent from approaching any OOD state-actions without any consideration on whether they are good or bad. However, if we can identify OOD data points where we can predict their Q-values with high conﬁdence, it is more effective not to restrain the agent from choosing those data points.
+From this intuition, we propose an uncertainty-based model-free ofﬂine RL method that effectively quantiﬁes the uncertainty of the Q-value estimates by an ensemble of Q-function networks and does not require any estimation or sampling of the data distribution. To achieve this, we ﬁrst show that a well-known technique from online RL, the clipped Q-learning [10], can be successfully leveraged as an uncertainty-based penalization term. Our experiments reveal that we can achieve state-of-the-art performance on various ofﬂine RL tasks by solely using this technique with increased ensemble size. To further improve the practical usability of the method, we develop an ensemble diversifying objective that signiﬁcantly reduces the number of required ensemble networks. We evaluate our proposed method on D4RL benchmarks [9] and verify that the proposed method outperforms the previous state-of-the-art by a large margin on various types of environments and datasets. 2 Preliminaries
+We consider an environment formulated as a Markov Decision Process (MDP) deﬁned by a tuple (S, A, T, r, d0, γ), where S is the state space, A is the action space, T (s(cid:48) | s, a) is the transition probability distribution, r : S × A −→ R is the reward function, d0 is the initial state distribution, and γ ∈ (0, 1] is the discount factor. The goal of reinforcement learning is to ﬁnd an optimal policy π(a | s) that maximizes the cumulative discounted reward Est,at [(cid:80)∞ t=0 γtr(st, at)], where s0 ∼ d0(·), at ∼ π(· | st), and st+1 ∼ T (· | st, at).
+One of the major approaches for obtaining such a policy is Q-learning [12, 20] which learns a state-action value function Qφ(s, a) parameterized by a neural network that represents the expected cumulative discounted reward when starting from state s and action a. Standard actor-critic approach
+[14] learns this Q-function by minimizing the Bellman residual (Qφ(s, a) − Bπθ Qφ(s, a))2, where (cid:2)r(s, a) + γ Ea(cid:48)∼πθ(·|s(cid:48))Qφ (s(cid:48), a(cid:48))(cid:3) is the Bellman operator. In the
+Bπθ Qφ(s, a) = Es(cid:48)∼T (·|s,a) context of ofﬂine RL, where transitions are sampled from a static dataset D, the objective for the
+Q-network becomes minimizing
+Jq(Qφ) := E(s,a,s(cid:48))∼D (cid:20)(cid:16)
+Qφ(s, a) − (cid:0)r(s, a) + γ Ea(cid:48)∼πθ(·|s(cid:48)) [Qφ(cid:48) (s(cid:48), a(cid:48))](cid:1) (cid:17)2(cid:21)
+, (1) where Qφ(cid:48) represents the target Q-network softly updated for algorithmic stability [20]. The policy, which is also parameterized by a neural network, is updated in an alternating fashion to maximize the expected Q-value: Jp(πθ) := Es∼D,a∼πθ(·|s) [Qφ(s, a)] .
+However, as the policy is updated to maximize the Q-values, the actions a(cid:48) sampled from the current policy in Equation (1) can be biased towards OOD actions with erroneously high Q-values. In the ofﬂine RL setting, such errors cannot be corrected by feedback from the environment as in online
+RL. To handle the error propagation from these OOD actions, most ofﬂine RL algorithms regularize either the policy [11, 15] or the Q-function [16] to be biased towards the given dataset. However, the policy regularization methods typically require an accurate estimation of the behavior policy. The previous state-of-the-art method CQL [16] instead learns conservative Q-values without estimating the behavior policy by penalizing the Q-values of OOD actions by (cid:16) (cid:17)
+Jq(Qφ) + α
+Es∼D,a∼µ(·|s) [Qφ (s, a)] − E(s,a)∼D [Qφ (s, a)]
+, min
+φ 2
+where µ is an approximation of the policy that maximizes the current Q-function. While CQL does not need explicit behavior policy estimation, it requires sampling from an appropriate action distribution µ(· | s). 3 Uncertainty penalization with Q-ensemble
+Figure 1: Performance of SAC-N on halfcheetah-medium and hopper-medium datasets while varying
+N , compared to CQL. ‘Average Return’ denotes the undiscounted return of each policies on evaluation.
+Results averaged over 4 seeds. (cid:104)
+In this section, we turn our attention to a conventional technique from online RL, Clipped Double Q-Learning [10], which uses the minimum value of two parallel Q-networks as the Bellman target: y = r(s, a) + γ Ea(cid:48)∼πθ(·|s(cid:48))
+. Although this technique was originally proposed in online RL to mitigate the overestimation from general prediction errors, some ofﬂine RL algorithms
+[11, 15, 28] also utilize this technique to enforce their Q-value estimates to be more pessimistic.
+However, the isolated effect of the clipped Q-learning in ofﬂine RL was not fully analyzed in the previous works, as they use the technique only as an auxiliary term that adds up to their core methods. minj=1,2 Qφ(cid:48) (cid:105) (s(cid:48), a(cid:48)) j
+To examine the ability of clipped Q-learning to prevent the overestimation in ofﬂine RL on its own, we modify SAC [12] by increasing the number of Q-ensembles from 2 to N : (cid:34)(cid:18)
+Es,a,s(cid:48)∼D
+Qφi (s, a) − (cid:18) r(s, a) + γ Ea(cid:48)∼πθ (·|s(cid:48)) (cid:20) min j=1,...,N
+Qφ(cid:48) j (cid:0)s(cid:48), a(cid:48)(cid:1) − β log πθ (cid:21)(cid:19)(cid:19)2(cid:35) (cid:0)a(cid:48) | s(cid:48)(cid:1)
+Es∼D,a∼πθ (·|s) (cid:20) min j=1,...,N (cid:21)
+Qφj (s, a) − β log πθ (a | s)
+, (2) min
+φi max
+θ for i = 1, . . . , N . We denote this modiﬁed algorithm as SAC-N .
+Figure 1 shows the preliminary experiments on D4RL halfcheetah-medium and hopper-medium datasets [9] while varying N . Note that these datasets are constructed from suboptimal behavior policies. Surprisingly, as we gradually increase N , we can successfully ﬁnd policies that outperform the previous state-of-the-art method (CQL) by a large margin. In fact, as we will present in Section 5,
+SAC-N outperforms CQL on various types of environments and data-collection policies.
+To understand why this simple technique works so well, we can ﬁrst interpret the clipping procedure (choosing the minimum value from the ensemble) as penalizing state-action pairs with high-variance
+Q-value estimates, which encourages the policy to favor actions that appeared in the dataset [11]. The dataset samples will naturally have lower variance compared to the OOD samples as the Bellman residual term in Equation (2) explicitly aligns the Q-value predictions for the dataset samples. More formally, we can regard this difference in variance as accounting for epistemic uncertainty [8] which refers to the uncertainty stemming from limited data and knowledge.
+Utilization of the clipped Q-value relates to methods that consider the conﬁdence bound of the
+Q-value estimates [24]. Online RL methods typically utilize the Q-ensemble to form an optimistic estimate of the Q-value, by adding the standard deviation to the mean of the Q-ensembles [18]. This optimistic Q-value, also known as the upper-conﬁdence bound (UCB), can encourage the exploration 3
+of unseen actions with high uncertainty. However, in ofﬂine RL, the dataset available during training is ﬁxed, and we have to focus on exploiting the given data. For this purpose, it is natural to utilize the lower-conﬁdence bound (LCB) of the Q-value estimates, for example by subtracting the standard deviation from the mean, which allows us to avoid risky state-actions.
+The clipped Q-learning algorithm, which chooses the worst-case Q-value instead to compute the pessimistic estimate, can also be interpreted as utilizing the LCB of the Q-value predictions. Suppose
+Q(s, a) follows a Gaussian distribution with mean m(s, a) and standard deviation σ(s, a). Also, let
+{Qj(s, a)}N j=1 be realizations of Q(s, a). Then, we can approximate the expected minimum of the realizations following the work of Royston [23] as
+E (cid:20) min j=1,...,N (cid:21)
+Qj(s, a)
+≈ m(s, a) − Φ−1 (cid:19) (cid:18) N − π 8
+N − π 4 + 1
+σ(s, a), (3) where Φ is the CDF of the standard Gaussian distribution. This relation indicates that using the clipped Q-value is similar to penalizing the ensemble mean of the Q-values with the standard deviation scaled by a coefﬁcient dependent on N . (a) Clip penalty (b) Standard deviation (c) Clip penalty gap
+Figure 2: (a) and (b) each plots the size of the clip penalty and the standard deviation of the Q-value estimates for in-distribution (behavior) and OOD (random) actions while training SAC-10 on halfcheetah-medium dataset. (c) plots the gap of the clip penalty between the in-distribution and
+OOD actions while varying N . Results averaged over 4 seeds.
+We now move on to the empirical analysis of the clipped Q-learning. Figure 2a compares the strength of the uncertainty penalty on in-distribution and OOD actions. Speciﬁcally, we compare actions sampled from two types of policies: (1) the behavior policy which was used to collect the dataset, and (2) the random policy which samples actions uniformly from the action space. For each policy, we measure the size of the penalty from the clipping as Es∼D,a∼π(·|s)[ 1 j=1 Qφj (s, a) −
+N minj=1,...,N Qφj (s, a)]. Figure 2a shows that the clipping term penalizes the random state-action pairs much stronger than the in-distribution pairs throughout the training. For comparison, we also measure the standard deviation of the Q-values for each policy. The results in Figure 2b show that as we conjectured, the Q-value predictions for the OOD actions have a higher variance. We also ﬁnd that the size of the penalty and the standard deviation are highly correlated, as we noted in Equation (3). (cid:80)N
+As we observe that OOD actions have higher variance on Q-value estimates, the effect of increasing
+N becomes obvious: it strengthens the penalty applied to the OOD samples compared to the dataset samples. To verify this, we measured the relative penalty applied to the OOD samples in Figure 2c and found that indeed the OOD samples are penalized relatively further as N increases. 4 Ensemble gradient diversiﬁcation
+Even though SAC-N outperforms existing methods on various tasks, it sometimes requires an excessively large number of ensembles to learn stably (e.g., N = 500 for hopper-medium). While investigating its reason, we found that the performance of SAC-N is negatively correlated with the degree to which the input gradients of Q-functions ∇aQφj (s, a) are aligned, which decreases with
+N . Figure 4 measures the minimum cosine similarity between the gradients of the Q-functions mini(cid:54)=j(cid:104)∇aQφi(s, a), ∇aQφj (s, a)(cid:105) to examine the alignment of the gradients while varying N on the D4RL hopper-medium dataset. The results imply that the performance of the learned policy degrades signiﬁcantly when the Q-functions share a similar local structure. 4
+(a) Without ensemble gradient diversiﬁcation (b) With ensemble gradient diversiﬁcation
+Figure 3: Illustration of the ensemble gradient diversiﬁcation. The vector λiwi represents the normalized eigenvector wi of Var(∇aQφj (s, a)) multiplied by its eigenvalue λi.
+We now show that the alignment of the input gradients can induce insufﬁcient penalization of near-distribution data points, which leads to requiring a large number of ensemble networks. Let ∇aQφj (s, a) be the gradient of the j-th Q-function with respect to the behavior action a and assume the gradient is normalized for simplicity. If the gradients of the Q-functions are well-aligned as illustrated in Figure 3a, then there exists a unit vector w such that the Q-values for the OOD actions along the direction of w have a low variance. To show this, we ﬁrst assume the Q-value predictions for the in-distribution state-action pairs coincide, i.e., Qφj (s, a) = Q(s, a) for j = 1, . . . , N .
+Note that this can be optimized by minimizing the Bellman error. Then, using the ﬁrst-order Taylor approximation, the sample variance of the Q-values at an OOD action along w can be represented as
+Figure 4: Plot of the minimum cosine similarity between the input gradients of
+Q-functions and the average return while varying the number of Q-functions.
+Var (cid:0)Qφj (s, a + kw)(cid:1) ≈ Var (cid:0)Qφj (s, a) + k (cid:10)w, ∇aQφj (s, a)(cid:11)(cid:1)
+= Var (cid:0)Q(s, a) + k (cid:10)w, ∇aQφj (s, a)(cid:11)(cid:1)
+= k2Var (cid:0)(cid:10)w, ∇aQφj (s, a)(cid:11)(cid:1)
+= k2w(cid:124)Var (cid:0)∇aQφj (s, a)(cid:1) w, where (cid:104)·, ·(cid:105) denotes an inner-product, k ∈ R, and Var (cid:0)∇aQφj (s, a)(cid:1) is the sample variance matrix for the input gradients ∇aQφj (s, a). One interesting property of the variance matrix is that its total variance, which is equivalent to the sum of its eigenvalues, can be represented as a function of the norm of the average gradients by Lemma 1.
+Lemma 1. The total variance of the matrix Var (cid:0)∇aQφj (s, a)(cid:1) is equal to 1 − (cid:107)¯q(cid:107)2 2, where ¯q = (cid:80)N 1
+N j=1 ∇aQφj (s, a).
+Let λmin be the smallest eigenvalue of Var (cid:0)∇aQφj (s, a)(cid:1) and wmin be the corresponding normalized (cid:10)∇aQφi(s, a), ∇aQφj (s, a)(cid:11) = 1 − (cid:15). eigenvector. Also, let (cid:15) > 0 be the value such that mini(cid:54)=j
+Then, using Lemma 1, we can prove that the variance of the Q-values for an OOD action along wmin is upper-bounded by some constant multiple of (cid:15), which is given by Proposition 1.
+Proposition 1. Suppose Qφj (s, a) = Q(s, a) and Qφj (s, ·) is locally linear in the neighbor-hood of a for all j ∈ [N ]. Let λmin and wmin be the smallest eigenvalue and the correspond-ing normalized eigenvector of the matrix Var (cid:0)∇aQφj (s, a)(cid:1) and (cid:15) > 0 be the value such that 5
+(cid:10)∇aQφi (s, a), ∇aQφj (s, a)(cid:11) = 1 − (cid:15). Then, the variance of the Q-values for an OOD mini(cid:54)=j action in the neighborhood along the direction of wmin is upper-bounded as follows:
+Var (cid:0)Qφj (s, a + kwmin)(cid:1) ≤ k2(cid:15), 1
+|A|
+N − 1
+N where |A| is the action space dimension.
+We provide the proofs in Appendix A.1. Proposition 1 implies that if there exists such (cid:15) > 0 that is small, which means the gradients of Q-function are well-aligned, then the variance of the Q-values for an OOD action along a speciﬁc direction will also be small. This in turn degrades the ability of the ensembles to penalize OOD actions, which ultimately leads to requiring a large number of ensemble networks.
+To address this problem, we propose a regularizer that effectively increases the variance of the Q-values for near-distribution OOD actions. Note that the variance is lower-bounded by some constant multiple of the smallest eigenvalue λmin:
+Var (cid:0)Qφj (s, a + kw)(cid:1) ≈ k2w(cid:124)Var (cid:0)∇aQφj (s, a)(cid:1) w
+≥ k2w
+= k2λmin.
+Therefore, an obvious way to increase this variance is to maximize the smallest eigenvalue of
+Var (cid:0)∇aQφj (s, a)(cid:1), which can be formulated as (cid:2)λmin minVar (cid:0)∇aQφj (s, a)(cid:1) wmin (cid:0)Var (cid:0)∇aQφj (s, a)(cid:1)(cid:1)(cid:3) ,
+Es,a∼D (cid:124) maximize
+φ where φ denotes the collection of the parameters {φj}N j=1. There are several methods to compute the smallest eigenvalue, such as the power method or the QR algorithm [27]. However, these iterative methods require constructing huge computation graphs, which makes optimizing the eigenvalue using back-propagation inefﬁcient. Instead, we aim to maximize the sum of all eigenvalues, which is equal to the total variance. By Lemma 1, it is equivalent to minimizing the norm of the average gradients:
+ (cid:42) minimize
+φ
+Es,a∼D
+ 1
+N
+N (cid:88) i=1
+∇aQφi (s, a),
+∇aQφj (s, a) (cid:43)
+ . 1
+N
+N (cid:88) j=1 (4)
+With simple modiﬁcation, we can reformulate Equation (4) as diversifying the gradients of each
+Q-function network for in-distribution actions: minimize
+φ
+JES(Qφ) := Es,a∼D
+
+
+
+ 1
+N − 1
+ (cid:88) 1≤i(cid:54)=j≤N
+ (cid:10)∇aQφi(s, a), ∇aQφj (s, a)(cid:11)
+
+ (cid:125) (cid:123)(cid:122) (cid:124)
+ESφi,φj (s,a)
+.
+Concretely, our ﬁnal objective can be interpreted as measuring the pairwise alignment of the gradients using cosine similarity, which we denote as the Ensemble Similarity (ES) metric ESφi,φj (s, a), and minimizing the ES values for every pair in the Q-ensemble with regard to the dataset state-actions.
+The illustration of the ensemble gradient diversiﬁcation is shown in Figure 3b. Note that we instead maximize the total variance to reduce the computational burden. Nevertheless, the modiﬁed objective is closely related to maximizing the smallest eigenvalue. The detailed explanation can be found in
+Appendix A.2.
+We name the resulting actor-critic algorithm as Ensemble-Diversiﬁed Actor Critic (EDAC) and present the detailed procedure in Algorithm 1 (differences with the original SAC algorithm marked in blue). Note that Algorithm 1 reduces to SAC-N when η = 0, and further reduces to vanilla SAC when also N = 2. 5 Experiments
+We evaluate our proposed methods against the previous ofﬂine RL algorithms on the standard D4RL benchmark [9] . Concretely, we perform our evaluation on MuJoCo Gym (Section 5.1) and Adroit 6
+Algorithm 1 Ensemble-Diversiﬁed Actor Critic (EDAC) 1: Initialize policy parameters θ, Q-function parameters {φj}N j=1, target Q-function parameters j}N
+{φ(cid:48) 2: repeat 3: 4: j=1, and ofﬂine data replay buffer D
+Sample a mini-batch B = {(s, a, r, s(cid:48))} from D
+Compute target Q-values (shared by all Q-functions): y(r, s(cid:48)) = r + γ (cid:18) min j=1,...,N
+Qφ(cid:48) j (s(cid:48), a(cid:48)) − β log πθ (a(cid:48) | s(cid:48)) (cid:19)
+, a(cid:48) ∼ πθ (· | s(cid:48)) 5:
+Update each Q-function Qφi with gradient descent using
+∇φi 1
+|B| (cid:88) (s,a,r,s(cid:48))∈B
+ (cid:18)
+
+Qφi (s, a) − y (r, s(cid:48)) (cid:19)2
++
+η
+N − 1 (cid:88) 1≤i(cid:54)=j≤N
+
+ESφi,φj (s, a)
+ 6:
+Update policy with gradient ascent using
+∇θ 1
+|B| (cid:88) s∈B (cid:18) min j=1,...,N
+Qφj (s, ˜aθ(s)) − β log πθ (˜aθ(s) | s) (cid:19)
+, where ˜aθ(s) is a sample from πθ(· | s) which is differentiable w.r.t. θ via the reparametrization trick.
+Update target networks with φ(cid:48) i + (1 − ρ)φi i ← ρφ(cid:48) 7: (Section 5.2) domains. We consider the following baselines: SAC, the backbone algorithm of our method, CQL, the previous state-of-the-art on the D4RL benchmark, REM [2], an ofﬂine RL method which utilized Q-network ensemble on discrete control environments, and BC, the behavior cloning method. We evaluate each method under the normalized average return metric where the average return is scaled such that 0 and 100 each equals the performance of a random policy and an online expert policy. In addition to the performance evaluation, we compare the computational cost of each method (Section 5.3). For the implementation details of our algorithm and the baselines, please refer to Appendix B and C. Also, we provide more experiments such as comparison with more baselines, CQL with N Q-networks, and hyperparameter sensitivity from Appendix E to H. The code is available online3. 5.1 Evaluation on D4RL MuJoCo Gym tasks
+We ﬁrst evaluate each method on D4RL MuJoCo Gym tasks which consist of three environments, halfcheetah, hopper, and walker2d, each with six datasets from different data-collecting policies.
+In detail, the considered policies are random: a uniform random policy, expert: a fully trained online expert, medium: a suboptimal policy with approximately 1/3 the performance of the expert, medium-expert: a mixture of medium and expert policies, medium-replay: the replay buffer of a policy trained up to the performance of the medium agent, and full-replay: the ﬁnal replay buffer of the expert policy. Each dataset consists of 1M transitions except for medium-expert and medium-replay.
+The experiment results in Table 1 show EDAC and SAC-N both outperform or are competitive with the previous state-of-the-art on all of the tasks considered. Notably, the performance gap is especially high for random, medium, and medium-replay datasets, where the performances of the previous works are relatively low. Both the proposed methods achieve average normalized scores over 80, reducing the gap with the online expert by 40% compared to CQL. While the performance of EDAC is marginally better than the performance of SAC-N , EDAC achieves this result with a much smaller
+Q-ensemble size. As noted in Figure 5, on hopper tasks, SAC-N requires 200 to 500 Q-networks, while EDAC requires less than 50.
+Figure 6 compares the distance between the actions chosen by each method and the dataset actions.
+Concretely, we measure E(s,a)∼D,ˆa∼πθ(·|s)[(cid:107)ˆa−a(cid:107)2 2] for EDAC, SAC-N , CQL, SAC-2, and a random 3https://github.com/snu-mllab/EDAC 7
+policy on ∗-medium datasets. We ﬁnd that our proposed methods choose from a more diverse range of actions compared to CQL. This shows the advantage of the uncertainty-based penalization which considers the prediction conﬁdence other than penalizing all OOD actions.
+Table 1: Normalized average returns on D4RL Gym tasks, averaged over 4 random seeds. CQL (Paper) denotes the results reported in the original paper.
+Task Name
+BC
+SAC
+REM
+CQL (Paper)
+CQL (Reproduced) halfcheetah-random halfcheetah-medium halfcheetah-expert halfcheetah-medium-expert halfcheetah-medium-replay halfcheetah-full-replay hopper-random hopper-medium hopper-expert hopper-medium-expert hopper-medium-replay hopper-full-replay walker2d-random walker2d-medium walker2d-expert walker2d-medium-expert walker2d-medium-replay walker2d-full-replay 2.2±0.0 43.2±0.6 91.8±1.5 44.0±1.6 37.6±2.1 62.9±0.8 3.7±0.6 54.1±3.8 107.7±9.7 53.9±4.7 16.6±4.8 19.9±12.9 1.3±0.1 70.9±11.0 108.7±0.2 90.1±13.2 20.3±9.8 68.8±17.7 29.7±1.4 55.2±27.8
+-0.8±1.8 28.4±19.4 0.8±1.0 86.8±1.0 9.9±1.5 0.8±0.0 0.7±0.0 0.7±0.0 7.4±0.5 41.1±17.9 0.9±0.8
+-0.3±0.2 0.7±0.3 1.9±3.9
+-0.4±0.3 27.9±47.3
+-0.8±1.1
+-0.8±1.3 4.1±5.7 0.7±3.7 6.6±11.0 27.8±35.4 3.4±2.2 0.7±0.0 0.8±0.0 0.8±0.0 27.5±15.2 19.7±24.6 6.9±8.3 0.2±0.7 1.0±2.3
+-0.1±0.0 12.5±6.2
+-0.2±0.3
+Average 49.9 16.2 6.2 35.4 44.4 104.8 62.4 46.2
+-10.8 86.6 109.9 111.0 48.6
+-7.0 74.5 121.6 98.7 32.6
+--SAC-N (Ours) 28.0±0.9 67.5±1.2 105.2±2.6 107.1±2.0 63.9±0.8 84.5±1.2 31.3±0.0 100.3±0.3 110.3±0.3 110.1±0.3 101.8±0.5 102.9±0.3 21.7±0.0 87.9±0.2 107.4±2.4 116.7±0.4 78.7±0.7 94.6±0.5
+EDAC (Ours) 28.4±1.0 65.9±0.6 106.8±3.4 106.3±1.9 61.3±1.9 84.6±0.9 25.3±10.4 101.6±0.6 110.1±0.1 110.7±0.1 101.0±0.5 105.4±0.7 16.6±7.0 92.5±0.8 115.1±1.9 114.7±0.9 87.1±2.3 99.8±0.7 31.3±3.5 46.9±0.4 97.3±1.1 95.0±1.4 45.3±0.3 76.9±0.9 5.3±0.6 61.9±6.4 106.5±9.1 96.9±15.1 86.3±7.3 101.9±0.6 5.4±1.7 79.5±3.2 109.3±0.1 109.1±0.2 76.8±10.0 94.2±1.9 73.7 84.5 85.2 halfcheetah hopper walker2d
+SAC-N
+EDAC 10
+N 5 3 2 0 500
+N 200 100 50 0 20 100
+N 20 10 0 random medium expert M-E random medium expert M-E random medium expert M-E
+Figure 5: Minimum number of Q-ensembles (N ) required to achieve the performance reported in
+Table 1. M-E denotes medium-expert. We omit the results of medium-replay and full-replay as
+SAC-N already works well with a small number of ensembles (less than or equal to 5). For more details of the experiment, please refer to Appendix C.
+Figure 6: Histograms of the distances between the actions from each methods (EDAC, SAC-N , CQL,
+SAC-2, and a random policy) and the actions from the dataset. For more details of the experiment, please refer to Appendix C. 8
+5.2 Evaluation on D4RL Adroit tasks
+We also experiment on the more complex D4RL Adroit tasks that require controlling a 24-DoF robotic hand to perform tasks such as aligning a pen, hammering a nail, opening a door, or relocating a ball.
+We use two types of datasets for each environment: human, containing 25 trajectories of human demonstrations, and cloned, a 50-50 mixture between the demonstration data and the behavioral cloned policy on the demonstrations. Note that for the Adroit tasks, we could not reproduce the CQL results from the paper completely. For the detailed procedure of reproducing the results of CQL, please refer to Appendix D.
+Table 2: Normalized average returns on D4RL Adroit tasks, averaged over 4 random seeds.
+Task Name
+BC
+SAC
+REM
+CQL (Paper)
+CQL (Reproduced) pen-human hammer-human door-human relocate-human pen-cloned hammer-cloned door-cloned relocate-cloned 25.8±8.8 3.1±3.2 2.8±0.7 0.0±0.0 38.3±11.9 0.7±0.3 0.0±0.0 0.1±0.0 4.3±3.8 0.2±0.0
+-0.3±0.0
+-0.3±0.0
+-0.8±3.2 0.1±0.1
+-0.3±0.1
+-0.1±0.1 5.4±4.3 0.3±0.0
+-0.3±0.0
+-0.3±0.0
+-1.0±0.1
+-0.3±0.0
+-0.3±0.0
+-0.2±0.2 55.8 2.1 9.1 0.35 40.3 5.7 3.5
+-0.1 35.2±6.6 0.6±0.5 1.2±1.8 0.0±0.0 27.2±11.3 1.4±2.1 2.4±2.4 0.0±0.0
+SAC-N (Ours) 9.5±1.1 0.3±0.0
+-0.3±0.0
+-0.1±0.1 64.1±8.7 0.2±0.2
+-0.3±0.0 0.0±0.0
+EDAC (Ours) 52.1±8.6 0.8±0.4 10.7±6.8 0.1±0.1 68.2±7.3 0.3±0.0 9.6±8.3 0.0±0.0
+The evaluation results are summarized in Table 2. For pen-∗ tasks, where the considered algorithms achieve meaningful performance, EDAC outperforms or matches with the previous state-of-the-art.
+Especially, for pen-cloned, both EDAC and SAC-N achieve 75% higher score compared to CQL.
+Unlike the results from the Gym tasks, we ﬁnd that SAC-N falls behind in some datasets, for example, pen-human, which could in part due to the size of the dataset being exceptionally small (5000 transitions). However, our method with ensemble diversiﬁcation successfully overcomes this difﬁculty. 5.3 Computational cost comparison
+We compared the computational cost of our methods with vanilla SAC and CQL on hopper-medium-v2, where our methods require the largest number of Q-networks. For each method, we measure the runtime per training epoch (1000 gradient steps) along with GPU memory consump-tion. We run our experiments on a single machine with one RTX 3090 GPU and provide the results in Table 3.
+Table 3: Computational costs of each method.
+Runtime GPU Mem. (s/epoch) (GB)
+SAC
+CQL 21.4 38.2 1.3 1.4
+As the result shows, our method EDAC runs faster than
+CQL with comparable memory consumption. Note that
+CQL is about twice as slower than vanilla SAC due to the additional computations for Q-value regularization (e.g., dual update and approximate logsumexp via sampling). Meanwhile, the inference to the Q-network ensemble in SAC-N and EDAC is embarrassingly parallelizable, minimizing the runtime increase with the number of Q-networks.
+Also, we emphasize that our gradient diversiﬁcation term in Equation (4) has linear computational complexity, as we can reformulate the term using the sum of the gradients.
+SAC-500
+EDAC 44.1 30.8 5.1 1.8 6

@@ -1,0 +1,216 @@
+Abstract
+Detecting out-of-distribution (OOD) inputs during the inference stage is crucial for deploying neural networks in the real world. Previous methods typically relied on the highly activated feature map outputted by the network. In this study, we revealed that the norm of the feature map obtained from a block other than the last block can serve as a better indicator for OOD detection. To leverage this insight, we propose a simple framework that comprises two metrics: FeatureNorm, which computes the norm of the feature map, and NormRatio, which calculates the ra-tio of FeatureNorm for ID and OOD samples to evaluate the OOD detection performance of each block. To iden-tify the block that provides the largest difference between
+FeatureNorm of ID and FeatureNorm of OOD, we cre-ate jigsaw puzzles as pseudo OOD from ID training sam-ples and compute NormRatio, selecting the block with the highest value. After identifying the suitable block, OOD detection using FeatureNorm outperforms other methods by reducing FPR95 by up to 52.77% on CIFAR10 bench-mark and up to 48.53% on ImageNet benchmark. We demonstrate that our framework can generalize to vari-ous architectures and highlight the significance of block se-lection, which can also improve previous OOD detection methods. Our code is available at https://github.com/gist-ailab/block-selection-for-OOD-detection. 1.
+
+Introduction
+Neural networks have widely been utilized in the real world, such as in autonomous cars [9, 21] and medical di-agnoses [7, 38]. In the real world, neural networks often en-counter previously unseen input that are different from the training data. If the system fails to recognize those input as unknown input, there can be a dangerous consequence. For example, a medical diagnosis system may recognize an un-seen disease image as one of the known diseases. This gives rise to the importance of the out-of-distribution (OOD) de-tection, which makes users operate a neural network system more safely in the real world.
+Figure 1. Histogram of norm of the feature map produced by con-volutional blocks of ResNet18. In last block (a), the norm of ID (black) is hard to separate from OOD (blue, orange) compared to the one from the penultimate block (b).
+In practice, various outputs of the network can be used as an indicator to separate the in-distribution (ID) and out-of-distribution (OOD) data. For instance, output probabil-ity [15], calibrated output probability [28], and output en-ergy [30] are used as an indicator. The output of a neural network is commonly calculated using a feature vector of the feature extractor and a weight vector of the classifica-tion layer. It is known that the norm of the feature vector can be an indicator of input image quality [23, 37, 40] or level of awareness [46]. Thus, we ask the following ques-tion: Can we use the norm of the feature as an indicator to separate ID and OOD?
+In this paper, we first reveal the key observation con-cerning the last block of neural networks sometimes deteri-orating owing to the overconfidence issue [10, 11]. Empir-ically, we show that OOD images highly activate filters of the last block (i.e., large norm; see Figure 1, left) on a net-work trained with CIFAR10 while lowly activate filters of the penultimate block (i.e., small norm; see Figure 1, right).
+As a result, OOD detection methods that consider overacti-vated feature [42] and overconfident output [28] have been successful. However, we find that the norm of the feature map for the OOD and ID is quite separable in the penulti-mate block compared to the last block.
+This motivates a simple and effective OOD detection
+Figure 2. Illustration of our proposed out-of-distribution detection framework. FeatureNorm refers to a norm calculation for the given feature map produced by the block. We use NormRatio of ID and pseudo OOD (i.e., jigsaw puzzles) to find which block is suitable for
+OOD detection (a). During inference time, for a given input image, the OOD score is calculated by FeatureNorm on the selected block (b).
+If FeatureNorm for a given input is smaller than the threshold, the given input is classified as OOD. framework consists of (1) FeatureNorm: the norm of the feature map and (2) NormRatio: the ratio of FeatureNorm for ID and OOD. In the case of a suitable block for OOD detection, the FeatureNorm of ID is large, and the Fea-tureNorm of OOD is small since its filters are trained to be activated on ID [1, 52]. Thus, we use FeatureNorm of the block that has the largest NormRatio as an indicator to separate ID and OOD. Although NormRatio directly repre-sents the OOD detection performance of the block, we can-not access to the OOD before deployment. In order to se-lect the block, that provides the largest difference between
+FeatureNorm of ID and FeatureNorm of OOD, we create pseudo OOD from ID training samples by generating jig-saw puzzles [36] and calculate NormRatio with them, and the block with the largest value is selected without access-ing OOD. Subsequently, we calculate FeatureNorm of the given test image for OOD detection. The proposed OOD detection framework is shown in Figure 2.
+We provide experimental results and extensive analy-sis of our framework. We conduct experiments on com-mon OOD detection benchmarks and show that our simple framework outperforms previous OOD detection methods.
+Below, we summarize our key results and contributions:
+• We introduce the FeatureNorm, a norm of the feature map, and the NormRatio, a ratio of FeatureNorm for
+ID and OOD to select a block for OOD detection. To the best of our knowledge, FeatureNorm and NormRa-tio are the first to explore and demonstrate the norm of the feature map can be an indicator of OOD detection.
+• We extensively evaluate our proposed framework on common benchmarks and establish state-of-the-art performances among post-hoc OOD detection meth-ods. Our framework outperforms the best baseline by reducing FPR95 by up to 52.77% on CIFAR10 bench-mark and by up to 48.53% on ImageNet benchmark.
+• We provide ablation and analysis that improve under-standing of our framework. Our analysis demonstrates an importance of norm from the suitable block, which can improve previous OOD detection methods. 2. Preliminaries
+We first describe the general setting of the supervised learning problem for the image classification network. In the general setting, the classification network is trained with cross-entropy loss for the given training dataset Din = i=1, where xi ∈ R3×W ×H is the input RGB im-{(xi, yi)}I age and yi ∈ {1, 2, ..., K} is the corresponding label with
+K class categories. An OOD detection method is consid-ered as post-hoc method if it does not modify anything dur-ing the training stage.
+Out-of-distribution detection When deploying a net-work in the real world, a user can trust the network if the network classify known images correctly and detect the
+OOD image as ”unknown”. For an OOD detection problem with image classification networks, the given test image x is considered as an OOD image when x semantically (e.g., object identity) or non-semantically (e.g., camera settings or style of the image) differs from the images of the Din.
+The decision of the OOD detection is a binary classification with a scoring function that produce ID-ness for the given image x. The main object of the OOD detection research is to find the scoring function that can effectively separate the
+ID samples and OOD samples.
+Elements of convolutional neural networks Convolu-tional neural networks (CNNs) usually consist of a feature extractor and a classification layer. A feature extractor en-codes an RGB image to a feature map with M channel z ∈ RM ×W ×H using its block, where W and H refer to the width and height of each feature map. Also, a classifica-tion layer encodes a feature map z to a logit vector v. There have been various CNN architectures such as AlexNet [25],
+VGG [41], ResNet [12], and MobileNet [17]. In this paper, we consider a block as a set of a single convolutional layer with an activation function in VGG architecture and a block as a residual block in ResNet and MobileNet.
+Note that the output logit and the output probability of a
+CNN are commonly calculated as follows: vi = Wi · f = ||f ||2||Wi||2 cos(θi), pi = exp(vi) k exp(vk) (cid:80)
+, where ||·||2, vi, f , and Wi denote the L2-norm, i-th element of logit v, feature vector, and i-th class weight, respectively.
+Also, θi refers to the angle between the feature vector f and i-th class weight vector Wi. Since the output probability distribution is calculated by applying a softmax function on the logit, larger L2-norm feature and larger L2-norm class weight produce a harder probability distribution [49]. Be-cause the cross-entropy loss forces the network to produce 1.0 probability for all training data, the norm of the feature vector and the norm of class weight are forced to be large. 3. Method 3.1. Overview of OOD detection framework
+Our OOD detection framework is based on the idea that the norm of feature map obtained from a suitable block for
+OOD detection can be a good indicator and the suitable block can be selected with ratio of ID and pseudo OOD which are generated from ID training samples. We illus-trate our framework in Figure 2. After the training is done, we select the block by NormRatio for OOD detection (Fig-ure 2; left). Then, we use the norm of the feature map
+FeatureNorm obtained from the selected feature map for
+OOD detection during the inference stage (Figure 2; right).
+Specifically, we first generate the jigsaw puzzle as pseudo
+OOD from ID training samples and calculate NormRatio of training samples and corresponding pseudo OOD. Since the jigsaw puzzles have destroyed object information, we argue that these images can be considered as OOD that is semantically shifted. Thus, NormRatio of ID training sam-ples and pseudo OOD (i.e., jigsaw puzzle) is suitable for finding the block that produces FeatureNorm that can sepa-rate ID and OOD samples during the inference stage. Note that our proposed OOD detection framework does not mod-ify the training stage of the network and once the input im-age is detected as in-distribution image during the inference stage, we can always obtain original output without having any disadvantage on classification accuracy. 3.2. FeatureNorm: norm of the feature map
+We consider FeatureNorm, a norm of the feature map, to be an indicator of the activation level of the block for
+In practice, we consider a pre-trained the given image. neural network for K-category image classification with a feature extractor and a classification layer. We denote by z ∈ RM ×W ×H feature map obtained by the block of the feature extractor. The norm of each channel ai of feature map zi ∈ R1×W ×H is calculated as follows: ai = (cid:118) (cid:117) (cid:117) (cid:116)
+W (cid:88)
+H (cid:88) w h max(zi(w, h), 0)2, (1) where zi(w, h) is the w-th, h-th element of the feature map zi. This equation can be interpreted as Frobenius norm of the rectified zi by ReLU function. We utilize a ReLU func-tion to eliminate the effect of negative elements of feature map, which can be seemed as deactivation of filters. Thus, the ai represents the level of activation of i-th channel for the obtained feature map z.
+Subsequently, the channel-wise averaged norm of the feature map for the block B is calculated as follows: f FeatureNorm(x; B) = 1
+M
+M (cid:88) m=1 am, (2) where f FeatureNorm(x; B) ∈ R is the level of activation for the given image x and the block B. During the inference stage, OOD detection using FeatureNorm with a suitable block Bs can be conducted with a threshold γ:
+G(x; θ) = (cid:40)
+ID
+OOD else, if f FeatureNorm(x; Bs) ≥ γ (3) where the threshold γ is typically chosen so that 95% of ID data is correctly classified as ID (i.e., true positive rate of 95%) and the θ refers to the neural network. 3.3. NormRatio: measure of block’s suitability
+We consider NormRatio, which is the ratio of ID Fea-tureNorm and pseudo OOD FeatureNorm, to be an indicator of the suitability of the block for OOD detection. NormRa-tio directly represents suitability of the block for OOD de-tection since the suitable block will produce large ID Fea-tureNorm and the small OOD FeatureNorm.
+In practice, the main problem of the NormRatio for selecting a block is that we cannot access the OOD before deployment. Thus,
+we need to generate the pseudo OOD, that can represent the OOD may seem during the inference stage, to calculate
+NormRatio. We argue that using the NormRatio for select-ing the block with pseudo OOD that can represent the most hard OOD can achieve the best OOD detection results, and since the semantically shifted OOD images are known to be the hardest OOD to detect [18], we generate the 3×3 jigsaw puzzle, which is semantically shifted, as done in [36] using training samples. Our selection algorithm using NormRatio is described as Algorithm 1.
+Algorithm 1 Block selection using NormRatio
+Input: Block list {B1, ...BN }, training data {xi, yi}I while Bn ∈ {B1, ...BN } do i=1 while i ∈ I do
+▶Create jigsaw image:
+ˆxi ← Jigsaw(xi)
+▶Compute NormRatio:
+R(n,i) = f F eatureN orm(xi;Bn) f F eatureN orm(ˆxi;Bn) end while
+Rn ← 1
+I ΣiR(n,i) end while s ← argmaxn(Rn)
+Return Bs 4. Experiments
+Setup We use commonly utilized CNN architectures:
+ResNet18 [12], VGG11 [41] and WideResNet [55] with depth 28 and width 10 (WRN28) for the CIFAR10 [24] benchmark. The ResNet18 and VGG11 are trained with batch size 128 for 100 epochs with weight decay of 0.0005.
+The WRN28 is trained with batch size 128 for 200 epochs with weight decay of 0.0005. In all training, the SGD op-timizer with momentum 0.9 and initial learning rate of 0.1 is utilized, except VGG11 use initial learning rate of 0.05.
+The learning rate is decreased by a factor of 10 at 50, 75, 90 training epochs for ResNet18 and VGG11, and at 100, 150 training epochs for WRN28. Also, we use pretrained
+ResNet50 [12], VGG16 [41], and MobileNetV3 large [17] (MobileNetV3) architectures provided by Pytorch for Ima-geNet [4] benchmark. At test time, all images are resize to 32×32 for CIFAR10 networks, and to 256×256 and cen-ter crop to size of 224×224 for ImageNet networks. We use SVHN [34], Textures [2], LSUN-crop [53](LSUN(c)),
+LSUN-resize [53](LSUN(r)), iSUN [50], and Places365
+[56] as OOD datasets for CIFAR10 benchmark. We use iNaturalist [45], SUN [48], PLACES [56], and Textures [2], which are sampled by Huang et al. [19], as OOD dataset
+For the ImageNet benchmark.
+ID
+CIFAR10
+ImageNet
+Architecture Selected Block Name Output Size Depth
+ResNet18
+WRN28
+VGG11
+ResNet50
+VGG16
+MobileNetV3 512 × 4 × 4
+N-1 640 × 8 × 8
+N-1 512 × 4 × 4
+N-2 2048 × 7 × 7 N-1 512 × 14 × 14
+N 960 × 7 × 7
+N
+Block 4.1
+Block 3.3
+Layer 7
+Block 4.2
+Layer 13
+Block 17
+Table 1. Summary of the selected blocks for each architecture.
+Depth N represents the last block, while Depth 1 represents the first block.
+Evaluation Metrics We measure the quality of OOD de-tection using the two most widely adopted metrics in OOD detection researches: which are (1) area under the receiver operating characteristic curve (AUROC; [3,8]) and (2) false positive rate at 95% true positive rate (FPR95; [28]). AU-ROC plots the true positive rate of ID data against false pos-itive rate of OOD data by varying a OOD detection thresh-old. Thus, it can represent the probability that ID samples will have a higher score than OOD samples. FPR95 is a false positive rate at threshold is set to produce 95% true positive rate. Therefore, it can represent OOD detection performance when an application requirement is recall of 95%. In summary, the higher AUROC and the lower FPR95 represent the better quality of the OOD detection method.
+Comparison with previous methods We compare our framework with other post-hoc OOD detection method which calculate OOD score from a model trained on ID data using cross-entropy loss. Although, ODIN [28] requires validation set of ID and OOD for hyperparameter setting, we set these hyperparameters without OOD data as in [18] for fair comparison without access to OOD. As a result, we compare our method with Maximum Softmax Probability (MSP; [15]), ODIN [28], Energy [30], Energy+ReAct [42], and Energy+DICE [43].
+Block selection for OOD detection using NormRatio we evaluate OOD detection performance of proposed Fea-tureNorm with the block selection using NormRatio of ID and pseudo OOD. Pseudo OOD are 3×3 jigsaw puzzles generated from each ID training sample. Once the training of the network is done, we calculate the NormRatio for ev-ery block using Algorithm 1. Since the various architectures are used for the experiments, we summarize results of block selection in Table 1. We find that our method choose the block for each architecture consistently. For instance, the
+Block 4.1, Block 3.3 and Layer 7 are selected for ResNet18,
+WRN28 and VGG11 in all five trials.
+OOD
+Average
+Architecture
+Method
+ResNet18
+WRN28
+VGG11
+MSP [15]
+ODIN [28]
+Energy [30]
+Energy+ReAct [42]
+Energy+DICE [43]
+FeatureNorm (ours)
+MSP [15]
+ODIN [28]
+Energy [30]
+Energy+ReAct [42]
+Energy+DICE [43]
+FeatureNorm (ours)
+MSP [15]
+ODIN [28]
+Energy [30]
+Energy+ReAct [42]
+Energy+DICE [43]
+FeatureNorm (ours) iSUN
+SVHN
+LSUN©
+Textures
+Places365
+LSUN®
+FPR95↓ AUROC↑ FPR95↓ AUROC↑ FPR95↓ AUROC↑ FPR95↓ AUROC↑ FPR95↓ AUROC↑ FPR95↓ AUROC↑ FPR95↓ AUROC↑ 52.12 33.83 30.47 40.54 25.95 7.13 42.10 37.08 33.11 98.31 37.84 3.83 68.07 53.84 53.13 58.81 47.81 8.84 89.56 90.01 90.37 88.44 89.82 92.31 87.45 82.85 85.09 60.80 79.70 97.06 89.37 91.94 92.08 87.47 91.77 95.11 59.47 45.49 45.83 48.61 47.22 31.18 53.30 47.58 46.06 91.85 50.77 14.23 63.86 48.09 47.04 51.73 50.95 24.62 95.62 98.62 98.63 96.86 99.26 99.96 96.37 98.65 98.76 57.11 99.43 99.81 93.73 97.01 97.20 94.77 97.06 99.36 92.20 93.03 94.05 90.54 94.66 98.65 91.85 88.36 90.54 39.94 86.99 99.18 90.02 92.23 92.26 83.28 93.27 98.24 50.63 29.14 29.66 34.47 30.84 25.67 41.49 29.22 28.65 86.22 31.53 13.53 64.77 47.52 46.46 47.15 50.80 39.34 32.83 7.29 7.21 15.12 3.83 0.07 24.85 6.14 5.86 96.76 2.54 0.32 46.63 19.95 18.51 23.40 16.73 3.38 50.30 23.09 27.14 30.57 31.07 26.02 40.11 22.95 25.12 79.48 28.30 5.98 71.81 56.61 55.39 51.30 65.83 62.80 91.91 94.02 94.10 92.32 93.54 94.36 91.84 90.95 91.99 65.78 89.30 97.33 88.73 91.56 91.67 88.44 90.98 91.18 48.35 20.05 23.62 27.01 27.70 27.08 37.81 20.51 22.68 77.63 26.30 8.13 70.19 54.29 53.02 47.19 64.26 71.17 92.58 96.01 95.34 93.95 94.42 95.38 93.05 94.22 94.17 78.67 92.14 98.71 85.71 88.87 88.97 88.07 87.43 86.05 93.07 96.56 95.93 94.74 95.01 95.25 93.71 95.04 94.90 80.15 92.89 98.32 86.29 89.47 89.58 89.68 87.83 83.12 88.42 89.86 90.29 89.37 88.08 84.62 88.58 86.57 88.50 77.98 84.65 90.91 87.25 89.86 89.95 87.39 88.53 85.20 60.70 45.06 43.67 44.99 49.28 62.54 50.73 41.03 39.08 73.29 43.46 48.69 68.08 52.34 51.67 50.47 59.23 65.25
+Table 2. Performance of OOD detection on CIFAR10 benchmarks. All methods in the table has no access to OOD data during training and validation. The best and second-best results are indicated in bold and underline, respectively. All values are percentages averaged over five runs. 5. Results 5.1. Result on CIFAR10 benchmark
+In Table 2, we report the performance of OOD detection for ResNet18, WRN28, and VGG11 architectures using various post-hoc detection methods. The performance are calculated using FPR95 and AUROC on six OOD datasets.
+Our proposed method achieved the best average perfor-mance on both ResNet18 and WRN28, and best FPR95 on
+VGG11. Note that our method reduces the average FPR95 by 13.45%, 52.77%, and 15.33% compared to the second best results on ResNet18, WRN28, and VGG11, respec-tively.
+As shown in Table 2, our method consistently outper-forms other method on three OOD datasets: SVHN, Tex-tures and LSUN(c). Also, we find that our method is weaker to LSUN(r), iSUN, and Places365. We argue that our method is stronger to detect images from SVHN, Textures and LSUN(c) since its image has low complexity compare to CIFAR10 [29] and activation of the image cumulatively differs from the early stage of the network to later stage (see 6.2). In contrast, LSUN(r) and iSUN have large complex-ity [29], which makes its activation large on the shallow layer and to be detected more easily when using a deeper architecture (i.e., WRN28). Finally, Places365 has similar complexity as CIFAR10 [29] which can be interpreted as images from Places365 have similar low-level abstraction information and semantically shifted compared to ID (i.e., semantically shifted OOD [18]). 5.2. Result on ImageNet benchmark
+In Table 3, we report the performance of OOD detection for ResNet50, VGG16, and MobileNetV3 architectures.
+The performance are calculated using FPR95 and AUROC on four datasets. Our proposed method achieved the best averaged performance on VGG16 and MobileNetV3 archi-tectures. Note that our method reduces the FPR95 on Ima-geNet benchmark by 48.53% and 27.84% compared to the second best results when using VGG16 and MobileNetV3 architectures. In contrast, we find that our method does not effective on ResNet50 architecture compared to the other methods. We argue that the block structure with batch nor-malization layer of ResNet reduced the separation gap be-tween ID and OOD samples (see 6.4).
+Note that our method consistently outperforms other methods on detecting Textures dataset. We argue that images of Textures are far-OOD [51] and have a lot of low-level complexity images compared to the other OOD dataset, and the activation cumulatively differs from the early stage of the network to later stage (see 6.2). Also, iNaturalist usually have higher complexity images com-pared to ImageNet. As a result, deep networks can detect the iNaturalist as OOD unlike VGG11 and ResNet18 on CI-FAR10 benchmark. Finally, SUN and PLACES have sim-ilar complexity level compared to ImageNet, which means that OOD images is semantically shifted and hard to be de-tected [18]. 6. Discussion 6.1. Effect of NormRatio
+We calculate the NormRatio using the ID training sam-ples and the pseudo OOD, which is a jigsaw puzzle gener-ated from the ID image, to select the suitable block for OOD detection. Our insight is that the block that has the largest
+NormRatio is the suitable for detecting pseudo OOD (i.e., jigsaw puzzle) and the other OOD can be seen during the inference stage as well. To find out that the NormRatio can
+Architecture
+Method iNaturalist
+FPR95↓ AUROC↑
+SUN
+FPR95↓ AUROC↑
+PLACES
+FPR95↓ AUROC↑
+Textures
+FPR95↓ AUROC↑
+OOD
+Average
+FPR95↓ AUROC↑
+ResNet50
+VGG16
+MobileNetV3
+MSP† [15]
+ODIN† [28]
+Energy† [30]
+Energy+ReAct† [42]
+Energy+DICE† [43]
+FeatureNorm (Ours)
+MSP [15]
+ODIN [28]
+Energy [30]
+Energy+ReAct [42]
+Energy+DICE [43]
+FeatureNorm (Ours)
+MSP [15]
+ODIN [28]
+Energy [30]
+Energy+ReAct [42]
+Energy+DICE [43]
+FeatureNorm (Ours) 54.99 47.66 55.72 20.38 25.63 22.01 56.72 42.66 44.60 99.94 49.70 16.78 56.04 39.93 54.04 40.98 60.94 33.10 87.74 89.66 89.95 96.22 94.49 95.76 87.26 92.13 91.77 34.50 90.03 96.69 87.31 93.10 91.15 91.17 84.72 92.71 70.83 60.15 59.26 24.20 35.15 42.93 75.66 61.31 59.34 99.87 58.42 28.09 74.19 55.22 68.13 59.82 63.4 42.41 80.86 84.59 85.89 94.20 90.83 90.21 78.31 86.51 86.82 35.01 86.71 94.37 79.08 87.87 85.89 84.80 82.7 88.60 73.99 67.89 64.92 33.85 46.49 56.80 77.89 67.33 66.27 99.25 68.97 41.78 77.03 64.11 69.37 63.07 75.88 58.46 79.76 81.78 82.86 91.58 87.48 84.99 77.60 83.87 83.95 37.54 83.04 90.21 78.23 85.09 83.91 81.53 77.88 81.79 68.00 50.23 53.72 47.30 31.72 20.07 64.84 44.57 43.90 96.45 38.95 23.53 65.00 38.28 54.91 58.78 42.98 8.60 79.61 85.62 85.99 89.80 90.30 95.39 81.66 89.82 89.94 49.12 90.66 95.05 81.64 91.24 88.88 85.17 87.36 98.26 66.95 56.48 58.41 31.43 34.75 35.45 68.78 53.97 53.53 98.88 54.01 27.55 68.07 49.39 61.61 55.66 60.80 35.64 81.99 85.41 86.17 92.95 90.78 91.59 81.21 88.08 88.12 39.04 87.61 94.08 81.57 89.33 87.46 85.67 83.17 90.34
+Table 3. Performance of OOD detection on ImageNet benchmarks. All methods in the table has no access to OOD data during training and validation. The best and second-best results are indicated in bold and underline, respectively. All values are obtained over a single run with the pretrained network provided by Pytorch. † indicates the result is reported by Sun et al. [43]. 6.2. Effect of FeatureNorm
+To demonstrate the effectiveness of FeatureNorm as an indicator for OOD detection, we show the change of Fea-tureNorm of various input through blocks in Figure 4. In
+Figure 4, we demonstrate that norm of the OOD images with low-complexity (SVHN) is low consistently on all blocks except the last one. On the other way, FeatureNorm of the OOD images with high complexity (LSUN(r)) is higher than ID in shallow blocks since the shallow block of network act as edge detector [1, 52] and the high level complexity image tends to have large low-level abstraction.
+Also, high complexity images obtain large FeatureNorm in shallow blocks, the FeatureNorm is reduced since it can-not activate deeper blocks that act as high-level abstraction detector. We argue that network like VGG11 or ResNet18 is hard to separate ID and OOD with high-level complexity since it has a few deep blocks compared to WRN28. As a re-sult, the low quality ID image obtains low FeatureNorm and the high quality ID image or OOD image with high-level se-mantic information obtains high FeatureNorm as shown in
+Figure 5. 6.3. Output calibration using the selected block
+The output of the network is deteriorated when the last block of the network produces a high norm for both ID and
+OOD, and we argue that the network output can be cal-ibrated by replacing the norm of the last block with the norm of the selected block. We evaluate the OOD detec-tion method on ResNet18, WRN28, and VGG11, which are suffered by overconfident last block, with and without re-In the Table 4, we show that the existing OOD placing.
+Figure 3. NormRatio using ID and pseudo OOD calculated on each block (solid line with square marker) and the performance of OOD detection with FeatureNorm on each block (gray bar). It shows that the best OOD detection performance is achieved when using the block that produce the largest NormRatio. represent the OOD detection performance of the block, we calculate the NormRatio and OOD detection performance for each block. In Figure 3, we show that the best OOD de-tection performance can be achieved by the block that pro-duce the largest NormRatio. Also, in Figure 4, we show that
+FeatureNorm for the given ID (black), pseudo OOD (gray) and various OOD (SVHN: red, Places: blue, LSUN(r): or-ange). We see that the FeatureNorm of pseudo OOD (gray) acts as the FeatureNorm of OOD images that has enough low-level abstraction (blue, orange).
+Architecture Method w/o the selected norm w/ the selected norm
+AUROC↑
+FPR95↓
+AUROC↑
+FPR95↓
+ResNet18
+WRN28
+VGG11
+MSP
+ODIN
+Energy
+MSP
+ODIN
+Energy
+MSP
+ODIN
+Energy 50.63 29.14 29.66 41.49 29.22 28.65 64.77 47.52 46.46 91.91 94.02 94.10 91.84 90.95 91.99 88.73 91.56 91.67 35.56 15.99 17.59 38.38 23.71 24.01 56.57 35.62 35.42 94.66 97.03 96.69 93.59 94.75 94.87 90.55 93.50 93.58
+Table 4. An ablation study with and without selected norm for other previous OOD detection methods. We demonstrate that re-placing the norm of the last block with the norm of the selected block improve the performance of previous methods. The results are averaged over five runs.
+OOD
+SVHN
+Textures
+LSUN(c)
+LSUN(r) iSUN
+Places365
+Average
+Conv-BN-ReLU
+FPR95↓ AUROC↑
+BN-ReLU-Conv
+FPR95↓ AUROC↑ 7.13 31.18 0.07 27.08 26.02 62.54 25.67 98.65 92.31 99.96 95.25 95.38 84.62 94.36 6.92 36.89 0.50 17.93 14.62 49.30 21.03 98.68 91.91 99.82 96.97 97.39 90.76 95.92
+Table 5. OOD detection performance comparison between two
+ResNet18 architectures with different block orders. Conv-BN-ReLU refers to the basic block order of ResNet18 and BN-ReLU-Conv refers to the block order of WRN28, which we argue that better block order for OOD detection.
+It demonstrates that the
+BN-ReLU-Conv block order outperforms the original block or-der in detecting high complexity OOD images (LSUN(r), iSUN,
+Places365). Thus, ResNet18 and ResNet50 cannot fully leverage the proposed framework. The results are averaged over five runs. activation [42] because it standardizes the input elements with moving average and moving variance of the ID, and the absolute value of the output elements becomes large. Di-rectly adding ReLU output from the Conv-BN-ReLU block to identity increases the feature map norm by adding pos-itive elements, whereas adding Conv output from the BN-ReLU-Conv block may not increase the feature map norm since the output may not be positive. Since OOD inputs may activate the convolutional layer filters less, the FeatureNorm of the output feature map may be smaller for a given OOD.
+Therefore, we argue that block order is an important factor in OOD detection. 7.

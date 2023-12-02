@@ -1,0 +1,165 @@
+Abstract
+Supervised learning requires a large amount of training data, limiting its appli-cation where labeled data is scarce. To compensate for data scarcity, one pos-sible method is to utilize auxiliary tasks to provide additional supervision for the main task. Assigning and optimizing the importance weights for different auxiliary tasks remains an crucial and largely understudied research question.
+In this work, we propose a method to automatically reweight auxiliary tasks in order to reduce the data requirement on the main task. Speciﬁcally, we formu-late the weighted likelihood function of auxiliary tasks as a surrogate prior for the main task. By adjusting the auxiliary task weights to minimize the diver-gence between the surrogate prior and the true prior of the main task, we obtain a more accurate prior estimation, achieving the goal of minimizing the required amount of training data for the main task and avoiding a costly grid search. In multiple experimental settings (e.g. semi-supervised learning, multi-label classiﬁ-cation), we demonstrate that our algorithm can effectively utilize limited labeled data of the main task with the beneﬁt of auxiliary tasks compared with previous task reweighting methods. We also show that under extreme cases with only a few extra examples (e.g. few-shot domain adaptation), our algorithm results in signiﬁcant improvement over the baseline. Our code and video is available at https://sites.google.com/view/auxiliary-task-reweighting. 1
+
+Introduction
+Supervised deep learning methods typically require an enormous amount of labeled data, which for many applications, is difﬁcult, time-consuming, expensive, or even impossible to collect. As a result, there is a signiﬁcant amount of research effort devoted to efﬁcient learning with limited labeled data, including semi-supervised learning [41, 47], transfer learning [48], few-shot learning [9], domain adaptation [49], and representation learning [42].
+Among these different approaches, auxiliary tasks are widely used to alleviate the lack of data by providing additional supervision, i.e. using the same data or auxiliary data for a different learning task during the training procedure. Auxiliary tasks are usually collected from related tasks or domains 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Figure 1: Learning with minimal data through auxiliary task reweighting. (a) An ordinary prior p(θ) over model parameters contains little information about the true prior p∗(θ) and the optimal parameter
+θ∗. (b) Through a weighted combination of distributions induced by data likelihood p(Tak |θ) of different auxiliary tasks, we ﬁnd the optimal surrogate prior pα(θ) which is closest to the true prior. where there is abundant data [49], or manually designed to ﬁt the latent data structure [46, 55].
+Training with auxiliary tasks has been shown to achieve better generalization [2], and is therefore widely used in many applications, e.g. semi-supervised learning [55], self-supervised learning [42], transfer learning [48], and reinforcement learning [25].
+Usually both the main task and auxiliary task are jointly trained, but only the main task’s performance is important for the downstream goals. The auxiliary tasks should be able to reduce the amount of labeled data required to achieve a given performance for the main task. However, this has proven to be a difﬁcult selection problem as certain seemingly related auxiliary tasks yield little or no improvement for the main task. One simple task selection strategy is to compare the main task performance when training with each auxiliary task separately [54]. However, this requires an exhaustive enumeration of all candidate tasks, which is prohibitively expensive when the candidate pool is large. Furthermore, individual tasks may behave unexpectedly when combined together for ﬁnal training. Another strategy is training all auxiliary tasks together in a single pass and using an evaluation technique or algorithm to automatically determine the importance weight for each task. There are several works along this direction [4, 10, 13, 31], but they either only ﬁlter out unrelated tasks without further differentiating among related ones, or have a focused motivation (e.g. faster training) limiting their general use.
+In this work, we propose a method to adaptively reweight auxiliary tasks on the ﬂy during joint training so that the data requirement on the main task is minimized. We start from a key insight: we can reduce the data requirement by choosing a high-quality prior. Then we formulate the parameter distribution induced by the auxiliary tasks’ likelihood as a surrogate prior for the main task. By adjusting the auxiliary task weights, the divergence between the surrogate prior and the true prior of the main task is minimized. In this way, the data requirement on the main task is reduced under high quality surrogate prior. Speciﬁcally, due to the fact that minimizing the divergence is intractable, we turn the optimization problem into minimizing the distance between gradients of the main loss and the auxiliary losses, which allows us to design a practical, light-weight algorithm. We show in various experimental settings that our method can make better use of labeled data and effectively reduce the data requirement for the main task. Surprisingly, we ﬁnd that very little labeled data (e.g. 1 image per class) is enough for our algorithm to bring a substantial improvement over unsupervised and few-shot baselines. 2 Learning with Minimal Data through Auxiliary Task Reweighting
+Suppose we have a main task with training data Tm (including labels), and K different auxiliary tasks with training data Tak for k-th task, where k = 1, · · · , K. Our model contains a shared backbone with parameter θ, and different heads for each task. Our goal is to ﬁnd the optimal parameter θ∗ for the main task, using data from main task as well as auxiliary tasks. Note that we care about performance on the main task and auxiliary tasks are only used to help train a better model on main task (e.g. when we do not have enough data on the main task). In this section, we discuss how to learn with minimal data on main task by learning and reweighting auxiliary tasks. 2
+2.1 How Much Data Do We Need: Single-Task Scenario
+Before discussing learning from multiple auxiliary tasks, we ﬁrst start with the single-task scenario.
+When there is only one single task, we normally train a model by minimizing the following loss:
+L(θ) = − log p(Tm|θ) − log p(θ) = − log(p(Tm|θ) · p(θ)), (A1) where p(Tm|θ) is the likelihood of training data and p(θ) is the prior. Usually, a relatively weak prior (e.g. Gaussian prior when using weight decay) is chosen, reﬂecting our weak knowledge about the true parameter distribution, which we call ‘ordinary prior’. Meanwhile, we also assume there exists an unknown ‘true prior’ p∗(θ) where the optimal parameter θ∗ is actually sampled from. This true prior is normally more selective and informative (e.g. having a small support set) (See Fig. 1(a)) [5].
+Now our question is, how much data do we need to learn the task. Actually the answer depends on the choice of the prior p(θ). If we know the informative ‘true prior’ p∗(θ), only a few data items are needed to localize the best parameters θ∗ within the prior. However, if the prior is rather weak, we have to search θ in a larger space, which needs more data. Intuitively, the required amount of data is related to the divergence between p(θ) and p∗(θ): the closer they are, the less data we need.
+In fact, it has been proven [5] that the expected amount of information needed to solve a single task is
+I = DKL(p∗ (cid:107) p) + H(p∗), (A2) where DKL(· (cid:107) ·) is Kullback–Liebler divergence, and H(·) is the entropy. This means we can reduce the data requirement by choosing a prior closer to the true prior p∗. Suppose p(θ) is parameterized by α, i.e., p(θ) = pα(θ), then we can minimize data requirement by choosing α that satisﬁes:
+DKL(p∗ (cid:107) pα). min
+α (A3)
+However, due to our limited knowledge about the true prior p∗, it is unlikely to manually design a family of pα that has a small value in (A3). Instead, we will show that we can deﬁne pα implicitly through auxiliary tasks, utilizing their natural connections to the main task. 2.2 Auxiliary-Task Reweighting
+When using auxiliary tasks, we optimize the following joint-training loss:
+L(θ) = − log p(Tm|θ) −
+K (cid:88) k=1
+αk log p(Tak |θ) = − log(p(TM |θ) ·
+K (cid:89) k=1 pαk (Tak |θ)), (A4) where auxiliary losses are weighted by a set of task weights α = (α1, · · · , αK), and added together with the main loss. By comparing (A4) with single-task loss (A1), we can see that we are implicitly using pα(θ) = 1 k=1 pαk (Tak |θ) as a ‘surrogate’ prior for the main task, where Z(α) is the normalization term (partition function). Therefore, as discussed in Sec. 2.1, if we adjust task weights
+α towards (cid:81)K
+Z(α)
+DKL(p∗(θ) (cid:107) min
+α 1
+Z(α)
+K (cid:89) k=1 pαk (Tak |θ)), (A5) then the data requirement on the main task can be minimized. This implies an automatic strategy of task reweighting. Higher weights can be assigned to the auxiliary tasks with more relevant information to the main task, namely the parameter distribution of the tasks is closer to that of the main task. After taking the weighted combination of auxiliary tasks, the prior information is maximized, and the main task can be learned with minimal additional information (data). See Fig. 1(b) for an illustration. 2.3 Our Approach
+In Sec. 2.2 we have discussed about how to minimize the data requirement on the main task by reweighting and learning auxiliary tasks. However, the objective in (A5) is hard to optimize directly due to a few practical problems:
+• True Prior (P1): We do not know the true prior p∗ in advance. 3
+• Samples (P2): KL divergence is in form of an expectation, which needs samples to estimate.
+However, sampling from a complex distribution is non-trivial.
+• Partition Function (P3): Partition function Z(α) = (cid:82) (cid:81)K k=1 pαk (Tak |θ)dθ is given by an intractable integral, preventing us from getting the accurate density function pα.
+To this end, we use different tools or approximations to design a practical algorithm, and keep its validity and effectiveness from both theoretical and empirical aspects, as presented below.
+True Prior (P1)
+In the original optimization problem (A5), we are minimizing
+DKL(p∗(θ) (cid:107) pα(θ)) = Eθ∼p∗ log p∗(θ) pα(θ)
+, (A6) which is the expectation of log p∗(θ) pα(θ) w.r.t. p∗(θ). The problem is, p∗(θ) is not accessible. However, we can notice that for each θ∗ sampled from prior p∗, it is likely to give a high data likelihood p(Tm|θ∗), which means p∗(θ) is ‘covered’ by p(Tm|θ), i.e., p(Tm|θ) has high density both in the sup-port set of p∗(θ), and in some regions outside. Thus we propose to minimize DKL(pm(θ) (cid:107) pα(θ)) instead of DKL(p∗(θ) (cid:107) pα(θ)), where pm(θ) is the parameter distribution induced by data like-lihood p(Tm|θ), i.e., pm(θ) ∝ p(Tm|θ). Furthermore, we propose to take the expectation w.r.t.
+Z(cid:48)(α) pm(θ)pα(θ) instead of pm(θ) due to the convenience of sampling while optimizing the joint loss (see P2 for more details). Then our objective becomes 1 min
+α
+Eθ∼pJ log pm(θ) pα(θ)
+, (A7) where pJ (θ) = 1
+Z(cid:48)(α) pm(θ)pα(θ), and Z (cid:48)(α) is the normalization term.
+Now we can minimize (A7) as a feasible surrogate for (A5). However, minimizing (A7) may end up with a suboptimal α for (A5). Due to the fact that pm(θ) also covers some ‘overﬁtting area’ other than p∗(θ), we may push pα(θ) closer to the overﬁtting area instead of p∗(θ) by minimizing (A7).
+But we prove that, under some mild conditions, if we choose α that minimizes (A7), the value of (A5) is also bounded near the optimal value:
+Theorem 1. (Informal and simpliﬁed version) Let us denote the optimal weights for (A5) and (A7) by α∗ and ˆα, respectively. Assume the true prior p∗(θ) has a small support set S. Let γ =
+θ /∈S pm(θ)pα(θ)dθ be the maximum of the integral of pm(θ)pα(θ) outside S, then we have maxα (cid:82)
+DKL(p∗ (cid:107) pα∗ ) ≤ DKL(p∗ (cid:107) p ˆα) ≤ DKL(p∗ (cid:107) pα∗ ) + Cγ2 − C (cid:48)γ2 log γ. (A8)
+The formal version and proof can be found in Appendix. Theorem 1 states that optimizing (A7) can also give a near-optimal solution for (A5), as long as γ is small. This condition holds when pm(θ) and pα(θ) do not reach a high density at the same time outside S. This is reasonable because overﬁtted parameter of main task (i.e., θ giving a high training data likelihood outside S) is highly random, depending on how we sample the training set, thus is unlikely to meet the optimal parameters of auxiliary tasks. In practice, we also ﬁnd this approximation gives a robust result (Sec. 3.3).
+Samples (P2) To estimate the objective in (A7), we need samples from pJ (θ) = 1
+Z(cid:48)(α) pm(θ)pα(θ).
+Apparently we cannot sample from this complex distribution directly. However, we notice that pJ is what we optimize in the joint-training loss (A4), i.e., L(θ) ∝ − log pJ (θ). To this end, we use the tool of Langevin dynamics [39, 51] to sample from pJ while optimizing the joint-loss (A4). Speciﬁcally, at the t-th step of SGD, we inject a Gaussian noise with a certain variance into the gradient step:
+∆θt = (cid:15)t∇ log pJ (θ) + ηt, (A9) where (cid:15)t is the learning rate, and ηt ∼ N (0, 2(cid:15)t) is a Guassian noise. With the injected noise, θt will converge to samples from pJ , which can then be used to estimate (A7). In practice, we inject noise in early epochs to sample from pJ and optimize α, and then return to regular SGD once α has converged. Note that we do not anneal the learning rate as in [51] because we ﬁnd in practice that stochastic gradient noise is negligible compared with injected noise (see Appendix). 4
+Algorithm 1 ARML (Auxiliary Task Reweighting for Minimum-data Learning)
+Input: main task data Tm, auxiliary task data Tak , initial parameter θ0, initial task weights α
+Parameters: learning rate of t-th iteration (cid:15)t, learning rate for task weights β for iteration t = 1 to T do if α has not converged then
+θt ← θt−1 − (cid:15)t(−∇ log p(Tm|θt−1) − (cid:80)K
+α ← α − β∇α(cid:107)∇ log p(Tm|θt) − (cid:80)K
+Project α back into A k=1 αk∇ log p(Tak |θt−1)) + ηt k=1 αk∇ log p(Tak |θt)(cid:107)2 2
+θt ← θt−1 − (cid:15)t(−∇ log p(Tm|θt−1) − (cid:80)K k=1 αk∇ log p(Tak |θt−1)) else end if end for (cid:81)K
+Partition Function (P3) To estimate (A7), we need the exact value of surrogate prior pα(θ) = 1 k=1 pαk (Tak |θ). Although we can easily calculate the data likelihood p(Tak |θ), the partition
+Z(α) function Z(α) is intractable. The same problem also occurs in model estimation [18], Bayesian inference [38], etc. A common solution is to use score function ∇ log pα(θ) as a substitution of pα(θ) to estimate relationship with other distributions [22, 24, 33]. For one reason, score function can uniquely decide the distribution. It also has other nice properties. For example, the divergence deﬁned on score functions (also known as Fisher divergence)
+F (p (cid:107) q) = Eθ∼p(cid:107)∇ log p(θ) − ∇ log q(θ)(cid:107)2 (A10) 2 is stronger than many other divergences including KL divergence, Hellinger distance, etc. [22, 32].
+Most importantly, using score function can obviate estimation of partition function which is constant w.r.t. θ. To this end, we propose to minimize the distance between score functions instead, and our objective ﬁnally becomes min
+α
+Eθ∼pJ (cid:107)∇ log p(Tm|θ) − ∇ log pα(θ)(cid:107)2 2. (A11)
+Note that ∇ log pm(θ) = ∇ log p(Tm|θ). In Appendix we show that under mild conditions the optimal solution for (A11) is also the optimal or near-optimal α for (A5) and (A7) . We ﬁnd in practice that optimizing (A11) generally gives optimal weights for minimum-data learning. 2.4 Algorithm
+Now we present the ﬁnal algorithm of auxiliary task reweighting for minimum-data learning (ARML).
+The full algorithm is shown in Alg. 1. First, our objective is (A11). Until α converges, we use
+Langevin dynamics (A9) to collect samples at each iteration, and then use them to estimate (A11) and update α. Additionally, we only search α in an afﬁne simplex A = {α| (cid:80) k αk = K; αk ≥ 0, ∀k} to decouple task reweighting from the global weight of auxiliary tasks [10]. Please also see Appendix ?? for details on the algorithm implementation in practice. 3 Experiments
+For experiments, we test effectiveness and robustness of ARML under various settings. This section is organized as follows. First in Sec. 3.1, we test whether ARML can reduce data requirement in different settings (semi-supervised learning, multi-label classiﬁcation), and compare it with other reweighting methods. In Sec. 3.2, we study an extreme case: based on an unsupervised setting (e.g. domain generalization), if a little extra labeled data is provided (e.g. 1 or 5 labels per class), can
+ARML maximize its beneﬁt and bring a non-trivial improvement over unsupervised baseline and other few-shot algorithms? Finally in Sec. 3.3, we test ARML’s robustness under different levels of data scarcity and validate the rationality of approximation we made in Sec. 2.3. 3.1 ARML can Minimize Data Requirement
+To get started, we show that ARML can minimize data requirement under two realist settings: semi-supervised learning and multi-label classiﬁcation. we consider the following task reweight-5
+ing methods for comparison: (i) Uniform (baseline): all weights are set to 1, (ii) AdaLoss [21]: tasks are reweighted based on uncertainty, (iii) GradNorm [10]: balance each task’s gradi-ent norm, (iv) CosineSim [13]: tasks are ﬁltered out when having negative cosine similarity cos(∇ log p(Tak |θ), ∇ log p(Tm|θ)), (v) OL_AUX [31]: tasks have higher weights when the gradient inner product ∇ log p(Tak |θ)T ∇ log p(Tm|θ) is large. Besides, we also compare with grid search as an ‘upper bound’ of ARML. Since grid search is extremely expensive, we only compare with it when the task number is small (e.g. K = 2).
+Semi-supervised Learning (SSL)
+In SSL, one generally trains classiﬁer with certain percentage of labeled data as the main task, and at the same time designs different losses on unlabeled data as auxiliary tasks. Speciﬁcally, we use Self-supervised Semi-supervised Learning (S4L) [55] as our baseline algorithm. S4L uses self-supervised methods on unlabeled part of training data, and trains classiﬁer on labeled data as normal. Following [55], we use two kinds of self-supervised
+◦ methods: Rotation and Exemplar-MT. In Rotation, we rotate each image by [0
+] and ask the network to predict the angle. In Exemplar-MT, the model is trained to extract feature invariant to a wide range of image transformations. Here we use random ﬂipping, gaussian noise [8] and Cutout [12] as data augmentation. During training, each image is randomly augmented, and then features of original image and augmented image are encouraged to be close.
+, 180
+, 270
+, 90
+◦
+◦
+◦
+Table 1: Test error of semi-supervised learning on CIFAR-10 and SVHN. From top to bottom: purely-supervised method, state-of-the-art semi-supervised methods, and S4L with different reweight-ing schemes. ∗ means multiple runs are needed.
+CIFAR-10 (4000 labels)
+SVHN (1000 labels)
+Supervised 20.26 ± .38 12.83 ± .47
+Π-Model [28]
+Mean Teacher [47]
+VAT [41]
+VAT + EntMin [17]
+Pseudo-Label [29]
+S4L (Uniform)
+S4L + AdaLoss
+S4L + GradNorm
+S4L + CosineSim
+S4L + OL_AUX
+S4L + GridSearch∗
+S4L + ARML (ours) 16.37 ± .63 15.87 ± .28 13.86 ± .27 13.13 ± .39 17.78 ± .57 15.67 ± .29 21.06 ± .17 14.07 ± .44 15.03 ± .31 16.07 ± .51 13.76 ± .22 13.68 ± .35 7.19 ± .27 5.65 ± .47 5.63 ± .20 5.35 ± .19 7.62 ± .29 7.83 ± .33 11.53 ± .39 7.68 ± .13 7.02 ± .25 7.82 ± .32 6.07 ± .17 5.89 ± .22
+Figure 2: Amount of labeled data required to reach certain accuracy on CIFAR-10.
+Figure 3: Accuracy of multi-source domain generalization with Art as target.
+Based on S4L, we use task reweighting to adjust the weights for different self-supervised losses.
+Following the literature [41, 47], we test on two widely-used benchmarks: CIFAR-10 [27] with 4000 out of 45000 images labeled, and SVHN [40] with 1000 out of 65932 images labeled. We report test error of S4L with different reweighting schemes in Table 1, along with other SSL methods. We notice that, on both datasets, with the same amount of labeled data, ARML makes a better use of the data than uniform baseline as well as other reweighting methods. Remarkably, with only one pass, ARML is able to ﬁnd the optimal weights while GridSearch needs multiple runs. S4L with our
+ARML applied is comparable to other state-of-the-art SSL methods. Notably, we only try Rotation and Exemplar-MT, while exploring more auxiliary tasks could further beneﬁt the main task and we leave it for future study.
+To see whether ARML can consistently reduce data requirement, we also test the amount of data required to reach different accuracy on CIFAR-10. As shown in Fig. 2, with ARML applied, we only need about half of labels to reach a decent performance. This also agrees with the results of
+GridSearch, showing the maximum improvement from auxiliary tasks during joint training. 6
+Table 2: Test error of main task on CelebA.
+Baseline
+AdaLoss [21]
+GradNorm [10]
+CosineSim [13]
+OL_AUX [31]
+ARML (ours)
+Test Error 6.70 ± .18 7.21 ± .11 6.44 ± .07 6.51 ± .14 6.32 ± .17 5.97 ± .18
+Table 3: Top 5 relative / irrelative attributes (auxiliary tasks) to the target attribute (main task) on CelebA. main task most related tasks least related tasks 5_o_Clock_Shadow
+Mustache
+Bald
+Sideburns
+Rosy_Cheeks
+Goatee
+Mouth_Slightly_Open
+Male
+Attractive
+Heavy_Makeup
+Smiling
+Multi-label Classiﬁcation (MLC) We also test our method in MLC. We use the CelebA dataset [34]. It contains 200K face images, each labeled with 40 binary attributes. We cast this into a
+MLC problem, where we randomly choose one target attribute as the main classiﬁcation task, and other 39 as auxiliary tasks. To simulate our data-scarce setting, we only use 1% labels for main task.
+We test different reweighting methods and list the results in Table 2. With the same amount of labeled data, ARML can help ﬁnd better and more generalizable model parameters than baseline as well as other reweighting methods. This also implies that ARML has a consistent advantage even when handling a large number of tasks. For a further veriﬁcation, we also check if the learned relationship between different face attributes is aligned with human’s intuition. In Table 3, we list the top 5 auxiliary tasks with the highest weights, and also the top 5 with the lowest weights. As we can see,
+ARML has automatically picked attributes describing facial hair (e.g. Mustache, Sideburns, Goatee), which coincides with the main task 5_o_Clock_Shadow, another kind of facial hair. On the other hand, the tasks with low weights seem to be unrelated to the main task. This means ARML can actually learn the task relationship that matches our intuition. 3.2 ARML can Beneﬁt Unsupervised Learning at Minimal Cost
+In Sec. 3.1, we use ARML to reweight tasks and ﬁnd a better prior for main task in order to compensate for data scarcity. Then one may naturally wonder whether this still works under situations where the main task has no labeled data at all (e.g. unsupervised learning). In fact, this is a meaningful question, not only because unsupervised learning is one of the most important problems in the community, but also because using auxiliary tasks is a mainstream of unsupervised learning methods [7, 16, 42].
+Intuitively, as long as the family of prior pα(θ) is strong enough (which is determined by auxiliary tasks), we can always ﬁnd a prior that gives a good model even without label information. However, if we want to use ARML to ﬁnd the prior, at least some labeled data is required to estimate the gradient for main task (Eq. (A11)). Then the question becomes, how minimum of the data does ARML need to ﬁnd a proper set of weights? More speciﬁcally, can we use as little data as possible (e.g. 1 or 5 labeled images per class) to make substantial improvement?
+To answer the question, we conduct experiments in domain generalization, a well-studied unsuper-vised problem. In domain generalization, there is a target domain with no data (labeled or unlabeled), and multiple source domains with plenty of data. People usually train a model on source domains (auxiliary tasks) and transfer it to the target domain (main task). To use ARML, we relax the restriction a little by adding Nm extra labeled images for target domain, where Nm = 1, · · · , 5.
+This slightly relaxed setting is known as few-shot domain adaptation (FSDA) which was studied in [37], and we also add their FSDA results into comparison. For dataset selection, we use a common benchmark PACS [30] which contains four distinct domains of Photo, Art, Cartoon and Sketch. We pick each one as target domain and the other three as source domains which are reweighted by our
+ARML.
+We ﬁrst set Nm = 5 to see the results (Table 4). Here we include both state-of-the-art domain generalization methods [3, 7, 14] and FSDA methods [37]. Since they are orthogonal to ARML, we apply ARML on both types of methods to see the relative improvement. Let us ﬁrst look at domain generalization methods. Here the baseline refers to training a model on source domains (auxiliary tasks) and directly testing on target domain (main task). If we use the extra 5 labels to reweight different source domains with ARML, we can make a non-trivial improvement, especially with Sketch as target (4% absolute improvement). Note that in “Baseline + ARML”, we update θ using only classiﬁcation loss on source data (auxiliary loss), and the extra labeled data in the target 7
+Table 4: Results of multi-source domain generalization (w/ extra 5 labeled images per class in target domain). We list results with each of four domains as target domain. From top to down: domain generalization methods, FSDA methods and different methods equipped with ARML. JT is short for joint-training. † means the results we reproduced are higher than originally reported.
+Method
+Extra label
+Sketch
+Art
+Cartoon
+Photo
+Baseline†
+D-SAM [14]
+JiGen [7]
+Shape-bias [3]
+JT
+FADA [37]
+Baseline + ARML
+JT + ARML
+FADA + ARML (cid:55) (cid:55) (cid:55) (cid:55) (cid:51) (cid:51) (cid:51) (cid:51) (cid:51) 75.34 77.83 71.35 78.62 78.52 79.23 79.35 80.47 79.46 81.25 77.33 79.42 83.01 83.94 83.64 82.52 85.70 85.16 77.35 72.43 75.25 79.39 81.36 79.39 77.30 81.01 81.23 95.93 95.30 96.03 96.83 97.01 97.07 95.99 97.22 97.01 domain are just used for reweighting the auxiliary tasks, which means the improvement completely comes from task reweighting. Additionally, joint-training (JT) and FSDA methods also use extra labeled images by adding them into classiﬁcation loss. If we further use the extra labels for task reweighting, then we can make a further improvement and reach a state-of-the-art performance.
+We also test performance of ARML with Nm = 1, · · · , 5. As an example, here we use Art as target domain. As shown in Fig. 3, ARML is able to improve the accuracy over different domain generalization or FSDA methods. Remarkably, when Nm = 1, although FSDA methods are under-performed, ARML can still bring an improvement of ∼ 4% accuracy. This means ARML can beneﬁt unsupervised domain generalization with as few as 1 labeled image per class. 3.3 ARML is Robust to Data Scarcity
+Finally, we examine the robustness of our method. Due to the approximation made in Sec. 2.3, ARML may ﬁnd a suboptimal solution. For example, in the true prior approximation (P1), we use p(Tm|θ) to replace p∗(θ). When the size of Tm is large, these two should be close to each other. However, if we have less data, p(Tm|θ) may also have high-value region outside p∗(θ) (i.e. ‘overﬁtting’ area), which may make the approximation inaccurate. To test the robustness of ARML, we check whether
+ARML can ﬁnd similar task weights under different levels of data scarcity.
+Figure 4: Change of task weights during training under different levels of data scarcity. From left to right: one-shot, partially labeled and fully labeled.
+We conduct experiments on multi-source domain generalization with Art as target domain. We test three levels of data scarcity: few-shot (1 label per class), partly labeled (100 labels per class) and fully labeled (∼ 300 labels per class). We plot the change of task weights during training time in
+Fig. 4. We can see that task weights found by ARML are barely affected by data scarcity, even in few-shot scenario. This means ARML is able to ﬁnd the optimal weights even with minimal guidance, verifying the rationality of approximation in Sec. 2.3 and the robustness of our method. 8
+4

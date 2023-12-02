@@ -1,0 +1,228 @@
+Abstract
+PointGoal Navigation (Habitat+Gibson)
+Furniture Moving (AI2-THOR) 3 vs. 1 with Keeper (Google Football)
+While deep reinforcement learning (RL) promises free-dom from hand-labeled data, great successes, especially for Embodied AI, require signiﬁcant work to create supervi-sion via carefully shaped rewards. Indeed, without shaped rewards, i.e., with only terminal rewards, present-day Em-bodied AI results degrade signiﬁcantly across Embodied AI problems from single-agent Habitat-based PointGoal Navi-gation (SPL drops from 55 to 0) and two-agent AI2-THOR-based Furniture Moving (success drops from 58% to 1%) to three-agent Google Football-based 3 vs. 1 with Keeper (game score drops from 0.6 to 0.1). As training from shaped rewards doesn’t scale to more realistic tasks, the commu-nity needs to improve the success of training with termi-nal rewards. For this we propose GRIDTOPIX: 1) train agents with terminal rewards in gridworlds that generically mirror Embodied AI environments, i.e., they are indepen-dent of the task; 2) distill the learned policy into agents that reside in complex visual worlds. Despite learning from only terminal rewards with identical models and RL algo-rithms, GRIDTOPIX signiﬁcantly improves results across tasks: from PointGoal Navigation (SPL improves from 0 to 64) and Furniture Moving (success improves from 1% to 25%) to football gameplay (game score improves from 0.1 to 0.6). GRIDTOPIX even helps to improve the results of shaped reward training. 1.
+
+Introduction
+The Embodied AI research community has developed a host of capable simulated environments focused on the challenges of navigation [58, 78], interaction [35, 77, 24], manipulation [79, 32, 81], and simulation-to-real trans-fer [21, 50, 34]. Fast progress has been made within these environments over the past few years, particularly in navi-gation heavy tasks such as PointGoal navigation [58, 75].
+While early applications of deep RL to Embodied AI set down the more challenging path of learning from terminal
+⇤denotes equal mentoring by LW and AS
+SPL
+Success
+Game Score 69 64 55 58 62 0.6 0.65 0.57 0.1
+DirectPix
+GridToPix
+GridToPix (ours) 1
+DirectPix 25 0.07
+GridToPix
+GridToPix (ours)
+DirectPix
+GridToPix
+GridToPix (ours)
+Shaped rewards
+Terminal rewards
+Figure 1. Shaped vs. terminal rewards. Across three tasks, em-bodied AI agents fail to learn from terminal rewards using standard
+RL methods despite achieving high performance when given care-fully shaped rewards. When using our GRIDTOPIX methodology, the embodied AI agents successfully learn from terminal rewards and sometimes even outperform DirectPix trained agents receiving shaped rewards. rewards1 [84], the pursuit of increasingly capable agents has steered us towards employing large amounts of human supervision [60, 2, 65, 28, 37], reward shaping [75, 67], and task-speciﬁc architectures [12, 54]. The multitude of rewards and auxiliary hyperparameters that are manually tuned when training Embodied AI agents today is reminis-cent of careful feature engineering [44, 17, 39] in computer vision years ago.
+While these design choices have got our ﬁeld (and agents) off the ground, it is hard to believe that this method-ology will scale as tasks increase in complexity and physi-1I.e., reward structures in which the only goal dependent reward is given at the end of an episode. Goal independent rewards, e.g., a time-step penalty, can be given at every step. 1
+Agent Trajectory  in Environment 2
+T 1
+…
+…
+GRID AGENT  (perfect perception)
+Imitation
+PIX AGENT (RGB observations)
+Figure 2. GRIDTOPIX methodology to transfer knowledge from gridworld to visual agents. We propose to train agents in gridworld environments, where perception is simpliﬁed and simulation is fast, mirroring visual environments used in Embodied AI research. Learned gridworld policies can then be distilled to visual agents via imitation learning. See Sec. 3.3 for detailed notation. step=1 1 step=2 2 step=T
+T cal realism. Instead, we must borrow from the notable suc-cesses of reinforcement learning in games [62, 61], where sophisticated agents are trained with minimal supervision in the form of terminal rewards.
+As a ﬁrst step towards this goal, we empirically ana-lyze the ability of modern tried-and-true Embodied AI al-gorithms to learn high-quality policies from only terminal rewards in visual environments (DirectPix). We consider a variety of challenging tasks in three diverse simulators – single-agent PointGoal Navigation in Habitat [58] (SPL drops from 55 to 0), two-agent Furniture Moving in AI2-THOR [35] (success drops from 58% to 1%), and three-agent 3 vs. 1 with Keeper in the Google Research Football
+Environment [38] (game score drops from 0.6 to 0.1). Given only terminal rewards, we ﬁnd that performance of these modern methods degrades drastically, as summarized in
+Fig. 1. Often, no meaningful policy is learned despite train-ing for millions of steps. These results are eye-opening and a reminder that we are still ways off in our pursuit of embod-ied agents that can learn skills with minimal supervision, i.e., supervision in the form of only terminal rewards.
+If present-day RL algorithms have been successful in other domains (particularly ones requiring less visual pro-cessing [62, 61, 16]), why do they struggle for Embodied
+AI? Our hypothesis: this struggle is due to the need for embodied agents to learn to plan and perceive simultane-ously. This introduces a ‘non-stationarity’ into learning – the planning module must continuously adapt to changes in perceptual reasoning. While non-stationarity in learning has also been a problem in past challenges conquered by
+RL methods, Embodied AI tasks exacerbate this problem due to the presence of rich and diverse visual observations, long-horizon planning, a need for collaboration, and a re-quirement to generalize to unseen test worlds. training routine for embodied agents that decouples the joint goal of planning from visual input into two manageable pieces. Speciﬁcally, using general-purpose gridworld envi-ronments which generically mirror the embodied environ-ments of interest, we ﬁrst train a gridworld agent for the desired task. Within a gridworld, an agent has perfect vi-sual capabilities, allowing learning algorithms to focus on long-horizon planning given only terminal rewards. Next, this gridworld agent supervises an agent operating solely on complex visual observations (no gridworld is needed at test time).
+Importantly, our conceptualization of ‘gridworld’ isn’t restricted to a top-down occupancy map. As we detail in Sec. 3.2, gridworlds are perfect-perception environments, i.e., semantics are explicitly available to the agent.
+Across tasks, as summarized in Fig. 1, we observe that
+GRIDTOPIX signiﬁcantly outperforms directly compara-ble2 methods when training visual agents using terminal re-wards: for PointGoal Navigation the SPL metric improves from 0 to 64; for Furniture Moving success improves from 1% to 25%; for 3 vs. 1 with Keeper the game score im-proves from 0.1 to 0.6. Moreover, GRIDTOPIX even im-proves benchmarks when trained with carefully shaped re-wards. This ﬁnding is analogous to the progress made by weakly supervised computer vision approaches which inch towards benchmarks set by fully supervised methods. 2. Why Learn From Terminal Rewards?
+Human supervision, hand-written and rule-based ex-pert teachers, shaped rewards, and custom architectures are common when developing increasingly capable embodied agents. Several questions naturally arise when developing agents with only minimal supervision.
+As rule-based optimal experts are frequently available in to-Driven by this hypothesis, we study GRIDTOPIX, a 2I.e., using identical model architectures.
+day’s simulated environments and tasks, why not use them for dense supervision at every step? Admittedly, many present-day embodied tasks are navigational which permits computing optimal actions easily using shortest path algo-rithms. The community is, however, quickly moving to more intricate and physics-based tasks, where rule-based experts are computationally expensive or infeasible. Con-sider, for example, the games of Go, Hanabi, and Football, or the real world tasks of elderly assistance and disaster re-lief. It is extremely difﬁcult to devise a heuristic expert, let alone an optimal one, for any of those examples. Creating heuristic experts in these settings is just as, if not more, la-bor intensive as the reward shaping we hoped to avoid. With these long term pursuits in mind, we think it is important to study and develop methods that learn with minimal su-pervision, including in tasks that are popular today. In this work, optimal actions can be easily computed for the pop-ular Point Navigation task [58]. But for the other two tasks we consider – FurnMove [29] and 3 vs. 1 with Keeper [38] – no experts are available in the literature and creating such an expert appears to be extremely difﬁcult.
+If not rule-based experts, how about collecting human an-notations? Deep models need the equivalent of years of expert supervision even for perfect-perception tasks [16].3
+Embodied AI would undoubtedly require a similar (if not much larger) number of annotations. Collecting these hu-man annotations is labor intensive and must be done for ev-ery new task and behavior we wish our agent to complete.
+This is extremely expensive and intractable for more com-In contrast, terminal rewards are easy to plex behaviors. provide and allow years of simulated self-play (tractable in wall-clock time). This goal aligns closely with the pursuits of the AI community – pre-training with self-supervision and then learning new skills with minimal human help.
+Why should we expect that computing terminal rewards is easier than computing shaped rewards? While we can’t
+“prove” that terminal rewards are easier to compute than shaped rewards, we believe there is good evidence that this is, in general, the case. Shaped rewards are frequently de-signed so that they provide, at every step, feedback to the agent about its progress towards achieving the goal. Com-puting such rewards thus requires to approximate a ‘dis-tance,’ in terms of agent actions, between an arbitrary state and the goal. It is not hard to construct tasks where comput-ing such a distance is NP-complete (exponential-time with known algorithms). In comparison, verifying that an agent has reached a goal (and thus deserves its terminal reward) requires no such search, making it, in principle, an easier problem.4 3. GRIDTOPIX
+We are interested in learning from only terminal rewards a high-performance policy ⇡V which acts on realistic (e.g., visual) observations within an Embodied AI environment, hereafter called the visual environment. However, empiri-cally and irrespective of the task and environment, we ﬁnd joint learning of perception and planning from terminal re-wards (DirectPix) to be extremely challenging, as summa-rized in Fig. 1.
+In contrast, due to their perceptual simplicity, gridworlds are generally extremely fast to simulate, and learning is sample efﬁcient as a gridworld policy ⇡G needs to devote little effort to learn accurate perception. This enables grid-world agents to rapidly learn high-quality policies ⇡G from only terminal rewards.
+This advantage of gridworlds is an opportunity to reduce labor-intensive reward shaping efforts: can we ﬁrst learn policies from terminal rewards within gridworlds that repli-cate the dynamics of a visual environment and then efﬁ-ciently transfer these policies to visual agents?
+We refer to the approach which is designed to enable this transfer and which is sketched in Fig. 2 as GRIDTOPIX, and discuss it next. In particular, Sec. 3.1 formalizes terminal and shaped rewards, Sec. 3.2 describes how we design grid-worlds that replicate a visual environment’s dynamics, and
+Sec. 3.3 details both how we train gridworld agents and how imitation learning can be used to transfer gridworld policies to visual agents. 3.1. Terminal vs. Shaped Reward Structures
+The reward structure used during training has a substan-tial impact on sample efﬁciency, stability, and quality of the learned policy. Most prior work for the tasks considered in this paper used a shaped reward structure, i.e., the reward obtained by the agent at timestep t can be decomposed into rshaped t
+= rsuccess t
++ rprogress t
++ r??t
+. (1)
+Here, rsuccess t but the last timestep; for our considered tasks, is a sparse terminal reward equalling 0 on all rsuccess t
+= rsuccess · 0 ( (1
+↵
+·
+  t
+T ) if goal achieved, otherwise, (2) where T rsuccess > 0, ↵ rprogress t 1 is the maximum allowed episode length and
+[0, 1] are task-speciﬁc constants.5 Further, is a dense, goal-dependent reward, often equalling
+  2 3BabyAI gridworld [16] studies show that 21M expert actions are needed to train an agent to complete an instruction following task with high-performance. If humans produce 1 action per second, 246 days of labeling are required.
+⇠ 4The entire class of NP-complete problems is one in which verifying solutions is easy (polynomial time) but in which ﬁnding these solutions is fundamentally harder (unless P=NP). 5The inclusion of the ↵ parameter in terminal rewards allows to encode is a more nuanced measure of success. Note that when ↵> 0, rsuccess larger when the agent completes the task in fewer steps. t
+the change in distance to the goal. Finally, r??t is a possibly dense but goal-independent reward, meant to encourage be-haviors that are generally thought to be “good” regardless of the task, e.g., r??t often includes a small negative step penalty which gently encourages the agent to complete its task quickly.
+As previously discussed, the goal-dependent shaped re-wards rprogress must be manually designed, can be computa-t tionally expensive, and generally require privileged access to the environment state. Because of this, we often aim to train agents with the simpler reward structure rterminal t
+= rsuccess t
++ r??t
+. (3)
+In fact, for our experiments with terminal rewards, we let 0 in all but the FurnMove task where we keep prior r??t ⌘ work’s inclusion of a step and failed-coordination penalty. 3.2. Gridworld Mirrors of Visual Environments
+In order for policies obtained from gridworld training to be successfully transferable to visual agents, we need these gridworlds to be mirrors of their visual counterparts: a step in the gridworld should be translatable to a step in the vi-sual world. We will now describe the three gridworlds used in our experiments, mirroring the AIHABITAT, AI2-THOR, and Google Football environments. While these gridworlds work well for the considered tasks, they are also applica-ble for other tasks trained in these environments. We hope to encourage current and future Embodied AI environment developers to provide comprehensive general purpose grid-worlds corresponding to their environments.
+GRID-HABITAT. We extend the existing functionality of the AIHABITAT platform to permit, for the ﬁrst time, train-ing of gridworld agents. Speciﬁcally, we generate an ego-centric, top-down, observation with the agent positioned at the bottom facing towards the center (see Fig. 2). This top-down observation contains sensor information about occu-pancy (i.e., free space and walls) and goal location. This sensor information is sufﬁcient for PointNav and can be eas-ily enriched for other tasks (e.g., by adding semantic chan-nels for ObjectNav). Our gridworld observation is different from the top-down visualization tool provided by AIHABI-TAT which is allocentric and scaled differently for different scenes. We call this new gridworld GRID-HABITAT.
+GRID-AI2-THOR. For the multi-agent FurnMove task, we follow Jain et al. [29] and conduct our study on an AI2-THOR-mirroring top-down gridworld. Given the complex-ity of FurnMove, we include information in separate chan-nels of the top-down tensor with each channel correspond-ing to the output of a distinct sensor. These sensors specify whether a cell can be occupied by a furniture item, whether the cell is reachable by an agent, whether it was previously visited, the location of the furniture item, and the location
+Step 1:
+Gridworld agent trained by 
+RL and then frozen
+Value
+CNN
+RNN
+Policy
+RL losses
+Critic loss
+Actor loss
+Neg. Ent. Loss
+Step 2:
+Visual agent trained by IL  using frozen gridworld expert
+Sample 
+CNN
+RNN
+Policy
+CE Loss
+GridToPix
+Figure 3. Model overview. Schematic of how top-down grid and visual observations are processed by their respective networks.
+The gridworld agent is trained via actor-critic losses, and subse-quently supervises the visual agent via a cross-entropy loss. of the other agent. We refer to this gridworld as GRID-AI2-THOR.
+GRID-GOOGLE-FOOTBALL. For the multi-agent Google football environment created by Kurach et al. [38], we con-struct an observation that summarizes important game state information. Speciﬁcally, for each controlled player, the gridworld observation is a 1D vector which contains the lo-cation of all other players, the ball, and the opponent goal relative to the controlled player’s location.
+Importantly, as suggested in Sec. 1, our conceptualiza-tion of a gridworld goes beyond a spatial top-down occu-pancy map. While observations of GRID-HABITAT capture occupancy and goal information, the observation of GRID-AI2-THOR is a tensor containing explicit semantics of the environment. Moreover, as in GRID-GOOGLE-FOOTBALL, gridworld observations need not be restricted to have spatial structure. Here, as is common in RL literature, gridworld agents receive a 1D vector capturing perfect-perception ob-servations. 3.3. Supervising Visual Agents via Gridworlds
+We now describe how we train gridworld agents and sub-sequently use imitation learning to transfer their learned policies to visual agents. An overview is given in Fig. 3.
+Training in Gridworlds. As is standard in RL, we train gridworld agents to maximize the expected  -discounted cumulative reward of their actions.
+Task speciﬁc de-tails (e.g., algorithms and hyperparameters) are included in Sec. 4. Whenever possible we follow protocols laid out by prior work.
+Distilling policies. How can we effectively train the param-eters of a visual agent policy ⇡V given a policy ⇡G trained in a gridworld? To answer this question, recall that the vi-sual agent is interacting with a visual environment for which every step is translatable to a gridworld. The vi-V
+G
+V
+. The visual agent sual agent can hence be supervised by a gridworld agent might act using its own policy ⇡V or
+G adopt an exploration policy µ. This leads to on-policy and off-policy variants of imitation learning (IL). To illustrate and the gridworld this, let a rollout of the visual agent be (aV1 , aV2 , . . . , aVt ) and (aG1 , aG2 , . . . , aGt ), respec-agent tively. To train the parameters of the visual policy ⇡V via
+GRIDTOPIX, we employ the cross-entropy loss. Formally, suppose that Oµ is a random variable corresponding to the observation seen by an agent when following policy µ and suppose that Hµ is a random variable encoding the history of all observations seen before obtaining observation Oµ.
+The GRIDTOPIX loss is then
+V
+|
+·|
+⇠
+ 
+⇡G ( log ⇡V (a
+Oµ,Hµ)[
+Oµ, Hµ)]].
+LGRIDTOPIX = E[Ea (4)
+The choice of exploratory policy µ leads to three variants, each widely adopted in IL tasks: student forcing, teacher forcing, and annealed teacher forcing or DAgger (details in
+Appendix). In our experiments we primarily use DAgger.
+Importantly, no matter the exploration policy used during training, at test time the visual agent’s policy ⇡V is deployed so that there is no access to gridworld policies at test time. 4. Tasks, Models, and Evaluation
+We evaluate GRIDTOPIX using three tasks. We chose these tasks as they (a) span both single-agent and multi-agent settings, (b) include tasks that do not have easily constructed rule-based experts (FurnMove and 3 vs. 1 with Keeper Football) as well as a task for which optimal actions can be computed from shortest path com-putations (PointNav), (c) provide the opportunity to test
+GRIDTOPIX across a variety of different reward structures and model architectures, and (d) employ three different Em-bodied AI environments. Additionally, in the Appendix, we include experiments for a task where perfect reward shap-ing is intractable – Visual Predator-Prey (in OpenAI multi-particle environment [46, 49]). Across all experimental re-sults, we present standard evaluation metrics after 10% and 100% of training has completed (to provide an understand-ing of sample efﬁciency and asymptotic results). 4.1. PointGoal Navigation
+PointGoal Navigation (PointNav) is a single agent nav-igation task speciﬁed for the AIHABITAT simulator. An agent is spawned at a random location in the scene and must navigate to a target location speciﬁed by coordinates relative to the agent’s current location. The relative goal position is available at every time step and the agent navigates by choosing one of four actions at every step.
+Shaped rewards. Traditionally trained with shaped re-wards [58, 75, 80], the change in shortest-geodesic-path dis-tance to the goal is chosen as the goal-dependent progress t t
+  0.01. reward rprogress (see Eq. (1)). Computing it requires ac-cess to the full scene graph and a shortest-path planner.
+Here the success reward rsuccess is chosen as in Eq. (2) with rsuccess = 10 and ↵ = 0. Finally, r??t is a constant step penalty of
+Terminal rewards. Here we use the reward structure from
+Eq. (3) with rsuccess obtained from Eq. (2) with rsuccess = 10 t and ↵ = 0.9. We set r??t = 0.
+Model architecture. For a fair comparison, we use the standard CNN-GRU architecture [58, 75, 14, 9, 11, 69]. We adopt the ofﬁcial implementation6 and train with PPO [59], the de-facto standard RL algorithm for PointNav.
+Evaluation. PointNav agents are primarily evaluated via
+Success weighted by Path Length (SPL) [1] and percentage of successful episodes (Success). We set a budget of 50 million environment steps7 and report results on the Gibson validation set of 14 unseen scenes with 994 episodes. 4.2. Furniture Moving
+FurnMove is a challenging two-agent furniture moving task set within the AI2-THOR simulator [29]. Two agents collaborate to move an object through the scene and place it above a visually distinct target. Agents may communicate with other agents at each timestep using a low bandwidth communication channel. Each agent can choose from 13 actions. Speciﬁcally, in addition to the vanilla navigation, agents may move with the lifted object, move just the ob-ject, and rotate the object. Moreover, due to two agents, the joint action space contains 169 actions.
+Shaped rewards. Here, change in Manhattan distance to the goal8 is used as the goal-dependent reward rprogress
+.
+Three goal-independent rewards are suggested in [29] to help learn the coordinated policy for this multi-agent sys-tem. In particular, r??t includes a step penalty, a joint-pass (or do-nothing) penalty, and a failed action penalty.
+Terminal rewards. For a head-on comparison with [29] we simply drop rprogress
+. Like prior work [29], the success reward rsuccess is obtained from Eq. (2) using rsuccess = 1 and
+↵ = 0. All FurnMove results are based on this. Additional results with r??t = 0.01 are included in the appendix.
+Model architecture. We utilize SYNC, the best-performing architecture from prior work [29]. For fairness, we use the same RL algorithm (A3C [47]) as prior work.
+Evaluation. FurnMove agents are primarily evaluated via two metrics – % successful episodes (Success) and a Man-hattan distance based SPL (MD-SPL). Additional metrics are reported in the appendix. Consistent with [29], we train t t t 6github.com/facebookresearch/habitat-lab 7 2.5 days of training using a g4dn.12xlarge AWS instance conﬁgured with 4 NVIDIA T4 GPUs, 48 CPUs, and 192 GB memory.
+⇠ 8In FurnMove, computing the shortest-geodesic-path is intractable as each location of the furniture corresponds to over 400k states [29].
+Tasks
+Training routines
+!
+#
+DirectPix
+GRIDTOPIX
+GRIDTOPIX
+DirectPix
+!
+PointGoal Navigation
+SPL
+MD-SPL
+@10% @100% @10% @100% @10% @100% @10% @100% @10% @100%
+Success
+Success
+Furniture Moving 3 vs. 1 with Keeper
+Game Score 0.0 45.4 44.6 0.1 63.8 59.7 0.0 63.5 62.1 0.2 81.8 77.7 0.0 1.6 2.7 0.0 4.0 3.1 0.8 16.4 19.8 0.8 24.6 14.5 0.03 0.33 0.35 0.07 0.63 0.6
+Gridworld expert (upper bound) 78.8 94.2 19.2 56 0.9
+Table 1. Quantitative results (terminal reward structure). Metric values for the PointNav, FurnMove, and 3 vs. 1 with Keeper tasks reported on their respective evaluation sets (see Sec. 4). Across all the three tasks, the GRIDTOPIX agents outperform their DirectPix counterparts. For ease of reading, SPL is scaled by 100 and success % is reported. To quantify the efﬁciency of learning, metrics are reported after 10% and 100% of training has completed. The last row is separated to highlight that gridworld experts serve as a loose upper bound for GRIDTOPIX agent performance and should otherwise not be directly compared against.
+DirectPix
+GRIDTOPIX (ours)
+GRIDTOPIX ⇾ DirectPix (ours) (a) PointGoal Navigation (b) Furniture Moving
+Figure 4. Learning curves on validation set (terminal reward structure). Primary metrics are plotted vs. training steps/episodes, following the standard protocols for the respective task (see Sec. 4). (a) Thin lines mark checkpoints evenly spaced by 1 Mn frames. Bold lines and shading mark the rolling mean (with a window size of 2) and the corresponding standard deviation. (b) In line with [29], we log information by running an online validation process and employ a local quadratic regression smoothing with 95% conﬁdence intervals. (c) The plot shows the average game score and standard deviation. Checkpoints are evenly spaced by 200K frames. Despite considerable effort, DirectPix methods fail to learn meaningful policies with terminal rewards. (c) Football – 3 vs. 1 with Keeper for 500k episodes for the visual agents.9 Metrics are re-ported on the test set and learning curves on validation. 4.3. Football – 3 vs. 1 with Keeper 3 vs. 1 with Keeper is a task introduced by Kurach et al. [38]. In this multi-agent task, three agents collaborate to score against rule-based defenders. One agent starts behind the penalty arc and the other two agents start on the sides of the penalty area. There are two opponent rule-based de-fenders, including one goalkeeper. At the beginning of each episode, the center agent possesses the ball and faces the de-fender. The episode terminates when the controlled agents score or the maximum episode length is reached.
+Shaped rewards. We use the ‘checkpoint’ [38] reward as the goal-dependent reward rprogress to encourage controlled t agents to move the ball towards the opponent’s goal. Specif-ically, the area between the initial location of the center agent and the opponent goal is divided into three checkpoint regions according to the distance to the opponent goal. A progress reward of +0.1 is received the ﬁrst time the con-trolled players posses the ball in a checkpoint region. 92-4 days of training with a g4dn.12xlarge AWS instance.
+Terminal rewards. Following [38], rsuccess = 1 and ↵ = 0.
+Model architecture. For a fair comparison, we use the
+CNN architecture used by [38, 42], and a parallel PPO al-gorithm [42] to train the agents.
+Evaluation. Agents are evaluated using the average score obtained in test episodes. Consistent with Liu et al. [42], we set a training budget of 8 million environment steps. Train-ing curves and ﬁnal metrics are reported on test episodes. 5. Experiments
+We now provide an overview of the training routines em-ployed to train our visual and gridworld agents, followed by results on the three tasks. 5.1. Training Visual Agents
+For each task (in both the terminal reward and shaped re-ward settings), we train visual agents in three ways:
+DirectPix. We train visual agents (hence, ‘Pix’) using only reward-based RL losses (i.e., PPO or A3C).
+GridToPix. Our proposed routine trains visual agents by imitating a corresponding gridworld expert (that we train).
+As stated before, the expert is only available at training time
+Tasks
+Training routines
+!
+#
+DirectPix
+GRIDTOPIX
+GRIDTOPIX
+DirectPix
+!
+PointGoal Navigation
+SPL
+MD-SPL
+@10% @100% @10% @100% @10% @100% @10% @100% @10% @100%
+Success
+Success
+Furniture Moving 3 vs. 1 with Keeper
+Game Score 35.9 57.6 53.6 54.7 69.0 69.1 60.5 77.5 71.9 79.0 86.4 84.9 2.8 8.4 7.1 11.2 9.7 15.3 22.5 57.7 55.3 58.4 62.0 68.6 0.0 0.37 0.38 0.6 0.65 0.61
+Gridworld expert (upper bound) 85.3 97.5 22.2 76.3 0.95
+Table 2. Quantitative results (shaped reward structure). Identical to Tab. 1 but all methods have been trained with shaped, rather than terminal, rewards. Even with this denser form of supervision, training routines based on GRIDTOPIX can improve performance of all the metrics across the three tasks.
+DirectPix
+GRIDTOPIX (ours)
+GRIDTOPIX ⇾ DirectPix (ours) (a) PointGoal Navigation (b) Furniture Moving
+Figure 5. Learning curves on validation set (shaped reward structure). Follows Fig. 4. As expected, with this additional supervision the performance gap between GRIDTOPIX and DirectPix methods narrows but can still be substantial (e.g., in the PointNav task). See Fig. 4 for legend and plot details. (c) Football – 3 vs. 1 with Keeper
+! and weights are ﬁxed. See appendix for more details.
+DirectPix. This is a hybrid of the above
+GridToPix two routines and follows the common practice of ‘warm-starting’ agent policies with supervised/imitation learning and then ﬁne-tuning with reinforcement learning.10 Addi-tional details are deferred to the appendix. 5.2. Training Gridworld Experts
+For each task, the gridworld expert utilizes a training routine identical to DirectPix. Gridworld experts observe semantic top-down tensors or 1D state information, unlike the architectures that learn from raw pixels. Hence, we make minimal edits to the CNN that encodes the observa-tions (see appendix for details).
+As described in Sec. 3, training in gridworlds is very fast. Moreover, gridworlds can, in principle, be optimized to accelerate the environment transitions. Hence, for grid-world variants of each of the three tasks, we train models to near saturation. Importantly, due to difference in state space, models, and training time, the gridworld expert rows in Tab. 1 and Tab. 2 shouldn’t be compared to visual ana-logues. They serve as a loose upper-bound for the perfor-mance of the visual agents trained with GRIDTOPIX. 10For example, prior works use IL
+RL to train agents for visual dia-log [20], embodied question answering [19], vision-and-language naviga-tion [68, 67, 31], and emergent communication [45].
+! 5.3. Results
+We report standard evaluation metrics on three tasks. To study sample efﬁciency, we also show learning curves.
+Terminal rewards (see Tab. 1 and Fig. 4). With perfect perception, gridworld experts can train to a high perfor-mance (e.g., 94% success in PointNav) and guide the learn-ing of visual agents. In sharp contrast, DirectPix doesn’t learn a meaningful policy in any of the tasks11 – demon-strating present day methods’ inability to learn from ter-minal rewards in these visual worlds. Our GRIDTOPIX variants perform signiﬁcantly better.
+For instance, at
+PointNav, GRIDTOPIX obtains a respectable SPL of 0.638, inching towards the 0.788 obtained by the gridworld expert. GRIDTOPIX
+DIRECTPIX sometimes produces small gains beyond GRIDTOPIX. As evidenced by learning curves, GRIDTOPIX learning is also efﬁcient – most gains come in the early few million steps (0.45 SPL, i.e., 70% of the ﬁnal performance in just 5M steps for PointNav).
+A similar pattern emerges in other tasks – DirectPix can-not learn meaningful behaviors from terminal rewards with a 0.8% success and 0.07 game score in FurnMove and
+! 11We investigated the learned policy qualitatively in the PointNav task and found that the DirectPix agent learns the (locally optimal) policy of executing STOP as its ﬁrst action. We report best number after training over 15 conﬁgurations (20M steps each) by varying the entropy coefﬁcient, number of PPO trainers, and random seeds. For 3 vs. 1 with Keeper, the
+DirectPix agents shoot straight at the goal and are intercepted by the goal-keeper and sometimes pass to another player who fails to receive.
+3 vs. 1 with Keeper, respectively. Our training routines achieve the best performance.
+!
+In addition to these improvements in the terminal reward structure, we also investigate the training routines in (the more traditional) setting with shaped rewards.
+Shaped rewards (see Tab. 2 and Fig. 5). As seen in past works, DirectPix performs well when provided with shaped rewards. Interestingly, GRIDTOPIX
+DIRECTPIX also out-performs DirectPix in this reward setting in the ﬁrst two tasks and performs roughly as well on the third task – an over 25% relative gain in SPL (PointNav), an over 35% rel-ative gain in MD-SPL (FurnMove), and an over 8% relative gain in game score (Football). The efﬁciency of learning is
+DIRECTPIX reaching 83% of also high with GRIDTOPIX
+! its ﬁnal SPL in just 5M steps for the PointNav task. Since
+PointNav is single-agent navigation, we trained an agent us-ing the optimal shortest-path actions via IL. GRIDTOPIX outperforms this baseline with (very) dense supervision.12
+These results across three tasks running in three sim-ulators demonstrate the potential of GRIDTOPIX as we move towards training with terminal rewards. In addition
+GRIDTOPIX also provides meaningful gains in our current
+Embodied AI training setups that employ shaped rewards. 6.

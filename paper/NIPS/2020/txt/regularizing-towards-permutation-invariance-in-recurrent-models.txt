@@ -1,0 +1,124 @@
+Abstract
+In many machine learning problems the output should not depend on the order of the input. Such “permutation invariant” functions have been studied extensively recently. Here we argue that temporal architectures such as RNNs are highly relevant for such problems, despite the inherent dependence of RNNs on order.
+We show that RNNs can be regularized towards permutation invariance, and that this can result in compact models, as compared to non-recurrent architectures. We implement this idea via a novel form of stochastic regularization.
+Existing solutions mostly suggest restricting the learning problem to hypothe-sis classes which are permutation invariant by design [Zaheer et al., 2017, Lee et al., 2019, Murphy et al., 2018]. Our approach of enforcing permutation invari-ance via regularization gives rise to models which are semi permutation invariant (e.g. invariant to some permutations and not to others). We show that our method outperforms other permutation invariant approaches on synthetic and real world datasets. 1
+
+Introduction
+In recent years deep learning has shown remarkable performance in a vast range of applications from natural language processing to autonomous vehicles.
+One of the most successful models of the current deep-learning Renaissance are convolutional neural nets (CNN) [Krizhevsky et al., 2012], which utilize domain speciﬁc properties such as invariance of images to speciﬁc spatial transformations. Such inductive bias is common in other domains where it is necessary to learn from limited amounts of data.
+In this work we consider the setting where learned functions are such that the order of the inputs does not affect the output value. These problems are commonly referred to as permutation invariant, and typical solutions aim to restrict the learned models to functions that are permutation invariant by design. One such work is DeepSets [Zaheer et al., 2017], which provided a characterization of permutation invariant functions. Speciﬁcally, given a set of objects tx1, . . . , xnu and a permutation invariant function f px1, . . . , xnq they showed that f can be expressed as follows: there exist two networks ϕp¨q and ρp¨q such that f is a result of applying ϕ to all inputs, sum-aggregating and then applying ρ. Namely:
+¸
+˜ nÿ f px1, . . . , xnq “ ρ
+ϕpxiq i“1 (1.1) 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Other works suggest replacing summation with different permutation invariant aggregation methods such as element-wise maximum [Qi et al., 2017] and attention mechanisms [Lee et al., 2019, Vinyals et al., 2016]. Although these approaches result in permutation invariant functions and can be shown to express any permutation invariant function, it is not clear how many parameters are required for such an implementation. Indeed, there remains an important open question: given the many ways in which a given permutation-invariant function can be implemented, what are the relative advantages of each approach?
+Here we highlight the potential of recurrent architectures for modeling permutation invariance. By recurrent architectures we mean any architecture that has a state that evolves as the sequence is processed. For example, recurrent neural networks (RNNs), LSTMS [Hochreiter and Schmidhuber, 1997] and GRUs [Chung et al., 2014]. We focus on standard RNNs in what follows, but our approach applies to any recurrent model. It initially seems counter-intuitive that RNNs should be useful for modeling permutation invariant functions. However, as we show in Section 3 there are permutation invariant functions that RNNs can model with far fewer parameters than DeepSets.
+The reason why RNNs are effective models for permutation invariant functions is that their state can be used as an aggregator to perform order invariant summaries. For example, max-aggregation for positive numbers can be implemented via the simple state update st`1 “ maxrst, xts and s0 “ 0, and can be realized with only four ReLU gates. Similarly, the state can collect statistics of the sequence in a permutation invariant manner (e.g., order-statistics [Alon et al., 1999] etc.).
+One option to achieve permutation invariant RNNs is to take all permutations of the input sequence, feed each of them to an RNN, and average. This method is exponential in the sequence length, and
+Murphy et al. [2018] suggest approximating it by sub-sampling the permutation set. Here we take an alternative approach that is conceptually simple, more general and more empirically effective. We propose to regularize RNNs towards invariance. Namely learn a regular RNN model f , but with a regularization term Rpf q that penalizes models f that violate invariance. The naive implementation of this idea would be to require that all permutations of the training data result in the same output.
+However, we go beyond this, by requiring same-output for subsets of training sequences. We call this “subset invariance regularization” (SIRE). It is a very natural criterion since most sequence classiﬁcation tasks do not have ﬁxed length inputs, and a subsequence of a training point is likely to be a valid example as well.
+In contrast to previous methods which all result in architectures that are invariant by design, our method enforces invariance in a “soft” manner, thus enabling usage in “semi” permutation invariant settings where previous methods are not applicable. This makes it applicable to settings where there is some temporal structure in the inputs.
+The rest of the paper is structured as follows: in Section 2 we deﬁne notations and formally describe the problem setting. Section 3 shows that in some cases RNNs are favorable with respect to other permutation invariant architectures. In Section 4 we describe our regularization method. In Section 5 we discuss related work, and Section 6 provides an empirical evaluation. 2 Formulation
+Consider a general recurrent neural network, with a state update function f : S ˆ X Ñ S parame-terized by Θ (we omit Θ dependence when clear from context). The initial state s0 is also a learned parameter. The state update rule is therefore given by: st`1 “ f pst, xt`1; Θq (2.1)
+In what follows we use the notation f ps, x1, . . . , xnq to denote the state that is generated by starting at state s and processing the sequence x1, . . . , xn. Thus, for an input sequence px1, x2, x3q, the state s3 will be given by: s3 “ f ps2, x3q “f pf ps1, x2q, x3q “ f pf pf ps0, x1q, x2q, x3q :“ f ps0, x1, x2, x3q (2.2)
+The state is mapped to an output yt via the output mapping yt “ gpstq.
+We next deﬁne several notions of permutation invariance. Informally, a model f is permutation invariant if it provides the same output regardless of the ordering of the input. In the deﬁnitions below we assume input is sampled from some distribution D and require invariance only for inputs 2
+in the support of D, or their subsets. If D is the true underlying distribution of the data, then clearly this is sufﬁcient since we will never test on examples outside D. When training we will consider the empirical distribution as an approximation to D.
+We begin by deﬁning invariance for the sequences sampled from D.
+Deﬁnition 1. An RNN is called permutation invariant with respect to D on length n, if for any px1, . . . , xnq in the support of D and any permutation π P Sn we have:1 f ps0, x1, . . . , xnq “ f ps0, xπ1, . . . , xπnq (2.3)
+We next note that Deﬁnition 1 does not imply any constraint on sequences of length n1 ă n. How-ever, a natural requirement from a permutation invariant RNN is to satisfy the same properties for shorter sequences as well. This is captured by the following deﬁnition.
+Deﬁnition 2. An RNN is called subset-permutation invariant with respect to D on length n, if for any px1, . . . , xnq in the support of D, any sequence px1 mq whose elements are a subset of px1, . . . , xnq, and any permutations ˆπ, ˜π P Sm it holds that:
+ˆπmq “ f ps0, x1 f ps0, x1
+˜π1 1, . . . , x1
+, . . . , x1
+, . . . , x1 (2.4)
+˜πmq
+ˆπ1
+Note that Deﬁnition 2 is more restrictive than Deﬁnition 1. In particular, an RNN which satisﬁes
+Deﬁnition 2 also trivially satisﬁes Deﬁnition 1 but the other way around is not true.
+Deﬁnition 2 involves the response of RNNs to sub-sequences of the data. It is thus closely related to the states that the RNN can reach when presented with sequences of different length. The next deﬁnition captures this notion.
+Deﬁnition 3. Denote the states reachable by D and parameters Θ by SD,Θ. Formally:2
+SD,Θ def“
+! f ps0, x1 1, . . . , x1 i; Θq | Dpx1, . . . , xnq : px1 1, . . . , x1
+) iq P 2tx1,...,xnu , P px1, . . . , xnq ą 0
+We shall use this deﬁnition when proposing an invariance regularization in Section 4. 3 Compact RNNs for Permutation Invariance
+In this section we show the existence of functions that are permutation invariant and are modeled by a very small RNN, whereas modeling them with a DeepSet architecture requires signiﬁcantly more parameters. In what follows we make this argument formal.
+Theorem 4. For any natural number K ą 4, there exists a permutation invariant function that can be implemented by an RNN with 3 hidden neurons but its DeepSets implementation requires ΩpKq neurons to implement.
+The above theorem says there are cases where an RNN requires far fewer parameters to implement than a DeepSet architecture, and this will of course imply (by standard sample complexity lower bounds) that there are distributions for which the RNN will require far fewer samples to learn than
+DeepSets. We next prove the result by using the parity function to demonstrate the gap in model size. In Section 6 we provide an empirical demonstration of the result.
+Proof. In order to prove Theorem 4 one needs to show that for any K there exists a function f such that: (a) f can be implementated with a constant number of neurons using RNNs, and (b) any
+DeepSets architecture will require at least K neurons to implement f .
+Let n “ 2K. Given X “ t0, 1u, deﬁne the parity function operating over sets of size n: parityptx1, . . . , xnuq “ xi mod 2 (3.1)
+˜
+¸ nÿ i“1
+Next we claim that the parity function can be implemented by an RNN with three hidden neurons and 12 parameters in total. Consider an RNN operating on a sequence x1, . . . , xn P t0, 1u with the 1Where Sn denotes the symmetry group containing all permutations of a set with n elements. 2We use the notation 2tx1,...,xnu to denote all sequences whose elements are subsets of (x1, . . . , xnq. 3
+following update rule st`1 “ W T
+W3 “ r2, 2, 2s, and B “ r0, ´1, ´3s we have,
+¸T
+˜ 1 σpW2xt ` W3st ` Bq. By setting:W1 “ r1, ´1, ´1s, W2 “ st`1 “
+σ 1
+´1
+´1
+˜˜
+¸¸ 2xt ` 2st 2xt ` 2st ´ 1 2xt ` 2st ´ 3 (3.2)
+The above implements the function ReLU paq´ReLU pa´1q´ReLU pa´3q, where a “ 2xt `2st.
+This in turn is equivalent to the XOR function (namely pxt ` stqmod 2).
+Since the RNN state update implements addition modulo 2, it easily follows that the full RNN will calculate parity. Speciﬁcally, by setting s0 “ 0 and applying f pf ps0, x1q, . . . , xnq we obtain the parity of px1, . . . , xnq, as required. Note that the implementation requires 4 weight matrices,
+W1, W2, W3, B P R3 which amounts to 12 parameters.
+The second part of the proof requires showing that any DeepSets architecture needs at least K neu-rons to implement parity over sets of n elements. Recall that a DeepSets architecture is composed of two functions, ϕ and ρ (see Eq. 1.1). We assume ϕ and ρ are feed-forward nets with ReLU acti-vations and l hidden layers of ﬁxed width d. Our result can be extended to variable width networks.
+First we argue that WLOG the function ϕ can be assumed to be the identity ϕI pxq “ x. To see this, recall that there are only two possible x values. We will now take any DeepSet implementation
+ϕ, ρ and show that it has an equivalent implementation ϕI , ˜ρ. Denote the two values that ϕ takes by
+ϕp0q “ v0 and ϕp1q “ v1. Thus, after the sum aggregation of the DeepSet architecture we have:
+ÿ
+ϕpxiq “ n0v0 ` n1v1 “ pn ´ n1qv0 ` n1v1 “ nv0 ` n1pv1 ´ v0q (3.3) i where n0, n1 are the number of zeros and one in the sequence x1, . . . , xn (so that n0 ` n1 “ n).
+Now note that: i xi “ n1. Then we can deﬁne ˜ρpzq “ ρ pnv0 ` zpv1 ´ v0qq, and i ϕI pxiq “
+ř
+ř we have that the implementations are equivalent, namely:
+ÿ
+ÿ
+˜
+¸
+˜
+¸
+ρ
+ϕpxiq
+“ ˜ρ
+ϕI pxiq i i (3.4)
+From now on, we therefore assume ϕpxq “ x.
+Given the above, we can assume that ϕpxq “ x. Therefore ρ : R Ñ R is a continuous function
+ř n i“1 xi as input and outputs 1 for odd values and 0 for even values. Recall that a ReLU which takes network implements a piecewise linear function, and a network of depth L and r units per layer can model a function with at most rL linear segments [Montufar et al., 2014]. The ρ function above must have at least n segments since it switches between 0 and 1 values n times. This network has Lr2 parameters. Minimizing Lr2 under the condition that rL “ n the minimum is L “ log2 n, r “ 2.
+Thus the minimum number of units in a network that implements ρ is 4 log2 n “ 4K, proving the result. 4 Permutation Invariant Regularization
+In the previous section we showed that RNNs can implement certain permutation invariant functions in a compact manner. On the other hand, if we learn an RNN from data, we have no guarantee that it will be permutation invariant. The question is then: how can we learn RNNs that correspond to permutation invariant functions. In this section we present an approach to this problem, which relies on a regularization term that “encourages” permutation invariant RNNs. Intuitively, such a term should be designed such that it is minimized only by permutation invariant RNNs. 4.1 Regularizing Towards Subset Permutation Invariance
+Our goal is to deﬁne a function Rpf q that will be zero when f is subset permutation invariant and non-zero otherwise.
+Following Deﬁnition 2 it is natural to deﬁne the expected squared error between the RNN state for all sub-sequence pairs that are required to have the same output. Clearly, having the same state will 4
+result in the same output. Thus we deﬁne the regularizer:
+”`
+RSU Bpf q “ E f ps0, x1
+ˆπ1
+, . . . , x1
+ˆπm q ´ f ps0, x1
+˜π1
+, . . . , x1
+˘
+˜πmq
+ı 2 (4.1) where the expectation is taken with respect to D, ˆπ, ˜π P Sm and the subsequence sampling. 4.2 Pair Permutation Invariance Regularization
+Calculating the RSU B regularizer exactly will take exponential time, and thus we must resort to approximations. The simplest approach would be to randomly select a subset and two permutations and then replace the expectation in SUB with its empirical average. However, as we show next, there is a simpler approach to regularization.
+We next suggest an alternative regularizer, RSIRE that also vanishes for subset-permutation-invariant models, but avoids the permutation sampling in RSU B. Our key insight is that because of the recurrent nature of the RNN, one only needs to verify invariance by considering invariance to adding two elements to an existing sub-sequence. We next state the key result that facilitates the new regularizer.
+Theorem 5. An RNN is subset-permutation invariant with respect to D if @x1, x2 P X and @s P
+SD,Θ it holds that: f ps, x1, x2q “ f ps, x2, x1q (4.2)
+In order to prove Theorem 5, we make use of the following lemma.
+Lemma 6. Assume Equation 4.2 holds under the conditions of Theorem 5. Then @x1, . . . , xt P X the following holds for all i P t1, . . . , t ´ 1u: f ps0, x1, . . . , xi´1, xi, xi`1, xi`2, . . . , xtq “ f ps0, x1, . . . , xi´1, xi`1, xi, xi`2, . . . , xtq
+Corollary 7. Assume the condition of Lemma 6 holds. Then for a sequence x1, . . . , xt any two elements xi and xj can be swapped without changing the value of the resulting state.
+The proofs for Lemma 6 and Corollary 7 are provided in the Appendix.
+Proof of Theorem 5. Given an arbitrary permutation π P St it sufﬁces to show: f ps0, x1, . . . , xtq “ f ps0, xπ1 , . . . , xπtq (4.3)
+Denote by i the ﬁrst index for which i ‰ πi. Then Dj ą i such that πj “ i. From Corollary 7 we can sawp xπi and xπj. This process is repeated until Equation 4.3 is satisﬁed. 4.2.1 The SIRE Regularizer
+The result above implies that testing for subset-permutation-invariance is equivalent to testing the effect of adding two inputs to an existing state. This immediately suggests a regularizer that will vanish if and only if the RNN f is subset-permutation-invariant. We refer to this as the Subset-Invariant-Regularizer (SIRE), and deﬁne it as follows:
+”`
+RSIREpf q “ E x1,x2„D s„SD,Θ f ps, x1, x2q ´ f ps, x2, x1q
+ı
+˘ 2 (4.4)
+The key advantage of SIRE over SUB is that SIRE requires sampling sub-sequences but not per-mutations. Empirically, we show this translates to much faster learning when using RSIRE (see
+Appendix).
+In practice, we of course do not sum over all states s P SD,Θ as that will require all permutations over the training data. Instead we randomly sample subsets of training sequences and estimate SIRE via an average over those.
+In summary, we propose learning an RNN by minimizing the regular training loss (e.g., squared error for regression or cross-entropy for classiﬁcation) plus the regularization term RSIREpf q in
+Equation 4.4, where it is estimated via sampling. As with any regularization scheme, RSIREpf q may be multiplied by a regularization coefﬁcient λ. 5
+5

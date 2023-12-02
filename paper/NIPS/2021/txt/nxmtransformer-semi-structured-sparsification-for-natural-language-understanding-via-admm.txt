@@ -1,0 +1,58 @@
+Abstract
+Natural Language Processing (NLP) has recently achieved great success by using huge pre-trained Transformer networks. However, these models often contain hundreds of millions or even billions of parameters, bringing challenges to online deployment due to latency constraints. Recently, hardware manufacturers have introduced dedicated hardware for NxM sparsity to provide the ﬂexibility of un-structured pruning with the runtime efﬁciency of structured approaches. NxM sparsity permits arbitrarily selecting M parameters to retain from a contiguous group of N in the dense representation. However, due to the extremely high com-plexity of pre-trained models, the standard sparse ﬁne-tuning techniques often fail to generalize well on downstream tasks, which have limited data resources.
+To address such an issue in a principled manner, we introduce a new learning framework, called NxMTransformer, to induce NxM semi-structured sparsity on pretrained language models for natural language understanding to obtain better performance. In particular, we propose to formulate the NxM sparsity as a con-strained optimization problem and use Alternating Direction Method of Multipliers (ADMM) to optimize the downstream tasks while taking the underlying hardware constraints into consideration. ADMM decomposes the NxM sparsiﬁcation prob-lem into two sub-problems that can be solved sequentially, generating sparsiﬁed
+Transformer networks that achieve high accuracy while being able to effectively execute on newly released hardware. We apply our approach to a wide range of
+NLP tasks, and our proposed method is able to achieve 1.7 points higher accuracy in GLUE score than current best practices. Moreover, we perform detailed analysis on our approach and shed light on how ADMM affects ﬁne-tuning accuracy for downstream tasks. Finally, we illustrate how NxMTransformer achieves additional performance improvement with knowledge distillation based methods. 1
+
+Introduction
+Large-scale Transformer networks have achieved remarkable success for a wide variety of natural language tasks, including natural language inferencing, sentiment analysis, question answering, and others. The state-of-the-art of these NLP models employs a transfer learning paradigm which contains two stages: a semi-supervised pre-training stage that trains a masked language modeling on massive web text, followed by a ﬁne-tuning stage where the pre-trained model is adapted to speciﬁc 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+downstream tasks with much smaller datasets. The size of these language models has dramatically increased in recent years; even relatively small models [6, 27] consist of hundreds of millions of parameters while larger models [23, 25, 24] stretch well into multi-billions. The large model size brings challenges for both deployment and training costs. While training a large-scale model often requires signiﬁcant time even on large training clusters, the trained model also incurs signiﬁcant challenges in deployment due to latency and capacity constraints.
+These challenges motivate techniques to compress and accelerate these models, even in datacenter environments where hardware resource limitations are at their smallest. These techniques include but are not limited to model quantization [35, 28, 3], low rank decomposition [19], knowledge distillation [11, 27], and model sparsiﬁcation [4, 9]. These compression techniques can often be combined to maximize performance gains [37, 19, 10].
+Among different techniques, sparsiﬁcation attempts to identify parameters that can be removed from the model without signiﬁcantly compromising model accuracy. Sparsiﬁcation techniques typically fall under two broad categories: unstructured and structured. Unstructured techniques will remove the individual parameters based on their importance (e.g., weight magnitude), which often yield the best accuracy but are unfriendly to modern hardware. Structured sparsiﬁcation techniques remove parameters in groups (e.g., entire rows or columns), which result in models that retain their dense structure but can also add constraints that limit the expressiveness of the model.
+Recently, hardware manufacturers introduced support for NxM semi-structured sparsity to provide the beneﬁts of both structured and unstructured sparsity. In NxM semi-structured sparsity, a model may preserve M parameters from each contiguous group of N original parameters. This relatively weak constraint on sparsiﬁcation allows for sparse representations similar in ﬂexibility to those of unstructured approaches but also permits efﬁcient hardware implementation as well. Consider the 4x2 semi-structured sparsity implementation found on NVIDIA GPUs based on the Ampere architecture [1]. The Ampere architecture introduces a small set of multiplexers that select values from the input matrix corresponding to the retained values in the weight matrix [21]. The output of this operation remains compatible with the efﬁcient Tensor Cores for dense matrix-matrix operations.
+While the Ampere GPUs are the ﬁrst to market with this capability, the matrix multiplication accelerators within them are similar to those used by other accelerators [15] which should enable other vendors to provide support for this type of sparsity as well.
+To induce semi-structured sparsity, a small set of approaches have been offered. ASP [21] proposes training the dense network until convergence, using single-shot magnitude-based pruning to induce sparsity conformant to the NxM constraints, and repeating the original training procedure to recover accuracy. Zhou, et al. [36] uses sparse-reﬁned straight-through estimator (SR-STE) to introduce the sparsity throughout the entire training process. Both of these techniques pose some challenges for large-scale pre-trained Transformer networks in particular. ASP can require a second costly sparse pre-train of the model and the single-shot magnitude-based pruning might hurt the knowledge transferrability to different downstream tasks. SR-STE on the other hand sparsiﬁes from the random model initialization, which avoids the costly sparse retraining but also necessitates performing the pre-training process with only a sparse representation in mind. Since NxM sparse hardware is not yet ubiquitous, maintaining compatibility with a single dense pretrained representation is valuable so the costly pre-training process does not need to be performed for both sparse and dense networks.
+In this work, we propose to effectively induce NxM semi-structured sparsity for large-scale Trans-former networks to leverage newly released Sparse Tensor Core hardware by making the following contributions. (1) We introduce a principled method, NxMTransformer (See Figure 1), to obtain
+Transformer networks with NxM semi-structured sparsity for different downstream tasks using Alter-nating Direction Method of Multipliers (ADMM), a technique designed for large-scale non-convex optimization problems with constraints. Such a method allows us to alternate promoting the NxM sparsity of the network and optimizing the ﬁne-tuning performance. (2) We conduct comprehensive experiments and demonstrate that NxMTransformer achieves 1.7 points higher accuracy than state-of-the-art techniques to introduce NxM sparsity for natural language processing tasks. (3) We perform detailed analysis on our approach and shed light on how ADMM affects ﬁne-tuning accuracy for downstream tasks. (4) Finally, we show that NxMTransformer is complimentary to alternative model compression techniques such as knowledge distillation and can further sparsify distilled models while preserving accuracy. 2
+Embeddings
+Query
+Query
+Query
+Key
+Key
+Key
+Value
+Value
+Value
+Self
+Self
+Attention
+Self
+Attention
+Attention
+Attention
+Attention
+Output
+Attention
+Output
+Output
+FFN1
+FFN1
+FFN1
+FFN2
+FFN2
+FFN2
+Classifier
+Network
+Transformer Layer (x12)
+ADMM
+Compress for 
+Execution
+Dense Pretrained 
+Model
+Dense Representation of 
+Sparse Finetuned Model
+Non-zero 
+Values
+Indices
+Figure 1: The layers sparsiﬁed by NxMTransformer are highlighted in blue in the block structure of a BERT model. As shown for FFN1, NxMTransformer simultaneously ﬁnetunes the pretrained representation while inducing NxM semi-structured sparsity using ADMM. This sparse model can be trivially converted to the deployment format for compatible hardware. 2

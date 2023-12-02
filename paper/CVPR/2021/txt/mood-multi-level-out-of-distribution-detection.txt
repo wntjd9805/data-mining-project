@@ -1,0 +1,207 @@
+Abstract
+Out-of-distribution (OOD) detection is essential to pre-vent anomalous inputs from causing a model to fail during deployment. While improved OOD detection methods have emerged, they often rely on the ﬁnal layer outputs and re-quire a full feedforward pass for any given input. In this paper, we propose a novel framework, multi-level out-of-distribution detection (MOOD), which exploits intermedi-ate classiﬁer outputs for dynamic and efﬁcient OOD infer-ence. We explore and establish a direct relationship be-tween the OOD data complexity and optimal exit level, and show that easy OOD examples can be effectively detected early without propagating to deeper layers. At each exit, the
+OOD examples can be distinguished through our proposed adjusted energy score, which is both empirically and theo-retically suitable for networks with multiple classiﬁers. We extensively evaluate MOOD across 10 OOD datasets span-ning a wide range of complexities. Experiments demon-strate that MOOD achieves up to 71.05% computational reduction in inference, while maintaining competitive OOD detection performance. 1.
+
+Introduction
+Out-of-distribution (OOD) detection has become a cen-tral building block for safely deploying machine learning models in the real world, where the testing data may be dis-tributionally different from the training data. Existing OOD detection methods commonly rely on a scoring function that derives statistics from the penultimate layer or output layer of the neural network [13, 31, 34, 32, 41, 15]. As a result, existing solutions require a full feedforward pass for any given test-time input and utilize a ﬁxed amount of computa-tion. This can be undesirable for safety-critical applications such as self-driving cars, where higher computational cost directly translates into higher latency for the model to take prevention in the presence of OOD driving scenes. Fur-*Authors contributed equally. ther, the computational cost of OOD detection can be ex-acerbated by the over-parameterization of neural networks, which nowadays have reached unprecedented depth and ca-pacity. For example, recent computer vision models [18] can have over 900 million parameters, which unavoidably incurs high computational demand during inference time.
+This motivates the following unexplored question: how can we enable out-of-distribution detection that can adjust and save computations adaptively on-the-ﬂy?
+In this paper, we take the ﬁrst step to explore the feasi-bility and efﬁcacy of an adaptive OOD detection framework based on intermediate classiﬁer outputs. Adaptive OOD de-tection offers several compelling yet untapped advantages.
+It allows exploiting the intrinsic complexity of OOD exam-ples which may vary at a wide spectrum (see Figure 1). Ide-ally, easy samples could be detected at the early layer, while more complex ones could still be propagated to the deeper layers for more conﬁdent decisions. For example, it might be sufﬁcient to utilize coarse-level features such as color to detect an OOD image of grayscale MNIST digit [25], for a model tasked to classify color images of animals. Secondly, adaptive OOD detection allows ﬂexibility in controlling the computational cost. This is a valuable property in many sce-narios, where the computational budget may change over time or vary across different devices.
+Formally, we propose a novel framework, Multi-level
+Out-of-distribution Detection (MOOD), which exploits the aforementioned beneﬁts and allows resource-efﬁcient OOD detection. In designing MOOD, we identify three key tech-nical challenges: (1) how to set up an adaptive network with intermediate exits for both OOD detection and classiﬁca-tion; (2) how to dynamically choose the optimal exit con-ditioned on test-time inputs; and (3) at a given exit, how to derive effective OOD scoring function to differentiate be-tween in- vs. out-of-distribution data?
+This paper contributes the following technical compo-nents by carefully addressing the three challenges above.
+• First, we propose intermediate OOD detectors operat-ing at varying depths of the network and enabling dy-namic OOD inference. Each intermediate detector is 15313
+High Complexity Data  i w e
+V s t e s a t a
+D w e
+V i l e d o
+M
+Low Complexity Data
+Shallow Block
+Deep Block
+Block-1
+Block-2
+Block-3
+Block-k
+MSD layer
+Forward
+Classiﬁer
+MOOD Exit@1
+MOOD Exit@2
+MOOD Exit@3
+MOOD Exit@k
+Figure 1. Overview of proposed Multi-level Out-of-distribution Detection (MOOD) framework. MOOD exploits the intrinsic complexity of OOD examples which vary at a wide spectrum (top). The adaptive inference network is composed of k OOD detectors, operating at different depths of the network (bottom). For a given input, a complexity score is used to dynamically determine the exit during inference time. An OOD detector is attached at each exit for differentiating between in- vs. out-of-distribution data. also referred to as an exit. Whilst our study is certainly inspired by prior works on resource-efﬁcient learn-ing [16, 29], the problem we explore differs substan-tially: most prior solutions are designed for optimizing the classiﬁcation accuracy for the in-distribution (ID) task, rather than OOD detection.
+• Second, we exploit a novel complexity-based exit strat-egy, which uses model-agnostic complexity scores for determining the intrinsic easiness/hardness of the in-put data. We show a direct relationship between the
+OOD data complexity and the optimal exit and show that MOOD can detect easy examples early without propagating to deeper layers. Our setting is more chal-lenging than choosing an optimal exit for the image classiﬁcation task since OOD data are unexposed to the model during training.
+• Thirdly, we introduce an adjusted energy score as the
+OOD scoring function for each intermediate classiﬁer.
+[32],
+Our method effectively mitigates the issue of where the non-probabilistic energy score can ﬂuctuate and are not comparable across different exits. We show both empirically and mathematically that adjusted en-ergy scores are suitable for MOOD with multiple clas-siﬁers operating at different depths of the network.
+We extensively evaluate MOOD on a collection of 10
+OOD test datasets, spanning a wide range of complexi-ties. We show a relationship between OOD data complexity and the optimal exit level, where the early exit is more fa-vorably chosen for less complex datasets such as MNIST while deeper exits are preferred for complex datasets such as iSUN. Under the same network architecture and capac-ity, MOOD with dynamic exit reduces the computational cost by up to 71.05%, with an average computation deduc-tion by 22.02% across all 10 datasets. Moreover, MOOD maintains competitive OOD detection performance. Our code and models are available at https://github. com/deeplearning-wisc/MOOD. 2. Method
+Our proposed adaptive OOD detection framework,
+Multi-level Out-of-distribution Detection (MOOD), ad-dresses three key questions and challenges in designing an adaptive OOD detection framework. Firstly, in Section 2.1, we describe the adaptive inference model, which allows early exits for OOD detection at varying depths of the net-work. In Section 2.2, we then introduce a novel complexity-based exit strategy, which allows dynamically determining the optimal exit level for each input during inference time.
+Lastly, in Section 2.3, we introduce the OOD inference method operating at different levels of classiﬁers. 15314        
+2.1. OOD Detector at Early Exits
+We begin by addressing the ﬁrst challenge of how do we set up an adaptive inference model with early exit for OOD detection? Inspired by recent works on adaptive neural net-works [2, 16, 10, 30, 47, 20, 33, 48, 29], we consider an adaptive inference model composed of k classiﬁers. As il-lustrated in Figure 1, the model can be viewed as a conven-tional CNN with k − 1 intermediate classiﬁers attached at varying blocks of the network, where each block contains multiple layers. The model can generate a set consisting of k predictions, one from each of the exits: f (x; θ) = [f1(x; θ1), ..., fk(x; θk)], (1) where θ is the parameterizations of the neural network, and fi(x; θi) represents the output from the classiﬁer at exit i ∈ {1, 2, ..., k}. However, prior adaptive networks are de-signed for optimizing the in-distribution task such as clas-siﬁcation or segmentation, and therefore miss the critical component of OOD detection.
+In our framework, we introduce intermediate OOD de-tectors that operate at each level of classiﬁer and enable dy-namic OOD inference. Our key idea is that “easy” OOD examples can be captured by early layers, whereas more complex ones should be propagated to the deeper layers for more conﬁdent decisions. Speciﬁcally, each detector Gi(x) can be viewed as a binary classiﬁer:
+Gi(x; θi) = in, out, ( if Si(x; θi) ≥ γi if Si(x; θi) < γi, where Si(x; θi) is the scoring function deﬁned for classiﬁer at exit i. γi is the threshold at exit i, which is chosen so that a high fraction (e.g., 95%) of in-distribution data is correctly classiﬁed by the detector. Our multi-level OOD framework allows the full ﬂexibility of early exits at any level, and more importantly, does not incur additional parameterizations on top of the classiﬁcation networks. 2.2. Complexity based Exit for OOD Detection
+In this subsection, we address the second challenge of how to dynamically choose the optimal exit, conditioned on the test-time inputs? At test time, we deﬁne an exit function
+I(x) ∈ {1, ..., k}, which determines the index of the exit classiﬁer for a given input x. While previous work [29, 16] has relied on prediction conﬁdence to determine the exit for classifying in-distribution data, we argue that such a mech-anism is not suitable for OOD detection since the model is not exposed to any OOD data during training. As we show in Section 3, deeper and more conﬁdent layers do not nec-essarily perform better OOD detection. This suggests the need for an exit strategy that does not depend on the model parameterizations.
+To this end, we propose a complexity-based exit strat-egy and derive an exit function I(x) by exploiting the in-trinsic complexity of images that naturally varies at a wide spectrum, from easy to hard. In an attempt to quantify this notion of “easiness”, we consider a complexity score as a proxy measurement [42]. Speciﬁcally, the complexity of a given image x can be upper bounded by a lossless compres-sion algorithm. An input of high complexity will require more bits while a less complex one will be compressed with fewer bits. The complexity for x can be deﬁned as the num-ber of bits used to encode the compressed image:
+L(x) = Bit length(c(x)). (2)
+For the compression function c, one can use common meth-ods such as PNG [39] and JPEG2000 [43]. We further normalize the score by the maximum complexity score of
+ID dataset, where Lnormalized = L(x)/Lmax.
+In Figure 1, we show the distribution of complexity scores for different datasets, ranging from the lowest (e.g., MNIST [24]) to the highest (e.g., LSUN [52]).
+To make use of the complexity score for inference, we divide the spectrum of complexity scores into k sub-ranges.
+For any given example x (ID and OOD), we assign exit I(x) based on the complexity range a sample belongs to:
+I(x) = min(⌈Lnormalized(x) ∗ k⌉, k). 2.3. OOD Scoring Function
+OOD detection is a binary classiﬁcation problem, which commonly relies on a scoring function to distinguish be-tween in- vs. out-of-distribution data. In this subsection, we address the last key challenge in designing MOOD: what is the suitable scoring function that allows deriving statistics at intermediate classiﬁers for OOD detection?
+We begin by exploring the energy-based method for
+OOD detection, inspired by recent work [32]. Speciﬁcally, we derive the exit-wise energy score based on classiﬁer (a) Energy Score [32] (b) Adjusted Energy Score (ours)
+Figure 2. Left: Energy scores are not comparable across exits.
+Right: Adjusted energy scores are more comparable across exits (shown in dashed green line). 15315
+Figure 3. Top: Average computational cost (FLOPs) with MOOD, and the normalized frequency distribution of exits chosen by MOOD.
+Gap in between the orange and blue lines indicates the computational savings. Bottom: Average AUROC by taking constant exits at different levels. Model is trained on CIFAR-100 as in-distribution, and evaluated on 10 OOD test datasets described in Section 3.1. outputs at different exits:
+E(x; θi) = − log
+C j=1
+X ef (j) i (x;θi), (3) i where C is the number of classes for in-distribution data, and f (j) (x; θi) is the logit output corresponding to class j ∈ {1, 2, ..., C} for intermediate classiﬁer at exit i. The likelihood function can be expressed in terms of energy function [25]: p(x|θi) = e−E(x;θi) x e−E(x;θi) . (4)
+Taking the logarithm on both sides, we have
+R
+Algorithm 1: MOOD: MULTI-LEVEL OUT-OF-DISTRIBUTION DETECTION
+Input: x, neural network f (x; θ), number of exits k, threshold γ chosen on in-distribution data;
+Compute normalized complexity:
+Lnormalized = L(x)/Lmax;
+Choose exit classiﬁer:
+I(x) = min(⌈Lnormalized(x) ∗ k⌉, k); if Eadjusted(x; θI(x)) ≥ γ then
+G(x) = in; f (x) = fI(x)(x; θI(x)); else
+G(x) = out end log p(x|θi) = −E(x; θi) − log e−E(x;θi) (5) x
+= −E(x; θi) − log Zi.
+For a single classiﬁer at exit i, the energy score −E(x; θi) is indicative of the log likelihood log p(x|θi), since the second term log Zi is a constant for all x [32]. (6)
+Z
+However, in our case with multiple classiﬁers, the sec-ond term log Zi cannot be ignored as it depends on exit i, and can cause variation across classiﬁers owing to different input features at each exit. To see this, we depict in Figure 2(a) the energy score distributions at each exit. In particu-lar, the energy scores for CIFAR-100 (ID) shift signiﬁcantly among exits. Ideally, the scores should be comparable re-gardless of which exit they come from.
+Adjusted Energy Score To mitigate this issue, we intro-duce a new scoring function Adjusted Energy Score:
+Eadjusted(x; θi) = −E(x; θi) − Ex∈Din [−E(x; θi)], (7) where Ex∈Din [−E(x; θi)] is the mean of energy scores de-rived from exit i, and in practice can be estimated empiri-cally on the test set of in-distribution data. We show that
+Adjusted Energy Score produces comparable values across exits. To see this, we can rewrite adjusted energy as:
+Eadjusted(x; θi) = (log e−E(x;θi) − log Zi)
+− (Ex[log e−E(x;θi) − log Zi])
+= log e−E(x;θi) x e−E(x;θi) − Ex[log (8) e−E(x;θi) x e−E(x;θi) ] (9)
+R
+R
+= log p(x|θi) − Ex[log p(x|θi)]. (10)
+Adjusted Energy Score is more comparable across exits for all samples x, since the second term is the estimation of average log-likelihood. Depending on how well each 15316
+In-distribution (ID)
+Architecture
+Method
+WideResNet-40-4
+CIFAR-10
+MSDNet Exit@last
+MSP [13]
+ODIN [31]
+Mahalanobis [28]
+Energy [32]
+MSP [13]
+ODIN [31]
+Mahalanobis [28]
+Energy [32]
+MSDNet (dynamic exit) MOOD (ours)
+WideResNet-40-4
+CIFAR-100
+MSDNet Exit@last
+MSP [13]
+ODIN [31]
+Mahalanobis [28]
+Energy [32]
+MSP [13]
+ODIN [31]
+Mahalanobis [27]
+Energy [32]
+MSDNet (dynamic exit) MOOD (ours)
+FLOPs
+↓ (×108) 13.00 13.00 13.00 13.00 1.05 1.05 1.05 1.05 0.79 13.00 13.00 13.00 13.00 1.05 1.05 1.05 1.05 0.79
+AUROC
+↑ 0.8898 0.9011 0.8933 0.9004 0.8972 0.9033 0.8284 0.9048
+FPR95
+↓ 0.5681 0.3531 0.3548 0.3526 0.4987 0.2930 0.7519 0.3362 0.9126 (±0.0016) 0.2805 (±0.0051) 0.7710 0.8466 0.8319 0.8369 0.7833 0.8489 0.7380 0.8451 0.7751 0.5722 0.5352 0.6271 0.7671 0.5745 0.7806 0.5915 0.8497 (±0.0026) 0.5722 (±0.0068)
+ID Acc
+↑ (%) 94.93 94.93 94.93 94.93 94.09 94.09 94.09 94.09 94.13 76.90 76.90 76.90 76.90 75.43 75.43 75.43 75.43 75.26
+Table 1. OOD detection performance comparison between MOOD and baselines. All results here are averaged across 10 datasets. Bold numbers are superior results. For MOOD, the complexity calculation takes a negligible amount of time. Therefore, the computations are dominated by the neural network inference cost, measured by FLOPs. The mean and variance of AUROC / FPR95 is reported based on 5 runs. See supplementary A for detailed results for each OOD test dataset. classiﬁer approximates the log-likelihood, the second term
+Ex∼Din[log p(x|θi)] can be arbitrarily similar across exits as evidenced in Figure 2(b). The score comparability of in-distribution data allows us to use a single threshold γ across all exits in inference, which is chosen so that 95% in-distribution data is above the threshold.
+We summarize the complete inference-time algorithm for MOOD in Algorithm 1. For input detected as in-distribution, MOOD also performs classiﬁcation using the classiﬁer of the current exit. We note that previous methods may require tuning hyper-parameters [28], or use auxiliary outlier training data [14]. In contrast, MOOD inference is parameter-free and is easy to use and deploy. 3. Experiments
+We discuss our experimental setup in Section 3.1, and show that MOOD achieves improved OOD detection per-formance while reducing computational cost by a large mar-gin in Section 3.2. We also conduct extensive ablation anal-ysis to explore different aspects of our algorithm. 3.1. Setup
+In-distribution Datasets We use CIFAR-10 and CIFAR-100 [21] as in-distribution datasets, which are common benchmarks for OOD detection. We use the standard split, with 50,000 training images and 10,000 test images. All the images are of size 32 × 32.
+Out-of-distribution Datasets For the OOD detection evaluation, we consider a total of 10 datasets with a di-verse spectrum of image complexity.
+In order of in-creasing complexity, we use MNIST [24], K-MNIST [7], fashion-MNIST [49], LSUN (crop) [52], SVHN [37],
+Textures [6], STL10 [8], Places365 [54], iSUN [50] and LSUN (resize) [52]. The complexity distribution of each dataset is shown in Figure 1 (top). All images are resized to 32 × 32. For each OOD dataset, we evaluate on the entire test split. See supplementary A for details.
+Evaluation Metrics We evaluate MOOD and baseline methods using the following metrics: (1) Number of com-putational FLOPS during inference time; (2) False Positive
+Rate (FPR95) on OOD data when the true positive rate for in-distribution data is 95%; and (3) The area under the re-ceiver operating characteristic curve (AUROC).
+Training Details For training the classiﬁcation model on in-distribution data, we follow the settings in [16, 29], and use default MSDNet with k = 5 blocks with 4 layers each.
+We use the default growth rate of 6, with scale factors
+[1, 2, 4]. We train the model for 300 epochs, using Gradi-ent Equilibrium (GE) proposed in [29]. The initial learn-ing rate is 0.1, which is decayed by a factor of 10 after 150 and 225 epochs. We use SGD (stochastic gradient de-scent) [3, 45] with a mini-batch size of 64. We use Nesterov momentum [36] with weight 0.9, and a weight decay of 15317
+10−4. In Section 3.2.4, we further explore the performance of MOOD with different model capacities by varying the number of layers within each block to be {2, 3, 4, 6, 8, 12}. 3.2. Results 3.2.1 How does MOOD compare with existing OOD detection methods?
+The evaluation results on CIFAR-10 and CIFAR-100 are summarized in Table 1. All numbers are averaged across 10 OOD datasets described in Section 3.1. For fair eval-uation, we compare with competitive methods in the lit-erature that derive OOD scoring functions from a model trained on in-distribution data and does not require any aux-iliary outlier data. In particular, we compare with MSP [13],
+ODIN [31], Mahalanobis [28] as well as Energy [32]. All methods above rely on outputs or features extracted from the ﬁnal exit and consume the same amount of computations measured by FLOPs. Under the same network (MSDNet),
+MOOD with dynamic exit reduces the computational cost (FLOPs) by up to 71.05% on the low-complexity dataset, and reduces the average FLOPs by 22.02% across all 10 datasets. In addition to the computational saving, MOOD achieves better OOD detection performance than the base-line methods. This demonstrates that taking early exit is not only computationally beneﬁcial but also algorithmically de-sirable for OOD inference.
+We note that WideResNet [53] used in prior works is much deeper and computationally more expensive (with 8.9 million parameters), whereas MSDNet with 2.8 million pa-rameters achieves similar OOD detection performance, as shown in Table 1.
+Method
+Glow [17]
+JEM [11]*
+Serr`a et al [42]*
+MOOD
+SVHN CIFAR-100 CelebA 0.54 0.79 0.86 0.88 0.64 0.89 0.95 0.96 0.65 0.87 0.74 0.84
+Table 2. Comparison with generative-based models for OOD de-tection. Values are AUROC. In-distribution dataset is CIFAR-10, which is common setting used in all baselines. * indicates the vari-ant with best results for the methods.
+We also compare with generative-based OOD detection approaches, namely Glow [17], JEM [11], and likelihood ratio-based method [42]. As shown in Table 2, MOOD achieves competitive OOD detection performance with only 0.79 × 108 FLOPs, as opposed to Glow-based models [17] (4.09 × 109 FLOPs) or PixelCNN-based model in [42] (2.78 × 1010 FLOPs). 3.2.2 What is the effect of complexity-based dynamic exiting strategy?
+To better understand MOOD’s exiting behavior, we show in Figure 3 (top) the normalized frequency distribution of
+Exit@1
+Exit@2
+Exit@3
+Exit@4
+Exit@5
+FLOPs AUROC FPR95
+↓ 0.7083 0.5719 0.5776 0.5712 0.5915
+↓ (×108) 0.267 0.516 0.689 0.884 1.051
+↑ 0.7769 0.8313 0.8471 0.8531 0.8451
+ID Acc
+↑ (%) 65.37 71.24 74.26 75.10 75.43 0.794 0.8507
+MOOD (ours) 75.26
+Table 3. Performance comparison between MOOD (dynamic exit) taking constant exits at different levels (non-dynamic exit). vs.
+Numbers are averaged over 10 OOD datasets with CIFAR-100 as
+ID dataset. 0.5709 exits chosen by MOOD, for each OOD dataset. We show that early exits are more frequently chosen for less com-plex datasets such as MNIST, while deeper exits are chosen more often for complex datasets such as iSUN. The blue curve shows the average FLOPs consumed by MOOD for each dataset. This trend signiﬁes a direct relationship be-tween computational cost (FLOPs) and OOD data complex-ity, which is effectively exploited by MOOD.
+Figure 3 (bottom) depicts the average AUROC by tak-ing constant exits at {1, 2, ..., 5} for each OOD dataset.
+The best AUROC chosen among 5 exits can be viewed as the performance upper bound of MOOD, which chooses exit dynamically based on input complexity. We show that early exit is optimal for less complex datasets such as fashion-MNIST while deeper exits are preferred by more complex datasets such as iSUN. Overall, MOOD with dynamic exiting achieves comparable performance as the best possible exit, on all 10 datasets. This trend signiﬁes a direct relationship between the complexity score and an optimal exit. We also show the average results on 10 OOD datasets in Table 3. MOOD overall achieves similar OOD detection performance compared to the best constant exit (upper bound performance), while reducing the computa-tional cost in terms of FLOPs and maintaining a high ID classiﬁcation accuracy.
+We additionally experiment with an alternative loss-less compressor JPEG2000 [43] for estimating complexity, which results in similar OOD detection performance (see supplementary B for details). 3.2.3
+Is MOOD compatible with other scoring func-tions?
+We show that MOOD is a ﬂexible framework that is com-patible with alternative scoring functions S(x; θ). To see this, we replace the adjusted energy score with MSP [13] and ODIN score [31] derived from outputs of intermedi-ate classiﬁers, and report performance in Table 4. The dynamic exit strategy remains the same, where we utilize the complexity score for determining the exit I(x). On 15318
+In-distribution MOOD w/ score AUROC ( ↑) FPR95 (↓) 3.2.5 How does MOOD affect in-distribution classiﬁ-CIFAR-10
+CIFAR-100
+MSP
+ODIN
+Energy
+Adjusted Energy
+MSP
+ODIN
+Energy
+Adjusted Energy 0.8984 0.9065 0.9070 0.9129 0.7974 0.8548 0.8433 0.8507 0.5001 0.2906 0.3009 0.2834 0.7336 0.5688 0.6041 0.5709
+Table 4. Effect of scoring functions in MOOD. All numbers ag-gregated over 10 datasets.
+CIFAR-10, using MOOD with adjusted energy score results in the optimal performance with average AUROC 91.29%.
+While the performance using the ODIN score on CIFAR-100 is slightly better, we note that it requires tuning hyper-parameters. In contrast, MOOD with adjusted energy scores is completely parameter-free and is easy to use and deploy.
+Further, by contrasting the performance with Table 1, we observe that MOOD consistently improves the performance compared to using ﬁnal outputs (i.e., MSDNet Exit@last), regardless of the scoring function. 3.2.4 How does model capacity affect MOOD perfor-mance?
+We explore the effect of model capacity on MOOD perfor-mance by increasing the depth of MSDNet. First, we ﬁx the number of blocks k = 5 and vary the number of steps for each block to be {2, 3, 4, 6, 8, 12}, resulting in network conﬁgurations with varying total depths. As shown in Fig-ure 4(a), we observe that MOOD with dynamic exit works better than the best baseline [32] using the last layer out-put. Additionally, we explore the effect of varying number of blocks k ∈ {3, 5, 7, 9, 12}, as shown in Figure 4(b). In both cases, the improvement is more pronounced as the net-work gets deeper. This suggests the applicability of MOOD at different model capacities. cation accuracy?
+We show in Table 1 that MOOD enables efﬁcient OOD detection while maintaining the classiﬁcation accuracy on in-distribution data. During inference time, we apply complexity-based strategy to determine the exit I(x) for any given in-distribution test input x, and use the classi-ﬁcation predictions made by the corresponding classiﬁer f (x; θI(x)). This conﬁrms that our MOOD framework provides several desiderata altogether, including (1) safety guarantee against OOD examples, (2) accurate and compa-rable predictions on in-distribution examples, and (3) com-putational efﬁciency during inference. 3.2.6 Comparison with Greedy-based and Random
+Exit Strategy
+As an ablation on the effect of alternative exit strategies, we attempt a greedy-based method that takes the exit i when-ever the adjusted energy score is below the threshold γi.
+The algorithm is summarized in Algorithm 2. In contrast to our complexity-based method, the greedy-based strategy depends on the model parameterizations and thresholds for each intermediate OOD exit. γi is chosen for each exit i so that 95% of the in-distribution data is correctly classiﬁed.
+In Table 5, we show results comparison between complexity- vs. greedy-based exiting strategies. The greedy-based method is suboptimal for the task of OOD de-tection. For our experiment on MSDNet with 5 blocks, the greedy method leads to a 9.26% higher FPR95 compared to our complexity-based method. Since the model is not trained with OOD data, the thresholds are less indicative of the optimal OOD exit.
+Lastly, we also consider a randomized exit strategy, where we randomly select an exit {1, 2, ..., k} for a given sample during test time. This can be viewed as lower bounding the performance. As expected, the results in Ta-ble 5 show a substantial performance drop in both OOD detection as well as in-distribution classiﬁcation accuracy.
+Exit strategy
+Complexity
+Greedy
+Randomized
+FLOPs AUROC FPR95
+↓ 0.5709 0.6635 0.6078
+↓ (×108) 0.7943 0.6890 0.6880
+↑ 0.8507 0.8400 0.8298
+ID Acc 0.7526 0.7384 0.7299 (a) varying layers per block (k = 5) (b) varying number of blocks k
+Figure 4. Effect of model capacity on MOOD performance (CIFAR-100 as ID). Left: we ﬁx the number of blocks k = 5 and vary the number of steps in each block. Right: we vary the number of blocks. Blue curves indicate OOD detection perfor-mance (AUROC). Green curves indicate classiﬁcation accuracy on in-distribution data.
+Table 5. Comparison between complexity-based, greedy-based and randomized exiting strategies. Numbers are averaged over 10
+OOD datasets with CIFAR-100 as ID dataset. 4.

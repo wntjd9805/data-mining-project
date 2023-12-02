@@ -1,0 +1,69 @@
+Abstract
+Bayesian optimization is a sequential decision making framework for optimizing expensive-to-evaluate black-box functions. Computing a full lookahead policy amounts to solving a highly intractable stochastic dynamic program. Myopic approaches, such as expected improvement, are often adopted in practice, but they ignore the long-term impact of the immediate decision. Existing nonmyopic approaches are mostly heuristic and/or computationally expensive. In this paper, we provide the ﬁrst efﬁcient implementation of general multi-step lookahead Bayesian optimization, formulated as a sequence of nested optimization problems within a multi-step scenario tree. Instead of solving these problems in a nested way, we equivalently optimize all decision variables in the full tree jointly, in a “one-shot” fashion. Combining this with an efﬁcient method for implementing multi-step Gaussian process “fantasization,” we demonstrate that multi-step expected improvement is computationally tractable and exhibits performance superior to existing methods on a wide range of benchmarks. 1
+
+Introduction
+Bayesian optimization (BO) is a powerful technique for optimizing expensive-to-evaluate black-box functions. Important applications include materials design [33], drug discovery [12], machine learning hyperparameter tuning [24], neural architecture search [16, 32], etc. BO operates by constructing a surrogate model for the target function, typically a Gaussian process (GP), and then using a cheap-to-evaluate acquisition function (AF) to guide iterative queries of the target function until a predeﬁned budget is expended. We refer to [23] for a literature survey.
+Most of the existing acquisition policies are only one-step optimal, that is, optimal if the decision horizon were one. An example is the popular expected improvement (EI) [20]. Such myopic policies only consider the immediate utility of the decision, ignoring the long-term impact of exploration.
+Despite the sub-optimal balancing of exploration and exploitation, they are widely used in practice due to their simplicity and computational efﬁciency.
+When the query budget is explicitly considered, BO can be formulated as a Markov decision process (MDP), whose optimal policy maximizes the expected utility of the at the end of the decision horizon
+[18, 15]. However, solving the MDP is generally intractable due to the uncountable state space, uncountable action space, and potentially long decision horizon. There has been recent interest in
+∗Equal contribution. Work mostly done at Washington University in St. Louis for S. Jiang. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+developing nonmyopic policies [11, 18, 30, 31], but these policies are often heuristic in nature or computationally expensive. A recent work known as BINOCULARS [15] achieved both efﬁciency and a certain degree of nonmyopia by maximizing a lower bound of the multi-step expected utility.
+However, a general implementation of multi-step lookahead for BO has, to our knowledge, not been attempted before.
+Main Contributions. Our work makes progress on the intractable multi-step formulation of BO through the following methodological and empirical contributions:
+• One-shot multi-step trees. We introduce a novel, scenario tree-based acquisition function for BO that performs an approximate, multi-step lookahead. Leveraging the reparameterization trick, we propose a way to jointly optimize all decision variables in the multi-step tree in a one-shot fashion, without resorting to explicit dynamic programming recursions involving nested expectations and maximizations. Our tree formulation is fully differentiable, and we compute gradients using auto-differentiation, permitting the use of gradient-based optimization.
+• Fast-fantasies and parallelism. Our multi-step scenario tree is built by recursively sampling from the GP posterior and conditioning on the sampled function values (“fantasies”). This tree grows exponentially in size with the number of lookahead steps. While our algorithm cannot negate this reality, our novel efﬁcient linear algebra methods for conditioning the GP model combined with a highly parallelizable implementation on accelerated hardware allows us to tackle the problem at practical wall times for moderate lookahead horizons (less than 5).
+• Improved optimization performance. Using our method, we are able to achieve signiﬁcant improve-ments in optimization performance over one-step EI and BINOCULARS on a range of benchmarks, while maintaining competitive wall times. To further improve scalability, we study two special cases of our general framework which are of linear growth in the lookahead horizon. We empirically show that these alternatives perform surprisingly well in practice.
+We set up our problem setting in Section 2 and propose our one-shot multi-step tree approach in
+Section 3. We discuss how we achieve fast evaluation and optimization of these trees in Section 4. In
+Section 5, we show some notable instances of multi-step trees and make connections to related work in Section 6. We present our empirical results in Section 7 and conclude in Section 8. 2 Bayesian Optimal Policy
+We consider an optimization problem x∗ ∈ arg maxx∈X f (x), (1) where X ⊂ Rd and f (x) is an expensive-to-evaluate black-box function. Suppose we have collected a (possibly empty) set of initial observations D0 and a probabilistic surrogate model of f that provides a joint distribution over outcomes p(Y | X, D0) for all ﬁnite subsets of the design space X ⊂ X . We need to reason about the locations to query the function next in order to ﬁnd the maximum of f , given the knowledge of the remaining budget. Suppose that the location with maximum observed function value is returned at the end of the decision horizon k. A natural utility function for sequentially solving (1) is u(Dk) = max(x,y)∈Dk y, (2) where Dk is the sequence of observations up to step k, deﬁned recursively by Di = Di−1 ∪ {(xi, yi)} for i = 1, 2, . . . , k. Due to uncertainties in the future unobserved events, D1, D2, . . . , Dk are random quantities. A policy π = (π1, π2, . . . , πk) is a collection of decision functions, where at period i, the function πi maps the dataset Di−1 to the query point xi. Our objective function is supπ k )], where {Dπ i } is the sequence of datasets generated when following π.
+For any dataset D and query point x ∈ X , deﬁne the one-step marginal value as
+E[u(Dπ v1(x | D) = Ey (cid:2)u(D ∪ {(x, y)}) − u(D) | x, D(cid:3). (3)
+Note that under the utility deﬁnition (2), v1(x | D) is precisely the expected improvement (EI) acquisition function [20]. It is well-known that the k-step problem can be decomposed via the
+Bellman recursion [18, 15]: vt(x | D) = v1(x | D) + Ey[maxx(cid:48)vt−1(x(cid:48) | D ∪ {(x, y)})], (4) 2
+D x z1 1 z2 1 z3 1
+· · · x2 2
+· · · z2,1 2 z2,2 2 z2,3 2 x2,1 3 x2,2 3 x2,3 3
+. . .
+· · ·
+· · ·
+· · ·
+· · ·
+· · ·
+· · ·
+· · ·
+. . .
+Figure 1: Illustration of the decision tree with three base samples in each stage. for t = 2, 3, . . . , k. Our k-step lookahead acquisition function is vk(x | D), meaning that a maximizer in arg maxx vk(x | D) is the recommended next point to query.
+If we are allowed to evaluate multiple points X = {x(1), . . . , x(q)} in each iteration, we replace v with a batch value function V . For k = 1 and batch size |X| = q, we have
+V q 1 (X | D) = E y(1),...,y(q) (cid:2)u(D ∪ {(x(1), y(1)), . . . , (x(q), y(q))}) − u(D) | X, D(cid:3), which under the utility deﬁnition (2) is known as q-EI in the literature [10, 26]. For general k, Vk is the exact analogue of (4); we capitalize v and x to indicate expected value of a batch of points. While we only consider the fully adaptive setting (q = 1) in this paper, we will make use of the batch policy for approximation. 3 One-Shot Optimization of Multi-Step Trees
+In this section, we describe our multi-step lookahead acquisition function, a differentiable, tree-based approximation to vk(x | D). We then propose a one-shot optimization technique for effectively optimizing the acquisition function and extracting a ﬁrst-stage decision. 3.1 Multi-Step Trees
+Solving the k-step problem requires recursive maximization and integration over continuous domains: vk(x | D) = v1(x | D) + Ey (cid:104) max x2 (cid:110) v1(x2 | D1) + Ey2 (cid:2) max x3 (cid:8)v1(x3 | D2) + · · · (cid:105)
+. (5)
+Since under a GP surrogate, these nested expectations are analytically intractable (except the last step for EI), we must resort to numerical integration. If we use Monte Carlo integration, this essentially means building a discrete scenario tree (Figure 1), where each branch in a node corresponds to a particular fantasized outcome drawn from the model posterior, and then averaging across scenarios.
+Letting mt, t = 1, . . . , k − 1 denote the number of fantasy samples from the posterior in step t, we have the approximation
+¯vk(x | D) = v1(x | D) + 1 m1 m1(cid:88) (cid:104) j1=1 max x2 (cid:110) v1(x2 | Dj1 1 ) + (cid:2) max x3 (cid:8)v1(x3 | Dj1j2 2
+) + · · · (cid:105)
+, t
+, yj1...jt t
+= Dj1...jt−1 t−1
+, Dj1...jt−1 t−1 1 = D ∪ {(x, yj1)}, Dj1...jt
+∼ p(yt | xj1...jt where Dj1
+)}, with fantasy samples t yj1...jt
+). As the distribution of the fantasy samples depends on the query t locations x, x1, x2, . . ., we cannot directly optimize ¯vk(x | D). To make ¯vk(x | D) amenable to optimization, we leverage the re-parameterization trick [17, 28] to write y = hD(x, z), where hD is a deterministic function and z is a random variable independent of both x and D. Speciﬁcally, for a GP posterior, we have hD(x, z) = µD(x) + LD(x)z, where µD(x) is the posterior mean, LD(x) is a root decomposition of the posterior covariance ΣD(x) such that LD(x)LT
+D(x) = ΣD(x), and z ∼ N (0, I). Since a GP conditioned on additional samples remains a GP, we can perform a similar re-parameterization for every dataset Dj1...jt in the tree. We refer to the z’s as base samples. t m2(cid:88) 1 m2 j2=1
+∪ {(xj1...jt−1 t 3.2 One-Shot Optimization
+Despite re-parameterizing ¯vk(x | D) using base samples, it still involves nested maximization steps.
+Particularly when each optimization must be performed numerically using sequential approaches (as 3
+is the case when auto-differentiation and gradient-based methods are used), this becomes cumbersome.
+Observe that conditional on the base samples, ¯vk is a deterministic function of the decision variables.
+Proposition 1. Fix a set of base samples and consider ¯vk(x | D). Let xj1...jt−1 be an instance of xt for each realization of Dj1...jt−1 and let t t−1 x∗, x∗ 2, x∗ 3, . . . , x∗ k = arg max x,x2,x3,...,xk (cid:40) v1(x | D) + 1 m1 m1(cid:88) j1=1 m1(cid:88)
+· · · v1(xj1 2 | Dj1 1 ) + · · · + mk−1 (cid:88) v1(xj1···jk−1 k
+| Dj1···jk−1 k−1 (cid:41)
+)
+, (6) 1 (cid:81)k−1 (cid:96)=1 m(cid:96) j1=1 jk−1=1 2 }j1=1...m1 , x3 = {xj1j2 3
+}j1=1...m1,j2=1...m2, and so on. where we compactly represent x2 = {xj1
+Then, x∗ = arg maxx ¯vk(x | D).
+Proposition 1 suggests that rather than solving a nested optimization problem, we can solve a joint optimization problem of higher dimension and subsequently extract the optimizer. We call this the one-shot multi-step approach. A single-stage version of this was used in [1] for optimizing the
+Knowledge Gradient (KG) acquisition function [29], which also has a nested maximization (of the posterior mean). Here we generalize the idea to its full extent for efﬁcient multi-step BO. We use a perturbed version of the solution from the last iteration to warm-start the optimization of (6); technical details can be found in Appendix D. We will show that this can dramatically improve the performance in practice. 4 Fast, Differentiable, Multi-Step Fantasization
+Computing the one-shot objective (6) requires us to repeatedly condition the model on the fantasy samples as we traverse the tree to deeper levels. Our ability to solve multi-step lookahead problems efﬁciently is made feasible by linear algebra insights and careful use of efﬁcient batched computation on modern parallelizable hardware. Typically, conditioning a GP on additional data in a computa-tionally efﬁcient fashion is done by performing rank-1 updates to the Cholesky decomposition of the input covariance matrix. In this paper, we develop a related approach, which we call multi-step fast fantasies, in order to efﬁciently construct fantasy models for GPyTorch [8] GP models representing the full lookahead tree. A core ingredient of this approach is a novel linear algebra method for efﬁciently updating GPyTorch’s LOVE caches [22] for posterior inference in each step. 4.1

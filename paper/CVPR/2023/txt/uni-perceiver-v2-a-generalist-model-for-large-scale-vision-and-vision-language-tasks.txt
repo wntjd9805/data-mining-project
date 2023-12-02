@@ -1,0 +1,129 @@
+Abstract
+Despite the remarkable success of foundation models, their task-speciﬁc ﬁne-tuning paradigm makes them incon-sistent with the goal of general perception modeling. The key to eliminating this inconsistency is to use generalist models for general task modeling. However, existing at-tempts at generalist models are inadequate in both ver-satility and performance.
+In this paper, we propose Uni-Perceiver v2, which is the ﬁrst generalist model capable of handling major large-scale vision and vision-language tasks with competitive performance. Speciﬁcally, images are encoded as general region proposals, while texts are encoded via a Transformer-based language model. The en-coded representations are transformed by a task-agnostic decoder. Different tasks are formulated as a uniﬁed max-imum likelihood estimation problem. We further propose an effective optimization technique named Task-Balanced
+Gradient Normalization to ensure stable multi-task learn-ing with an unmixed sampling strategy, which is helpful for tasks requiring large batch-size training. After being jointly trained on various tasks, Uni-Perceiver v2 is capable of di-rectly handling downstream tasks without any task-speciﬁc adaptation. Results show that Uni-Perceiver v2 outper-forms all existing generalist models in both versatility and performance. Meanwhile, compared with the commonly-recognized strong baselines that require tasks-speciﬁc ﬁne-tuning, Uni-Perceiver v2 achieves competitive performance on a broad range of vision and vision-language tasks. 1.
+
+Introduction
+Learning a general perception model that can handle various modalities and tasks is widely regarded as an im-⇤Equal contribution.
+This work is done when Hao Li, Jinguo
+Zhu, and Xiaohu Jiang are interns at Shanghai Artiﬁcial Intelligence
+Laboratory. Code shall be released at https : / / github . com /
+BCorresponding to fundamentalvision / Uni - Perceiver.
+Xizhou Zhu <zhuxizhou@sensetime.com>. portant step towards artiﬁcial general intelligence. Due to its difﬁculty, many works (e.g., Florence [45], CoCa [44],
+BEiT-3 [40]), also known as foundation models [2], instead focus on a fallback solution of learning a general repre-sentation encoder that can be adapted (e.g., ﬁne-tuned) to various downstream tasks. By performing large-scale pre-training on massive multi-modal task-agnostic data, these works have demonstrated the superiority by pushing the state-of-the-art results on a broad range of tasks including single-modal tasks (e.g., image classiﬁcation and object de-tection) and also cross-modal tasks (e.g., image captioning and image retrieval).
+Despite the success, there is still a considerable gap be-tween foundation models and the goal of general perception modeling. While foundation models only focus on general representation learning, task modeling is neglected. Tradi-tional task-speciﬁc ﬁne-tuning paradigm is still utilized (see
+Fig. 1). This signiﬁcantly increases the marginal cost of adapting pre-trained models to various downstream tasks, making it difﬁcult to meet the rapidly growing demands of diverse downstream tasks and scenarios. Such a task-speciﬁc ﬁne-tuning paradigm of foundation models is in-consistent with the goal of general perception modeling.
+Instead of performing task-speciﬁc ﬁne-tuning, gener-alist models process different tasks with shared architec-ture and parameters, which is aligned with the goal of gen-eral perception modeling. It not only reduces the cost of handling diverse tasks but also enables task collaboration.
+Most existing attempts on generalist models are sequence-to-sequence (seq2seq) models [1, 5, 10, 14, 23, 29, 39, 43].
+However, these attempts are inadequate in both versatil-ity and performance: (1) some pillar vision and vision-language tasks as listed in Tab. 1 cannot be handled, e.g., image-text retrieval, object detection, and instance seg-mentation; (2) the accuracy and inference speed still lag signiﬁcantly behind state-of-the-art task-speciﬁc methods.
+Another line of research named Uni-Perceivers [49, 50] builds generalist models supporting both generation and
+Pre-training
+Image
+Text
+!!
+!"
+Pre-training
+Tasks
+Foundation Models (e.g., Florence, BEiT-3, CoCa)
+Task-Specific Finetuning
+Our Generalist Model – Uni-Perceiver v2
+General Task Adaptation
+Image
+!
+!./0
+"./0
+Image
+Classification
+Image
+!
+!123
+"123
+Object
+Detection
+Image
+Text
+Image
+Image
+!
+!024
+"024
+Instance
+Segmentation
+Text
+!
+!523
+"
+!523
+!
+!.67
+"
+!.67
+Image-Text
+Retrieval
+".67
+Image
+Captioning
+Image
+Text
+!!
+!"
+"428256/
+Image Classification
+Object Detection
+Instance Segmentation
+Image-Text Retrieval
+Image Captioning
+·
+·
+·
+#$3936/ = &360:
+! × #$;+ + &360:
+" × #$;, + (#$<-./ + #$<012 + #$</13 + ⋯ )
+#$3936/ = #$;+ + #$;, + #$<314156.
+Figure 1. Comparison of foundation models and Uni-Perceiver v2. EI and ET denote the image encoder and text encoder, respectively. In existing foundation models, task-speciﬁc decoders Dcls, Ddet, . . . are employed to tune EI and ET in different task-speciﬁc ﬁnetuning. The total number of parameters #Ptotal in adaptation grow with the number of visual/linguistic tasks, denoted as N I task, respectively.
+By contrast, our Uni-Perceiver v2 shares all parameters across various downstream tasks with a general decoder Dgeneral, where no task-speciﬁc ﬁne-tuning is incorporated. Better than previous generalist models, our method can also effectively handle pillar tasks such as image classiﬁcation, object detection, instance segmentation, and image-text retrieval. task and N T non-generation tasks. Nevertheless, they still cannot han-dle many vital tasks such as detection and segmentation.
+To develop generalist models with better versatility and performance, our core idea is to encode images as gen-eral region proposals consisting of the semantic, bound-ing box and segmentation mask representations. Com-pared with previous methods where images are represented as non-overlapping patches, this design makes our local-ization modeling more expressive and ﬂexible. This ex-plicit encoding of foreground information not only greatly reduces the difﬁculty of handling localization tasks such as image detection and segmentation, but also provides richer features for understanding textual concepts in non-localization vision-language tasks, thus enabling more gen-eral task modeling and better performance.
+In this paper, we propose Uni-Perceiver v2 as a gen-eralist model capable of handling major large-scale vision and vision-language tasks as listed in Tab. 1. Speciﬁ-cally, images are encoded as a concatenation of global and regional representations via a region proposal network, while texts are encoded via a Transformer-based language model. Both the image and text encoders can beneﬁt from off-the-shelf pre-trained models, which reduces the demand for training data and resources and ensures per-formance. The encoded representations are transformed by a shared modality-agnostic Transformer [36] network to obtain the decoded representations. Following Uni-Perceivers [49, 50], different tasks are formulated as a uni-ﬁed maximum likelihood estimation problem and are jointly learned to enable general task adaptation. We further pro-pose Task-Balanced Gradient Normalization to ensure sta-ble multi-task learning with an unmixed sampling strategy which only samples one task for all GPUs per iteration. This is very helpful for tasks requiring large batch size training.
+Uni-Perceiver v2 is the ﬁrst generalist model achieving competitive results on major large-scale vision and vision-language tasks including object detection, instance segmen-tation, image classiﬁcation, image captioning, and image-text retrieval, except for image generation that has not been veriﬁed due to limited computational resources. After be-ing jointly trained on various tasks, it can directly handle a broad range of tasks without any task-speciﬁc adaption, achieving state-of-the-art performance among existing gen-eralist models. Our contributions are summarized as:
+• We propose Uni-Perceiver v2, which is the ﬁrst general-ist model capable of handling both localization and non-localization tasks with competitive performance. The general region proposal encoding of images brings more
+ﬂexible and expressive localization modeling.
+• To improve the effectiveness of multi-task learning, we adopt an unmixed sampling strategy to enable large batch-size training and develop an effective optimization tech-nique named Task-Balanced Gradient Normalization to mitigate the instability in gradients.
+• Uni-Perceiver v2 outperforms all existing generalist mod-els in both versatility and performance. Without any task-speciﬁc adaption, Uni-Perceiver v2 achieves competitive performance on a broad range of downstream tasks com-pared with commonly-recognized strong baselines that require task-speciﬁc ﬁne-tuning, demonstrating its strong ability of general task modeling.
+Categories
+Speciﬁc Tasks
+Retrieval
+Image-text retrieval
+Classiﬁcation
+Localization
+Mask Predication
+Image Generation
+Image to Text
+Image classiﬁcation
+Region categorization
+Situation recognition
+Object detection
+Key point detection
+Pose estimation
+Referring expression grounding
+Human object interaction
+Relation detection
+Optical character recognition
+Object localization
+Instance segmentation
+Semantic segmentation
+Panoptic segmentation
+Image synthesis
+Image inpainting
+Segment-based image generation
+Style transferring
+Depth estimation
+Surface normal estimation
+Image inﬁlling
+Image super resolution
+Image captioning
+Visual question answering
+Region captioning
+Grounded VQA
+Grounded captioning
+Visual commonsense reasoning
+Table 1. Categories of mainstream vision and vision-language tasks. Pillar tasks of different downstream task categories are in bold. These pillar tasks are the most representative tasks in each category, where other tasks can be derived from them. Uni-Perceiver v2 is able to effectively handle the underlined pillar tasks, except for image synthesis that has not been veriﬁed due to limited computational resources. 2.

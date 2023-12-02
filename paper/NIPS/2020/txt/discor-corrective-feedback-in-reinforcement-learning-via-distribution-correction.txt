@@ -1,0 +1,359 @@
+Abstract
+Deep reinforcement learning can learn effective policies for a wide range of tasks, but is notoriously difﬁcult to use due to instability and sensitivity to hyperparame-ters. The reasons for this remain unclear. In this paper, we study how RL methods based on bootstrapping-based Q-learning can suffer from a pathological interac-tion between function approximation and the data distribution used to train the
+Q-function: with standard supervised learning, online data collection should induce corrective feedback, where new data corrects mistakes in old predictions. With dy-namic programming methods like Q-learning, such feedback may be absent. This can lead to potential instability, sub-optimal convergence, and poor results when learning from noisy, sparse or delayed rewards. Based on these observations, we propose a new algorithm, DisCor, which explicitly optimizes for data distributions that can correct for accumulated errors in the value function. DisCor computes a tractable approximation to the distribution that optimally induces corrective feedback, which we show results in reweighting samples based on the estimated accuracy of their target values. Using this distribution for training, DisCor results in substantial improvements in a range of challenging RL settings, such as multi-task learning and learning from noisy reward signals. 1
+
+Introduction
+Reinforcement learning (RL) algorithms, when combined with high-capacity deep neural net func-tion approximators, have shown promise in domains ranging from robotic manipulation [22] to recommender systems [44]. However, current deep RL methods can be difﬁcult to use: they require delicate hyperparameter tuning, and exhibit inconsistent performance. While a number of hypotheses have been proposed to understand these issues [15, 52, 11, 10], and gradual improvements have led to more stable algorithms in recent years [14, 18], an effective solution has proven elusive. We hypothesize that one source of instability in reinforcement learning with function approximation and value function estimation, such as Q-learning [53, 38, 33] and actor-critic algorithms [13, 23], is a pathological interaction between the data distribution induced by the latest policy, and the errors induced in the learned approximate value function as a consequence of training on this distribution.
+While a number of prior works [1, 10, 29] have provided theoretical examinations of various approxi-mate dynamic programming (ADP) methods, which include Q-learning and actor-critic algorithms, prior work has not extensively studied the relationship between the data distribution induced by the latest value function and the errors in the future value functions obtained by training on this data.
+When using supervised learning style procedures to train contextual bandits or dynamics models, online data collection results in a kind of “hard negative” mining: the model collects transitions that lead to good outcomes according to the model (potentially erroneously). This results in collecting precisely the data needed to correct errors and improve. On the contrary, ADP algorithms that use 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+bootstrapped targets rather than ground-truth target values may not enjoy such corrective feedback with online data collection in the presence of function approximation.
+Since function approximation couples Q-values at different states, the data distribution under which
+ADP updates are performed directly affects the learned solution. As we will argue in Section 3, online data collection may give rise to distributions that fail to correct errors in Q-values at states that are used as bootstrapping targets due to this coupling effect. If the bootstrapping targets in ADP updates are themselves are erroneous, then any form of Bellman error minimization using these targets may not result in the correction of errors in the Q-function, leading to poor performance. In this work, we show that we can explicitly address this by modifying the ADP training routine to re-weight the data buffer to a distribution that explicitly optimizes for corrective feedback, giving rise to our proposed method, DisCor. With DisCor, transitions sampled from the data buffer are reweighted with weights that are inversely proportional to the estimated errors in their target values. Thus, transitions with erroneous targets are down-weighted. We will show how this simple modiﬁcation to ADP improve corrective feedback, and increases the efﬁciency and stability of ADP algorithms.
+The main contribution of our work is to propose a simple modiﬁcation to ADP algorithms to provide corrective feedback during the learning process, which we call DisCor. We show that DisCor can be derived from a principled objective that results in a simple algorithm that reweights the training distribution based on estimated target value error, so as to mitigate error accumulation. DisCor is general and can be used in conjunction with modern deep RL algorithms, such as DQN [33] and SAC [14]. Our experiments show that DisCor substantially improves performance of standard
+RL methods, especially in challenging multi-task RL settings. We evaluate our approach on both continuous control tasks and discrete-action, image-based Atari games. On the multi-task MT10 benchmark [56] and several robotic manipulation tasks, our method learns policies with a ﬁnal success rate that is 50% higher than that of SAC.
+|
+,
+∈
+A represent state and action spaces, P (s(cid:48) 2 Preliminaries
+The goal in reinforcement learning is to learn a policy that maximizes the expected cumulative
+, P, R, γ). discounted reward in a Markov decision process (MDP), which is deﬁned by a tuple ( s, a) and r(s, a) represent the dynamics and reward
+S (0, 1) represents the discount factor. ρ0(s) is the initial state distribution. The function, and γ s) is denoted as dπ(s) and inﬁnite-horizon, discounted marginal state distribution of the policy π(a
+| s). We deﬁne P π, the state-action the corresponding state-action marginal is dπ(s, a) = dπ(s)π(a
+| transition matrix under a policy π as P πQ(s, a) := Es(cid:48)∼P (·|s,a),a(cid:48)∼π(a(cid:48)|s(cid:48))[Q(s(cid:48), a(cid:48))].
+Approximate dynamic programming (ADP) algorithms, such as Q-learning and actor-critic methods, aim to acquire the optimal policy by modeling the optimal state (V ∗(s)) and state-action (Q∗(s, a))
+∗Q)(s, a) = value functions by recursively iterating the Bellman optimality operator, r(s, a) + γEs(cid:48)∼P [maxa(cid:48) Q(s(cid:48), a(cid:48))]. With function approximation, these algorithms project the values of the Bellman optimality operator (e.g., deep neural nets) under a sampling or data distribution µ, such that Qk+1
+∗ onto a family of Q-function approximators
+∗Qk) and
+∗, deﬁned as (
+Πµ(
+Q
+A
+B
+B
+B
+S
+,
+Πµ(Q) def= arg min
+Q(cid:48)∈Q
+Es,a∼µ[(Q(cid:48)(s, a)
+B
+Q(s, a))2].
+←
+− (1)
+Q-function ﬁtting is usually interleaved with additional data collection, which typically uses a policy derived from the latest value function, augmented with either (cid:15)-greedy [54, 33] or Boltzmann-style [14, 45] exploration. For commonly used ADP methods, µ simply corresponds to the on-policy state-action marginal, µk = dπk (at iteration k) or else a “replay buffer” [14, 33, 27, 28] formed as a mixture distribution over all past policies, such that µk = 1/k (cid:80)k i=1 dπi. However, as we will show in this paper, the choice of the sampling distribution µ is of crucial importance for the stability and efﬁciency of ADP algorithms. We analyze this issue in Section 3, and then discuss a potential solution to this problem in Section 5. 3 Corrective Feedback in Q-Learning
+When learning with supervised regression (i.e., non-bootstrapped objectives) onto the true value function (e.g., in a bandit setting), active data collection methods will visit precisely those state-action tuples that have erroneously optimistic values, observe their true values, and correct the errors, by
+ﬁtting these true values. However, ADP methods that use bootstrapped target values may not be able to correct errors this way, and online data collection may not reduce the error between the current 2
+Figure 1: Left: Depiction of a possible run of Q-learning iterations on a tree-structured MDP with on-policy sampling. The trajectory sampled at each iteration is shown with dotted boundaries. Function approximation results in aliasing (coupling) of the box-shaped and circle-shaped nodes (i.e., instances of each shape has similar features values). Updating the values at one circle node affects all other circles, likewise for boxes. Regressing to erroneous targets at one circle node may induce errors at another circle node, even if the other node has a correct target, simply because the other node is visited less often. Right: If a distribution that puts higher probability on nodes with correct target values, i.e. which moves from leaves to nodes higher up, is chosen, then, the effects of function approximation aliasing are reduced, and correct Q-values can be obtained.
+Q-function and Q∗, especially when function approximation is employed to represent the Q-function.
+This is because function approximation error can result in erroneous bootstrap target values at some state-action tuples. Visiting these tuples more often will simply cause the function approximator to more accurately ﬁt these incorrect target values, rather than correcting the target values themselves.
+As we will show, those states that are the cause of incorrect target values at other states can be extremely infrequent in the data obtained by running the policy. Therefore, their values will not be corrected, leading to more error propagation.
+Didactic example. To build intuition for the phenomenon, consider tree-structured MDP example in
+Figure 1. We illustrate a potential run of Q-learning (Alg. 2) with on-policy data collection. Q-values at different states are updated to match their (potentially incorrect) bootstrap target values under a distribution, µ(s, a), which, in this case is dictated by the visitation frequency under the current policy (Equation 1). The choice of µ(s, a), does not affect the resulting Q-function when function approximation is not used, as long as µ is full-support, i.e., µ(s, a) > 0 s, a.
+However, with function approximation, updates across state-action pairs affect each other. Erroneous updates higher up in the tree, trying to match incorrect target values, may prevent error correction at leaf nodes if the states have similar representations under function approximation (i.e., if they are partially aliased). States closer to the root have higher frequencies (because there are fewer of them) than the leaves, exacerbating this problem. This issue can compound: the resulting erroneous leaf values are again used as targets for other nodes, which may have higher frequencies, further preventing the leaves from learning correct values.
+∀
+If we can instead train with µ(s, a) that puts higher probability on nodes with correct target values, we can alleviate this issue. We would expect that such a method would ﬁrst ﬁt the most accurate target values (at the leaves), and only then update the nodes higher up, as shown in Figure 1 (right).
+Our proposed algorithm, DisCor, shows how to construct such a distribution in Section 5.
+Value error in ADP. To more formally quantify, and devise solutions to this issue, we ﬁrst deﬁne our notion of error correction in ADP in terms of value error:
+Deﬁnition 3.1. The value error is deﬁned as the error of the current Q-function, Qk to the optimal
+Q∗ averaged under the on-policy (πk) marginal, dπk (s, a) :
+Q∗
+Qk
+]. k = Edπk [
+|
+E
+−
+|
+A smooth decrease in value error k
+E k is
+ﬂuctuates or increases, the algorithm is making poor learning progress. When the value error
+E roughly stagnant at a non-zero value, this indicates premature convergence. The didactic example k for ADP may not smoothly decrease to 0, and can even (Fig. 1) suggests that the value error
+E increase with function approximation. k indicates that effective error correction in the Q-function. If
+E
+To analyze this phenomenon computationally, we use the gridworld MDPs from Fu et al. [10] and visualize the correlations between policy visitations dπk (s, a) and the value of Bellman error after (s, a), as well as the correlation between visitations and the the ADP update, i.e.
+| difference in value errors after and before the update, k(s, a). We eliminate ﬁnite
+Qk+1
+|
+∗Qk
+− B k+1(s, a)
+E
+− E 3
+sampling error by training on all transitions, simply weighting them by the true on-policy or replay buffer distribution. Details are provided in Appendix G.1. In Figure 2, we show that, as expected,
+Bellman error correlates negatively with visitation frequency (dashed line), suggesting that visiting a state more often decreases its Bellman k in general does error. However, the change in value error not correlate negatively with visitation. Value error often increases in states that are visited more frequently, suggesting that a corrective feedback mechanism is often lacking.
+− E k+1
+E
+Figure 2: Correlation (y-axis) be-tween dπk (s, a) and the Bellman error, |Qk+1 − B∗Qk| (dashed), and correlation between dπk (s, a) and change in value error, Ek+1 −
+Ek (solid), during training with on-policy data. dπk (s, a) nega-tively correlates with Bellman er-ror, but often correlates positively with an increase in value error.
+The Q-function value error at state-action pairs that will be used as bootstrapping targets for other state-action tuples (Q(s0, a1) is used as target for all states with action a1) is high and the state-action pair with correct target value, (s3, a0), appears infrequently in the on-policy distribution, since the policy chooses the other action a1 with high probability. Since the function approximator couples together updates across states and actions, the low update frequency at (s3, a0) and high frequency of state-action tuples with incorrect targets will cause the Q-function updates to increase value error.
+Thus, minimizing Bellman error under the on-policy distribution can lead to an increase in the error against Q∗ (Also shown in Figure 2 on a gridworld). A more concrete computational example illustrating this phenomenon is described in detail in Section 4. We can further generalize this discussion over multiple iterations of learning. k over the
+E
+Which distributions lead to higher value errors? In Figure 3, we plot value error course of Q-learning with on-policy and replay buffer distributions. The plots show prolonged periods where k is increasing or ﬂuctuating.
+E
+When this happens, the policy has poor perfor-mance, with returns that are unstable or stag-nating (Fig. 3). To study the effects of function approximation and distributions on this issue, we can control for both of these factors. When a uniform distribution Unif(s, a) is used instead of the on-policy distribution, as shown in Fig. 3 (red), or when using a tabular representation without function approximation, but with the on-policy distribution, as shown in with Fig. 3 (brown), we see that k decreases smoothly, sug-E gesting that the combination of function approximation and naïve distributions can result in challenges in value error reduction.
+Figure 3: Value error (Ek) and policy performance (nor-malized return) for Left: sub-optimal convergence with on-policy distributions, Right: instabilities in learning progress with replay buffers. Note that an oracle re-weighting to a uniform data distribution or complete removal of function approximation, gives rise to decreas-ing Ek curve and better policy performance.
+In fact, we can construct a family of MDPs generalizing our didactic tree example, where training with on-policy or replay buffer distributions theoretically requires at least exponentially many iterations to converge to Q∗, if at all convergence to Q∗ happens.
+Theorem 3.1 (Exponential lower bound for on-policy and replay buffer distributions). There exists a family of MDPs parameterized by H > 0, with
+= 2 and state features Φ, such that on-policy or replay-buffer Q-learning requires Ω (cid:0)γ−H (cid:1) exact Bellman projection steps for convergence to Q∗, if at all convergence happens. This happens even with features, Φ that can represent the optimal Q-function near-perfectly, i.e.,
+= 2H ,
+Φw
+|A|
+|S|
+ε.
+Q∗
+||
+−
+∞
+||
+≤
+The proof is in Appendix D. This suggests that on-policy or replay buffer distributions can induce very slow learning in certain MDPs. We show in Appendix D.3 that our method, DisCor, which we derive in the next section, can avoid many of these challenges, in this MDP family. 4 Optimal Distributions for Value Error Reduction
+We discussed how, with function approximation and on-policy or replay-buffer training distributions, k may not decrease over the course of training. What if we instead directly optimize the value error
+E the data distribution at each iteration so as to minimize value error? To do so, we derive a functional form for this “optimal” distribution by formulating an optimization problem that directly optimizes the training distribution pk(s, a) at each iteration k, greedily minimizing the error k at the end of
+E 4
+iteration k. Note that pk(s, a) is now distinct from the on-policy or buffer data distribution denoted by µ(s, a). We will then show how to approximately solve for pk(s, a), yielding a simple practical algorithm in Section 5. All proofs are in Appendix A. We can write the optimal pk(s, a) as the solution to the following optimization problem: min pk
+Edπk [
+|
+Qk
+−
+Q∗
+] s.t. Qk = arg min
+|
+Q
+Epk (cid:2)(Q
+− B
+∗Qk−1)2(cid:3) , (cid:88) s,a pk(s, a) = 1. (2)
+Theorem 4.1. The solution pk(s, a) to a relaxation of the optimization in Equation 2 satisﬁes pk(s, a) exp (
+Qk
+−|
+R+ is the magnitude of Lagrange multiplier for (cid:80)
+−
+∝
+|
+Q∗ (s, a)) |
+− B
+Qk
+∗Qk−1
+λ∗ (s, a)
+|
+, (3) s,a pk(s, a) = 1 in Problem 2. where λ∗
+∈
+Proof sketch. Our proof of Theorem 4.1 utilizes the Fenchel-Young inequality [39] to ﬁrst upper-bound Edπk [
+] via more tractable terms giving us the relaxation, and then optimizing the
+−
+Lagrangian. We We use the implicit function theorem (IFT) [24] to compute implicit gradients of Qk with respect to pk.
+Qk
+|
+Q∗
+|
+− B
+Qk
+|
+∗Qk−1
+Intuitively, the optimal pk in Equation 3 assigns higher probability to state-action tuples with high
+, but only when the resulting Q-value Qk is close to Q∗. However, this
+Bellman error
+| expression contains terms that depend on Q∗ and Qk, namely
+, which
+| are observed only after pk is chosen. As we will show next, we need to estimate these quantities using surrogates, that only depend upon the past Q-function iterates in order to use pk in a practical algorithm. Intuitively, these surrogates exploit the rich structure in Bellman iterations: the Bellman error at each iteration contributes to the error against Q∗ in a structured manner, as we will discuss below, allowing us to approximate the value error using a special sum of Bellman errors. We present these approximations below, and then combine then to derive our proposed algorithm, DisCor.
+∗Qk−1
+Qk
+|
+− B and
+Q∗
+Qk
+−
+|
+|
+−
+Q∗
+Qk
+|
+. For approximating the error against Q∗, we show that the cumulative
+Surrogate for sum of discounted and propagated Bellman errors over the past iterations of training, denoted as ∆k
+Q∗
+. Speciﬁcally, Theorem 4.2 and shown in Equation 5, are equivalent to an upper bound on
+| will show that, up to a constant, ∆k forms a tractable upper bound on
+Qk constructed only
+| from prior Q-function iterates, Q0,
+, Qk−1. We deﬁne ∆k as:
+Qk
+|
+Q∗
+−
+−
+|
+|
+∆k = k (cid:88) i=1
+γk−i
+· · ·
+
+ k−1 (cid:89) j=i
+P πj
+
+
+Qi
+| (
+B
+−
+∗Qi−1)
+.
+| (vector-matrix form of∆) (4)
+=
+⇒
+∆k(s, a) =
+Qk(s, a)
+|
+∗Qk−1)(s, a)
+Here P πj is the state-action transition matrix under policy πj as described in Section 2. We can then use ∆k to deﬁne an upper bound on the value error
+Theorem 4.2. There exists a k0 k following inequality, pointwise, for each s, a, as well as, ∆k k0 and ∆k from Equation 5, ∆k satisﬁes the as πk
++ γ(P πk−1∆k−1)(s, a).
+N, such that
+, as follows:
+Qk
+| (
+B
+π∗.
+Q∗
+Q∗
+Qk (5)
+≥
+−
+−
+∈
+∀
+|
+|
+∆k(s, a) + k (cid:88) i=1
+γk−iαi
+Qk
+≥ |
+−
+Q∗ (s, a), αi =
+|
+→ | 2Rmax
+γ 1
+−
+−
+|
+→
+DTV(πi( s), π∗(
+·|
+·| s)).
+A proof and intermediate steps of simpliﬁcation can be found in Appendix B. The key insight in this
+Q∗ argument is to use a recursive inequality, presented in Lemma B.1, App. B, to decompose
+,
+| which allows us to show that ∆k + (cid:80) i γk−iαi is a solution to the corresponding recursive equality,
+Q∗
+. Using an upper bound of this form in Equation 3 may and hence, an upper bound on
+| downweight more transitions, but will never upweight a transition that should not be upweighted.
+Qk
+|
+Qk
+−
+−
+|
+∗Qk−1
+− B
+. The Bellman error multiplier term
+Qk
+Estimating in Equation 3
+| is also not known in advance. Since no information is known about the Q-function Qk, a viable between the minimum and maximum Bellman errors approximation is to bound
+|
+∗Qk−2 obtained at the previous iteration, c1 = mins,a and c2 = maxs,a
+Qk−1
+.
+|
+|
+We restrict the support of state-action pairs (s, a) used to compute c1 and c2 to be the set of transitions in the replay buffer used for the Q-function update, to ensure that both c1 and c2 are ﬁnite. This
+|
+Qk
+|
+Qk−1
+|
+∗Qk−2
+∗Qk−1
+Qk
+|
+− B
+− B
+−B
+−B
+|
+|
+∗Qk−1 5
+approximation can then be applied to the solution obtained in Equation 3 to replace the Bellman error multiplier
+, effectively giving us a lower-bound on pk(s, a) in terms of c1 and c2.
+∗Qk−1
+Qk
+|
+− B
+|
+Re-weighting the replay buffer µ. Since it is challenging to directly obtain samples from pk via online interaction, a practically viable alternative is to use the samples from a stan-dard replay buffer distribution, denoted µ, but reweight these samples using importance weights wk = pk(s, a)/µ(s, a). However, naïve importance sampling often suffers from high variance, lead-ing to unstable learning. Instead of directly re-weighting to pk, we re-weight samples from µ to a projection of pk, denoted as qk, that is still close to µ under the KL-divergence metric, such that qk = arg minq Eq(s,a)[log pk(s, a)] + τ DKL(q(s, a)
+µ(s, a)), where τ > 0 is a scalar. The weights wk are thus given by (derivation in Appendix B):
+Q∗
+τ
+∗Qk−1
+λ∗ wk(s, a) (s, a) (s, a)
+− B exp
+Qk
+Qk (6)
+−|
+− (cid:18) (cid:19)
+||
+|
+|
+|
+∝
+Putting it all together. We have noted all practical approximations to the expression for optimal pk (Equation 3), including estimating surrogates for Qk and Q∗, and the usage of importance weights to simply re-weighting transitions in the replay buffer, rather than altering the exploration strategy.
+We now put these together to obtain a tractable expression for weights in our method. Due to space limitations, we only provide a sketch of the proof here, and a detailed derivation is in Appendix C.
+∗Qk−1 by ∆k. However, estimating ∆k requires
+,
+|
+| c2, and hence (s, a)
+Qk
+≤
+| in Equation 6. For the ﬁnal Bellman error c1. Simplifying
+We ﬁrst upper-bound the quantity which is not known in advance. We utilize the upper bound c2: use γP πk−1∆k−1(s, a) + c2 as an estimator for term outside the exponent, we can lower bound it with c1, where constants c1, c2 and λ∗, the ﬁnal expression for this tractable approximation for wk is: (cid:18)
+|
+∗Qk−1
+− B
+Qk
+∗Qk−1
+Qk
+|
+− B
+−B
+Q∗
+Q∗
+| ≥
+Qk
+Qk
+−
+− (cid:19)
+|
+|
+|
+| wk(s, a) exp
+∝
+−
+γ [P πk−1∆k−1] (s, a)
+τ
+. (7)
+This expression gives rise to our practical algorithm, DisCor, described in the next section.
+A concrete demonstration. To illustrate the effectiveness of DisCor and the challenges with naively chosen distributions in RL, we present a simple computational example in Figure 4 that illustrates that, even in a simple MDP, error can increase with standard Q-learning but decreases with our distribution correction approach, DisCor, that is based on the idea of ﬁrst attempting to minimize value error at states-action tuples that will serve as target-values for other states. Our example is a 5-state MDP, with the starting state s0 and the terminal state sT (marked in gray). Each state has two available actions, a0 and a1, and each action deterministically transits the agent to a state marked by arrows in
+Figure 4. A reward of 0.001 is received only when action a0 is chosen at state s3 (else reward is 0).
+The Q-function is a linear function over pre-deﬁned features φ(s, a), i.e., Q(s, a) = [w1, w2]T φ(s, a), where φ(
+, a1) =
+, a0) = [1, 1] and φ( a1, 0 a1, 0
+·
+·
+[1, 1.001] (hence features are aliased across states). Computationally, we see that when minimizing Bellman error starting from a Q-function with weights [w1, w2] =
+[0, 1e-4], under the on-policy distribu-tion of the Boltzmann policy, π(a0
+) = 0.001, π(a1
+) = 0.999, in the absence of sampling error (using all transitions but weighted), the error against Q∗ still in-creases from 7.177e-3 to 7.179e-3 in one iteration, whereas with DisCor error decreases to 5.061e-4.
+With uniform the error also decreases, but is larger: 4.776e-3.
+Figure 4: A simple MDP showing the effect of on-policy distribution and function approximation on learning dynamics of ADP algorithms.
+γ = 0.999 a1, 0 a1, 0 a0, 0 a0, 0 a0, 0 1e-3 sT a0 s3 s0 s1 s2
+|·
+|· 5 Distribution Correction (DisCor) Algorithm
+In this section, we present the our full, practical algorithm, which uses the weights wk from Equation 7 to re-weight the Bellman backup in order to better correct value errors. Pseudocode for our approach, called DisCor (Distribution Correction), is presented in Algorithm 1, with the main differences from standard ADP methods highlighted in red. In addition to a standard Q-function, DisCor trains another parametric model, ∆φ, to estimate ∆k(s, a) at each state-action pair. The recursion in Equation 5 is used to obtain a simple approximate dynamic programming update rule for the parameters φ (Line 6
+8). We need to explicitly estimate this error term ∆φ because it is required to compute the weights described in Equation 7. The second change is the introduction of a weighted Q-function backup with weights wk(s, a), as shown in Equation 7 on Line 7. Since DisCor simply introduces a change to the training distribution, this change can be applied to popular ADP algorithms such as DQN [33] or SAC [14], as shown in Algorithm 3, Appendix F.
+Using the weights wk in Equation 7 for weighting Bellman backups possesses a very clear and intuitive explanation. Note that (P πk−1 ∆k−1)(s, a) corresponds to the estimated upper bound on the error of the target values for the current transition, due to the backup operator P πk−1, as de-scribed in Equation 7. Intuitively, this im-plies that weights wk downweight those transitions for which the bootstrapped tar-get Q-value estimate has a high estimated error to Q∗, effectively focusing the learn-ing on samples where the supervision (tar-get value) is estimated to be accurate, which are precisely the samples that we expect maximally improve the accuracy of the Q function. 6

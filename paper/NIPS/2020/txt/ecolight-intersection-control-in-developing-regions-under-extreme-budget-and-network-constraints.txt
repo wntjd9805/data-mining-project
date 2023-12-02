@@ -1,0 +1,183 @@
+Abstract
+Effective intersection control can play an important role in reducing trafﬁc con-gestion and associated vehicular emissions. This is vitally needed in developing countries, where air pollution is reaching life threatening levels. This paper presents
+EcoLight intersection control for developing regions, where budget is constrained and network connectivity is very poor. EcoLight learns effective control ofﬂine using state-of-the-art Deep Reinforcement Learning methods, but deploys highly efﬁcient runtime control algorithms on low cost embedded devices that work stand-alone on road without server connectivity. EcoLight optimizes both average case and worst case values of throughput, travel time and other metrics, as evaluated on open-source datasets from New York and on a custom developing region dataset. 1
+
+Introduction
+Developing countries are overwhelmed with the problems of trafﬁc congestion (TimesOfIndia [2018],
+IndiaTimes [2018], FinancialExpress [2018]) and air pollution (DW [2019a], Amnesty [2019], DW
+[2019b]). Intersection control to better manage trafﬁc congestion and reduce vehicular emissions is vitally needed, in addition to policies for curbing trafﬁc (Ecotech [2016]). State-of-the-art intelligent intersection control like Presslight (Wei et al. [2019a]) and CoLight (Wei et al. [2019b]) are showing impressive results on lane-based orderly trafﬁc of the developed countries. This paper explores whether the beneﬁts of these Convolutional Neural Network (CNN) based real time video analysis from trafﬁc cameras, and Deep Reinforcement Learning (DRL) based adaptive intersection control, can be translated to the developing world, where the need for these technologies is paramount.
+The challenges of directly importing the afore-mentioned technologies are three fold – (a) extreme budget constraints, which allows for only very low cost, compute and RAM constrained, embedded platforms to be deployed (b) poor network connectivity between the road and the servers, forcing all analysis to happen in-situ on the road and (c) chaotic non-laned driving behavior in developing regions, which makes accurate video analysis for exact counting and classiﬁcation of vehicles harder.
+This paper presents EcoLight, the ﬁrst practical step towards intelligent intersection control in developing countries. Through close collaboration with trafﬁc authorities and cameras deployed in real intersections, we explore how low computation intensive video processing and control algorithms can be trained to run on low cost embedded devices without network connectivity. EcoLight exploits state-of-the-art CNN and DRL methods on high-end GPUs in the pre-deployment stage – (a) CNN for training more efﬁcient trafﬁc density estimation using background subtraction and optical ﬂow, and (b) DRL for learning efﬁcient Look-Up Table (LUT) based or threshold based intersection control.
+This enables EcoLight to perform at par with these compute intensive methods, at a mere fraction of runtime overhead. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+Optimizing computational overhead while not losing accuracy has been challenging for EcoLight. We reduce DRL states from over a thousand dimensions in state-of-the-art papers (Wei et al. [2019a,b]) to one or two dimensions. We remove the DNN based RL computation at runtime using static LUTs. We quantize the original continuous values of DRL states for ﬁnite sized LUTs. All these optimizations needed to be carefully tuned for accuracy. We experiment with both open-source developed country dataset and a custom developing region dataset, created by us from our deployed cameras. As a result of careful tuning, EcoLight gives comparable beneﬁts and sometimes even improves upon the compute-intensive methods, on both performance metrics (throughput, average travel time etc. at the intersection) and fairness metrics (worst case travel time, vehicles stuck etc. at the intersection).
+An end-to-end EcoLight based system has also been demonstrated in this paper. This incorporates video feeds from cameras at a real intersection and computer vision based trafﬁc density estimation for input to the control algorithms. Our results show great promise towards practical adaptive intersection control at extreme budget and network constraints, a vital necessity for sustainability. 2 Problem Deﬁnition
+To start-with, we deﬁne the problem of trafﬁc signal control as a Markov Process. Each intersection in the system is controlled by an agent running independently, and without any communication with the others. In this setting, each agent observes part of the total system, and decides for its own intersection whether to keep the same phase or switch to the next, so as to minimize the average trafﬁc density on the approaches around the intersection. Speciﬁcally, the problem can be characterized by the following major components < S, O, A, P, r, π, γ > as described in detail below.
+• With system state space S and observation space O, we assume that there are N intersections in the system and each agent can observe part of the system state s (cid:15) S as its observation o (cid:15) O. We deﬁne ot i for agent i at time t, which consists of trafﬁc density in one or two dimensions as described later.
+• With set of actions A, at time t, an agent i would choose an action at i from its candidate action set
+Ai as a decision for the next ∆t period of time. Here, each agent would choose either 0 or 1 as its action at i, indicating that from time t to t + ∆t, this intersection would be in same phase or under transition to the next phase.
+• With transition probability P, given the system state st system arrives at the next state st+1
+• With reward r, each agent i obtains an immediate reward rt i from the environment at time t. In this paper, we want to minimize the travel time for all vehicles in the system, which is hard to optimize i = − (cid:80) directly. Therefore, we deﬁne the reward for intersection i as rt i,a is the stop density on the approach a of intersection i at time t. according to the state transition probability P (st+1 i of agent i at time t, the i and actions at i,a where dt i, at a dt i).
+|st i i
+• With Policy π and discount factor γ, as the independent actions have long-term effects on the system, we want to minimize the expected stop density of each intersection in each episode. Speciﬁcally, at time t, each agent chooses an action following a certain policy O x A → π, aiming to maximize its total reward Gt i , where T is total time steps of an episode and γ (cid:15) [0, 1] differentiates the rewards in terms of temporal proximity.
+In this paper, we use the action-value function Qi(θn) for each agent i at the nth iteration (parameter-ized by θ) to approximate total reward Gt i with neural networks by minimizing the loss: t=τ γt−τ rt i = (cid:80)T
+L(θn) = E[(rt i + γ max i denotes the next observation for ot i, at where ot(cid:48) i. These earlier snapshots of parameters are periodically updated with the most recent network weights and help increase the learning stability by de-correlating predicted and target q-values. i ; θn−1) − Q(ot i; θn))2] i , at(cid:48)
+Q(ot(cid:48) (1) a(cid:48) 3 Doing Away with Large States: Small State DRL for Intersection Control
+Deep Reinforcement Learning (DRL) based intersection control algorithms like Presslight (Wei et al. [2019a]), CoLight (Wei et al. [2019b]) are giving excellent performance in recent literature.
+Unfortunately the DRL state size for these state-of-the-art algorithms are 80 for Presslight and 1600-12480 for CoLight. Further Presslight needs coordination among different intersections, though it learns individual RL agents for each intersection. CoLight learns a centralized RL agent. Coordinated or centralized control requires network connectivity, which is not ubiquitous in developing regions. 2
+For deployment on low cost embedded devices (with limited RAM and compute power) and per intersection control without coordination, we start with exploring small state DRLs. Let x1 denote the trafﬁc density on the road approach with green signal and x2 denote total trafﬁc density on all other road approaches with red signal. We explore two small state DRLs - (a) 2-dimensional state
+< x1, x2 > (b) 1-dimensional state < x3 >, where x3 = x1/(x1 + x2).
+Table 1: Performance of 2-dimensional and 1-dimensional state RL
+DNN 1x1 (3-approach) 123 veh/min @ Delhi 16x1 (4-approach) 114 veh/min @ NY 16x3 (4-approach) 47 veh/min @ NY
+Model
+StateSz
+Param nOut
+Travl
+Total nOut
+Travl
+Total nOut
+Travl
+Total
+Presslight
+CoLight 2dimRL 1dimRL 80 12480 2 1 2082 6018 162 52 1246 1248 1282 1260 254 222 238 254 252 251 243 250 4866 4986 5010 3607 220 260 252 187 362 375 376 604 1355 2589 2574 1148 560 319 328 375 930 311 322 1093
+Using (a) 1-hour long publicly available New York (USA) dataset1 and (b) 1-hour New Delhi (India) dataset collected and processed by us, we simulate the trafﬁc-ﬂows in the CityFlow trafﬁc simulator (Zhang et al. [2019]). Table 1 show the metric values that need to be maximized (nOut or number of vehicles cleared by the controller) and minimized (Travel and Total times). Total combines the time spent by the vehicles which clear the intersection and also those stuck at the intersection, while
+Travel time comprises only cleared vehicles’ time spent in the network.
+We evaluate two road networks in the New York dataset – (a) 16x3 network, where 16 roads parallel to each other intersect with 3 roads perpendicular to them giving 48 intersections, each having 4 approaches, and (b) 16x1 network with one perpendicular road to 16 parallel roads, giving 16 intersections, each with 4 approaches. The Delhi dataset is for one intersection (1x1), with 3 approach.
+As seen from the table, the 1-dimensional state DRL does poorly on Throughput and TotalTime metrics, especially on 16x3 network. However, the 2-dimensional state DRL shows impressive metric values, matching the performance of CoLight and improving upon Presslight, at a mere fraction of state size and parameters. This shows that the state-of-the-art DRL algorithms have a lot of redundancy, that can be optimized, and also less DNN parameters for the small state DRLs can be trained better with limited data. This result shows the promise of small state DRLs. We take this as the starting point to build our efﬁcient intersection control in the next two sections. 4 Doing Away with Runtime DRL: Lookup Table based Intersection Control
+In Section 3, we use a DRL architecture with fully connected layers, comprising two hidden layers of size H each. We use M dimensional states to represent an intersection and further show in Section 3, that M = 2 gives comparable results to state of the art intersection control algorithms Presslight and
+CoLight (Wei et al. [2019a,b]). We consider N phases, each phase denoting a certain conﬁguration of green and red signals for the different approaches at the intersection. At every decision making point, our DRL can make one of two choices, to stay in the current phase or switch to the next phase. So our
+DRL has an M x H x H x P architecture, with M = 2, H = 10 and P = 2. We use stop density as the DRL reward, which is easily computable as discussed later in section 6. Though our optimizations and method should improve the performance irrespective of underlying Loss Function and Optimizer choice, still we used them same as the baselines, MeanSquareError (Verma [2019]) and RMSprop (Bushaev [2018]), to rule out their effect from the performance comparison/improvement.
+In this section, we seek to do away with running the DRL at runtime at the deployment site. The
+ﬁrst reason is efﬁciency: on low cost embedded systems, compute power is limited. The inputs for the control algorithms anyway needs to be computed on the embedded devices, using computer vision algorithms on the real time video data from all approaches. Using these inputs, if the control algorithm can be made more efﬁcient than running a neural network for DRL, it becomes more practical to meet the low computational budget. The second reason to do away with runtime DRL, is the lack of conﬁdence on the DRL black box. Based on anecdotal evidence through discussions with our deployment partners, adaptive intersection control that can be visualized and veriﬁed by human experts before deployment, is much more preferred than algorithms which are free to choose actions at runtime without any human supervision/comprehension, as a runtime DRL would do. 1https://www1.nyc.gov/site/tlc/about/tlc-trip-record-data.page 3
+We therefore seek to use static Lookup Tables (LUT) at deployment, where each cell in the table will represent a state in our DRL. The value contained in that cell will represent a boolean action: stay in the current phase vs. switch to the next phase, referred to as keep-change actions henceforth. The actions are learnt using ofﬂine DRL training. This training can be compute heavy and high latency, as it is run on powerful GPU servers before deployment for real time intersection control. During training, computer vision based processed video datasets are collected from the road, and fed in trafﬁc simulator to create all possible DRL states (cells in the LUT). Actions corresponding to each state are then learnt by training the DRL algorithm.
+Figure 1: DRL training and LUT structure
+The ﬁrst graph in Figure 1 shows how metrics Total time and Travel time improve over many epochs of ofﬂine DRL training. The other three images show how many times different DRL states are seen by the DRL training algorithm as training progresses. The lighter the color, the more a DRL state is seen. These three images also describe the LUT structure, where the two axes represent quantized values of x1 and x2 for the 2-dimensional state DRL. Instead of "how many times a DRL state is seen" presented in these images, the LUT contains a boolean action value in each cell, learnt by DRL training. Veriﬁed by developing country trafﬁc control experts for sanity and safety checks, the LUT is eventually deployed on road. At runtime, the current state is computed using computer vision methods on incoming video, and the action corresponding to that state in the stored LUT is taken by the trafﬁc signal controller.
+While storing DRL decisions for different states in LUT is efﬁcient and veriﬁable, we need to ensure that the learnt decisions are good for subsequent use at runtime. It is important to choose good DRL models to populate the static LUT, as unlike running DRL at runtime, the LUT will not be able to dynamically update these decisions.
+As measure of DRL model goodness, we deﬁne two metrics: (a) FairShare: We hypothesize that a good RL tries to achieve FairShare of trafﬁc densities among approaches i.e. ﬁt the trafﬁc among at the intersection such that each approach maintains equal/similar density of trafﬁc. To quantify this FairShare property of a given DRL model, we project all instances of observed states (factored by the distance) onto the equal density segments of LUT (corresponding to the diagonal starting at 0,0) in Figure 1. We sum this vector of the projections to get a single scalar, which will be high for models with most states with equal density (like Epoch 90-99 in Figure 1), and low otherwise. This scalar quantiﬁes how balanced trafﬁc is among the approaches for a particular
+DRL model. (b) DecisionConsistency: If a model predicts to hold/keep the signal for a state, we hypothesize that a good or stable model should continue to predict the same for all states having higher trafﬁc in the green approach (or low trafﬁc in the red approaches). We name this model property of sticking to the same decision under similar trafﬁc scenarios as DecisionConsistency. To quantify
+DecisionConsistency, for each green density level (x1) we take the ratio of two numbers, the large range of red density (x2) over which the keep decision is maintained vs the range followed with opposite decision. The sum of all such ratios gives rise to a scalar which will be larger for models with better DecisionConsistency. 4
+In addition to hypothesizing what properties good DRL models might have, and deﬁning scalar metrics to quantify those goodness properties, we also need mechanisms to use these goodness metrics. We do this in the following two ways: (a) DRL training using model goodness metrics: We use the FairShare and DecisionConsistency scalars during the DRL training process to identify and favour better RL models. We maintain a threshold θ for these scalars, as training progresses. At each epoch we hold a model if its goodness metric is below θ, lower θ by a factor, and start the training for a fresh model in that epoch. We approve the best model so far (new or on hold), if its goodness metric exceeds θ, or after ﬁxed number (η=5) of retries in that epoch, and move on with the metric value of this model as new θ.
+Figure 2: Goodness metrics based DRL training (b) DRL selection using model goodness metrics: Figure 3 shows the correlation between Total
+Time performance metric and DRL model’s goodness metric values. We discard models with goodness metric values lower than the average of all the models, to remove outliers (see Perspective 1 of Figure 3). In order to select the good models among the remaining ones, we pick the best model (again based on the goodness metric values) among a set of (ψ=20) models, and restart the process from the model next to the selected one (see Perspective 2 of Figure 3). This ﬁnal set of high performing models can be effectively used to generate the LUT to be deployed at the intersection.
+Figure 3: Goodness metrics based DRL selection
+We need to evaluate this LUT based signal control, compared to the 2dimRL that we designed in
+Section 3, and also the state-of-art DRL methods Presslight (Wei et al. [2019a]) and CoLight (Wei et al. [2019b]). Static LUTs lose performance due to quantization of the trafﬁc density values, while runtime DRL can use continuous values of trafﬁc density. But the quantization is unavoidable, as the table needs to be of ﬁnite dimensions. Whether our training and training+selection with goodness metrics can overcome the quantization related performance loss, needs to be quantiﬁed.
+Table 2 shows the average case performance metric values (a) nOut (number of vehicles cleared by the intersection), (b) Travel (time spent by cleared vehicles) and (c) Total (time spent by all vehicles).
+The T in model names denotes Goodness based Training only experiments, whereas TS includes
+Goodness based Selection as well. We continue the training for 200 epochs, allowing all methods to converge and then average the next 50 epochs for performance metrics calculation for T, and the selected few out of these for TS. As can be seen from the table, performance loss compared to 2dimRL due to quantization, is gracefully recovered by both our goodness metrics. DecisionConsistency performs signiﬁcantly better than FairShare for all datasets.
+We further show the value of worst case or fairness metrics for 16x3 benchmark dataset in Table 3.
+Our fairness metrics are: (a) WrstTime (maximum time spent in the network by any stuck vehicle), (b) WrstWait (maximum wait time at any intersection by any vehicle), (c) MaxWait (maximum of 5
+Table 2: Performance of Goodness EcoLight for average case metrics 1x1 16x1 16x3
+Model
+PressLight
+CoLight 2dimRL
+FairShare(T)
+Decision(T)
+FairShare(TS)
+Decision(TS) nOut Travel
+Total nOut Travel
+Total nOut Travel
+Total 1246 1248 1282 1287 1292 1285 1298 254.4 222.3 237.9 251.3 224.6 251.6 186.4 252.0 250.9 243.4 243.4 239.7 243.7 234.5 4866 4986 5010 4976 5081 5137 5186 219.6 259.5 252.4 244.0 251.3 239.9 277.4 362.8 374.8 376.3 377.0 359.1 343.8 357.8 1355 2589 2574 2561 2586 2583 2586 560.3 318.9 328.1 331.2 327.6 327.3 325.5 930.3 311.3 322.6 330.1 318.6 318.1 316.2
+Table 3: Performance of Goodness EcoLight for worst case (fairness) metrics for 16x3
+Model
+Presslight
+Colight 2dimRL
+FairShare(T)
+Decision(T)
+FairShare(TS)
+Decision(TS)
+WrstTime WrstWait MaxWait
+Stuck75
+Stuck50
+Stuck25
+Stuck0 3516.4 834.4 985.3 1207.1 924.7 929.0 675.2 2481.5 900.8 1396.5 1524.2 1352.2 1320.0 1007.0 255.6 45.9 47.6 48.7 47.7 48.5 46.8 99.2 0.0 0.9 2.1 0.0 0.0 0.0 338.5 0.4 2.4 6.2 0.0 0.0 0.0 843.9 2.7 6.0 14.1 1.4 0.5 0.0 1405.9 234.7 250.1 261.3 238.3 241.0 237.6 average wait times at any intersection) and (d) StuckX (vehicles stuck in network at X% time from simulation end). Fairness loss due to quantization is not only gracefully recovered by our goodness metrics, but we signiﬁcantly outperform all baselines as well.
+Using a ﬁnite sized LUT with (a) quantized trafﬁc density values as rows and columns, and (b) cells containing binary decisions learnt using DRL model training, and model selection based on some goodness metrics, gives us performance and fairness comparable to the state-of-the-art DRL algorithms. This is extremely encouraging in terms of practical deployment in developing countries. 5 Doing Away With Look-up Tables: Threshold based Intersection Control
+Based on anecdotal discussions with intersection control companies, while most intersections in developing regions will be able to support LUTs, some intersections might be budget constrained to such an extent that the controller’s RAM will not be enough to even store LUTs. In this section, we therefore consider how to design such a stateless controller, with better performance and fairness metrics compared to other widely deployed stateless controllers. We start by examining the 1dim RL tried in Section 3, and gradually build performant and fair stateless control. 1-dimensional state RL did poorly on the Throughput and TotalTime metrics in Table 1, especially for the 16x3 road network. Wondering what is being learnt by the RL for the case of 1-dimensional state, we checked the model behaviour for the whole range of this state variable < x3 = x1/(x1 + x2) > from 0.0 to 1.0. We calculate the expected value of signal change for all 16 intersections (of 16x1 NY road network) for continuous 50 rounds after training for 500 rounds.
+Figure 4: Density vs action
+Figure 4 plots the expected signal change along y-axis, with relative density along x-axis. The signal change expectation is high when relative density is low (top left) and vice-versa (red line given for reference for exact negative correlation between signal change expectation and relative density).
+The blue curve shows a near-linear response following the red line, but is still non-linear. Thus 1-dimensional state with ratio x1/(x1 + x2) is not enough to capture the necessary non-linearity and overall trafﬁc concentration - empty vs. moderate vs. saturation. It only captures relative density among approaches, while absolute values retained in 2-dimensional state RL are clearly important. 6
+We explore the options of both 1-dimensional relative density < x1/(x1 + x2) > and 2-dimensional absolute densities < x1, x2 > in the simple algorithm below. The algorithm does not use any LUT to store the signal switching decisions learnt by RL for all possible states. It only uses few empirically learned thresholds. This is to support embedded hardware, that cannot use LUTs due to RAM constraints and would need the control algorithm to be completely stateless, possibly using only a few thresholding parameters.
+GetNextAction (cur_phase, phase_time, density_list): action ← 0 total_density ← sum(density_list) if total_density > 0 and phase_time ≥ CON F IG[M inGreen] then relative_density ← density_list[cur_phase]/total_density if relative_density < CON F IG[α] then if CON F IG[M ode] is Random then ratio ← random(0.0, 1.0) else cycleT ime ← CON F IG[CycleT ime] if CON F IG[M ode] is T imed(2dim) then cycleT ime ← cycleT ime × total_density × 2/CON F IG[M axDensity] cycleT ime ← M AX(CON F IG[M inGreen], cycleT ime) end if ratio ← phase_time/cycleT ime end if if ratio > relative_density then action ← 1 end if end if end if return action
+The intuition behind the algorithm is (a) to take the CycleTime (i.e. the cumulative duration of all phases), and divide it among phases in proportion to their relative densities and (b) to increase
+CycleTime based on increasing absolute densities. At each decision making point, the agent allows the green signal to continue until the relative density for that approach has not fallen below a threshold
+α. Below α, signal can be switched. When CycleTime is deﬁned (we call this variant Timed), the agent uses it in proportion to the relative density (Timed (1dim)), with optionally increasing the given
+CycleTime in response to absolute densities (Timed (2dim)). When CycleTime is undeﬁned (we call this variant Random), it would switch randomly, but still proportional to the relative density.
+Table 4: Algorithm Hyper Parameters
+Param
+Description
+Hold green above this threshold
+Minimum green per phase
+Total green time over phases
+α
+MinGreen
+CycleTime
+MaxDensity Maximum density at intersection
+Random / Timed(1dim or 2dim)
+Mode
+Table 5: Empirically Learnt Values
+Algorithm
+Properties
+FixedTiming
+MaxPressure
+SOTL
+Random
+Timed 20s Min/Max Green 5s Min Green 2/4 veh, 5s Min Green
+α=0.17, 5s Min Green
+α=0.17, 150s Cycle
+We compare the performance of our stateless algorithms against below baselines. These baselines also do not use any state, but work with few parameters as listed in Table 5. State-of-the-art research based RL methods like Presslight and CoLight are still in literature and not adopted in the real world.
+So these simpler baselines are the widely deployed intersection control algorithms across the world.
+Developing countries, typically, still use Fixed Timing signals. (a) Fixed Timing: Signal switches in cyclic order to the next approach after ﬁxed time intervals. (b) Max Pressure: Pressure is calculated by the difference of vehicles on the incoming and outgoing lanes for the possible movements in each phase (Varaiya [2013]). Signal is switched to the phase with maximum pressure. If current phase pressure is not the maximum, we switch to the next phase. (c) Self-Organizing Trafﬁc Light (SOTL): This is a vehicle actuated mechanism (Cools et al.
+[2006]). There is a minimum phase duration. Once the minimum phase duration is over, the switch signal is generated if the trafﬁc in green approach is less than a threshold and trafﬁc in any other approach is more than another threshold. 7
+Table 6: Performance of EcoLight Thresholding Algorithms for average case metrics 1x1 16x1 16x3
+Algo nOut Travel
+Total nOut Travel
+Total nOut Travel
+Total
+FixedTiming
+MaxPressure
+SOTL
+Random
+Timed(1dim)
+Timed(2dim) 1249 1160 1305 1361 1358 1358 260.6 280.8 246.7 231.6 231.7 231.7 252.0 272.8 239.0 224.8 255.4 255.4 3743 4106 4640 5076 5104 5268 193.0 214.4 264.7 354.9 355.3 346.6 583.5 504.2 436.3 427.8 428.9 406.3 1489 1840 2462 2540 2516 2553 723.2 649.7 485.9 378.5 380.6 375.2 985.7 768.8 465.1 364.9 368.3 361.7
+Table 6 shows the average case metric values (a) nOut (number of vehicles cleared by the intersection), (b) Travel (time spent by cleared vehicles) and (c) Total (time spent by all vehicles). Our algorithms
+Random, Timed (1dim) and Timed (2dim), clear many more vehicles at lower Travel and Total times than the baselines, for all benchmark datasets. The Travel times for 16x1 network is higher (italicized in Table 6) for our algorithms, though other metrics improved. This is due to the fact that it is a linear network of 16 intersections and the trafﬁc pattern is such that a good part of the trafﬁc enters around one end and exits around the other (and vice-versa), making the vehicles cross many intersections in a sequence. Supported by increased nOut, our algorithms make more vehicles to exit the network.
+The extra vehicles which exit are mostly the ones with larger travel times, thus pushing the average travel time for all cleared vehicles higher. Similar behaviour is observed for the baselines as well, where SOTL Travel time (with more nOut) is higher than other baselines (with less nOut).
+Table 7: Performance of EcoLight Thresholding Algo for worst case (fairness) metrics for 16x3
+Stuck0
+Algo
+WrstTime WrstWait MaxWait
+Stuck75
+Stuck50
+Stuck25
+FixedTiming
+MaxPressure
+SOTL
+Random
+Timed(1dim)
+Timed(2dim) 3443 3100 1229 841 839 719 2671 2347 2188 526 524 516 255.6 261.6 79.8 56.1 56.5 54.2 82 11 0 0 0 0 348 154 0 0 0 0 741 449 11 0 0 0 1203 942 362 284 308 271
+We further show the value of worst case or fairness metrics for 16x3 benchmark dataset in Table 7.
+For our Random variant, we take average of 5 rounds of simulation. For all others, the results are consistent for every round. Our algorithms signiﬁcantly outperform the baselines for all fairness metrics for 16x3 network, and also for other benchmarks (omitted here for space constraints).
+Based on these results, in situations where running RL based control or maintaining LUTs are not feasible due to RAM constraints, our stateless algorithms can be deployed, vastly improving both performance and fairness metrics, compared to the currently deployed intersection control baselines.
+Table 8 shows performance of EcoLight Algorithms on two addition datasets collected at different times on the same intersection in New Delhi (India).
+Table 8: Performance on other 1x1 datasets 2 3
+Algo nOut
+Travel
+Total nOut
+Travel
+Total
+PressLight
+Colight 2dimRL
+FairShare(T)
+Decision(T)
+FairShare(TS)
+Decision(TS)
+Timed(2dim)
+Timed(1dim)
+Random
+SOTL
+MaxPressure
+FixedTiming 225 221 225 225 225 225 225 225 225 225 223 224 224 529 514 540 517 538 538 564 566 563 562 539 487 512 163.1 163.2 182.3 194.5 185.2 181.7 172.8 168.9 174.8 172.8 196.0 205.5 198.4 177.6 181.7 178.6 189.5 180.2 178.4 167.8 162.5 166.9 166.3 186.7 202.0 188.8 29.4 49.1 29.9 30.9 29.8 31.7 29.9 31.3 31.3 31.3 53.8 47.3 69.0 30.0 31.2 30.4 31.3 30.3 32.2 30.4 31.9 31.9 31.9 50.7 48.4 70.9 8
+6
+Input to Control Algorithms: Computer Vision for End-To-End System
+All intersection control algorithms designed in this paper – (a) 2dim and 1dim state DRLs (Section 3), (b) LUTs built from ofﬂine DRL training using quantized states (Section 4) and (c) stateless threshold based algorithms (Section 5), use trafﬁc density as input. More speciﬁcally, the algorithms need density of standing trafﬁc (also called stop density), discarding vehicles which have started moving.
+Given the hardware constraints, we need to make sure that this input is available to our control algorithms at an acceptable latency, with limited computation and no communication to a back-end server. As efﬁcient computer vision candidates, we use background subtraction and opti-cal ﬂow. A background ﬁlter is subtracted from each frame, to compute the foreground, and f oreground/background indicates trafﬁc density. The ﬁlter is periodically updated, the period
+τ denoting the learning rate. Such updates ensure that changing lighting conditions over the day, shadows etc. are correctly incorporated in the background ﬁlter. Just like learning LUTs using computation heavy DRL training, here also τ is learnt using compute intensive ofﬂine analysis, namely CNNs for vehicle detection (Chauhan et al. [2019]). The CNN outputs vehicle bounding boxes on training videos. τ is empirically set, so that density estimates from background subtraction match the CNN bounding box detection based density estimation.

@@ -1,0 +1,121 @@
+Abstract
+Stochastic gradient descent (SGD) and its variants have established themselves as the go-to algorithms for large-scale machine learning problems with independent samples due to their generalization performance and intrinsic computational advan-tage. However, the fact that the stochastic gradient is a biased estimator of the full gradient with correlated samples has led to the lack of theoretical understanding of how SGD behaves under correlated settings and hindered its use in such cases.
+In this paper, we focus on the Gaussian process (GP) and take a step forward towards breaking the barrier by proving minibatch SGD converges to a critical point of the full loss function and recovers model hyperparameters with rate O( 1
+K ) up to a statistical error term depending on the minibatch size. Numerical studies on both simulated and real datasets demonstrate that minibatch SGD has better generalization over state-of-the-art GP methods while reducing the computational burden and opening up a new, previously unexplored, data size regime for GPs. 1
+
+Introduction
+The Gaussian process (GP) has seen many success stories in various domains, be it in optimization
+[42, 32], reinforcement learning [33, 20], time series analysis [19, 1], control theory [17, 23] and sim-ulation meta-modeling [44, 26]. One can attribute such success to its natural Bayesian interpretation, uncertainty quantiﬁcation capability and highly ﬂexible model priors. Yet its main limitation is the
+O(n3) computation and O(n2) storage for n training points [29]. Indeed, as mentioned in [13], a traditional large dataset for a GP is one with a few thousand data points and even those often require approximation techniques.
+As a result, during the past two decades, a large proportion of papers on GPs tackled approximate inference procedures to reduce the computational demands and numerical instabilities (mainly due to the need for matrix inversions). This push towards scalability dates back to the seminal paper by
+Quiñonero-Candela and Rasmussen [27] in 2005 which uniﬁed previous approximation methods into a single probabilistic framework based on inducing points. Since then, many new methods have also been introduced. Most notable are: variational inference procedures that laid the theoretical foundation for the class of inducing point methods [8, 25, 43, 3, 40], mixture of experts models
+[9, 36], covariance tapering [11, 16] and kernel expansions [21, 28, 41]. On the other hand, there has been a recent push to utilize increasing computational power and GPU acceleration to solve exact GPs. This recent literature inlcudes distributed Cholesky factorizations [24], preconditioned
+∗Equal contribution. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+conjugate gradients (PCG) to solve linear systems [12] and kernel matrix partitioning to perform all matrix-vector multiplications [38]. Interestingly [38] was able to ﬁt a bit more than 1 million data points using 8 GPUs in a few days.
+One possible solution to extend GPs far beyond what is currently possible is through stochastic gradient decent (SGD) and its variants: drawing m << n samples at each iteration and updating model parameters following the gradient of the loss function on the m subsamples. Indeed, SGD, or more generally the capability of inference via minibatches (possibly also with second order information), has been a key propeller behind the success of deep learning in its various forms [22].
+The caveat however is that, unlike empirical loss minimization, there exists correlation across all samples where any ﬁnite collection of the samples has a joint Gaussian distribution with covariance characterized by an empirical kernel matrix. This translates to the stochastic gradient being a biased estimator of the full gradient when taking expectation with respect to the random sampling. The lack of theoretical backing and understanding of how SGD behaves in such settings has long stood in the way of the use of SGD to do inference in GPs [13] and even in most correlated settings.
+In this paper, we establish convergence guarantees for both the full gradient and the model parameters.
+Interestingly, without convexity or even Liptchitz conditions on the loss function, the structure of the
+GP leads to an optimization error term O( 1
+K ) for both converging to a critical point and recovering true key parameters: noise variance and signal variance multiplied by the kernel function. Our proof takes two steps: ﬁrst we concentrate the stochastic gradient to its conditional expectation using an (cid:15)-net argument and then we show that the latter satisﬁes a strongly convex-like property by exploiting eigenvalues of the empirical kernel matrix. The proof and key ﬁndings offer standalone value beyond
+GPs and we hope they encourage researchers to further investigate SGD in other correlated settings such as Lévy, Itô and Markov processes.
+Most importantly, however, the results open a new data size regime to explore GPs. We were able to train n ≈ 1.2 × 106 data points using a single CPU core in around 30 minutes. Recall, it took the most recent advancements in exact GPs a couple of days using 8 GPUs when n ≈ 106 and n is limited to approximately 104 without GPU. We ﬁnd that GPs inferred using SGD offer remarkably better performance in various case studies with different dataset sizes, noise levels and input dimensions.
+These results highlight the value of intrinsic regularization offered by SGD and also shed light on the value of increased data sizes in Bayesian non-parametric representations. We ﬁrst start by listing our key ﬁndings in Section 1.1. We also note that the detailed proof is deferred to the appendix and only an outline is provided in Section 4. 1.1 Key Findings
+We establish convergence guarantees for the minibatch SGD algorithm for training GP, sampling with or without replacement. Under regularity conditions, our results suggest the following:
+• For a large enough minibatch size m, minibatch SGD converges to a critical point of the full log-likelihood loss function, and recovers the true hyperparameters, including the noise variance and the signal variance. To be speciﬁc, the full gradient and the estimation error of the hyperparameters evaluated at the Kth iterate are bounded by an optimization error term O( 1
+K ) and a statistical error term: O(m− 1 2 ) for the signal variance if the kernel function has exponential eigendecay, see Theorems 3.1 and 3.2. 2 ) for the full gradient and the noise variance, and O((log m)− 1
+• To guarantee the O( 1
+K ) optimization error bound, no convexity or even Liptchitz condition on the loss function are assumed. Instead, we prove that the conditional expectation of the loss function given covariates Xn satisﬁes a relaxed property of strong convexity (see Lemma 4.1), which provides more ﬂexibility in the choice of initial parameters.
+• Through benchmarking with state-of-the-art methods on various datasets we show that SGD offers great value from both computational and statistical perspectives. Computationally, we scale to dataset sizes previously unexplored in GPs in a fraction of time needed for competing methods. Meanwhile statistically, we ﬁnd that the induced regularization imposed by SGD improves generalization in GPs, speciﬁcally in large data settings. 2
+2 Problem Setup
+Notations Vectors and matrices are denoted by boldface letters, e.g., Kn, θ, except for the full gradient ∇(cid:96)(θ) and stochastic gradient g(θ). For any vector u ∈ Rp, ui denotes its ith entry, and (cid:107)u(cid:107)2 = (cid:0)(cid:80)p 2 denotes its (cid:96)2 norm. For any square matrix A, λi(A) denotes its ith largest eigenvalue. i=1 u2 i (cid:1) 1
+We consider the Gaussian process model f ∼ GP(m(·), c(·, ·)), x1, . . . , xn i.i.d.∼ P, yi = f (xi) + (cid:15)i, (cid:15)i i.i.d.∼ N (0, σ2 (cid:15) ), 1 ≤ i ≤ n, (1) f k(·, ·) for some kernel function k(·, ·) : X × X → R, where σ2 where xi ∈ X ⊂ RD is the input, m(·) : X → R is the prior mean function, c(·, ·) : X × X → R is the prior covariance function, and (cid:15)i is the observational noise with variance σ2 (cid:15) . With-out loss of generality, we consider constant 0 mean function. Let the prior covariance func-tion c(·, ·) = σ2 f is the sig-nal variance. We observe data points {(xi, yi)}n i=1 generated from (1) and organize them into (Xn, yn) = ((x1, . . . , xn)(cid:62), (y1, . . . , yn)(cid:62)), from which we aim to learn the hyperparameters in order to predict outputs from new inputs based on the posterior process.
+Denote by θ∗ = (σ2 (cid:15) )(cid:62) ∈ R2 the hyperparameters to be determined, and for notational conve-nience, we may also use θ∗ (cid:15) in the following. One direct approach to estimate θ∗ is by applying gradient descent to minimize the scaled negative log marginal likelihood function 1 to denote σ2 2 to denote σ2 f and θ∗ f , σ2 (cid:96)(θ; Xn, yn) = − log p(yn|Xn, θ)
+= n K−1 n (θ)yn + log |Kn(θ)| + n log(2π)] (2) 1 n 1
+[y(cid:62) 2n over θ ∈ (0, ∞)2, where Kn(θ) = θ1Kf,n + θ2In ∈ Rn×n is the marginal covariance matrix for noisy observations yn given Xn, and Kf,n ∈ Rn×n is the kernel matrix of k(·, ·) evaluated at Xn, i.e. (Kf,n)i,j = k(xi, xj). For notational convenience we will omit Kn(θ) to Kn when θ is clear from the context and denote Kn(θ∗) by K∗ n. In this case, the derivative of (cid:96)(θ) is of particular interest to us where each of its entries takes the form (∇(cid:96)(θ; Xn, yn))l =
+= 1 2n 1 2n (cid:20)
+−y(cid:62) n K−1 n
+∂Kn
+∂θl
+K−1 n yn + tr (cid:19)(cid:21) (cid:18)
+K−1 n
+∂Kn
+∂θl (cid:20) (K−1 n (In − ynyT n K−1 n ) tr (cid:21)
+,
+∂Kn
+∂θl 1 ≤ l ≤ 2, (3) where θl is the lth element of θ and (∂Kn/∂θl)ij = ∂(Kn)ij/∂θl. For notational convenience we will suppress Xn, yn and use ∇(cid:96)(θ) instead. Notice that the computation in (3) is dominated by the n , which requires O(n3) time. In order to reduce the computational cost of training, calculation of K−1 we consider the minibatch stochastic gradient descent approach to optimize (2). 2.1 Minibatch SGD algorithm
+Let ξ be a random subset of {i}n i=1 of size m, then {(xi, yi)}i∈ξ is the corresponding subset of data points which we organize into (Xξ, yξ), where Xξ is the submatrix formed by the rows of Xn, and yξ is the subvector of yn, both indexed by ξ. Deﬁne g(θ; Xξ, yξ) ∈ R2 as an approximation to
+∇(cid:96)(θ; Xn, yn) that can be calculated from this subset, i.e., (g(θ; Xξ, yξ))l = 1 2sl(m) tr (cid:20) (K−1
+ξ (Im − yξy(cid:62)
+ξ K−1
+ξ ) (cid:21)
+,
+∂Kξ
+∂θl 1 ≤ l ≤ 2, (4) where Kξ is the covariance matrix of yξ while also being the principle submatrix formed by the rows and columns of Kn indexed by ξ. A natural choice for sl(m) is m, but we will see in Section 3 that setting s1(m) (cid:16) log m and s2(m) = m would lead θ(k) to both converge to the true hyperparameters. Algorithm 1 summarizes the steps of minibatch SGD, where we do not specify whether minibatches are sampled with or without replacement since our theoretical guarantees will hold true under both scenarios. and θ(k) 2 1 3
+Algorithm 1: Minibatch SGD 1 Input: θ(0) ∈ R2, initial step size α1 > 0. 2 for k = 1, 2, . . . , K do 3
+Randomly sample a subset of indices ξk of size m;
+Compute the stochastic gradient g(θ(k); Xξk , yξk );
+αk ← α1 k ;
+θ(k) ← θ(k−1) − αkg(θ(k−1); Xξk , yξk ); 4 5 6 7 end for 3 Theoretical Guarantees
+In this section, we provide convergence guarantees for Algorithm 1, including error bounds for (cid:107)θ(k) − θ∗(cid:107)2
+Assumption 3.1 (Exponential eigendecay). The eigenvalues of kernel function k(·, ·) w.r.t. probability measure P are {Ce−bj}∞ 2 and ∇(cid:96)(θ(k)). The following assumptions are needed for our theoretical results. j=0, where C ≤ 1 is regarded as a constant.
+This exponential eigendecay assumption is satisiﬁed by the RBF kernels. In fact, for kernel functions with a different decay rate (e.g., polynomial decay), similar convergence guarantees shall still hold, except that the error bounds may scale differently w.r.t. the minibatch size m. The requirement C ≤ 1 is only for theoretical convenience, and it sufﬁces to have a bounded C.
+Assumption 3.2 (Bounded iterates). Both θ∗ and θ(k) for 0 ≤ k ≤ K lie in [θmin, θmax]2, where 0 < θmin < θmax.
+Assumption 3.3 (Bounded stochastic gradient). For all 0 ≤ k < K, (cid:107)g(θ(k); Xξk+1, yξk+1 for some G > 0.
+)(cid:107)2 ≤ G
+The following theorem guarantees the convergence of the parameter iterates under these assumptions.
+Theorem 3.1 (Convergence of parameter iterates). Under Assumptions 3.1 to 3.3, when m > C for some constant C > 0, we have the following results under two corresponding conditions on sl(m): 1. If s2(m) = m, 3 log m , with probability
+, then for any 0 < ε < C log log m
+γ where γ = 1 4θ2 2γ ≤ α1 ≤ 2 max at least 1 − CK exp{−cm2ε}, (θ(K) 2 − θ∗ 2)2 ≤ 8G2
+γ2(K + 1)
++ Cm− 1 2 +ε. (5) 2. If in addition to s2(m) = m, s1(m) is set to τ log m where τ > 64θ4 bθ4 max min 2γ ≤ α1 ≤ 2
+, 3
+γ where γ depends on τ , then for any 0 < ε < 1 2 , with probability at least 1 − CK exp{−c(log m)2ε}, (cid:107)θ(K) − θ∗(cid:107)2 2 ≤ 8G2
+γ2(K + 1)
++ C(log m)− 1 2 +ε. (6) 2, with the optimization error term O( 1
+Here c, C > 0 depend only on θmin, θmax, b.
+Remark 3.1. Theorem 3.1 suggests that the noise variance parameter θ(K) is guaranteed to converge to the truth θ∗ 2 +ε) with high probability, if ε log m is large, the initial stepsize is appropriately chosen and s2(m) = m.
+Furthermore, if we let s1(m) = τ log m, then Algorithm 1 achieves convergence for both θ(K) and
+θ(K) 2 with statistical error O((log m)− 1 2 +ε).
+Remark 3.2. The optimization error O( 1
+K ) is credited to the structure of the GP loss function, which satisﬁes a relaxation of strong convexity (details provided in Section 4). The different eigenvalue structures of Kf,ξ and Im lead to different rates of statistical errors for θ∗ 2, while the fact that statistical errors depend on m instead of n is due to the correlation among yξ from different minibatches.
+K ) and the statistical error term O(m− 1 1 and θ∗ 2 1 4
+Remark 3.3. For the second case where s1(m) = τ log m, γ needs to satisfy (cid:26) (cid:27)
+γ = min 1 32τ bθ2 max
+, 1 4θ2 max
+− max 2θ2
+τ bθ4 min
+, (7)
+Remark 3.4. One possible extension to our current set-up is to assume the covariance function c(·, ·) to be the summation over multiple kernel functions: c(·, ·) = (cid:80)M f,lkl(·, ·) for M > 1. To establish convergence guarantees for this case, we can follow similar arguments of the current proof with the additional assumption that the kernel matrices for all kernels k1(·, ·), . . . , kM (·, ·) share the same eigenvectors, which facilitates the analysis for the gradient. l=1 σ2
+Based on Theorem 3.1, we also derive the following convergence guarantee for the full gradient.
+Theorem 3.2 (Convergence of full gradient). Under Assumptions 3.1 to 3.3, if 3 2γ ≤ α1 ≤ 2
+, m > C, s2(m) = m, then for any 0 < ε < C log log m
+γ = 1 4θ2 1 − CK exp{−cm2ε},
+γ for log m , with probability at least max (cid:107)∇(cid:96)(θ(K))(cid:107)2 2 ≤ C (cid:20) G2
+K + 1 (cid:21)
++ m− 1 2 +ε
+, (8) holds, where c, C > 0 depend only on θmin, θmax, b.
+Theorem 3.2 implies that, running SGD for sufﬁciently many iterations with large minibatch size leads to the convergence to a critical point of (cid:96)(θ). 4 Proof Overview
+In this section, we present the proof overview for the ﬁrst part of Theorem 3.1 and Theorem 3.2. The proof of the second part in Theorem 3.1 follows similar ideas although requiring more careful analysis.
+With a bit abuse of notation, we will omit g(θ(k); Xξk+1, yξk+1
+) to g(θ(k)) and denote its conditional expectation E(g(θ(k))|Xξk+1) by g∗(θ(k)). Similarly we deﬁne ∇(cid:96)∗(θ(k)) = E(∇(cid:96)(θ(k))|Xn).
+Due to the bias in the stochastic gradient, we take the followings steps instead of directly drawing the connection between g(θ(k)) and ∇(cid:96)(θ(k)):
+• For proving the ﬁrst part of Theorem 3.1: – We ﬁrst show that the conditional expectation g∗(θ(k)) of the stochastic gradient has a property similar to strong convexity, see Lemma 4.1. – We then prove that g(θ) is close to its conditional expectation g∗(θ) uniformly over all possible θ, and thus g(θ(k)) is close to g∗(θ(k)). Applying Lemma 4.2 to each minibatch leads to the desired result.
+These two steps lead to the O( 1 rate depending on m, as shown in Theorem 3.1.
+K ) optimization error rate for (θ(k) 2 − θ∗ 2)2, and a statistical error
+• For proving Theorem 3.2: – Lemma 4.2 suggests that ∇(cid:96)(θ(k)) is close to ∇(cid:96)∗(θ(k)) – The eigendecay of kernel matrices ensures that (cid:107)∇(cid:96)∗(θ(k))(cid:107)2 is controlled by (θ(k) 2 − θ∗ 2)2, which is upper bounded in Theorem 3.1.
+These steps above provide us with the same error bound of (cid:107)∇(cid:96)∗(θ(k))(cid:107)2 from that of (θ(k) in Theorem 3.1. 2 − θ∗ 2)2 4.1 Key Lemmas
+The following two lemmas are the key building blocks of the proof: one shows the nice convex-like property of g∗(θ(k)), the other establishes a uniform bound for the statistical error ∇(cid:96)(θ) − ∇(cid:96)∗(θ) over θ ∈ [θmin, θmax]2, and thus also bounds g(θ(k)) − g∗(θ(k)); 5
+Lemma 4.1 (Strongly convex-like property of g∗(θ(k))). Under Assumptions 3.1 to 3.3, if s2(m) = m, m > C, then with probability at least 1 − 2Km−c, the following claim holds true for 0 ≤ k < K: (θ(k) 2 − θ∗ 2)(g∗(θ(k)))2 ≥ 1 8θ2 max
+Here C > 0 depends only on θmin, θmax, b. (θ(k) 2 − θ∗ 2)2 −
+C log m m
+, (9)
+Lemma 4.1 is a relaxation of strong convexity, but leads to similar convergence guarantees from running SGD on strongly convex objectives. The approximate “curvature" parameter, on the
+R.H.S of (9), remains a constant regardless of how large m is. To guarantee the constant “curvature”, we establish novel upper and lower bounds on (cid:80)m j=1 λl 2 )−2 with high probability when m is large, where λj is the jth largest eigenvalue of Kf,n, l = 0, 1, 2. The proof is based on the established error bounds for the empirical eigenvalues in [6] and the eigendecay of the kernel k(·, ·).
+Lemma 4.2 (Uniform statistical error). Under Assumption 3.1 to 3.3, for any x > 0, 1 ≤ l ≤ 2, we have 1 λj + θ(k) j(θ(k) 1 8θ2 max (cid:32) (cid:33)
+P sup
+θ∈[θmin,θmax]2
+|(∇(cid:96)(θ))i − (∇(cid:96)∗(θ))i| > Cx
+≤ δ(x), (10) where δ(x) ≤ C(log x)4 exp{−cn min{x2, x}}. Here c, C > 0 only depend on θmin, θmax, b.
+The major difﬁculty in the proof of Lemma 4.2 is to control the error term uniformly over
+θ ∈ [θmin, θmax]2. We need an uniform error bound, since g∗(θ(k)) is no longer the conditional expectation of g(θ(k)) if conditioning on the past iterate θ(k). Although the set [θmin, θmax]2 has constant dimension, the kernel matrix Kn(θ) ∈ Rn×n is of high dimension and is determined by θ in a non-linear way. Our solution is to explore the Taylor’s expansion of ∇(cid:96)(θ) − ∇(cid:96)∗(θ), then use truncation and covering arguments. 5

@@ -1,0 +1,184 @@
+Abstract els are better at recognizing tail entities.
+Large-scale multi-modal pre-training models such as
+CLIP [30] and PaLI [8] exhibit strong generalization on various visual domains and tasks. However, existing image classiﬁcation benchmarks often evaluate recognition on a speciﬁc domain (e.g., outdoor images) or a speciﬁc task (e.g., classifying plant species), which falls short of evaluat-ing whether pre-trained foundational models are universal visual recognizers. To address this, we formally present the task of Open-domain Visual Entity recognitioN (OVEN), where a model need to link an image onto a Wikipedia entity with respect to a text query. We construct OVEN-Wiki ‡ by re-purposing 14 existing datasets with all labels grounded onto one single label space: Wikipedia entities. OVEN-Wiki chal-lenges models to select among six million possible Wikipedia entities, making it a general visual recognition benchmark with the largest number of labels. Our study on state-of-the-art pre-trained models reveals large headroom in gen-eralizing to the massive-scale label space. We show that a PaLI-based auto-regressive visual recognition model per-forms surprisingly well, even on Wikipedia entities that have never been seen during ﬁne-tuning. We also ﬁnd existing pre-trained models yield different strengths: while PaLI-based models obtain higher overall performance, CLIP-based mod-1.
+
+Introduction
+Pre-trained large language models [3, 11], inter alia, have shown strong transferable text processing and generation skills in tackling a wide variety of natural language tasks [38, 44, 48] across languages and task formats, while requiring very few manually labeled per-task examples. At the same time, while there has been equally impressive progress in multi-modal pre-training [8, 30], it remains unclear whether similarly universal visual skills, i.e., recognizing millions of coarse-grained and ﬁne-grained visual concepts, have emerged. Are pre-trained multi-modal models capable of recognizing open-domain visual concepts?
+Answering this question requires a visual recognition dataset with broad coverage of visual domains and tasks, under a universally deﬁned semantic space. Existing recog-nition benchmarks such as ImageNet
+[34, 36], Stanford
+Cars [21], or SUN database [52] represent a large number of visual concepts, but make speciﬁc assumptions about the
+† Work was done when interned at Google.
+‡ Our dataset and evaluation toolkit is publicly available at https:
+//open-vision-language.github.io/oven
+granularity of the target concepts (e.g. building type such as “castle” in ImageNet but not a speciﬁc building in the world such as “Windsor Castle”), or limit attention to con-cepts of the same type such as car models/years. Visual question answering (VQA) datasets test models’ abilities to recognize concepts which can be of more ﬂexible granulari-ties and object types, but in practice existing VQA datasets tend to focus on higher-level categories. We aim to assess models’ abilities to recognize visual concepts from a close to universal, uniﬁed space of labels that covers nearly all visual concepts known to humankind, and at a ﬂexible level of granularity, speciﬁed by a user or a downstream appli-cation. Given a short speciﬁcation of each element in the target visual concepts space (such as a textual description), multimodal pre-trained models can in principle recognize concepts without seeing labeled instances from each of them.
+Towards evaluating models on such universal visual recognition abilities, we introduce the task of Open-domain
+Visual Entity recognitioN (OVEN), targeting a wide range of entities and entity granularities, including animals, plants, buildings, locations and much more. Particularly, we con-struct OVEN-Wiki by building on existing image recog-nition and visual QA datasets and unifying their label spaces/granularities and task formulations. For our uniﬁed label space, we use English Wikipedia which covers mil-lions of visual entities of various levels of granularity and also includes a speciﬁcation of each entity via its Wikipedia page (containing entity name, text description, images, etc.).
+Wikipedia also evolves as new entities appear or become known in the world, and can be used as a ﬁrst approximation of a universal visual concept space.
+We re-purpose 14 existing image classiﬁcation, image retrieval, and visual QA datasets, and ground all labels to
+Wikipedia. In addition to unifying labels, we unify input recognition intent speciﬁcations, which is necessary when combining specialized datasets with the goal of evaluating universal recognition. Given an image showing a car and a tree behind it, OVEN makes the recognition intent explicit via a natural language query such as “What is the model of the car?” or “What is the species of the tree?”. Therefore, the OVEN task takes as input an image and a text query1 that expresses visual recognition intent with respect to the image.
+The goal is to provide an answer by linking to the correct en-tity (e.g. BU G A T T I VE Y R O N or BA C T R I S G A S I P A E S) out of the millions of possible Wikipedia entities, each com-ing with descriptions and a relevant set of images from its
+Wikipedia page (see Figure 1). Importantly, OVEN requires recognition of entities that were UNSEEN in the training data.
+Models can still take advantage of the text description and/or images on the Wikipedia page of the UNSEEN entities, as well as knowledge acquired through pre-training. 1A query can be expressed in different formats; in this paper, we choose to use a question to reﬂect the intent.
+Human annotators were hired to help create OVEN-Wiki for two reasons. First, grounding labels from the component datasets into Wikipedia entities is non-trivial due to language ambiguity. For example, ‘Tornado’ can be a weather phe-nomenon or a type of airplane (PA N A V I A TO R N A D O). To reduce such ambiguity in the grounding, we take multiple steps to reﬁne the labels, including the use of human annota-tors, a state-of-the-art textual entity linking system [12], and heavy ﬁltering. Second, creating unambiguous textual query intents is also challenging. In many cases, a text query can lead to multiple plausible answers (e.g. of various granular-ities), and a human often needs to make revisions to make sure no other objects could be correct answers. For our train-ing and development/test sets we rely on semi-automatic processing, but additionally introduce a gold evaluation set, for which annotators thoroughly corrected entity linking errors and rewrote ambiguous input query intents.
+Based on OVEN-Wiki, we examine two representative multi-modal pre-trained models, PaLI [8] and CLIP [30], to establish an empirical understanding of the state-of-the-art in universal entity recognition. Particularly, these two models are used for creating an auto-regressive visual entity recognition model (similar to [12]) and a visual entity re-trieval model, respectively. Our study suggests that there is a large room for improvement in generalizing to the massive label space. We show that the PaLI-based auto-regressive visual recognition model performs surprisingly well, even on Wikipedia entities that have never been seen during ﬁne-tuning. Digging deeper, we discover that CLIP variants and
+PaLI-based models make very different kinds of errors. Par-ticularly, PaLI dominates in recognizing popular Wikipedia entities, whereas CLIP models can win consistently on rec-ognizing tail entities. 2. Open Domain Visual Entity Recognition
+To drive progress in universal entity recognition, we pro-pose the task of Open-domain Visual Entity recognitioN (OVEN). There are two desiderata that we would like to meet for the OVEN task. First, there should exist a univer-sal label space. In OVEN, we make use of a multi-modal knowledge base, such as Wikipedia, to serve as the universal label space, covering millions of entities. Second, the answer label for each OVEN input should be unambiguous. This is particularly challenging when the label space is very large and multi-granular. To accomplish this, OVEN makes use of input text queries to deﬁne the recognition intent (e.g., iden-tifying car types or car models), allowing visual concepts from different granularities to be unambiguously speciﬁed.
+Task Deﬁnition The input to an OVEN model is an image-text pair x = (xp, xt), with the text query xt expressing intent with respect to the corresponding image xp. Given a uniﬁed label space E which deﬁnes the set of all possible
+partial set of visual concepts (i.e., SEEN categories) for model training or ﬁne-tuning. For evaluation, an OVEN model is tested on generalization to entities not present in the ﬁne-tuning data (thus UNSEEN), without forgetting the SEEN concepts. The models need to either acquire information from the knowledge base, or make a prediction using knowl-edge obtained during pretraining. We evaluate OVEN with a metric aiming to balance performance between SEEN and
+UNSEEN entities using a harmonic mean, as shown below:
+HM(AccSEEN, AccUNSEEN) = 2 / ( 1
+AccSEEN
++ 1
+AccUNSEEN
+) (1)
+Harmonic mean equally weighs the importance of the SEEN and UNSEEN subsets, and penalizes models with a short barrel. Further details are provided in §3.
+OVEN versus recognition benchmarks Given that an
+OVEN model need to generalize to UNSEEN entities, it is re-quired to predict over all KB entities, which can exceed 6 mil-lion in our experiments (e.g., the size of English Wikipedia).
+This is orders of magnitude larger than existing benchmarks.
+Second, the large label space has made the generalization to
+UNSEEN entities the most critical criterion for a successful
+OVEN model, which also allows future open-domain eval-uation5. Third, OVEN requires models to do multi-modal reasoning, i.e., comprehending the text query within its vi-sual context, to predict the answer entity.
+OVEN versus Visual QA tasks OVEN can be considered as a VQA task because its input format is the same as that of standard VQA models (e.g., text query + image). How-ever, OVEN is specialized and focuses solely on recognition, with the text input serving mainly for intent disambigua-tion. Moreover, OVEN models are required to generate the name of an entity that exists in a given KB (like models for text entity linking tasks), while VQA models output free-form answers (such as yes/no for veriﬁcation questions and numbers for counting questions).
+From OVEN to Knowledge-Intensive VQA Although this paper aims to evaluate pre-trained multi-modal models on universal visual entity recognition, we highlight that models that excel at OVEN can serve as foundational components for systems that can answer knowledge-intensive questions.
+For example, given an image and a question “When was the church built?”, one could apply an OVEN model to link the image to a concrete church’s Wikipedia page and then extract the answer from that document. A follow-up work has con-ducted a thorough study on the value of Wikipedia grounding for answering knowledge-intensive visual questions [9]. 3. The OVEN-Wiki dataset
+Based on the task formulation of OVEN, we create the OVEN-Wiki dataset by combining 14 existing datasets, 5One can collect and label a new set of entities from Wikipedia, to serve as a new evaluation data for OVEN models (a) Dual Encoder (b) Encoder Decoder
+Figure 2: Illustration on two typical OVEN Models. entities, the knowledge base K = {(e, p(e), t(e)) | e ∈ E} is a set of triples, each containing an entity e, its corre-sponding text description t(e) (i.e., name of the entity, description, etc.) and a (possibly empty) set of relevant images p(e). For instance, an entity e = Q7395937 would have a corresponding textual description t(e) =
+‘Name: and a set p(e) containing one or more images from the corresponding Wikipedia page3 of SA B A T I A C A M P E S T R I S.
+We consider the combination of t(e) and p(e) the multi-modal knowledge for the entity e. As OVEN is a recognition task, we focus on recognizing and linking entities that are physically present in the image.4
+Sabatia campestris; Description:. . .’2
+The goal of learning for OVEN is to optimize a func-tion fΘ that predicts the entity e from a given test example x = (xp, xt) and the associated knowledge base of triples K.
+There are different ways to utilize the information available in K, and models may choose to use only a subset of this information. Figure 2 presents two typical ways of model-ing OVEN. For encoder-decoder models [8, 49], the most straight-forward utilization is to memorize the entities of the database K into model parameters Θ via pre-training and
+ﬁne-tuning, and then generate entity names directly during inference. Given that the generated name might not appear in the database, a BM25 search [35] is used to map the pre-diction to the entity with the closet name in the available database For dual-encoder models [7, 14, 19, 30], an alter-native is to explicitly compare a given test example x to representations of entities e ∈ E, making the prediction an entity retrieval problem. We refer to Section 4 for concrete examples of how to implement OVEN models.
+Data Split and Evaluation Due to OVEN’s goal of eval-uating pre-trained multi-modal models, we only provide a 2In this paper, we only consider using the name of the entity as its textual representation, despite the fact that more textual descriptions are available. 3https://en.wikipedia.org/wiki/File:Sabatia_ campestris_Arkansas.jpg 4Extending this framework to entities that are not physically present in the image (e.g. the inventor of the airplane) is also valid and useful. See a follow-up works [9] for more details.
+animal 19.4% plant 16.0% building 13.8% location 5.8% food 4.1% person 4.0% organization 3.8% others 33.0%
+Train Set Val Set Test Set Human Set
+WikiEN
+# unique queries
+# SEEN entities
+# SEEN examples
+# UNSEEN entities
+# UNSEEN examples
+# Total examples 19,129 7,943 18,341 3,124 10,137 1,942 4,958,569 63,366 366,350 10,156 2,004 66,124 362,909 4,958,569 129,490 729,259 0 0
+# entities
+# images
+# title
+AvgLen(title) 6,063,945 2,032,340 6,063,945 2.93 17,669 2,487 14,016 2,174 10,851 24,867
+Figure 3: Dataset Statistics of the OVEN-Wiki. Left: Distribution of super-categories of entities that have positive examples (See Appendix for more details). Mid: Statistics of different splits of the OVEN-Wiki. Right: Properties of the Wikipedia dump-2022/10/01. grounding their labels to Wikipedia, resolving label ambigui-ties, and providing unambiguous textual query intents for all examples. The 14 datasets were originally created for image recognition/retrieval, and visual question answering. Below is the complete list:
+• Image Recognition Datasets:
+ImageNet21k-P [34, 36], iNaturalist2017 [45], Cars196 [21], SUN397 [52],
+Food101 [2], Sports100 [16], Aircraft
+[26], Oxford
+Flower [29], Google Landmarks v2 [50].
+• Visual QA Datasets: VQA v2 [17], Visual7W [55], Visual
+Genome [22], OK-VQA [28], Text-VQA [42].
+These datasets belong to two groups: image recognition (or retrieval) which provides diverse visual entities, deﬁned as the Entity Split (ES); and VQA which provides visually-situated natural language queries, deﬁned as the Query split (QS). For examples that originate from VQA datasets, we employ human annotators to write templated rules and
+ﬁlter out questions that do not lead to visual entity answers that are present in the image. For examples from recognition datasets, we ﬁrst extract the super-category of their label (using the Wikipedia database), and then apply a templated query generation engine to generate a query with unambigu-ous intent that leads to the label (details in the Appendix).
+Label Disambiguation and Human Annotation Ground-ing the labels of 14 datasets to Wikipedia entities is chal-lenging, and we perform the following steps to accomplish this. We ﬁrst apply a state-of-the-art textual entity link-ing system [12] to recognize text labels and map them into
+Wikipedia. Human annotators are used to write rules to detect bad linking results or unlinkable labels (e.g. num-bers), and correct entity linking errors. The union of original dataset labels were linked to 20,549 unique Wikipedia en-tities, each with a number of examples for the purpose of training and evaluation. Meanwhile, we construct the candi-date label space using the English Wikipedia snapshot from
+Oct. 1 2022, by removing all disambiguation, redirect, and media ﬁle pages. As shown in Figure 1 (right), this left us with 6,063,945 Wikipedia entities in total. Note that we only consider using the ﬁrst Infobox images [51] from each page to serve as the visual support for each Wikipedia entity; these are available for 2,032,340 entities.
+We further perform human annotation to create a high-quality evaluation dataset. Speciﬁcally, we hired over 30 dedicated annotators to validate the entity links in <image, query, answer> triplets sampled from the test split. They were asked to re-annotate the triplets with access to the visual context, ensuring that the query leads to the correct
+Wikipedia entity answer. Through this process, we collected 24,867 natural language queries, equally distributed over triplets originally sampled from the Entity and Query splits (i.e., test splits). We asked the annotators to rewrite the queries so that no other object in the image could be a valid answer. As a result, the percentage of unique queries in the total examples (17,669 out of 24,867) as shown in Table 3 (mid) is signiﬁcantly higher in the human set than in the other sets. This brings higher query generalization challenges for the human eval set. We report results using the same evaluation metrics on the human data, with respect to SEEN and UNSEEN entities. Figure 1 provides a glance at the human annotated data.
+Dataset Statistics Figure 3 (left) presents the general dis-tribution of the super-categories for our ﬁnal collection of
+Wikipedia entities that have positive examples. Figure 3 (right) shows detailed statistics for queries and entities for each of the ﬁne-tuning (train), validation, test, and human splits. Note that the models do not know which entities are present in the val/test/human set, and must scan through the whole KB to make predictions. The # of SEEN/UNSEEN examples indicates the # of examples of which the positive entity labels are in the SEEN/UNSEEN split.
+Evaluation Details As aforementioned, we evaluate mod-els by asking them to predict one out of over 6 mil-lion English Wikipedia entries. While our data does not cover all 6 million labels as positive examples, models still need to consider all possible outputs due to the pres-ence of UNSEEN entities. We measure the models’ perfor-mance using both the Entity Split (ES) and Query Split (QS). Speciﬁcally, we ﬁrst compute the harmonic mean of accuracy over examples from the SEEN and UNSEEN classes, as AccES = HM(AccESSEEN, AccESUNSEEN) and
+AccQS = HM(AccQSSEEN, AccQSUNSEEN) as the Equation 1.
+Then we further calculate the harmonic mean between splits
+HM(AccES, AccQS) to reward models that do well on both
+splits. We use the validation data, which contains examples from subsets of both SEEN and UNSEEN entities, for model selection, and we measure performance on the test split and the human evaluation set. 4. Fine-tuning Pre-trained Models for OVEN
+We evaluate two prominent pre-trained multi-modal mod-els: CLIP [30], a widely-used dual encoder model for image and text, and PaLI [8], a state-of-the-art pre-trained encoder-decoder model. Figure 2 has illustrated high-levelly on how encoder-decoder and dual encoder models can model the task of OVEN. In the following, we present more details about how these two models can be ﬁne-tuned for OVEN. 4.1. Dual encoders: CLIP and its variants for OVEN
+One can naturally apply CLIP on OVEN by treating it as an image-to-text retrieval task. For an input image xp, the image encoder is used to form an image embedding. Then the predicted entity could be retrieved by ﬁnding the entity that has the maximum dot product value between the entity text embeddings and entity image embeddings among the entire entity database. However, this naive implementation ignores the input intent xt and the entity images p(e).
+In the following, we present two variants of CLIPs: CLIP
+Fusion and CLIP2CLIP. The goal of these two variants is to use all of the information provided in the OVEN task. Both variants learn a function fΘ that maximizes the score of the target entity for the given input image-query pair, using multimodal knowledge from the knowledge base. Given a test example x = (xp, xt) and the knowledge base of triples
+K, the function is used to make a prediction, e(cid:48) = arg max e∈E fΘ(xp, xt, p(e), t(e)) (2)
+CLIP Fusion adopts the pre-trained CLIP model as the featurizer to develop this system, via adding a 2-layer Multi-Modal Transformer on top of the CLIP image and text fea-tures as a mixed-modality encoder. The left encoder (for an input image-query pair) and the right encoder (for multi-modal knowledge information) use the same architecture, but do not share parameters. We ﬁne-tune all of their param-eters on the OVEN-Wiki, which includes both the pre-trained
+CLIP weights and randomly initialized Transformer weights.
+CLIP2CLIP relies more heavily on the pre-trained CLIP model and introduces only a minimal set of new parame-ters (i.e., four) to re-weigh and combine CLIP similarity scores. Particularly, it computes the cosine similarity be-tween <xp, t(e)>, <xt, p(e)>, <xp, p(e)>, and <xt, t(e)>, using the image and text encoders of CLIP, respectively.
+Then it aggregates these similarities by multiplying them with a learnable vector that reﬂects importance weights.
+Scaling to 6 million candidates. It is expensive to perform dot product scoring with respect to 6 million webpages on-the-ﬂy. Fortunately, there exist approximate algorithms for maximum inner product search whose running time and stor-age space scale sub-linearly with the number of documents
+[33, 40, 41]. In all our experiments, we use ScaNN [18] as our library for entity retrieval. 4.2. Encoder-Decoder: PaLI for OVEN
+PaLI [8] is a sequence-to-sequence model pre-trained on web text, image-text pairs (i.e., WebLI) and other sources.
+PaLI can accept both an image and text as input and gener-ates text as output. In order to map the PaLI predictions to the knowledge base, we run a BM25 [35] model to retrieve the most similar Wikipedia entity name for every generated text output. We found that this can slightly but consistently improve the entity recognition results. Note that we directly
+ﬁne-tune PaLI on the OVEN training data, which does not cover all entities and questions appearing in our Dev and Test splits. However, we found that PaLI is still able to handle entities that are unseen during ﬁne-tuning due to the knowl-edge acquired during pre-training. To make the comparison with CLIP more comprehensive, we report results on both
+PaLI-3B and PaLI-17B. The former PaLI variant is at the same magnitude (in its number of parameters) as the largest
+CLIP model, and the latter PaLI variant is one magnitude larger, and much stronger based on other evaluation [8]. 5. Experiments
+We ﬁrst describe the essential experimental setups in §5.1, and then present the main benchmark results in §5.2. 5.1. Experimental Setups
+Pre-trained Model Details. For all the CLIP variants, we employ the largest CLIP checkpoints, i.e., ViT-L14, which leverages Vision Transformer [13, 46] as its visual backbone.
+For the PaLI model [8], we make use of the 3B and 17B pa-rameter pre-trained models provided by the original authors, for ﬁne-tuning on OVEN.
+Data Processing Details. We process all images in our dataset by resizing them to 224×224, linearize them into a sequence of 14×14 patches, and apply the normalization technique consistent with each model’s pretraining to pre-process the images. For natural language text, we perform tokenization based on the adopted pre-trained model’s origi-nal vocabulary. More details in Appendix. 5.2. Benchmark Results
+Main Results Results on the test set are presented in Ta-ble 1. There are several interesting (perhaps surprising) ob-servations. First, while CLIP variants (e.g., CLIP Fusion & 6The human study is done on a random sampling of 100 examples.
+Entity Split(Test) Query Split(Test) Overall(Test)
+Human Eval
+# Params
+SEEN
+UNSEEN
+SEEN
+UNSEEN
+HM
+SEEN
+UNSEEN
+HM
+Dual Encoders: 0.42B
+CLIPViTL14
+CLIP FusionViTL14 0.88B
+CLIP2CLIPViTL14 0.86B
+Encoder Decoder:
+PaLI-3B
+PaLI-17B
+Human+Search 6 3B 17B
+-5.6 33.6 12.6 19.1 28.3
+-4.9 4.8 10.5 6.0 11.2
+-1.3 25.8 3.8 27.4 36.2
+-2.0 1.4 3.2 12.0 21.7
+-2.4 4.1 5.3 11.8 20.2
+-4.6 18.0 14.0 30.5 40.3 76.1 6.0 2.9 11.1 15.8 26.0 79.3 5.2 5.0 12.4 20.8 31.6 77.7
+Table 1: Results of methods on the OVEN-Wiki test set and human evaluation set. Human+Search represents human performances with information retrieval tools such as search engines and others, on a random subset of OVEN-WikiHuman Eval.
+CLIP2CLIP) are utilizing more information from Wikipedia (i.e., entity names and entity images), they are weaker than the auto-regressive PaLI-3B and PaLI-17B model, across most evaluation data splits. This suggests that high-capacity generative multi-modal pre-trained models are capable of recognizing visual entities. Second, this performance gap is more apparent on the query split than the entity split, poten-tially due to the VQ2A pre-training [6] and the underlying powerful language models [31] in the PaLI model.
+Comparing all CLIP-based models, we observe that CLIP
+Fusion and CLIP2CLIP, which uses all Wikipedia informa-tion are generally performing better than the vanilla CLIP model, showcasing the beneﬁts of multimodal information from Wikipedia. Meanwhile, we also observe that CLIP
+Fusion, where two new layers have been added on top of pretrained CLIP, shows very strong results on SEEN entities for both the Entity and the Query splits, but weak results on
+UNSEEN entities, thus leading to lower overall performance.
+The CLIP2CLIP model, on the other hand, is capable of retaining the cross-entity generalization performance while improving its prediction accuracy on SEEN entities.
+Comparing the PaLI models, we observe a drastic im-provement as the number of parameters in the models in-creased. Particularly, PaLI-17B has a double-digit perfor-mance gain in the overall performances, against the PaLI-3B model. This suggests that scaling the capacity of the model is one of the most important factors, and should be considered as a top priority in future multi-modal dual encoder research.
+Results on Human Set and Human Performance. Table 1 shows that the results on the human set are generally aligned with observations on the test set. We conduct a study to estimate the human performance on OVEN-Wiki, via re-questing 3 dedicated human annotators to answer 100 ex-amples (sampled from human evaluation set, answers are non-overlapping). We allow the annotators to use search en-gines (e.g., Google Image Search, Wikipedia Search, etc.)7, as long as the annotators can provide a valid Wikipedia en-7Even with search engines, each annotator has used 254 seconds to complete one example. 80 60 40 20
+% y c a r u c c
+A 0 0
+Query SEEN
+Entity SEEN
+Query UNSEEN
+Entity UNSEEN 500 1000 1500 2000 Steps
+Figure 4: Fine-tuning PaLI-17B for large # of steps in-creases the SEEN accuracy but hurts the UNSEEN accuracy (Results reported on Val split). tity name as the answer. As a result of this study, human achieves 77.7% harmonic mean accuracy, which is signiﬁ-cantly higher than the best comparison systems in Table 1. 6. Analysis
+In this section, we perform empirical studies to analyze the pre-trained CLIP2CLIP and PaLI models, and conduct a detailed analysis of these two models’ common errors.
+Does ﬁne-tuning always help generalization? Figure 4 presents the validation scores of the PaLI-17B model (results of CLIP2CLIP in Appendix), during ﬁne-tuning on OVEN-Wiki’s training split. It shows that a longer training schedule does not lead to better generalization performance, partic-ularly when evaluated on the UNSEEN entities. Because of this, we employ the early stopping strategy for model se-lection, and pick the model with the best harmonic mean combined score on the validation set. However, due to this early stopping strategy, both ﬁne-tuned models are not utiliz-ing 100% of the examples in OVEN’s training data because their UNSEEN performance starts to degenerate within one epoch. This has indicated that more advanced ﬁne-tuning strategies that use better regularization techniques to en-courage generalization across Wikipedia entities, could be a promising research to explore in the future.
+How would the number of entities in KB inﬂuence the model’s prediction? Figure 5 presents the accuracy of
+% y c a r u c c
+A
+M
+H 30 20 10 0
+PaLI-17B
+CLIP2CLIP 20K 100K 1M
+# Wikipedia Candidates 6M
+Figure 5: Impact of # Wikipedia Candidates on PaLI and CLIP2CLIP (Results reported on the Entity Val split).
+Increasing the size of Wikipedia makes the tasks difﬁcult.
+CLIP2CLIP, as a function of the # of total candidates to re-trieve from. Here, we compute the accuracy by sub-sampling the negative candidates from KB to different sizes. We ob-serve that when the retrieval candidate entities are only the positive entities (with the # of candidates being 20K), the performance of the CLIP2CLIP model is signiﬁcantly higher than the open-domain setting (with 6M entities in total).
+Beyond this, as the KB size increases, model accuracy de-creases. Concretely, it shows an approximately linear decline along the log-scale x-axis in Figure 5. This indicates that as the KB size increases, the models’ accuracy ﬁrst drops signiﬁcantly and then follows with a gradual decline. On the other hand, PaLI’s performance is generally more steady as the size of KB grows, potentially because its prediction has already matched up entity names inside KB, so narrow-ing down the set of candidates does not help the BM25 post-processing. One potential future direction is to employ constrained decoding for the PaLI-based model. tail entities?
+How would models perform on head vs.
+We evaluate the visual entity recognition performances of
+CLIP2CLIP and PaLI, on entities of different popularity. Par-ticularly, Figure 6 presents a histogram according to models’ performance on the entity that has different average monthly
+Wikipedia page views in 2022 [27]. From the comparison, we can see that PaLI is signiﬁcantly more accurate compared to CLIP2CLIP, on the head entities (that have more than 5K monthly page views). However, we observe that CLIP2CLIP can perform on par or even outperform PaLI on tail-ish enti-ties (that have less than 2.5K monthly views). This suggests that the retrieval-based visual entity recognition model has its own advantages, in recognizing the difﬁcult and tail entities.
+Meanwhile, this result suggests that potentially a frequency weighted evaluation should be developed to reward models more with strong recognition capability on the tail entities.
+Error analysis To better understand the errors models are making, we sampled a random 100 examples on the hu-man evaluation set, and manually categorize and analyze the errors that PaLI and CLIP2CLIP are making (results in Table 2). Particularly, we categorize the errors of the pre-trained models into four categories: (a) erroneous but relevant prediction, on concepts of the same granularity; (b)
+CLIP2CLIP
+PaLI-17B
+% y c a r u c c
+A 40 20 0 100 500 1K 2.5K 5K 10K 25K 50K 100K
+Average Monthly View of Entity
+Figure 6: Comparison on Head vs. Tail Entities (results on Val split). PaLI wins over CLIP2CLIP on popular (i.e., high monthly page view) Wikipedia entities, but loses on rare (i.e., low monthly page view) Wikipedia entities.
+PALI-17B CLIP2CLIP
+CORRECT
+IN-CORRECT
+→ (A) WRONG BUT RELEVANT
+→ (B) TOO GENERIC
+→ (C) MISUNDERSTAND QUERY
+→ (D) MISCELLANEOUS 29% 71% 23% 15% 7% 24% 15% 85% 27% 1% 37% 20%
+Table 2: Error statistics for difference models. PaLI predicts more generic answers, while most CLIP errors are due to misunderstanding the questions. errors due to predicting very generic concepts; (c) errors due to misunderstanding the intent behind the query. (d) other miscellaneous errors. Note that errors type (d) are mostly mistakes that are unrelated and not easily interpretable. Fig-ure 7 has provided some concrete examples of the above types of mistakes made by CLIP2CLIP and PaLI. Interest-ingly, it shows that the two models, i.e., CLIP2CLIP and
+PaLI, are making very different types of errors in their pre-dictions. Particularly, CLIP based model is good at capturing the right granularity of the entity, but often fails to under-stand the true intent of the text query. For instance, Figure 7 (c) shows that CLIP2CLIP ignores the text query and starts to predict the name of the barrel racer. In contrast, PaLI is good at following the text query, but can usually predict generic concepts when it does not know the answer conﬁdently. 7.

@@ -1,0 +1,224 @@
+Abstract
+Recent improvements in the performance of state-of-the-art (SOTA) methods for
+Graph Representational Learning (GRL) have come at the cost of signiﬁcant computational resource requirements for training, e.g., for calculating gradients via backprop over many data epochs. Meanwhile, Singular Value Decomposition (SVD) can ﬁnd closed-form solutions to convex problems, using merely a handful of epochs. In this paper, we make GRL more computationally tractable for those with modest hardware. We design a framework that computes SVD of implicitly deﬁned matrices, and apply this framework to several GRL tasks. For each task, we derive linear approximation of a SOTA model, where we design (expensive-to-store) matrix M and train the model, in closed-form, via SVD of M, without calculating entries of M. By converging to a unique point in one step, and without calculating gradients, our models show competitive empirical test performance over various graphs such as article citation and biological interaction networks.
+More importantly, SVD can initialize a deeper model, that is architected to be non-linear almost everywhere, though behaves linearly when its parameters reside on a hyperplane, onto which SVD initializes. The deeper model can then be ﬁne-tuned within only a few epochs. Overall, our procedure trains hundreds of times faster than state-of-the-art methods, while competing on empirical test performance. We open-source our implementation at: https://github.com/samihaija/isvd 1
+
+Introduction
+Truncated Singular Value Decomposition (SVD) provides solutions to a variety of mathematical problems, including computing a matrix rank, its pseudo-inverse, or mapping its rows and columns onto the orthonormal singular bases for low-rank approximations. Machine Learning (ML) software frameworks (such as TensorFlow) offer efﬁcient SVD implementations, as SVD can estimate solutions for a variaty of tasks, e.g., in computer vision [Turk and Pentland, 1991], weather prediction [Molteni et al., 1996], recommendation [Koren et al., 2009], language [Deerwester et al., 1990, Levy and
+Goldberg, 2014], and more-relevantly, graph representation learning (GRL) [Qiu et al., 2018].
+SVD’s beneﬁts include training models, without calculating gradients, to arrive at globally-unique solutions, optimizing Frobenius-norm objectives (§2.3), without requiring hyperparameters for the learning process, such as the choice of the learning algorithm, step-size, regularization coefﬁcient, etc. Typically, one constructs a design matrix M, such that, its decomposition provides a solution to a task of interest. Unfortunately, existing popular ML frameworks [Abadi et al., 2016, Paszke et al., 2019] cannot calculate the SVD of an arbitrary linear matrix given its computation graph: they
+∗Part of this work was done during internship at Intel Labs. 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+compute the matrix (entry-wise) then2 its decomposition. This limits the scalability of these libraries in several cases of interest, such as in GRL, when explicit calculation of the matrix is prohibitive due to memory constraints. These limitations render SVD as impractical for achieving state-of-the-art (SOTA) for tasks at hand. This has been circumvented by Qiu et al. [2018] by sampling M entry-wise, but this produces sub-optimal estimation error and experimentally degrades the empirical test performance (§7: Experiments).
+We design a software library that allows symbolic deﬁnition of M, via composition of matrix opera-tions, and we implement an SVD algorithm that can decompose M from said symbolic representation, without need to compute M. This is valuable for many GRL tasks, where the design matrix M is too large, e.g., quadratic in the input size. With our implementation, we show that SVD can perform learning, orders of magnitudes faster than current alternatives.
+Currently, SOTA GRL models are generally graph neural networks trained to optimize cross-entropy objectives. Their inter-layer non-linearities place their (many) parameters onto a non-convex objective surface where convergence is rarely veriﬁed3. Nonetheless, these models can be convexiﬁed (§3) and trained via SVD, if we remove nonlinearities between layers and swap the cross-entropy objective with Frobenius norm minimization. Undoubtedly, such linearization incurs a drop of accuracy on empirical test performance. Nonetheless, we show that the (convexiﬁed) model’s parameters learned by SVD can provide initialization to deeper (non-linear) models, which then can be ﬁne-tuned on cross-entropy objectives. The non-linear models are endowed with our novel Split-ReLu layer, which has twice as many parameters as a ReLu fully-connected layer, and behaves as a linear layer when its parameters reside on some hyperplane (§5.2). Training on modest hardware (e.g., laptop) is sufﬁcient for this learning pipeline (convexify → SVD → ﬁne-tune) yet it trains much faster than current approaches, that are commonly trained on expensive hardware. We summarize our contributions as: 1. We open-source a ﬂexible python software library that allows symbolic deﬁnition of matrices and computes their SVD without explicitly calculating them. 2. We linearize popular GRL models, and train them via SVD of design matrices. 3. We show that ﬁne-tuning a few parameters on-top of the SVD initialization sets state-of-the-art on many GRL tasks while, overall, training orders-of-magnitudes faster. 2 Preliminaries & notation
+We denote a graph with n nodes and m edges with an adjacency matrix A ∈ Rn×n and additionally, if nodes have (d-dimensional) features, with a feature matrix X ∈ Rn×d. If nodes i, j ∈ [n] are connected then Aij is set to their edge weight and otherwise Aij = 0. Further, denote the (row-wise normalized) transition matrix as T = D−1A and denote the symmetrically normalized adjacency with self-connections as (cid:98)A = (D + I)− 1 2 (A + I)(D + I)− 1
+We review model classes: (1) network embedding and (2) message passing that we deﬁne as follows.
+The ﬁrst inputs a graph (A, X) and outputs node embedding matrix Z ∈ Rn×z with z-dimensions per node. Z is then used for an upstream task, e.g., link prediction. The second class utilizes a function
+H : Rn×n × Rn×d → Rn×z where the function H(A, X) is usually directly trained on the upstream task, e.g., node classiﬁcation. In general, the ﬁrst class is transductive while the second is inductive. 2 where I is identity matrix. 2.1 Network embedding models based on DeepWalk & node2vec
+The seminal work of DeepWalk [Perozzi et al., 2014] embeds nodes of a network using a two-step process: (i) simulate random walks on the graph – each walk generating a sequence of node IDs then (ii) pass the walks (node IDs) to a language word embedding algorithm, e.g. word2vec [Mikolov et al., 2013], as-if each walk is a sentence. This work was extended by node2vec [Grover and Leskovec, 2016] among others. It has been shown by Abu-El-Haija et al. [2018] that the learning outcome of 2TensorFlow can caluclate matrix-free SVD if one implements a LinearOperator, as such, our code could be re-implemented as a routine that can convert TensorGraph to LinearOperator. 3Practitioners rarely verify that ∇θJ = 0, where J is mean train objective and θ are model parameters. 2
+the two-step process of DeepWalk is equivalent, in expectation, to optimizing a single objective4: min
+Z={L,R} (cid:88) (i,j)∈[n]×[n] (cid:20)
+− E q∼Q (cid:21)
+[T q] ◦ log σ(LR(cid:62)) − λ(1 − A) ◦ log(1 − σ(LR(cid:62)))
+, (1) ij where L, R ∈ Rn× z 2 are named by word2vec as the input and output embedding matrices, ◦ is
+Hadamard product, and the log(.) and the standard logistic σ(.) = (1 + exp(.))−1 are applied element-wise. The objective above is weighted cross-entropy where the (left) positive term weighs the dot-product L(cid:62) i Rj by the (expected) number of random walks simulated from i and passing through j, and the (right) negative term weighs non-edges (1 − A) by scalar λ ∈ R+. The context distribution Q stems from step (ii) of the process. In particular, word2vec accepts hyperparameter context window size C for its stochasatic sampling: when it samples a center token (node ID), it then samples its context tokens that are up-to distance c from the center. The integer c is sampled from a coin ﬂip uniform on the integers [1, 2, . . . , C] – as detailed by Sec.3.1 of [Levy et al., 2015].
+Therefore, PQ(q | C) ∝ C−q+1
+.
+. Since q has support on [C], then PQ(q | C) = (cid:16) (cid:17) C−q+1
+C 2 (C+1)C
+C 2.2 Message passing graph networks for (semi-)supervised node classiﬁcation
+We are also interested in a class of (message passing) graph network models taking the general form: for l = 0, 1, . . . L: H(l+1) = σl (cid:16) g(A)H(l)W(l)(cid:17)
+; H(0) = X; H = H(L); (2) where L is the number of layers, W(l)’s are trainable parameters, σl’s denote element-wise activations logistic or ReLu), and g is some (possibly trainable) transformation of adjacency matrix. (e.g.
+GCN [Kipf and Welling, 2017] set g(A) = (cid:98)A, GAT [Veliˇckovi´c et al., 2018] set g(A) = A ◦
+MultiHeadedAttention and GIN [Xu et al., 2019] as g(A) = A + (1 + (cid:15))I with (cid:15) > 0. For node classiﬁcation, it is common to set σL = softmax (applied row-wise), specify the size of WL s.t.
+H ∈ Rn×y where y is number of classes, and optimize cross-entropy objective:
+. min{Wj }L where Y is a binary matrix with one-hot rows indicating node labels. In semi-supervised settings where not all nodes are labeled, before measuring the objective, subset of rows can be kept in Y and H that correspond to labeled nodes.
+[−Y ◦ log H − (1 − Y) ◦ log(1 − H)] , j=1 2.3 Truncated Singular Value Decomposition (SVD)
+SVD is an algorithm that approximates any matrix M ∈ Rr×c as a product of three matrices:
+SVDk(M) (cid:44) arg min
+U,S,V
+||M − USV(cid:62)||F subject to U(cid:62)U = V(cid:62)V = Ik; S = diag(s1, . . . , sk).
+The orthonormal matrices U ∈ Rr×k and V ∈ Rc×k, respectively, are known as the left- and right-singular bases. The values along diagonal matrix S ∈ Rk×k are known as the singular values.
+Due to theorem of Eckart and Young [1936], SVD recovers the best rank-k approximation of input
+M, as measured by the Frobenius norm ||.||F. Further, if k ≥ rank(M) ⇒ ||.||F = 0.
+Popular SVD implementations follow Random Matrix Theory algorithm of Halko et al. [2009]. The prototype algorithm starts with a random matrix and repeatedly multiplies it by M and by M(cid:62), interleaving these multiplications with orthonormalization. Our SVD implementation (in Appendix) also follows the prototype of [Halko et al., 2009], but with two modiﬁcations: (i) we replace the recommended orthonormalization step from QR decomposition to Cholesky decomposition, giving us signiﬁcant computational speedups and (ii) our implementation accepts symbolic representation of
+M (§4), in lieu of its explicit value (constrast to TensorFlow and PyTorch, requiring explicit M).
+In §3, we derive linear ﬁrst-order approximations of models reviewed in §2.1 & §2.2 and explain how
+SVD can train them. In §5, we show how they can be used as initializations of non-linear models. 4Derivation is in [Abu-El-Haija et al., 2018]. Unfortunately, matrix in Eq. 1 is dense with O(n2) nonzeros. 3
+3 Convex ﬁrst-order approximations of GRL models 3.1 Convexiﬁcation of Network Embedding Models
+We can interpret objective 1 as self-supervised learning, since node labels are absent. Speciﬁcally, given a node i ∈ [n], the task is to predict its neighborhood as weighted by the row vector Eq[T q]i, representing the subgraph5 around i. Another interpretation is that Eq. 1 is a decomposition objective: multiplying the tall-and-thin matrices, as LR(cid:62) ∈ Rn×n, should give a larger value at (LR(cid:62))ij =
+L(cid:62) j Ri when nodes i and j are well-connected but a lower value when (i, j) is not an edge. We propose a matrix such that its decomposition can incorporate the above interpretations: (cid:99)M(NE) = Eq|C[T q] − λ(1 − A) = (cid:18) 2 (C + 1)C (cid:19) C (cid:88) q=1 (cid:18) C − q + 1
+C (cid:19)
+T q − λ(1 − A) (3)
+If nodes i, j are nearby, share a lot of connections, and/or in the same community, then entry (cid:99)M(NE) should be positive. If they are far apart, then (cid:99)M(NE) ij = −λ. To embed the nodes onto a low-rank space that approximates this information, one can decompose (cid:99)M(NE) into two thin matrices (L, R): ij
+LR(cid:62) ≈ (cid:99)M(NE) ⇐⇒ (LR(cid:62))i,j = (cid:104)Li, Rj(cid:105) ≈ (cid:99)M(NE) ij for all i, j ∈ [n]. (4)
+SVD gives low-rank approximations that minimize the Frobenius norm of error (§2.3). The remaining challenge is computational burden: the right term (1 − A), a.k.a, graph compliment, has ≈ n2 non-zero entries and the left term has non-zero at entry (i, j) if nodes i, j are within distance C away, as q has support on [C] – for reference Facebook network has an average distance of 4 [Backstrom et al., 2012] i.e. yielding T 4 with O(n2) nonzero entries – Nonetheless, Section §4 presents a framework for decomposing (cid:99)M from its symbolic representation, without explicitly computing its entries. Before moving forward, we note that one can replace T in Eq. 3 by its symmetrically normalized counterpart (cid:98)A, recovering a basis where L = R. This symmetric modeling might be emperically preferred for undirected graphs. Learning can be performed via SVD. Speciﬁcally, the node at the ith row and the node at the jthth column will be embedded, respectively, in Li and Rj computed as:
+U, S, V ← SVDk((cid:99)M(NE));
+L ← US 1 2 ;
+R ← VS 1 2 (5)
+In this k-dim space of rows and columns, Euclidean measures are plausible: Inference of nodes’ similarity at row i and column j can be modeled as f (i, j) = (cid:104)Li, Rj(cid:105) = U(cid:62) i SVj (cid:44) (cid:104)Ui, Vj(cid:105)S. 3.2 Convexiﬁcation of message passing graph networks
+Removing all σl’s from Eq. 2 and setting g(A) = (cid:98)A gives outputs of layers 1, 2, and L, respectively, as: (cid:98)AXW(1)
+, (cid:98)A2XW(1)W(2)
+, and (cid:98)ALXW(1)W(2) . . . W(L). (6)
+Without non-linearities, adjacent parameter matrices can be absorbed into one another. Further, the model output can concatenate all layers, like JKNets [Xu et al., 2018], giving ﬁnal model output of:
+H(NC) linearized = (cid:2)X (cid:98)AX (cid:98)A2X . . . (cid:98)ALX(cid:3) (cid:99)W (cid:44) (cid:99)M(NC) (cid:99)W, (7) where the linearized model implicitly constructs design matrix (cid:99)M(NC) ∈ Rn×F and multiplies it with parameter (cid:99)W ∈ RF ×y – here, F = d + dL. Crafting design matrices is a creative process (§5.3).
+Learning can be performed by minimizing the Frobenius norm: ||H(NC) − Y||F = ||(cid:99)M(NC) (cid:99)W − Y||F.
+Moore-Penrose Inverse (a.k.a, the psuedoinverse) provides one such minimizer: (cid:12) (cid:12) (cid:12) (cid:12) (cid:12)(cid:99)M (cid:99)W − Y (cid:12)
+= (cid:99)M†Y ≈ VS+U(cid:62)Y, (cid:99)W∗ = argmin (8) (cid:99)W (cid:12) (cid:12) (cid:12) (cid:12) (cid:12) (cid:12)F with U, S, V ← SVDk((cid:99)M). Notation S+ reciprocates non-zero entries of diagonal S [Golub and
+Loan, 1996]. Multiplications in the right-most term should, for efﬁciency, be executed right-to-left. 5Eq[T q]i is a distribution on [n]: entry j equals prob. of walk starting at i ending at j if walk length ∼ U [C]. 4
+1 a = scipy.sparse.csr_matrix(...) 2 d = scipy.sparse.diags(a.sum(axis=1)) 3 t = (1/d).dot(a) 4 t, a = F.leaf(t), F.leaf(a) 5 row1 = F.leaf(tf.ones([1, a.shape[0]])) 6 q1, q2, q3 = np.array([3, 2, 1]) / 6.0 7 M = q1 * t + q2 * t@t + q3 * t@t@t 8 M -= lamda * (row1.T @ row1 - A)
+Figure 1: Symbolic Matrix Representation. Left: code using our framework to implicitly construct the design matrix M = (cid:99)M(NE) with our framework. Center: DAG corresponding to the code. Right:
+An equivalent automatically-optimized DAG (via lazy-cache, Fig. 2) requiring fewer ﬂoating point operations. The ﬁrst 3 lines of code create explicit input matrices (that ﬁt in memory): adjacency
+A, diagonal degree D, and transition T . Matrices are imported into our framework with F.leaf (depicted on computation DAGs in blue). Our classes overloads standard methods (+, -, *, @, **) to construct computation nodes (intermediate in grey). The output node (in red) needs not be exactly calculated yet can be efﬁciently multiplied by any matrix by recursive downward traversal.
+The pseudoinverse (cid:99)M† ≈ VS+U(cid:62) recovers the (cid:99)W∗ with least norm (§6, Theorem 1). The ≈ becomes = when k ≥ rank((cid:99)M).
+In semi-supervised settings, one can take rows subset of either (i) Y and U, or of (ii) Y and M, keeping only rows that correspond to labeled nodes. Option (i) is supported by existing frameworks (e.g., tf.gather()) and our symbolic framework (§4) supports (ii) by implicit row (or column) gather – i.e., calculating SVD of submatrix of M without explicitly computing M nor the submatrix.
+Inference over a (possibly new) graph (A, X) can be calculated by (i) (implicitly) creating the design matrix (cid:99)M corresponding to (A, X) then (ii) multiplying by the explicitly calculated (cid:99)W∗. As explained in §4, (cid:99)M need not to be explicitly calculated for computing multiplications. 4 Symbolic matrix representation
+To compute the SVD of any matrix M using algorithm prototypes presented by Halko et al. [2009], it sufﬁces to provide functions that can multiply arbitrary vectors with M and M(cid:62), and explicit calculation of M is not required. Our software framework can symbolically represent M as a directed acyclic graph (DAG) of computations. On this DAG, each node can be one of two kinds: 1. Leaf node (no incoming edges) that explicitly holds a matrix. Multiplications against leaf nodes are directly executed via an underlying math framework (we utilize TensorFlow). 2. Symbolic node that only implicitly represents a matrix as as a function of other DAG nodes.
+Multiplications are recursively computed, traversing incoming edges, until leaf nodes.
+For instance, suppose leaf DAG nodes M1 and M2, respectively, explicitly contain row vector
+∈ R1×n and column vector ∈ Rn×1. Then, their (symbolic) product DAG node M = M2@M1 is
+∈ Rn×n. Although storing M explicitly requires O(n2) space, multiplications against M can remain within O(n) space if efﬁciently implemented as (cid:104)M, .(cid:105) = (cid:104)M2, (cid:104)M1, .(cid:105)(cid:105). Figure 1 shows code snippet for composing DAG to represent symbolic node (cid:99)M(NE) (Eq. 3), from leaf nodes initialized with in-memory matrices. Appendex lists symbolic nodes and their implementations. 5 SVD initialization for deeper models ﬁne-tuned via cross-entropy 5.1 Edge function for network embedding as a (1-dimensional) Gaussian kernel
+SVD provides decent solutions to link prediction tasks. Computing U, S, V ← SVD(M(NE)) is much faster than training SOTA models for link prediction, yet, simple edge-scoring function f (i, j) = (cid:104)Ui, Vj(cid:105)S yields competitive empirical (test) performance. We propose f with θ = {µ, s}: fµ,s(i, j) = E x∼N (µ,s)(cid:104)Ui, Vj(cid:105)Sx = U(cid:62) i
+Ex [Sx] Vj = U(cid:62) i
+SxN (x | µ, s) dx (cid:19)
+Vj, (9) (cid:18)(cid:90)
+Ω 5
+where N is the truncated normal distribution (we truncate to Ω = [0.5, 2]). The integral can be approximated by discretization and applying softmax (see §A.4). The parameters µ ∈ R, σ ∈ R>0 can be optimized on cross-entropy objective for link-prediction: minµ,s − E(i,j)∈A [log (σ(fµ,s(i, j)))] − k(n)E(i,j) /∈A [log (1 − σ(fµ,s(i, j)))] , (10) where the left- and right-terms, respectively, encourage f to score high for edges, and the low for non-edges. k(n) ∈ N>0 controls the ratio of negatives to positives per batch (we use k(n) = 10). If the optimization sets µ = 1 and s ≈ 0, then f reduces to no-op. In fact, we initialize it as such, and we observe that f converges within one epoch, on graphs we experimented on. If it converges as µ < 1,
+VS µ > 1, respectively, then f would effectively squash, VS enlarge, the spectral gap. 5.2 Split-ReLu (deep) graph network for node classiﬁcation (NC) (cid:99)W∗ from SVD (Eq.8) can initialize an L-layer graph network with input: H(0) = X, with: message passing (MP)
+H(l+1) = (cid:104) (cid:98)AH(l)W(l) (p) (cid:105)
++ (cid:104) (cid:98)AH(l)W(l) (n) (cid:105)
+−
+,
++ output
+H = l=L (cid:88) l=0 (cid:104)
+H(l)W(l) (op) (cid:105)
++ (cid:104)
+H(l)W(l) (on) (cid:105)
+−
++ initialize MP initialize output
+W(l)
+W(l) (p) ← I; W(l) (op) ← (cid:99)W∗ (n) ← −I;
+[dl : d(l+1)]; W(l) (on) ← − (cid:99)W∗
+[dl : d(l+1)]; (11) (12) (13) (14)
+Element-wise [.]+ = max(0, .). Further, W[i : j] denotes rows from (i)th until (j−1)th of W.
+The deep network layers (Eq. 11&12) use our Split-ReLu layer which we formalize as:
+SplitReLu(X; W(p), W(n)) = [XW(p)]+ − [XW(n)]+ , (15) where the subtraction is calculated entry-wise. The layer has twice as many parameters as standard fully-connected (FC) ReLu layer. In fact, learning algorithms can recover FC ReLu from SplitReLu by assigning W(n) = 0. More importantly, the layer behaves as linear in X when W(p) = −W(n).
+On this hyperplane, this linear behavior allows us to establish the equivalency: the (non-linear) model
+H is equivalent to the linear Hlinearized at initialization (Eq. 13&14) due to Theorem 2. Following the initialization, model can be ﬁne-tuned on cross-entropy objective as in §2.2. 5.3 Creative Add-ons for node classiﬁcation (NC) models (cid:104) (cid:105)
+. (NC) (cid:44) (cid:99)M ( (cid:98)A − (D + I)−1)Y[train] ( (cid:98)A − (D + I)−1)2Y[train]
+Label re-use (LR): Let (cid:99)M(NC)
+LR
+This follows the motivation of Wang and Leskovec [2020], Huang et al. [2021], Wang [2021] and their empirical results on ogbn-arxiv dataset, where Y[train] ∈ Rn×y contains one-hot vectors at rows corresponding to labeled nodes but contain zero vectors for unlabeled (test) nodes. Our scheme is similar to concatenating Y[train] into X, but with care to prevent label leakage from row i of Y to row i of (cid:99)M, as we zero-out the diagonal of the adjacency multiplied by Y[train].
+Pseudo-Dropout (PD): Dropout [Srivastava et al., 2014] reduces overﬁtting of models. It can be related to data augmentation, as each example is presented multiple times. At each time, it appears with a different set of dropped-out features – input or latent feature values, chosen at random, get replaced with zeros. As such, we can replicate the design matrix as: (cid:99)M(cid:62) ←
+. This row-wise concatenation maintains the width of (cid:99)M and therefore the number of model parameters.
+In the above add-ons, concatenations, as well as PD, can be implicit or explicit (see §A.3). (cid:104) (cid:99)M(cid:62) PD((cid:99)M)(cid:62) (cid:105) 6
+Table 1: Dataset Statistics
+Dataset
+Nodes
+Edges
+PPI
+FB
+AstroPh
+HepTh
+Cora
+Citeseer
+Pubmed ogbn-ArXiv ogbl-DDI 3,852 proteins 4,039 users 17,903 researchers 8,638 researchers 2,708 articles 3,327 articles 19,717 articles 169,343 papers 4,267 drugs 20,881 chem. interactions 88,234 friendships 197,031 co-authorships 24,827 co-authorships 5,429 citations 4,732 citations 44,338 citations 1,166,243 citations 1,334,889 interactions
+Source node2vec
+SNAP
+SNAP
+SNAP
+Planetoid
+Planetoid
+Planetoid
+OGB
+OGB
+Task X (cid:55)
+LP (cid:55)
+LP (cid:55)
+LP (cid:55)
+LP
+SSC (cid:51)
+SSC (cid:51)
+SSC (cid:51)
+SSC (cid:51) (cid:51)
+LP 6 Analysis & Discussion
+Theorem 1. (Min. Norm) If system (cid:99)M (cid:99)W = Y is underdetermined6 with rows of (cid:99)M being linearly independent, then solution space (cid:99)W ∗ = has inﬁnitely many solutions. Then, for (cid:99)W∈ (cid:99)W ∗ || (cid:99)W||2 k ≥ rank((cid:99)M), matrix (cid:99)W∗, recovered by Eq.8 satisﬁes: (cid:99)W∗ = argmin
+F . (cid:12) (cid:12) (cid:12) (cid:99)M (cid:99)W = Y (cid:99)W (cid:110) (cid:111)
+Theorem 1 implies that, even though one can design a wide (cid:99)M(NC) (Eq.7), i.e., with many layers, the recovered parameters with least norm should be less prone to overﬁtting. Recall that this is the goal of L2 regularization. Analysis and proofs are in the Appendix.
+Theorem 2. (Non-linear init) The initialization Eq. 13&14 yields H(NC)
+. linearized = H(cid:12) (cid:12)θ←via Eq. 13&14
+Theorem 2 implies that the deep (nonlinear) model is the same as the linear model, at the initialization of θ (per Eq. 13&14, using (cid:99)W∗ as Eq. 8). Cross-entropy objective can then ﬁne-tune θ.
+This end-to-end process, of (i) computing SVD bases and (ii) training the network fθ on singular values, advances SOTA on competitve benchmarks, with (i) converging (quickly) to a unique solution and (ii) containing merely a few parameters θ – see §7. 7 Applications & Experiments
+We download and experiment on 9 datasets summarized in Table 1.
+We attempt link prediction (LP) tasks on smaller graph datasets (< 1 million edges) of: Protein-Protein
+Interactions (PPI) graph from Grover and Leskovec [2016]; as well as ego-Facebook (FB), AstroPh,
+HepTh from Stanford SNAP [Leskovec and Krevl, 2014]. For these datasets, we use the train-test splits of Abu-El-Haija et al. [2018]. We also attempt semi-supervised node classiﬁcation (SSC) tasks on smaller graphs of Cora, Citeseer, Pubmed, all obtained from Planetoid [Yang et al., 2016]. For these smaller datasets, we only train and test using the SVD basis (without ﬁnetuning)
+Further, we attempt on slightly-larger datasets (> 1 million edges) from Stanford’s Open Graph
+Benchmark [OGB, Hu et al., 2020]. We use the ofﬁcial train-test-validation splits and evaluator of OGB. We attempt LP and SSC, respectively, on Drug Drug Interactions (ogbl-DDI) and ArXiv citation network (ogbn-ArXiv). For these larger datasets, we use the SVD basis as an initialization that we ﬁnetune, as described in §5. For time comparisons, we train all models on Tesla K80. 7.1 Test performance & runtime on smaller datasets from: Planetoid & Stanford SNAP
+For SSC over Planetoid’s datasets, both A and X are given. Additionally, only a handful of nodes are labeled. The goal is to classify the unlabeled test nodes. Table 2 summarizes the results. For baselines, we download code of GAT [Veliˇckovi´c et al., 2018], MixHop [Abu-El-Haija et al., 2019],
+GCNII [Chen et al., 2020] and re-ran them with instrumentation to record training time. However, for baselines Planetoid [Yang et al., 2016] and GCN [Kipf and Welling, 2017], we copied numbers 6E.g., if the number of labeled examples i.e. height of M and Y is smaller than the width of M. 7
+Table 2: Test accuracy (& train time) on citation graphs for task: semi-supervised node classiﬁcation.
+Graph dataset: Cora
+Citeseer
+Pubmed
+Baselines: acc tr.time acc tr.time acc tr.time
+Planetoid 75.7
+GCN 81.5
+GAT 83.2 81.9 85.5
+MixHop
+GCNII (13s) (4s) (1m) (26s) (2m) 64.7 70.3 72.4 71.4 73.4 (26s) (7s) (3m) (31s) (3m) 77.2 79.0 77.7 80.8 80.3 (25s) (83s) (6m) (1m) (2m)
+Our models: acc tr.time acc tr.time acc tr.time iSVD100((cid:99)M(NC))
++ dropout (§5.3) 82.0 ±0.13 (0.1s) 82.5 ±0.46 (0.1s) 71.4 ±0.22 (0.1s) 71.5 ±0.53 (0.1s) 78.9 ±0.31 (0.3s) 78.9 ±0.59 (0.2s)
+Table 3: Test ROC-AUC (& train time) on Stanford SNAP graphs for task: link prediction.
+AstroPh
+Graph dataset:
+HepTh
+PPI
+FB
+Baselines:
+AUC tr.time AUC tr.time AUC tr.time AUC tr.time
+WYS n2v
+NetMF
+Net(cid:103)MF 99.4 99.0 97.6 97.0 (54s) (30s) (5s) (4s) 97.9 97.8 96.8 81.9 (32m) (2m) (9m) (4m) 93.6 92.3 90.5 85.0 (4m) (55s) (72s) (48s) 89.8 83.1 73.6 63.6 (46s) (27s) (7s) (10s)
+Our models:
+AUC tr.time AUC tr.time AUC tr.time AUC tr.time iSVD32((cid:99)M(NE)) iSVD256((cid:99)M(NE)) 99.1 ±1e-6(0.2s) 99.3 ±9e-6 (2s) 94.4 ±4e-4 (0.5s) (7s) 98.0 ±0.01 90.5 ±0.1 (0.1s) 90.1 ±0.54 (2s) 89.3 ±0.01 (0.1s) (1s) 89.3 ±0.48 from [Kipf and Welling, 2017]. For our models, the row labeled iSVD100((cid:99)M(NC)), we run our implicit SVD twice per graph. The ﬁrst run incorporates structural information: we (implicitly) construct (cid:99)M(NE) with λ = 0.05 and C = 3, then obtain L, R ← SVD64((cid:99)M(NE)), per Eq. 5. Then, we concatenate L and R into X. Then, we PCA the resulting matrix to 1000 dimensions, which forms our new X. The second SVD run is to train the classiﬁcation model parameters (cid:99)W∗. From the PCA-ed
+X, we construct the implicit matrix (cid:99)M(NC) with L = 15 layers and obtain (cid:99)W∗ = VS+U(cid:62)Y[train] with U, S, V ← SVD100((cid:99)M(NC)
+[train]), per in RHS of Eq. 8. For our second “+ dropout” model
+| PD((cid:99)M(NC))(cid:62)(cid:3), update indices variant, we (implicit) augment the data by (cid:99)M(NC)(cid:62)
+[train] ← (cid:2)train | train(cid:3)(cid:62)
+[train]) → (cid:99)W∗ = VS+U(cid:62)Y[train]
+Discussion: Our method is competitive yet trains faster than SOTA. In fact, the only method that reliably beats ours on all dataset is GCNII, but its training time is about one-thousand-times longer. then similarly learn as: SVD100((cid:99)M(NC) (cid:99)M(NC)(cid:62)
+← (cid:2)
+For LP over SNAP and node2vec datasets, the training adjacency A is given but not X. The split includes test positive and negative edges, which are used to measure a ranking metric: ROC-AUC, where the metric increases when test positive edges are ranked above than negatives. Table 3 summarizes the results. For baselines, we download code of WYS [Abu-El-Haija et al., 2018]; we use the efﬁcient implementation of PyTorch-Geometric [Fey and Lenssen, 2019] for node2vec (n2v) and we download code of Qiu et al. [2018] and run it with their two variants, denoting their ﬁrst variant as NetMF (for exact, explicitly computing the design matrix) as and their second variant as Net(cid:103)MF (for approximate, sampling matrix entry-wise) – their code runs SVD after computing either variant. For the ﬁrst of our models, we compute U, S, V ← SVD32((cid:99)M(NE)) and score every test edge as U(cid:62) i SVj. For the second, we ﬁrst run SVD256 on half of the training edges, determine the “best” rank ∈ {8, 16, 32, 128, 256} by measuring the AUC on the remaining half of training edges, then using this best rank, recompute the SVD on the entire training set, then ﬁnally score the test edges. Discussion: Our method is competitive on SOTA while training much faster. Both
+NetMF and WYS explicitly calculate a dense matrix before factorization. On the other hand, Net(cid:103)MF approximates the matrix entry-wise, trading accuracy for training time. In our case, we have the best 8
+Table 4: Test Hits@20 for link prediction over Drug-Drug Interactions Network (ogbl-ddi).
+Graph dataset: ogbl-DDI
+Baselines:
+[Yang et al., 2021]
+DEA+JKNet
+LRGA+n2v [Hsu and Chen, 2021]
+MAD [Luo et al., 2021]
+LRGA+GCN [Puny et al., 2020]
+GCN+JKNet
+[Xu et al., 2018]
+Our models:
+HITS@20 tr.time 76.72 ±2.65 73.85 ±8.71 67.81 ±2.94 62.30 ±9.12 60.56 ±8.69 (60m) (41m) (2.6h) (10m) (21m)
+HITS@20 tr.time (a) iSVD100((cid:99)M(NE)) (b) + ﬁnetune fµ,s(S) (c) + update U,S,V (§3.1, Eq. 5) (§5.1, Eq. 9 & 10; sets µ = 1.15) (on validation, keeps fµ,s ﬁxed) 67.86 ±0.09 79.09 ±0.18 84.09 ±0.03 (6s) (24s) (30s) of both worlds: using our symbolic representation and SVD implementation, we can decompose the design matrix while only implicitly representing it, as good as if we had explicitly calculated it. 7.2 Experiments on Stanford’s OGB datasets
+We summarize experiments ogbl-DDI and ogbn-ArXiv, respectively, in Tables 4 and 5. For baselines, we copy numbers from the public leaderboard, where the competition is ﬁerce. We then follow links on the leaderboard to download author’s code, that we re-run, to measure the training time. For our models on ogbl-DDI, we (a) ﬁrst calculate U, S, V ← SVD100((cid:99)M(NE)) built only from training edges and score test edge (i, j) using U(cid:62) i SVj. Then, we (b) then ﬁnetune fµ,s (per §5.1, Eq. 9 & 10)) for only a single epoch and score using fµ,s(i, j). Then, we (c) update the SVD basis to include edges from the validation partition and also score using fµ,s(i, j). We report the results for the three steps. For the last step, the rules of OGB allows using the validation set for training, but only after the hyperparameters are ﬁnalized. The SVD has no hyperparameters (except the rank, which was already determined by the ﬁrst step). More importantly, this simulates a realistic situation: it is cheaper to obtain SVD (of an implicit matrix) than back-propagate through a model. For a time-evolving graph, one could run the SVD more often than doing gradient-descent epochs on a model. For our models on ogbn-ArXiv, we (a) compute U, S, V ← SVD250((cid:99)M(NC)
+LR ) where the implicit matrix is deﬁned in §5.3. We (b) repeat this process where we replicate (cid:99)M(NC)
+LR once: in the second replica, we replace the Y[train] matrix with zeros (as-if, we drop-out the label with 50% probability). We (c) repeat the process where we concatenate two replicas of (cid:99)M(NC)
+LR into the design matrix, each with different dropout seed. We (d) ﬁne-tune the last model over 15 epochs using stochastic GTTF [Markowitz et al., 2021]. Discussion: Our method competes or sets SOTA, while training much faster.
+Time improvements: We replaced the recommended orthonormalization of [Halko et al., 2009] from QR decomposition, to Cholesky decomposition (§A.2). Further, we implemented caching to avoid computing sub-expressions if already calculated (§A.3.4). Speed-ups are shown in Fig. 2.
+Table 5: Test classiﬁcation accuracy over ogbn-arxiv.
+Graph dataset: ogbn-ArXiv
+Baselines: accuracy tr.time
+GAT+LR+KD [Ren, 2020]
+GAT+LR [Niu, 2020] 74.16 ±0.08 73.99 ±0.12 73.98 ±0.09
+GAT+C&S [Huang et al., 2021] 73.86 ±0.14 72.74 ±0.16
+AGDN [Sun and Wu, 2020]
+GCNII [Chen et al., 2020] (6h) (3h) (50m) (2h) (3h)
+Our models: (a) iSVD250((cid:99)M(NC)
+LR ) (§3.2, Eq. 8) (§5.3) (b) + dropout(LR) (c) + dropout((cid:99)M(NC)
+LR ) (§5.3) (d) + ﬁnetune H (§5.2, Eq. 11-14) accuracy tr.time 68.90 ±0.02 69.34 ±0.02 71.95 ±0.03 74.14 ±0.05 (1s) (3s) (6s) (2m)
+Figure 2: SVD runtime conﬁgs of (lazy caching; orthonormalization) as a ratio of SVD’s common de-fault (QR decomposition) 9
+8

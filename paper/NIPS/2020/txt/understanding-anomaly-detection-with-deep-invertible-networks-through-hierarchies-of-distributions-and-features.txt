@@ -1,0 +1,150 @@
+Abstract
+Deep generative networks trained via maximum likelihood on a natural image dataset like CIFAR10 often assign high likelihoods to images from datasets with different objects (e.g., SVHN). We reﬁne previous investigations of this failure at anomaly detection for invertible generative networks and provide a clear ex-planation of it as a combination of model bias and domain prior: Convolutional networks learn similar low-level feature distributions when trained on any natu-ral image dataset and these low-level features dominate the likelihood. Hence, when the discriminative features between inliers and outliers are on a high-level, e.g., object shapes, anomaly detection becomes particularly challenging. To re-move the negative impact of model bias and domain prior on detecting high-level differences, we propose two methods, ﬁrst, using the log likelihood ratios of two identical models, one trained on the in-distribution data (e.g., CIFAR10) and the other one on a more general distribution of images (e.g., 80 Million
+Tiny Images). We also derive a novel outlier loss for the in-distribution net-work on samples from the more general distribution to further improve the per-formance. Secondly, using a multi-scale model like Glow, we show that low-level features are mainly captured at early scales. Therefore, using only the likelihood contribution of the ﬁnal scale performs remarkably well for detecting high-level feature differences of the out-of-distribution and the in-distribution.
+This method is especially useful if one does not have access to a suitable gen-eral distribution. Overall, our methods achieve strong anomaly detection perfor-mance in the unsupervised setting, and only slightly underperform state-of-the-art classiﬁer-based methods in the supervised setting. Code can be found at https:
+//github.com/boschresearch/hierarchical_anomaly_detection. 1
+
+Introduction
+One line of work for anomaly detection - to detect if a given input is from the same distribution as the training data - uses the likelihoods provided by generative models. Through likelihood maximization,
+∗This work was partially done during an internship at the Bosch Center for Artiﬁcial Intelligence. 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+they are trained to yield high likelihoods on the in-distribution inputs (a.k.a. inliers).2 After training, one may expect out-of-distribution inputs (a.k.a. outliers) to have lower likelihoods than the inliers.
+However, this is often not the case. For example, Nalisnick et al. [21] showed that generative models trained on CIFAR10 [14] assign higher likelihoods to SVHN [23] than to CIFAR10 images.
+Several works have investigated a potential reason for this failure: The image likelihoods of deep generative networks can be well-predicted from simple factors. For example, the deep generative networks’ image likelihoods highly correlate with: the image encoding sizes from a lossless compres-sor such as PNG [31]; background statistics, e.g., the number of zeros in Fashion-MNIST/MNIST images [26]; smoothness and size of the background [16]. These factors do not directly correspond to the type of object, hence the type of object does not affect the likelihood much.
+In this work, we ﬁrst synthesize these ﬁndings into the following hypothesis: A convolutional deep generative network trained on any image dataset learns low-level local feature relationships common to all images - such as smooth local patches - and these local features, forming the domain prior, dominate the likelihood. One can therefore expect a smoother dataset like SVHN to have higher likelihoods than a less smooth one like CIFAR10, irrespective of the image dataset the network was trained on. Following prior works, we take Glow networks [12] as the baseline model for our study.
+Next, we report several new ﬁndings to support the hypothesis: (1) Using a fully-connected instead of a convolutional Glow network, likelihood-based anomaly detection works much better for Fashion-MNIST vs. MNIST, indicating a convolutional model bias. (2) Image likelihoods of Glow models trained on more general datasets, e.g., 80 Million Tiny Images (Tiny), have the highest average correlation with image likelihoods of models trained on other datasets, indicating a hierarchy of distributions from more general distributions (better for learning domain prior) to more speciﬁc distributions. (3) The likelihood contributions of the ﬁnal scale of the Glow network correlate less between different Glow networks than the likelihood contributions of the earlier scales, while the overall likelihood is dominated by the earlier scales. This indicates a hierarchy of features inside the Glow network scales, from more generic low-level features that dominate the likelihood to more distribution-speciﬁc high-level features that are more informative about object categories.
+Finally, leveraging the two novel views of a hierarchy of distributions and a hierarchy of features, we propose two likelihood-based anomaly detection methods. From the hierarchy-of-distributions view, we use likelihood ratios of two identical generative architectures (e.g., Glow), one trained on the in-distribution data (e.g., CIFAR10) and the other one on a more general distribution (e.g., 80 Million
+Tiny Images), reﬁning previous likelihood-ratio-based methods. To further improve the performance, we additionally train our in-distribution model on samples from the general distribution using a novel outlier loss. From the hierarchy-of-features view, we show that using the likelihood contribution of the ﬁnal scale of a multi-scale Glow model performs remarkably well for anomaly detection.
+Our manuscript advances the understanding of the anomaly detection behavior of deep genera-tive neural networks by synthesizing previous ﬁndings into two novel viewpoints accounting for the hierarchical nature of natural images. Based on this concept, we propose two new anomaly detection methods which reach strong performance, especially in the unsupervised setting. Our experiments are more extensive than previous likelihood-ratio-based methods on images, especially in the unsupervised setting, and therefore also ﬁll an important empirical gap in the literature. 2 Common Low-Level Features Dominate the Model Likelihood
+The following hypotheses synthesized from the ﬁndings of prior work motivate our methods to detect if an image is from a different object recognition dataset: 1. Distributions of low-level features form a domain prior valid for all natural images (see Fig. 1A). 2. These low-level features contribute the most to the overall likelihood assigned by a deep genera-tive network to any image (see Fig. 1B and C). 3. How strongly which type of features contributes to the likelihood is inﬂuenced by the model bias (e.g., for convolutional networks, local features dominate) (see Fig. 1C). 2We note that likelihood is a function of the model given the data. As the model parameters are trained to model the data density, we may abuse likelihood and density in the paper for simplicity. 2
+Conv Glow trained on:
+CIFAR10
+SVHN
+TINY w o l
+G e s n e
+D w o l
+G v n o
+C 0.86 0.90 0.86 1.0 0.97 1.0 w o l
+G l a c o
+L 1.0 0.96 1.0
+C
+A
+B
+Figure 1: Low-level features and model bias. A: Distributions over local pixel value differences have overlapping high-density regions for Tiny, SVHN, CIFAR10 . B: Likelihoods extracted from the local pixel-difference distributions correlate with CIFAR10-Glow likelihoods. C: Likelihood correlations for different types of Glow networks trained on CIFAR10 with regular convolutional Glow networks trained on CIFAR10, SVHN and Tiny. Correlations are almost the same for convolutional
+Glow networks and local Glow networks trained on 8 × 8 patches. Correlations are smaller for fully-connected/dense Glow networks.
+For the ﬁrst hypothesis, we start from deﬁning low-level features. They are features that can be extracted in few computational steps (these will be local features for convolutional models like Glow).
+As an example, we use the difference of a pixel value to the mean of its 3 × 3 neighbouring pixels. As natural images are smooth, the distributions over such per-pixel difference of SVHN, CIFAR10 and 80 Million Tiny Image (Tiny) depicted in Fig. 1A are all zero centered. Smoother images will produce smaller differences among neighbouring pixels, therefore the density of SVHN has the highest peak around zero. A signiﬁcant overlapping high-density regions for SVHN, CIFAR10 and Tiny show that these low-level features are common to natural images, and thus not useful for anomaly detection.
+Next, we examine the second hypothesis by showing that low-level per-image likelihoods highly correlate with Glow network likelihoods. On the pixel level, we compute the pixel difference and estimate its density using a histogram with 100 equally distanced bins. Using the estimated density, we can get the conditional (on 3 × 3 neighbours) per-pixel likelihoods of each image. Summing the per-pixel likelihoods over the entire image, we obtain pixel-level per-image pseudo-likelihood, which is not a correct likelihood of image, but a proxy measure of low-level feature contributions to the image-level likelihood. The low-level pseudo-likelihoods of SVHN and CIFAR10 images have Spearman correlations3 > 0.83 with likelihoods of Glow networks trained on CIFAR10 (see
+Fig 1B), SVHN or Tiny. We also trained small modiﬁed Glow networks on 8 × 8 patches cropped from the original image. These local Glow networks’ likelihoods correlate even more with the full Glow networks’ likelihoods (> 0.95), further suggesting low-level local features dominate the total likelihood (see Fig 1C). To validate that the low-level features dominating the likelihoods are independent of the semantic content of the image, we mix two images in Fourier space by combining the amplitudes of one image’s Fourier transform with the phases of the other image’s
+Fourier transform, and then evaluate the likelihood of the resulting image using the same pretrained
+Glow model (see supp. material S3 for details). The mixed images are semantically much more coherent with the images that provide the phase information, yet their Glow likelihoods correlate more strongly with the Glow likelihoods of images sharing the same amplitudes (> 0.8 vs. < 0.05).
+Lastly, we show that what features are extracted and how much each feature contributes to the likelihood depend on the type of model. When training a modiﬁed Glow network that uses fully connected instead of convolutional blocks (see supp. material S2.2) on Fashion-MNIST and MNIST, the image likelihoods among them do not correlate (Spearman correlation −0.2). The fully-connected
+Fashion-MNIST network achieves worse likelihoods (4.8 vs. 2.9 bpd), but is much better at anomaly detection (81% AUROC for Fashion-MNIST vs. MNIST; 15% AUROC for convolutional Glow).
+Consistent with non-distribution-speciﬁc low-level features dominating the likelihoods, we ﬁnd full Glow networks trained independently on CIFAR10, CIFAR100, SVHN or Tiny produce highly correlated image likelihoods (Spearman correlation > 0.96 for all pairs of models, see Fig. 1 C). The same is true to a lesser degree for Fashion-MNIST and MNIST (Spearman correlation 0.85). 3All results in this section are qualitatively the same with Pearson correlations. 3
+Figure 2: Overview of the hierarchy-of-distributions approach. A: Schematic hierarchical view of image distributions. To approximate the distribution of natural images, we use 80 Million Tiny images (Tiny). B,C,D: Results of Glow networks trained on CIFAR10, SVHN and Tiny. B: Likelihoods rank-correlate almost perfectly for the Glow networks trained on CIFAR10 and Tiny on all three datasets (top), while rank correlations remain very close to 1 for CIFAR10-Glow and SVHN-Glow (bottom), validating that the main likelihood contribution comes from the domain prior. C: Distribution plots show almost identical plots for CIFAR10 and Tiny-Glow and a low area under the receiver operating curve (AUC) for CIFAR10 vs. SVHN anomaly detection. D: In contrast, the log likelihood difference between CIFAR10-Glow and Tiny-Glow reaches substantially higher AUCs (top), further increased by using our outlier loss (bottom) (see Section 3.1).
+Taken together, the evidence suggests convolutional generative networks have model biases that guide them to learn low-level feature distributions of natural images (domain prior) well, at the expense of anomaly detection performance. Based on this understanding, next we propose two methods to remove this inﬂuence of model bias and domain prior on likelihood-based anomaly detection. 3 Hierarchy of Distributions
+The models trained on Tiny have the highest average likelihood across all evaluated datasets. This inspired us to use a hierarchy of distributions: CIFAR10 and SVHN are subdistributions of natural images, CIFAR10-planes are a subdistribution of CIFAR10, etc. (see Fig. 2).
+We use this hierarchy of distributions to derive a log-likelihood-ratio-based anomaly detection method: 1. Train a generative network on a general image distribution like 80 Million Tiny Images; 2. Train another generative network on images drawn from the in-distribution, e.g., CIFAR10; 3. Use their likelihood ratio for anomaly detection.
+Formally, given the general-distribution-network likelihood pg and the speciﬁc-in-distribution-network likelihood pin, our anomaly detection score (low scores indicate outliers) is: log (cid:19) (cid:18) pin(x) pg(x)
+= log (pin(x)) − log(pg(x)) . (1) 3.1 Outlier Loss
+We also derive a novel outlier loss on samples xg from the more general distribution based on the two networks likelihoods. Concretely, we use the log-likelihood ratio after temperature scaling by T as the logit for binary classiﬁcation: (cid:18) (cid:19)(cid:19) (cid:32) (cid:33)
+Lo = −λ · log
+σ (cid:18) log(pg(xg)) − log(pin(xg))
+T
+= −λ · log
+T(cid:112)pg(xg)
+T(cid:112)pin(xg) + T(cid:112)pg(xg)
+, (2) where σ is the sigmoid function and λ is a weighting factor. 4
+Figure 3: Overview of the hierarchy of features motivation. A,B: Showcasing features at different scales in the Glow-network. Top images are examples from CIFAR10 and SVHN. A: Bottom two images are obtained by mixing features in the Glow-network trained on CIFAR10 as follows. We compute the three scale outputs of the Glow-network z1, z2 and z3, mix them between both images and invert again. For the bottom-left image, we take the earlier-scale features z1 and z2 from the
+SVHN image and the ﬁnal-scale features z3 from the CIFAR10 image and vice versa for the bottom-right image. Note the image class is completely determined by z3. B: Images are optimized to maximize the CIFAR10-Glow-network likelihood p(x) while keeping z3 constant as follows. We keep z3 from original Glow output ﬁxed, and use the inverse pass of the network to optimize z1 and z2 via gradient ascent to maximize log(p(x)). Only the global shape remains visible in the optimized images, while low-level structures have been blurred away. Such observation indicates that smoother local low-level features induce higher likelihood response of the model, once again conﬁrming the strong inﬂuence of domain prior on the model likelhood. C,D: We use two Glow models trained on CIFAR10 and SVHN, respectively. The log likelihood they obtain on CIFAR10 and SVHN is split into log likelihood contributions of z1, z2 and z3. The two plots show that (i) the summed contributions for z1 and z2 have very high rank correlation between both models (C); while the rank correlation drops for z3 (D) and (ii) the range of the contributions is much larger for z1 and z2, showing that z1 and z2 dominate the total log likelihood. 3.2 Extension to the Supervised Setting
+In all previous parts, our method is presented in an unsupervised setting, where the labels of the inliers are unavailable. We extend our method to the supervised setting with two main changes in our training. First, the Glow model pin(x) uses a mixture of Gaussians for the latent z, i.e., each class corresponding to one mode. Second, the outlier loss is extended for each mode of pin(x) by treating samples from the other classes as the negative samples, i.e., the same as {xg} in Eq. 2. 4 Hierarchy of Features
+The image likelihood correlations between models trained on different datasets reduce substantially when evaluating the likelihood contributions of the ﬁnal scale of the Glow network (see Fig. 3). Here, the adopted Glow network has three scales. At the ﬁrst two scales, i.e., i = 1 and 2, the layer output is split into two parts hi and zi, where hi is passed onto the next scale and zi is output as one part of the latent code z. The output at the last scale is z3, which together with z1 and z2 makes up the complete latent code z. In terms of y1 = (h1, z1), y2 = (h2, z2), y3 = z3 and h0 = x, the logarithm of the learned density p(x) can be decomposed into per-scale likelihood contributions ci(x) as log p(x) = (cid:88) i ci(x) = (cid:88) i log pz(zi) + log (cid:12) (cid:12) (cid:12) (cid:12) det (cid:18) ∂yi
+∂hi−1 (cid:19)(cid:12) (cid:12) (cid:12) (cid:12)
+. (3)
+The log-likelihood contributions c3(x) of the ﬁnal third scale of Glow networks correlate substantially less than the full likelihoods for Glow networks trained on the different datasets (0.26 mean correlation vs. 0.99 mean correlation). This is consistent with the observation that last-scale dimensions encode more global object-speciﬁc features (see Fig. 3 and [4]). Therefore, we use c3(x) as our anomaly detection score (low scores indicate outliers).
+Note that, here we do not condition z1 on z2 or z2 on z3, whereas other implementations often make z1 dependent of z2 such as z1 ∼ N (f (z2), g(z2)2) with f, g being small neural networks. Such 5
+Table 1: Anomaly detection performance (AUCs in %) of using the log-likelihood ratio of the in-distribution and general distribution model. For the general distribution models, we have three options, i.e., the general-purpose image compressor PNG [31] plus Tiny-Glow and Tiny-PCNN respectively trained on Tiny Images. Here, the Glow and PCNN trained on Tiny Images are also used as the starting point to train the in-distribution models. In the supp. material, we compare the results with training the two in-distribution models from scratch.
+In-dist.
+SVHN
+CIFAR10
+CIFAR100
+OOD
+Glow (in-dist.) diff to:
+PCNN (in-dist.) diff to:
+LSUN
+SVHN
+None PNG Tiny-Glow Tiny-PCNN None PNG Tiny-Glow Tiny-PCNN
+CIFAR10 98.3
+CIFAR100 97.9 99.6 8.8
+CIFAR100 51.7 69.3 10.3 49.2 66.3 61.3 100.0 100.0 100.0 16.6 53.4 16.8 18.3 54.2 19.1 53.2 100.0 100.0 100.0 94.8 57.5 93.6 91.3 48.3 90.0 86.2 100.0 100.0 100.0 94.4 63.5 92.9 90.0 54.5 87.6 87.0 100.0 100.0 100.0 93.9 66.8 89.2 87.4 52.8 81.0 85.7
+LSUN
+SVHN
+CIFAR10
+LSUN
+Mean 74.4 79.5 96.8 75.4 57.3 83.6 68.4 44.1 77.5 73.0 97.9 97.4 99.4 12.6 51.7 74.8 13.7 49.1 71.7 63.2 76.8 81.3 98.1 82.3 57.1 87.6 76.4 44.2 82.7 76.3 dependency is removable by transforming to z(cid:48) 1 now independent of z2 as z(cid:48) 1 ∼ N (0, 1), and this type of transformation can already be learned by an afﬁne coupling layer applied to z1 and z2, hence the explicit conditioning of other implementations does not fundamentally change network expressiveness. We do not use it here and do not observe bits/dim differences between our implementation and those that use it (see supp. material S7.1 for details).
+, with z(cid:48) 1 = (z1−f (z2)) g(z2)) 5 Experiments
+For the main experiments, we use SVHN [23], CIFAR10 [14], CIFAR100 [15] as inlier datasets and use the same and LSUN [36] as outlier datasets. Results for further outlier datasets can be found in the supp. material S7.4. 80 Million Tiny Images [34] serve as our general distribution dataset in the log likelihood-ratio based anomaly detection experiments and is also used in the outlier loss as given in Eq. 2 when training two generative models, i.e., Glow and PixelCNN++ (PCNN) (see supp. material S4 for their training details). In-distribution Glow and PixelCNN++ models are ﬁnetuned from the models pre-trained on Tiny for more rapid training, see supp. material S7.2 for details and ablation studies. Our reported results are averaged over 3 random seeds. 5.1 Anomaly Detection based on Log-Likelihood Ratio
+In Tab. 1, we compare the raw log-likelihood based anomaly detection (i.e., diff to: None) with the log-likelihood ratio based ones (i.e., diff to: PNG, Tiny-Glow, Tiny-PCNN). The raw log-likelihood based scheme underperforms the log-likelihood ratio based ones that use Tiny-Glow and
+Tiny-PCNN. However, when using PNG to remove the domain prior as proposed in [31]4, it sometimes performs worse than the raw log-likelihood based scheme, e.g., SVHN as the in-distribution vs. the other three OODs. This relates to the remaining model bias, as Glow trained on the in-distribution encodes the domain prior differently to PNG. Also note that using PCNN as the general-distribution model for Glow does not work well for CIFAR10/100. This is because Tiny-PCNN has very large bpd gains over Glow for the CIFAR-datasets and less large gains for SVHN. On average across datasets, it works best to use matching general and in-distribution models (Glow for Glow, PCNN for
+PCNN), validating our idea of a model bias. Also note that our SVHN vs. CIFAR10 results already outperform the likelihood-ratio-based results of Ren et al. [26] slightly (93.9% vs. 93.1% AUROC), and we observe further improvements with outlier loss in Section 5.3. Ren et al. [26] used a noised version of the in-distribution as the general distribution and only tested it on SVHN vs. CIFAR10.
+Comparing to Tiny, it is less representative as a domain prior, and thus its performance on more complicated datasets requires further assessment. 4The original results of [31] are not comparable since they used the training set of the in-distribution for evaluation. We provide supplementary code that uses a publicly available CIFAR10 Glow-network with pretrained weights that roughly matches the results reported here. 6
+Table 2: Raw log-likelihoods vs. log-likelihood ratios, where CIFAR10 is the in-distribution.
+Table 3: Different outlier losses, where CIFAR10 is the in-distribution.
+Out-dist
+SVHN
+CIFAR100
+LSUN
+Scale
+Full 16 × 16 8 × 8 4 × 4
+Full 16 × 16 8 × 8 4 × 4
+Full 16 × 16 8 × 8 4 × 4
+Raw Diff 93.9 8.8 84.6 7.0 48.9 13.5 92.9 83.6 66.8 51.7 55.7 50.7 56.3 53.5 60.0 66.1 89.2 69.3 63.6 70.3 74.0 56.5 82.8 75.1
+Out-dist
+SVHN
+CIFAR100
+LSUN
+Loss
+None
+Margin
+Ours
+None
+Margin
+Ours
+None
+Margin
+Ours
+Raw 4x4 Diff 93.9 92.9 8.8 96.5 84.2 84.2 98.6 96.4 95.5 66.8 60.0 51.7 71.1 71.7 72.3 85.4 84.5 84.9 89.2 82.8 69.3 75.7 82.0 82.0 95.1 94.1 94.9
+Medical Dataset To further validate our log-likelihood ratio approach on a different domain, we setup an experiment on the medical BRATS Magnetic Resonance Imaging (MRI) dataset. We use one
+MRI modality as in-distribution and the other three as OOD. The raw likelihood, the log-likelihood ratio to Tiny-Glow and to BRATS-Glow (trained on all modalities) yield AUROC 53.3%, 68.3% and 78.3%, respectively. So, Tiny also serves as a general distribution for the very different medical images, and a distribution from the more speciﬁc domain further improves the performance.
+The log-likelihood ratio approach can likely be applied to more than images. In the above, we have already shown the application to typical image datasets and, without adaptation, to medical
+MRI images. In the text/NLP domain, it may be used with Wikitext-2 as the general dataset, since
+Wikitext-2 already worked well as an outlier dataset in [8]. In the audio domain, the domain prior may come from strong dependencies of the signal values on short timescales, similar to the smoothness of natural images. If a suitable general dataset needs to be created, it does not require labels and may even proﬁt from noisy/unclean data. Therefore there is no principal obstacle preventing collection of such data, including concatenating existing datasets. 5.2 Anomaly Detection based on Last-scale Log-likelihood Contribution
+As an alternative to remove the domain prior by using, e.g., Tiny-Glow, our hierarchy-of-features view suggests to use the log-likelihood contributed by the high-level features attained at the last scale of the Glow model. It is orthogonal to the log-likelihood ratio based scheme, and can be used when the general distribution is unavailable. As shown in Tab. 2, using the raw log-likelihood on the last scale (4 × 4), consistently outperforms the conventional log-likelihood comparison on the full scale, but performs slightly worse than using the log-likelihood ratio in the full scale. Note that we don’t expect the log-likelihood ratio on the last scale to be the top performer, as the domain prior is mainly reﬂected by the earlier two scales, see Fig. 3. 5.3 Outlier Losses
+When training the in-distribution model, we can use the images from Tiny as the outliers to improve the training. Tab. 3 shows that our outlier loss as formulated in Eq. 2 consistently outperforms the margin loss [8] when combining with three different types of log-likelihood based schemes, i.e., raw log-likelihood, raw log-likelihood at the last scale 4 × 4 and log-likelihood ratio. We note that as the margin loss leads to substantially less stable training than our loss, see the supp. material S7.5.
+We also experiment on adding the outlier loss to the training loss of Tiny-Glow, i.e., using the in-distribution samples as outliers. This further improves the anomaly detection performance, see
+Diff† of Tab. 4, while Diff only uses the outlier loss for training the in-distribution Glow-network. 5.4 Unsupervised vs. Supervised Setting
+From the unsupervised to the supervised setting, Tab. 4 further reports the numbers achieved by using the class-conditional in-distribution Glow-network and treating inputs from other classes as outliers.
+We observe further improved anomaly detection performance. 7
+Table 4: Anomaly detection performance summary (AUC in %). The new term Diff† means to use in-distribution samples as the outliers to train Tiny-Glow, see Sec. 5.4. OE, proposed by Hendrycks et al. [8], stands for margin-based outlier loss for PixelCNN++, MSP-OE from the same work stands for entropy of classiﬁer predictions with entropy outlier loss.
+In-dist
+CIFAR10
+CIFAR100
+Setting
+Out-dist
+SVHN
+CIFAR100
+LSUN
+Mean
+SVHN
+CIFAR10
+LSUN
+Mean
+Mean
+Unsupervised 4×4 Diff Diff† OE 75.8 96.4 68.5 85.4 90.9 95.1 78.4 92.3
+-84.5
+-61.9
+-84.6
+-77.0
+-84.7 99.0 86.8 95.8 93.8 85.4 62.5 85.4 77.8 85.8 98.6 84.5 94.1 92.4 82.2 59.8 82.4 74.8 83.6
+Supervised 4×4 Diff Diff† MSP-OE 99.1 96.1 88.5 88.3 96.2 95.3 94.6 93.3 89.6 89.4 65.3 67.0 86.3 85.7 80.3 80.8 87.5 87.0 98.6 87.4 94.1 93.4 88.6 64.9 84.3 79.3 86.3 98.4 93.3 97.6 96.4 86.9 75.7 83.4 82.0 89.2
+Overall, our approach only slightly underperforms the approach MSP-OE [8] with inlier class labels (Supervised), while being substantially better without inlier class labels (Unsupervised), see Tab. 4.
+In contrast to observations by Hendrycks et al. [8] for their unsupervised setup, we do not experience a severe degradation of the anomaly detection performance from the lack of class labels. 6

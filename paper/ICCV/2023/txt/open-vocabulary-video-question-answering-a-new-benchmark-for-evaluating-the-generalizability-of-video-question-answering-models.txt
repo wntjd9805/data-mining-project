@@ -1,0 +1,258 @@
+Abstract
+Video Question Answering (VideoQA) is a challenging task that entails complex multi-modal reasoning. In con-trast to multiple-choice VideoQA which aims to predict the answer given several options, the goal of open-ended
+VideoQA is to answer questions without restricting candi-date answers. However, the majority of previous VideoQA models formulate open-ended VideoQA as a classification task to classify the video-question pairs into a fixed answer set, i.e., closed-vocabulary, which contains only frequent answers (e.g., top-1000 answers). This leads the model to be biased toward only frequent answers and fail to general-ize on out-of-vocabulary answers. We hence propose a new benchmark, Open-vocabulary Video Question Answering (OVQA), to measure the generalizability of VideoQA models by considering rare and unseen answers. In addition, in or-der to improve the model’s generalization power, we intro-duce a novel GNN-based soft verbalizer that enhances the prediction on rare and unseen answers by aggregating the information from their similar words. For evaluation, we introduce new baselines by modifying the existing (closed-vocabulary) open-ended VideoQA models and improve their performances by further taking into account rare and un-seen answers. Our ablation studies and qualitative anal-yses demonstrate that our GNN-based soft verbalizer fur-ther improves the model performance, especially on rare and unseen answers. We hope that our benchmark OVQA can serve as a guide for evaluating the generalizability of
+VideoQA models and inspire future research. Code is avail-able at https://github.com/mlvlab/OVQA. 1.
+
+Introduction
+Video question answering (VideoQA) is a multi-modal understanding task that requires complex reasoning be-*Corresponding author. (a) (b) (c)
+Figure 1: MSRVTT-QA statistics of three answer groups.
+Illustration of three different answer groups: the 1000 most frequent answers in the training set (∼ Top-1000), the re-maining answers in the training set (Top-1000 ∼), and un-seen answers which do not exist during training but appear (a) shows the proportion of the in the test set (Unseen). number of unique answers in each group. (b) shows the pro-portion of the number of samples in each group. (c) shows the distribution of the number of samples for each sorted answer. Note that the red lines distinguish each group and the y-axis is an exponential scale. tween two modalities to find the correct answer given a video-question pair. There are usually two task types in
+VideoQA, multiple-choice and open-ended. The multiple-choice VideoQA requires the model to select the correct an-swer among several options. On the other hand, in open-ended VideoQA, the model needs to predict the answer without restricting candidate vocabulary.
+However, most existing VideoQA models [1, 2, 3, 4, 5, 6, 7] formulate the open-ended VideoQA task as a clas-sification problem with a fixed set of answer candidates which frequently appear in the training set, e.g., top-1000.
+Therefore, the out-of-vocabulary answers, not used dur-ing training, are automatically regarded as incorrect with-out any thorough consideration during evaluation. Fig. 1a highlights that the top-1000 answer categories cover about 17.8% of the answer candidates while they possess about
+90.2% of the total samples overwhelming those of other an-swer categories in Fig. 1b. This suggests that previous mod-els may show seemingly good performance only with top-k answer candidates, yet they, in fact, fail to generalize to rare and unseen answers by ignoring the underrepresented out-of-vocabulary answers. Such problems have been over-looked since these models have been evaluated in terms of overall performance only. In other words, the conventional benchmark of open-ended VideoQA does not measure the generalizability and thus leads the model to neglect the real-istic setting of class imbalance and unseen answers. There-fore, a comprehensive benchmark that handles long-tail dis-tribution with unseen answers is necessary.
+A long-tail distribution with rare and unseen answers requires few-shot and zero-shot generalization. Recently, prompt-tuning [8, 9, 10, 11, 12] with large-scale pretrained models has drawn attention due to its significant perfor-mance gain on zero-shot and few-shot learning. A line of work [13, 14, 15, 16, 17, 18, 19, 20] enables fine-tuning the model in a parameter-efficient manner by retaining the
+Masked Language Modeling (MLM) objective leveraged in the pretraining phase. In other words, the model is asked to fill in [MASK] tokens for its downstream objectives. Sub-sequently, the concept of verbalizer was introduced by [13] to manually bridge the original label and its correspond-ing words to be filled in [MASK], e.g., filling the word
+‘great’ in [MASK] to predict the label POSITIVE in sen-timent classification. To reduce the human labor, search-based verbalizers [15, 18, 17] have been proposed. Current works [16, 21, 22] adopt soft verbalizers which consist of learnable tokens to find optimal embeddings during train-ing. However, verbalizers for unseen answers have been less explored in the literature.
+To this end, we introduce a new benchmark of open-ended VideoQA, named Open-vocabulary Video Question
+Answering (OVQA), to define the task under a more real-world setting with rare and unseen answers.
+In contrast to previous approaches which focus only on frequent an-swers, OVQA requires the model to predict rare and out-of-vocabulary answers. In OVQA, to address the problem of bias towards frequent answers, we propose a novel graph neural network (GNN)-based soft verbalizer to smooth the original answer embeddings by aggregating the information of similar words from an external knowledge base. Specif-ically, the GNN-based soft verbalizer learns how to smooth the original answers with their neighborhood words in the training phase and is adapted to the test phase based on the learned smoothing function during training to enhance the prediction for the unseen answers.
+In our experiments, on four benchmark open-ended
+VideoQA datasets (MSVD-QA, ActivityNet-QA, TGIF-QA, and MSRVTT-QA), we develop OVQA baseline mod-els with an additional answer encoder and improve their performances by taking into account rare and unseen an-swers as well. Also, our extensive ablation studies demon-strate that GNN-based soft verbalizer is generally adaptable to various backbone models and effectively reduces the bias towards frequent answers.
+To sum up, our contributions are as follows:
+• We propose a new benchmark of open-ended
+VideoQA, OVQA, to evaluate models’ generalizabil-ity under a long-tail distribution, including unseen an-swers.
+• We also present a novel GNN-based soft verbalizer to smooth answers on the answer graphs augmented with an external knowledge base.
+• Our experiments show that baselines are consistently improved by our simple modification with an addi-tional answer encoder to handle out-of-vocabulary an-swers.
+• Extensive ablation studies and qualitative analyses demonstrate that GNN-based soft verbalizer is broadly applicable and alleviates the bias problem toward fre-quent answers. 2. Open-vocabulary video question answering
+In this section, we introduce a new benchmark, Open-vocabulary Video Question Answering (OVQA), to tackle the problem of a common practice that formulates open-ended VideoQA as a classification task with fixed answer candidates. 2.1. Open-ended VideoQA
+Unlike multiple-choice VideoQA where a model needs to choose one answer among the given five options, the open-ended VideoQA task aims to predict the answer with-out any candidate answers. However, previous works [1, 2, 3, 4, 5, 6, 7] formulate open-ended VideoQA as a classifica-tion problem with a predefined answer set containing fixed candidate answers. We call this setting Closed-vocabulary
+Video Question Answering (CVQA) for the rest of our pa-per. Usually, in CVQA, they construct an answer vocabu-lary based on the frequencies of answers in the training set, e.g., top-1000 answers. As a result, the out-of-vocabulary answers not used for training will be considered incorrect during evaluation. In other words, previous models learn to predict only the top-k answers that frequently appear in the training set and ignore rare or unseen answers. This leads the model to be biased toward frequent answers and fail to generalize on rare and unseen answers, i.e., they memorize the answers rather than generalize.
+We first categorize all the answers from four bench-mark datasets (MSVD-QA, ActivityNet-QA, TGIF-QA,
+(a) Closed-vocabulary VideoQA (CVQA) (b) Open-vocabulary VideoQA (OVQA)
+Figure 2: Comparison of CVQA and OVQA. (a) The output feature of [CLS] token is fed to an MLP to calculate the logits over the fixed top-k answer candidates (closed-vocabulary) thus it fails to select the out-of-vocabulary answers in the test phase. (b) On the other hand, in our OVQA setting, the model chooses the answer based on the similarities between the output feature of [MASK] token and the answer embeddings. Therefore, the model can predict the answer although the answer is unseen at the training phase.
+MSVD-QA MSRVTT-QA TGIF-QA ActivityNet-QA
+Base (101 ∼)
+Common (11 ∼ 100)
+Rare (1 ∼ 10)
+Unseen (0)
+Total 41 333 1,478 391 2,243 205 937 2,858 1,632 5,632 38 210 1,292 206 1,746 26 275 1,353 1,378 3,032
+Table 1: Answer statistics. We report the number of an-swers for each category: base, common, rare, and unseen. and MSRVTT-QA) based on how many ⟨video, question, answer⟩ triplets from the training set they appear in: un-seen (0 times), rare (1 ∼ 10), common (11 ∼ 100), and base (101 ∼). The unseen answers are only present in the test set while the answers of other categories are seen in the training set but may or may not appear in the test set. Tab. 1 shows the number of unique answers for each category. For an ex-ample of MSRVTT-QA, in CVQA, top-1000 answers only include base and common answers. Therefore, we propose a new benchmark of open-ended VideoQA to provide an opportunity to consider the rare and even unseen answers. 2.2. Task definition
+We here introduce a new benchmark, Open-vocabulary
+Video Question Answering (OVQA), which considers not only the frequent answers but also the rare or unseen an-swers. Prior studies in CVQA have calculated logits with an
+MLP on video-question multi-modal features for each class label that corresponds to the individual answer candidate as shown in Fig. 2a. Nevertheless, they fail to determine the logit scores of the out-of-vocabulary answers that are un-seen in the training set. To consider all the answer vocab-ularies in OVQA, we also introduce new baselines which further encode the answer features and calculate the simi-larity between the video-question features and the encoded answer features. This enables the open-vocabulary setting which is capable of handling unseen answers as illustrated in Fig. 2b. As a result, unlike previous CVQA models memorizing only frequent answers, the goal of OVQA is to consider all the open-vocabulary answers and evaluate the model performance and its generalizability without ig-noring rare or unseen answers.
+Similar to the CVQA evaluation metric, we use the ac-curacy (%) metric for OVQA. Yet, we report the total accu-racy as well as the accuracy for each answer category (base, common, rare, and unseen). We also introduce a mean ac-curacy (mAcc), averaging the accuracy for each unique an-swer, to assess the generalizability of the model. 2.3. Comparison with other benchmarks
+There have been several attempts to evaluate the vi-sual question answering models under out-of-distribution (OOD) settings since a number of studies have revealed that most existing models rely extremely on dataset bias to answer questions [23, 24, 25, 26, 27]. For example, in
+Visual Question Answering, [23] proposed VQA-CP v2, a new split of VQA v2 [28], by changing the answer distribu-tion for each question type between train and test splits, and pointed out that previous models are vulnerable to such dis-tribution shifts. Also, GQA-OOD [24] re-organized GQA
+dataset [29] and introduced a new benchmark with more comprehensive evaluation metrics (e.g., acc-tail and acc-head). However, these benchmarks did not investigate the unseen answers, which cannot assess the models’ zero-shot adaptability. In Video Question Answering, NExT-QA [30] introduced open-form video question answering which re-quires the model to generate the answer, i.e., a generation problem, without fixed answer candidates.
+In contrast to previous efforts, our OVQA aims to as-sess the models’ generalizability under a long-tail distribu-tion including out-of-vocabulary answers, i.e., few-shot and zero-shot adaptability. The term ‘open-vocabulary’ means that a model is required to predict answers that are un-seen during training by comparing the similarity between the video-question feature and the answer feature. With a sufficiently large number of unseen vocabulary, we define
+Open-vocabulary VideoQA. 3. GNN-based soft verbalizer
+By adopting an additional answer encoder to extract an-swer embeddings to enable OVQA, it is worth designing a way to fine-tune the answer embeddings. To achieve this, we propose a novel GNN-based soft verbalizer. The goal of our framework is learning to smooth the original answer candidates with their similar words augmented by an exter-nal knowledge base (e.g., GloVe [31] and ConceptNet [32]).
+Thus it helps the model enhance the prediction of rare or unseen answers and improves its generalizability by aggre-gating information from their neighborhoods. The overall architecture is illustrated in Fig. 3. We first briefly sum-marize the basic concepts of the verbalizer and GNNs, and then delineate our framework. 3.1. Preliminaries
+Verbalizer. Large-scale foundation models like BERT [33],
+CLIP [8], and GPT [34] have shown remarkable perfor-mance on various domains and tasks, and thus ways to fine-tune those effectively and efficiently have also gained atten-tion. For example, when fine-tuning on sentiment classi-fication, a common practice is to predict the label (POS-ITIVE or NEGATIVE) with a task-specific classification head (usually MLP) on [CLS] token of a given sentence.
+Nonetheless, this scheme does not fully leverage the pre-training objective, i.e., MLM, and its pretrained layer.
+It discards the MLM head and newly adopts the classification head, which would be trained from scratch with a classifi-cation loss, on top of [CLS] token.
+To effectively utilize the pretrained MLM head, [13] re-formulated an input sentence into a cloze form and imple-mented prediction by filling in the [MASK] token. In this literature, the mapping from the label space (POSITIVE or
+NEGATIVE) to the vocabulary (‘great’ or ‘terrible’) to be filled into the [MASK] token is called the verbalizer. Re-cent studies [20, 35] about the verbalizer have proposed one-to-many mapping with similar words from the exter-nal knowledge base, e.g., (POSITIVE → ‘great’, ‘perfect’,
+‘fun’, and ‘brilliant’) and (NEGATIVE → ‘terrible’, ‘aw-ful’, ‘disappointing’, and ‘not’). Also, to deal with the limitations of such hard verbalizers that use discrete label words, [16, 21, 22] introduced soft verbalizers by adopting learnable label embeddings.
+Remarks. Unlike prompt-tuning which maps the word to embedding by appending several learnable tokens at the input-level, the soft verbalizer maps the word feature to word feature in the embedding space, while the hard ver-balizer maps the word to word in the word-level.
+Graph Neural Networks (GNNs). A graph is denoted as
+G = (V, E), where V is a set of nodes and E is a set of edges. Each node i ∈ V has a node feature vector vi ∈ RD.
+A set of neighborhoods of the i-th node including itself is defined as Ni = {i} ∪ {j ∈ V|(i, j) ∈ E}. The majority of current GNNs [36, 37] use message-passing frameworks to train graph-structured data as: (cid:16) (cid:16) (cid:17)(cid:17) h(l) h(l−1) j i = σ
+: j ∈ Ni
+W(l) · AGGREGATE
+, (1) where h(l) is a hidden representation of the i-th node on i the l-th layer, h(0) is an input feature of the i-th node, and
+W(l) is a learnable weight matrix on the l-th layer. AG-GREGATE is an aggregation function defined differently by the model, and σ is a non-linear activation function. L-layer GNN is conducted by propagating the input features through Eq. (1) L times. i
+Latest studies [38, 39] have shown that most existing
+GNNs such as GCN [37] and GAT [40] effectively learn to propagate information and capture meaningful patterns in the graph when the connected nodes have similar charac-teristics. We hence adopt GNN to learn how to smooth the original answer with its similar words and apply it to the test vocabulary answers to adequately handle the rare or unseen answers by smoothing them with their neighborhoods. 3.2. Overall architecture
+Our model is based on FrozenBiLM [7] consisting of three components: a video encoder, a text encoder, and a cross-modal encoder.
+Video encoder. Each input video is divided into T frames and each frame is fed into CLIP ViT-L/14 [8, 41] to extract t=1 ∈ RT ×D, where D is the features denoted as X = {xt}T a feature dimension.
+Input prompt and text tokenizer. The input text prompt for OVQA is formulated as a cloze form [13, 42], i.e., the model is expected to fill in a mask token in the input the prompt. beginning and the end of each sequence. Textual subtitles attained from automatic speech recognition (ASR) can be
+[CLS] and [SEP] tokens are inserted at
+stead of using MLP as the classification head, we replace it with the similarity calculation between video-question multi-modal features and answer embeddings. 3.3. Answer graph construction
+We first construct an answer graph from an external knowledge base to be used for a GNN-based soft verbal-izer. We denote a neighborhood construction function of the original answer a as n(a). Note that n(a) may be con-sidered as an one-to-many mapping verbalizer introduced in Sec. 3.1. n(a) is composed of the nearest neighborhood words of a from GloVe [31]. Then, we augment them into one node set as:
+V (k) train = {j|j ∈ n(i) and i ∈ V (k−1) test = {j|j ∈ n(i) and i ∈ V (k−1)
+V (k) train } ∪ V (k−1)
+} ∪ V (k−1)
+, test train test (2) where V (0) test vocabulary sets. Also, the set of edges is defined as: train = Vtrain and V (0) test = Vtest, i.e., original train and
+E (k) train = {(j, i)|j ∈ n(i) and i ∈ V (k−1) train } test = {(j, i)|j ∈ n(i) and i ∈ V (k−1)
+E (k)
+}. test
+Then, the answer graph is as follows: train = (V (K)
+G(K) train , E (K) train ), G(K) test = (V (K) test , E (K) test ). (3) (4) train and G(K)
+Note that G(K) take into account K-hop neighbor-hoods for each answer, and we use K = 2 to consider up to 2-hop neighborhoods. Also, the edges directly connected in-between the original answers are dropped. test 3.4. Label smoothing
+| i test test i=1 i=1 ∈ R|V (K)
+After constructing the answer graph, we extract answer embeddings Vtrain = {vi}|V (K) train |
+∈ R|V (K) train |×D and Vtest =
+{vi}|V (K)
+|×D using the answer encoder (e.g., De-BERTa tokenizer) and they are used as input node features, i.e., h(0) in Eq. (1) is vi. Note that the answer encoder is frozen during training. At the training phase, a node feature
+Vtrain and a graph structure G(K) train are fed into a GNN.
+As for a message-passing algorithm, we modify the stan-dard graph attention network (GAT) to adopt the attention mechanism and use it to adjust the information taken from the neighbor nodes. The attention score from the j-th to i-th node is calculated as:
+α(l) ij = (cid:18) exp
+LeakyReLU (cid:80) k∈Ni
+W(l) (cid:18)(cid:16) (cid:18) exp
+LeakyReLU (cid:18)(cid:16) dst h(l−1) i (cid:17)⊤(cid:16)
+W(l) src h(l−1) j (cid:17)(cid:19)(cid:19)
+W(l) dst h(l−1) i (cid:17)⊤(cid:16)
+W(l) src h(l−1) k (cid:17)(cid:19)(cid:19) , src ∈ RD×D and W(l) (5) where W(l) dst ∈ RD×D are learnable weight matrices to project source and destination node fea-is tures, respectively.
+In Eq. (5), the attention score α(l) ij
+Figure 3: Overall architecture. (a) Video-question en-coding: a video-question pair is first encoded through a backbone architecture and the output feature of [MASK] token, m ∈ RD, is extracted. (b) GNN-based soft verbal-izer: an answer graph is constructed with both original an-swers and their augmented words from an external knowl-edge base, and GNN aggregates their information. (c) Sim-ilarity calculation: we finally calculate the similarity (de-noted as ⊗) between smoothed answer embeddings Htrain (or Htest) and [MASK] token output feature m.
+[MASK].
+Each optionally appended. The prompt is as follows: “[CLS]
+Question:
+<Question>? Answer:
+Subtitles: <Subtitles> [SEP]”. prompt n=1 ∈ RN ×D by sequence is tokenized to Y = {yn}N
+DeBERTa [43] tokenizer, where N is the number of tokens.
+Cross-modal encoder. The visual feature X and text fea-ture Y are forwarded to the cross-modal encoder. The model is optimized by the masked language modeling (MLM) objective and we especially denote the output fea-ture of [MASK] token as m ∈ RD. Then, our model com-pares the similarity between m and the answer features also encoded by DeBERTa tokenizer. Fig. 3 illustrates our over-all architecture.
+In contrast to CVQA whose train and test vocabulary sets are consistent with each other (top-k frequent answers), we consider two different vocabulary sets Vtrain and Vtest respec-tively where the former covers the entire answers from the training set and the latter contains the answers even unseen at the training phase. We further develop several OVQA baselines by modifying a classfication head. In details, in-Models
+MSVD-QA
+B
+C
+R
+U
+T M B
+CVQA
+ActivityNet-QA
+C
+U
+R
+T M B
+TGIF-QA
+MSRVTT-QA
+C
+R
+U
+T M B
+C
+R
+U
+T M
+----HCRN [6]
+ClipBERT [1]
+SiaSamRea [44]
+MERLOT [5]
+All-in-one [2]
+JustAsk [45]
+VIOLET [4]
+--------------------62.6 31.5 4.5 0.0 65.6 10.1 50.4 12.3 0.8 0.0 39.5 3.9 65.9 37.8 13.6 0.0 47.5 12.6 60.5 37.1 16.9 0.0 39.0 8.2 68.0 31.3 11.4 0.0 56.9 11.7 51.7 18.5 6.0 0.0 41.8 7.0 77.5 10.5 0.0 0.0 0.0 40.9 1.4
+FrozenBiLM [7] 72.7 48.3 18.9 0.0 54.9 17.2 68.1 40.8 16.4 0.0 43.5 7.9 77.9 51.8 24.7 0.0 68.6 23.5 57.0 25.5 0.0 0.0 46.6 6.7
+--------0.0 42.8 7.9 65.1 34.1 6.9 0.0 39.5 5.3 79.4 34.5 5.7 0.0 43.6 2.7 63.5 32.2 0.5 0.0 37.6 3.7 89.0 14.3 0.0 0.0 68.0 4.5 55.0 0.6 36.8
+-45.5
+---39.8 41.4 35.4 37.4 41.6
+-57.9 60.3 60.2 69.5
+------------------------------------------------OVQA
+All-in-one+
+JustAsk+
+VIOLET+ 62.8 34.0 6.3 0.4 43.8 9.4 64.9 35.9 9.8 0.5 40.2 6.8 78.3 39.3 10.2 0.4 66.0 13.2 49.8 14.6 1.6 0.0 39.5 4.7 65.6 37.9 13.6 6.3 47.7 14.5 60.6 37.1 16.7 4.8 40.0 11.5 68.0 32.1 12.4 9.8 57.4 14.4 51.5 18.4 6.0 2.6 41.8 7.6 0.1 49.5 10.7 63.4 37.1 9.2 0.6 39.7 6.1 77.3 38.9 10.8 2.0 65.3 14.3 53.8 14.7 0.9 0.0 42.4 4.5 70.6 38.8 6.7
+FrozenBiLM+ 72.2 48.2 21.6 16.1 55.8 21.7 68.8 39.9 17.3 5.8 44.8 12.4 77.7 52.1 28.6 21.3 69.0 30.2 56.1 26.6 11.7 6.6 47.0 12.4
+Table 2: Comparison with state-of-the-art models. B, C, R, U, T, and M refer to Base, Common, Rare, Unseen, Total, and mean accuracy (mAcc), respectively. + denotes our developed version of baselines for OVQA. Blue cell denotes performance increase and red cell denotes performance decrease compared to the baselines. computed based on the similarity between source node j and target node i. Subsequently, AGGREGATE function in
+Eq. (1) is defined as:
+AGGREGATE (cid:16) h(l−1) j
+: j ∈ Ni (cid:17)
+≜ (cid:88) j∈Ni ij h(l−1)
+α(l) j
+, (6) the weighted sum of neighbor node features based on the attention score α(l) ij .
+, h(L) 2
+After L-layer GNN, the output answer embeddings are obtained as Htrain = [h(L)
+, . . . , h(L)
+, . . . ]⊤ ∈ 1
+R|Vtrain|×D, where ∀i ∈ Vtrain. We use two layer GNNs, i.e.,
+L = 2, to aggregate the information up to 2-hop neigh-borhoods. For learning stability, we adopt convex combi-nations of output answer embeddings of a GNN-based soft verbalizer, Htrain, with input answer embeddings Vtrain as: i
+ˆHtrain = ε · Vtrain + (1 − ε) · Htrain, (7) where ε is a convex combination coefficient. Also, we fix the weight matrix W(l) in Eq. (1) of the main paper to an identity matrix. Stop-gradient is applied to the input answer embeddings (i.e., frozen answer encoder) so the additional trainable parameters in GNN-based soft verbalizer are W(l) src and W(l) dst in Eq. (5).
+Finally, the similarity is calculated between the output feature of [MASK] token of the cross-modal encoder, m, and the smoothed answer embeddings ˆHtrain to predict the label, i.e., ˆHtrainm ∈ R|Vtrain|. Both GNN and backbone architectures are trained with the following loss: (cid:16) ˆHtrainm
+L = CrossEntropy aGT, Softmax (cid:17)(cid:17) (8) (cid:16)
+, where aGT is a ground-truth answer. During training, our
+GNN-based soft verbalizer learns to smooth the original answers with their neighborhoods.
+In the test phase, the learned smoothing function softly updates information from their neighborhoods for the test vocabulary that includes rare and unseen answers. As a result, the GNN-based soft verbalizer enhances prediction on the out-of-vocabulary an-swers and alleviates the strong bias toward the frequent an-swers. 4. Experiments 4.1. Experimental setup
+Datasets and answer vocabularies. Our experiment cov-ers four open-ended VideoQA datasets: MSVD-QA [46],
+MSRVTT-QA [46], ActivityNet-QA [47], and TGIF-FrameQA [48]. For training/testing, MSVD-QA is split into 32K/13K. MSRVTT-QA follows 159K/73K. ActivityNet-QA splits into 32K/8K. TGIF-FrameQA uses 39K/13K.
+The specific numbers of train/test vocabularies respectively for each dataset are as follows: MSVD-QA 1852/1200,
+MSRVTT-QA 4000/4173, TGIF-FrameQA 1540/933, and
+ActivityNet-QA 1654/2103.
+Baselines We introduce new baselines by modifying ex-isting open-ended VideoQA models: All-in-one [2], Jus-tAsk [45], VIOLET [4], and FrozenBiLM [7]. We follow the vocabulary setting of each baseline to reproduce their performances.
+Implementation details. We adopt GloVe [31] as an ex-tra knowledge base to construct the answer graph. We use nearest neighborhood words of the original answer based on GloVe word embeddings to create the neighbor nodes.
+The answer graph is constructed by considering up to 2-hop neighborhoods from the original answer. We search ε in {0.5, 0.6, 0.7, 0.8, 0.9}. Further dataset and implemen-tation details for baselines are provided in the supplement.
+Models
+GNN-based
+MSVD-QA soft verbalizer B
+C
+R
+U
+T M B
+ActivityNet-QA
+C
+U
+R
+T M B
+TGIF-QA
+MSRVTT-QA
+C
+R
+U
+T M B
+C
+R
+U
+T M
+FrozenBiLM+
+✘
+✔ 72.1 47.8 20.3 13.7 55.4 20.8 67.7 37.4 15.5 4.2 43.2 10.4 77.5 51.7 28.5 18.7 68.9 30.1 55.8 26.4 11.4 5.8 46.7 12.1 72.2 48.2 21.6 16.1 55.8 21.7 68.8 39.9 17.3 5.8 44.8 12.4 77.7 52.1 28.6 21.3 69.0 30.2 56.1 26.6 11.7 6.6 47.0 12.4
+Table 3: Effectiveness of GNN-based soft verbalizer on various datasets
+Models
+GNN-based
+ActivityNet soft verbalizer B
+C
+R
+U
+T M
+All-in-one+
+JustAsk+
+VIOLET+
+✘
+✔
+✘
+✔
+✘
+✔ 64.9 35.9 9.8 0.5 40.2 6.8 65.0 40.8 13.8 1.6 42.0 8.7 60.6 37.1 16.7 4.8 40.0 11.5 61.5 35.6 18.9 5.1 40.4 12.1 63.4 37.1 9.2 0.6 39.7 6.1 63.6 36.1 12.9 0.6 39.9 7.4
+Table 4: Effectiveness of GNN-based soft verbalizer on various backbone models. 4.2. Evaluation on OVQA
+We first evaluate the open-ended VideoQA baseline models under both settings of CVQA and OVQA. In
+OVQA, we additionally introduce an answer encoder, De-BERTa [43] tokenizer, to extract the answer embeddings. In
+Tab. 2, for all the previous models in CVQA in general, the total performance (T) seems plausible but mAcc (M) is ex-tremely low, e.g., the total performance (T) of VIOLET is 40.9% but the accuracy of the non-base answers (C, R, U) is almost 0% resulting in 1.4% mAcc (M) on MSRVTT-QA.
+This means that previous CVQA baselines are highly biased toward frequent answers and fail to generalize on rare and unseen answers.
+On the other hand, by comparing Baseline (CVQA) and
+Baseline+ (OVQA) over the four baselines, mAcc (M) of
+OVQA baselines are impressively increased on all datasets.
+In detail, mAcc (M) of FrozenBiLM+ is improved by 4.5%, 4.5%, 6.7%, and 5.7% compared to FrozenBiLM on each dataset. As for the detailed accuracy of each category, the performance on base answers (B) tends to marginally de-crease, but the performance on others including the total performance significantly increases. This result indicates that further taking into account non-frequent answers is beneficial for total performance as well as mAcc. We also observe that baselines equipped with language models (e.g.,
+JustAsk with DistillBERT [49] and FrozenBiLM with De-BERTa [43]) show relatively larger improvement in unseen answers (U).
+The gap between the total performances (T) of standard
+VIOLET and All-in-one is 0.8% on MSVD-QA. Specifi-cally, the performance of base (B) and common answers (C) are 77.5% and 10.5% on VIOLET and 62.6% and 31.5% on
+All-in-one, respectively. This demonstrates that VIOLET is more biased toward base answers than All-in-one while the total performance is similar. This is also shown by compar-ing their mAcc (M) (7.9% on All-in-one but 2.7% on VIO-LET). Interestingly, our variant VIOLET+ significantly out-performs the standard VIOLET by a large margin of 5.9% and 8% in terms of the total performance (T) and mAcc (M) on MSVD-QA, respectively. The performance gain mainly comes from the common answers (C) while being improved from 10.5% to 38.8%. On the other hand, the total perfor-mance gap between All-in-one and All-in-one+ is relatively smaller than VIOLET, implying that the performance gain is significant if the model is highly biased toward base (fre-quent) answers. 4.3. Ablation studies on GNN-based soft verbalizer
+Effectiveness of GNN-based soft verbalizer. In Tab. 3, we conduct the ablation study of GNN-based soft verbalizer on FrozenBiLM+. By comparing FrozenBiLM+ with and without GNN-based soft verbalizer, the performance gains of unseen answers (U) are 2.4%, 1.6%, 2.6%, and 0.8% on MSVD-QA, ActivityNet-QA, TGIF-QA, and MSRVTT-QA respectively. The performances on base and common answers (B, C) are also improved across all datasets im-plying that GNN-based soft verbalizer is beneficial to not only rare and unseen answers but also base and common answers.
+Furthermore, the performance gain of base and com-mon answers (B, C) is larger on AcitivityNet-QA than other datasets. We conjecture that this comes from the dataset annotations where most unseen answers on datasets except for ActivityNet-QA consist of hyponyms of base and com-mon answers. For example, in MSVD-QA, ‘play’ (hyper-nym) is in base answers while ‘golf’ (hyponym) belongs to unseen answers. GNN-based soft verbalizer enables the model to accurately predict the answer ‘golf’ yet accord-ing to the annotation, the ground-truth answer is ‘play’ (See
+Fig. 4d for details). Hence, this sometimes leads to the per-formance degradation on base answers by trying to predict accurate hyponym. On the other hand, most unseen answers in ActivityNet-QA comprise phrases that cannot be covered by base answers like ‘double fold eyelids’ (Fig. 4b), and thus considering unseen answers does not affect the per-formance on base answers. As a result, the performances on base and common answers are also increased by a large
+Verbalizer
+ActivityNet
+Answer graph soft/hard B
+C
+R
+U
+T M (A) (B) (C) (D) (E)
+✘
+✘
+✔
+✔
+N/A 67.7 37.4 15.5 4.2 43.2 10.4 hard soft hard soft 68.1 31.0 10.2 3.0 41.2 7.9 68.9 39.1 16.7 4.7 44.4 10.8 68.3 37.6 15.4 4.5 43.6 10.5 68.8 39.9 17.3 5.8 44.8 12.4
+Table 5: Comparison of each verbalizer type on Frozen-BiLM+. (A) does not adopt the verbalizer. (B) uses neither answer graph nor learnable verbalizer, i.e., only conducting mean-pooling of similar words from the external knowledge base. (C) adapts an MLP to be trainable from (B). Both (D) and (E) construct answer graph but (D) uses the mean-pooled feature of fixed answer embeddings while (E) adap-tively adjusts them. Note that (E) is our GNN-based soft verbalizer. margin along with the improvements on rare and unseen an-swers.
+Tab. 4 also shows the effectiveness of GNN-based soft verbalizer by applying it to various backbone models. We extract answer embeddings in an offline manner using frozen answer encoder (DeBERTa tokenizer) on All-in-one and VIOLET. On the other hand, JustAsk uses its own an-swer encoder which is unfrozen during training so we adopt a 2-stage training scheme: train the answer encoder of Jus-tAsk first and then train our GNN-based soft verbalizer with the trained answer encoder frozen. With a GNN-based soft verbalizer, the total performance (T) and mAcc (M) are consistently improved on all other models. Especially, the performances of rare answers (R) are increased by 4%, 2.2%, and 3.7% on All-in-one+, JustAsk+, and VIOLET+, signifying that GNN-based soft verbalizer is a generally ap-plicable algorithm.
+Comparison of various verbalizers. We also compare various verbalizers with our GNN-based soft verbalizer in
+Tab. 5. First, the method with a hard verbalizer (B), which utilizes a mean-pooled feature of similar words from the external knowledge base, exhibits considerable degradation compared to the method without a verbalizer (A). How-ever, (C) outperforms both (A) and (B) demonstrating that leveraging a soft verbalizer with a learnable MLP layer im-proves the model performance by adequately adjusting the information of similar words. Also in general, (D) and (E) surpass (B) and (C), respectively, indicating that con-structing the verbalizer with answer graphs and message-passing algorithms leads to more effective answer embed-dings. Specifically, our full model (E) outperforms (C) by 0.6% and 1.1% for rare and unseen respectively resulting in 1.6% improvement in mAcc. This demonstrates that our
+GNN-based soft verbalizer adaptively aggregates the infor-(a) (b) (c) (d)
+Figure 4: Examples of unseen answers. (a) and (b) are success cases and (c) and (d) are failure cases. mation of similar words on answer graphs and yields more effective answer embeddings. 4.4. Qualitative results
+Examples of unseen answers. Fig. 4 shows qualitative re-sults on the unseen answers comparing FrozenBiLM and our FrozenBiLM+. For example in Fig. 4a, FrozenBiLM is limited to the answer only within the closed-vocabulary set, “kitchen”, for the question “What is the person in the video doing?”. On the other hand, FrozenBiLM+ is ca-pable of predicting the out-of-vocabulary answer “making cocktails” with the guidance of answer embeddings from the answer encoder. Furthermore, FrozenBiLM is biased toward frequent answers by considering only top-k candi-dates. Specifically on ActivityNet-QA (Fig. 4b), it tends to predict “yes” on the question starting with “Is” since 97% of answers to such question types are “yes” or “no”. This language bias is commonly observed in question answering tasks [25, 26, 27]. However, unlike the baseline, our model alleviates such bias and corrects the output to “double fold eyelids”. Finally, Fig. 4c illustrates the failure case when the unseen answer is considered in MSVD-QA. As men-tioned in Sec. 4.3, since most unseen answers are hyponyms of base and common answers, accurately predicting the an-swer as ‘chinchilla’ is regarded as incorrect although the
+Figure 5: Confidence scores of the top-5 predictions w/ and w/o GNN-based soft verbalizer on FrozenBiLM+. visual content actually depicts ‘chinchilla’.
+Visualization of GNN-based soft verbalizer.
+In Fig. 5, we also qualitatively compare the models with and without a GNN-based soft verbalizer on FrozenBiLM+. Without a
+GNN-based soft verbalizer, the model is over-confident in the wrong answer “sharpening”. However, with a GNN-based soft verbalizer, the model corrects its output to “cut tomato” regularizing its over-confidence. To show how the
+GNN-based soft verbalizer smoothes the original answer, in
+Fig. 6, we illustrate the attention score αij in Eq. (5). We observe that GNN-based soft verbalizer aggregates the in-formation mainly from “chop”, “slice”, and “tomatoes” to predict the answer “cut tomato”. On the other hand, it is reluctant to utilize the information of “cheese” or “potato”, which are less relevant to the video, although they belong to the neighborhoods. This reveals that the answer embed-dings are effectively updated by GNN-based soft verbalizer through adjusting the neighborhood information. 5.

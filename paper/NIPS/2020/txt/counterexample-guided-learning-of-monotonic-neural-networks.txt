@@ -1,0 +1,233 @@
+Abstract
+The widespread adoption of deep learning is often attributed to its automatic feature construction with minimal inductive bias. However, in many real-world tasks, the learned function is intended to satisfy domain-speciﬁc constraints. We focus on monotonicity constraints, which are common and require that the function’s output increases with increasing values of speciﬁc input features. We develop a counterexample-guided technique to provably enforce monotonicity constraints at prediction time. Additionally, we propose a technique to use monotonicity as an inductive bias for deep learning. It works by iteratively incorporating monotonicity counterexamples in the learning process. Contrary to prior work in monotonic learning, we target general ReLU neural networks and do not further restrict the hypothesis space. We have implemented these techniques in a tool called COMET.1
+Experiments on real-world datasets demonstrate that our approach achieves state-of-the-art results compared to existing monotonic learners, and can improve the model quality compared to those that were trained without taking monotonicity constraints into account. 1
+
+Introduction
+Deep neural networks are increasingly used to make sensitive decisions, including ﬁnancial decisions such as whether to give a loan to an applicant [25] and as controllers for safety critical systems such as autonomous vehicles [7, 54]. In these settings, for safety, ethical, and legal reasons, it is of utmost importance that some of the decisions made are monotonic. For example, one would expect an individual with a higher salary to have a higher loan amount approved, all else being equal, and the speed of a drone to decrease with its proximity to the ground. Learning problems in medicine, revenue-maximizing auctions [17], bankruptcy prediction, credit rating, house pricing, etc., all have monotonicity as a natural property to which a model should adhere. Guaranteeing monotonicity helps users to better trust and understand the learned model [24]. Furthermore, prior knowledge about monotonic relationships can also be an effective regularizer to avoid overﬁtting [14].
+Unfortunately, there is no easy way to specify that a trained neural network should be monotonic in one or more of its features. Existing approaches to this problem, such as min-max networks [40], monotonic lattices [16], and deep lattice networks [53], guarantee monotonicity by construction but do so at the cost of signiﬁcantly restricting the hypothesis class. Other solutions, such as learning a linear function with positive coefﬁcients, are even more restrictive. Furthermore, techniques that 1https://github.com/AishwaryaSivaraman/COMET 34th Conference on Neural Information Processing Systems (NeurIPS 2020), Vancouver, Canada.
+enforce monotonicity as a soft constraint in neural networks [41, 23] suffer from not being able to provide any provable monotonicity guarantee at prediction time. Finally, the well-known framework of isotonic regression [4, 37] is effective only when the training data can be partially ordered, which is rarely the case in high dimensions.
+This paper develops techniques to incorporate monotonicity constraints for standard ReLU neural networks without imposing further restrictions on the hypothesis space. These techniques leverage recent work that employs automated theorem provers to formally verify robustness and safety proper-ties of neural networks [49, 50, 18, 28]. First, we present a counterexample-guided algorithm that provably guarantees monotonicity at prediction time, given an arbitrary ReLU neural network. Our approach works by constructing a monotonic envelope of the given model on-the-ﬂy via veriﬁcation counterexamples. Empirically we show that we guarantee monotonicity with little to no loss in model quality at a computational cost on the order of a few seconds on standard datasets. Second, we propose a new counterexample-guided algorithm to incorporate monotonicity as an inductive bias during training. We identify monotonicity counterexamples on the training data, inducing additional supervision for training the network, and perform this process iteratively. We also show that monotonicity is an effective regularizer: our counterexample-guided learning algorithm improves the overall model quality. Empirically, the two algorithms, when used in conjunction, enable better generalization while guaranteeing monotonicity for both regression and classiﬁcation tasks. We have implemented our algorithms in a tool called “COunterexample-guided Monotonicity Enforced
+Training” (COMET). Finally, we demonstrate that COMET outperforms min-max and deep lattice networks [53] on four real-world benchmarks.
+Organization. Section 2 introduces our problem statement and notation. Sections 3 and 4 re-spectively describe our proposed algorithms: counterexample-guided monotonic prediction and counterexample-guided monotonic training. Experimental results in Sections 3.2 and 4.2 demonstrate the potential of COMET on real-world benchmark datasets. Section 5 reviews related work in learning monotonic functions. We conclude and provide future directions in Section 6. 2 Preliminaries: Finding Monotonicity Counterexamples
+We begin by introducing some common notation. Let X be the input space consisting of d features, and suppose that it is a compact ﬁnite subset X = [L, U ]d of Rd. Let Y be the output space. We consider regression and (probabilistic) binary classiﬁcation tasks where Y is totally ordered.
+Our goal will be to learn functions that are monotonic in some of their input features.
+Deﬁnition 1. A function f : X → Y is monotonically increasing in features S iff each feature in S is totally ordered and for any two inputs x, x(cid:48) ∈ X that are (i) non-decreasing in features S,
+∀i ∈ S, x[i] ≤ x(cid:48)[i], and (ii) holding all else equal, ∀k (cid:54)∈ S, x[k] = x(cid:48)[k], the output of the function is non-decreasing: f (x) ≤ f (x(cid:48)).
+Formal properties of functions are often characterized in terms of their counterexamples.
+Counterexample-guided algorithms are prevalent in the ﬁeld of formal methods, for example to verify [10] and synthesize programs [44]. The techniques proposed in this paper will be centered around using counterexamples to the monotonicity speciﬁcation.
+Deﬁnition 2. A pair of inputs x, x(cid:48) ∈ X is a monotonicity counterexample pair for the ith feature of function f : X → Y iff the points are (i) non-decreasing in feature i, that is, x[i] ≤ x(cid:48)[i], (ii) holding all else equal, that is, ∀k (cid:54)= i, x[k] = x(cid:48)[k], and (iii) the function is decreasing: f (x) > f (x(cid:48)).
+Notably, for a function to be (jointly) monotonic in features S, it is both necessary and sufﬁcient that there does not exist a monotonicity counterexample pair for any of the individual features in S.
+ReLU neural networks generalize well and are widely used [20, 51, 13], particularly in the context of veriﬁcation and robustness. Hence, we will assume that f is a ReLU neural network.
+Deﬁnition 3. A ReLU neural network is a directed acyclic computation graph consisting of neurons that compute ReLU((cid:80) i wixi + b), where the activation function is a rectiﬁed linear unit ReLU(y) = max(0, y), the weights wi and bias b are parameters associated with each neuron, and neuron inputs xi are either input features or values of other neurons. The value of a designated output neuron deﬁnes the value of a function f : X → Y. 2
+Counterexample-guided algorithms rely on the ability to ﬁnd counterexamples, usually by relegating the task to an off-the-shelf solver. This requires that both the counterexample speciﬁcation and the object of interest — in this case the function f — can be encoded in a formal language amenable to automated reasoning. We will use a satisﬁability modulo theories (SMT) solver [5] for this purpose.
+Recall that satisﬁability (SAT) is the problem of deciding the existence of assignments of truth values to variables such that a propositional logical formula is satisﬁed. SMT generalizes SAT to deciding satisﬁability for formulas with respect to a decidable background theory [5]. We will use the background theory of linear real arithmetic (LRA), which allows for expressing Boolean combinations of linear inequalities between real number variables.
+The encoding of ReLU neural networks into SMT(LRA) is well-known and readily available [28, 27].
+Brieﬂy, the relationship between any neuron value and its inputs is encoded in SMT(LRA) as follows. The linear sum over neuron inputs is already a linear constraint. Additionally, we encode the non-linearity of the ReLU activation function using logical implications in SMT. Concretely, for z = ReLU(y) = max(0, y), we add two SMT constraints: y > 0 → z = y and y ≤ 0 → z = 0.
+We can now ask an SMT solver to ﬁnd monotonicity counterexample pairs: we simply take the (linear) conditions in Deﬁnition 2 and conjoin with the SMT (LRA) encoding of the function f . Linear real arithmetic is a decidable theory [45]; hence we will always obtain a correct counterexample if one exists. In Section 3, we require the ability to obtain a counterexample that maximally violates the monotonicity speciﬁcation. Hence, we use Optimization Modulo Theories (OMT) [38], which is an extension of SMT for ﬁnding models that optimize secondary linear objectives, which is again decidable. Note that our deﬁnitions consider monotonically increasing features, and we assume that form of monotonicity throughout. We can analogously deﬁne corresponding notions for monotonically decreasing features, and our algorithms can be applied straightforwardly to that setting as well.
+While this setup allows us to verify monotonicity of a learned function, it is not at all clear how to guarantee monotonicity, or how to enforce monotonicity during training as an inductive bias. The next two sections present the counterexample-guided algorithms that address these challenges. 3 Counterexample-Guided Monotonic Prediction
+A neural network trained using traditional approaches is not guaranteed to satisfy monotonicity constraints. In this section, we describe a technique to convert a non-monotonic model to a monotonic one. The technique leverages monotonicity counterexamples to construct a monotonic envelope (or hull) of the learned model. Further, our technique is online: the monotonic envelope is constructed on-the-ﬂy at prediction time.
+Neural Network
+Upper Envelope
+Lower Envelope 20 15 10
+)
+$ k ( e c i r
+P d e t c i d e r
+P 2 4
+#Rooms 6
+Figure 1: Monotone envelopes around a simple non-monotone learned function 3.1 Envelope Construction
+As an example, consider the regression task of predicting house prices, which monotonically increase with the number of rooms.
+Suppose that the solid line (
+) in Figure 1 plots the learned model’s predictions. This function is not monotonic; for example f (3) > f (4).
+The two dotted lines in Figure 1 show two monotonic envelopes that our technique produces: an upper envelope (
+) that increases the output where necessary to ensure monotonicity, and a lower envelope (
+) that decreases the output where necessary to ensure monotonicity. The rest of this section describes these envelopes formally and presents an empirical evaluation of the technique.
+We ﬁrst describe envelope construction for the case with a single monotonic feature (with any number of other features) and then generalize the approach to handle multiple monotonic features. 3.1.1 Envelope - Single Monotonic Feature
+Recall that Deﬁnition 2 in the previous section deﬁnes when a pair of inputs constitutes a monotonicity counterexample. To construct the envelope we require a special form of such counterexamples, namely maximal ones in terms of the degree of monotonicity violation, while ﬁxing a single input example. 3
+Deﬁnition 4. Consider example x ∈ X , function f : X → Y, and feature i. Let set A (resp. B) consist of all examples x(cid:48) such that (x, x(cid:48)) (resp. (x(cid:48), x)) is a counterexample pair for f and i. Then, a lower envelope counterexample for example x, function f and feature i is an example x(cid:48) ∈ A that minimizes f (x(cid:48)). An upper envelope counterexample is an example x(cid:48) ∈ B that maximizes f (x(cid:48)).
+For example, consider Figure 1 again. The upper envelope counterexample for input 3 is the input 2, since f (2) has the maximal value of all counterexamples below 3. The lower envelope counterexample for the input 3 is 4, since f (4) has the minimal value of all counterexamples above 3.
+Now we can deﬁne the upper and lower envelopes of a function.
+Deﬁnition 5. The upper envelope f u i of function f : X → Y for feature i is deﬁned as follows: f u i (x) = (cid:26)f (x(cid:48)) where x(cid:48) is an upper envelope counterexample for x, f , and i f (x ) if no such counterexample exists
+The lower envelope f l i is deﬁned analogously.
+We observe that it is not necessary to construct the envelope function explicitly. Rather, to ensure monotonicity, it sufﬁces to construct the envelope incrementally at prediction time. Given an input xt, we make a single query to an SMT solver to ﬁnd the input’s upper (lower) envelope counterexample or determine that no such counterexample exists. Note that this query is much simpler than would be required to verify that the original function is monotonic. Doing the latter would require searching for an arbitrary monotonicity counterexample pair (Deﬁnition 2), which is a pair of points. In contrast, our query is given the input xt and hence only requires the SMT solver to search over the space of inputs that are identical to xt except in the ith dimension. Concretely, for a feature i in the bounded interval [L, U ], the upper envelope search is over the interval [L, xt[i]) and the lower envelope search is over the interval (xt[i], U ]. Empirically we will later show that our envelope construction is faster than querying for an arbitrary counterexample pair (see Figure 3). 3.1.2 Envelope - Multi-Dimensional Case
+We now generalize our envelope construction to the case where multiple dimensions are monotonic.
+For space reasons we present only the upper envelope construction; the lower envelope is analogous.
+Recall from Section 2 that, to verify if a function is monotonic in more than one dimension, it is sufﬁcient to verify that it is monotonic in each dimension separately. However, to construct the envelope, it is not sufﬁcient to identify maximal counterexamples in each dimension and then take the maximum of these maxima. The envelopes produced using that approach are not guaranteed to be monotonic (see appendix for an example). To overcome this problem, we generalize to multiple dimensions by searching jointly in all monotonic dimensions and prove that this approach is correct.
+Deﬁnition 6. Consider example x ∈ X , function f : X → Y, and set of features S. Let set B consist of all examples x(cid:48) such that ∀i ∈ S, x(cid:48)[i] ≤ x[i] and ∀i (cid:54)∈ S, x(cid:48)[k] = x[k] and f (x(cid:48)) > f (x). An upper envelope counterexample is an example x(cid:48) ∈ B that maximizes f (x(cid:48)).
+It is easy to show that this approach does not identify spurious counterexamples: if an upper envelope counterexample exists for x and f and set of features S, then there is a dimension i ∈ S and points x(cid:48) and x(cid:48)(cid:48) such that x(cid:48) and x(cid:48)(cid:48) are a monotonicity counterexample for f in the ith dimension.
+We can now deﬁne the upper envelope function, analogous to the single-dimensional case:
+Deﬁnition 7. The upper envelope f u
+S of function f : X → Y for feature set S is deﬁned as follows: f u
+S (x) = (cid:26)f (x(cid:48)) where x(cid:48) is an upper envelope counterexample for x, f , and S f (x ) if no such counterexample exists
+Finally, we prove that the upper envelope is in fact monotonic, even when the function f is not.
+Theorem 1. For any function f and set of features S, the upper envelope f u
+S is monotonic in S.
+Proof. Let i0 ∈ S and x and x(cid:48) be any two inputs such that x[i0] ≤ x(cid:48)[i0] and ∀k (cid:54)= i0, x[k] = x(cid:48)[k].
+We will prove that f u
+S is monotonic. There are two cases:
+S (x(cid:48)) and hence that f u
+S (x) ≤ f u 4
+1. An input x(cid:48) e is the upper envelope counterexample for x(cid:48), f , and S, so f u
+S (x(cid:48)) = f (x(cid:48) e). We have two subcases.
+• An input xe is the upper envelope counterexample for x, f , and S, so f u
+S (x) = f (xe).
+By Deﬁnition 6 we have that ∀i ∈ S, xe[i] ≤ x[i] ∧ ∀i (cid:54)∈ S, xe[k] = x[k], so also
+∀i ∈ S, xe[i] ≤ x(cid:48)[i] ∧ ∀i (cid:54)∈ S, xe[k] = x(cid:48)[k]. Therefore again by Deﬁnition 6 it must be the case that f (xe) ≤ f (x(cid:48)
+• There is no upper envelope counterexample for x, f , and S, so f u
+S (x) = f (x). Since
+∀i ∈ S, x[i] ≤ x(cid:48)[i] ∧ ∀i (cid:54)∈ S, x[k] = x(cid:48)[k], by Deﬁnition 6 it must be the case that f (x) ≤ f (x(cid:48) e). e). 2. There is no upper envelope counterexample for x(cid:48), f , and S. The proof is similar (details in appendix).
+Hence, our envelope construction algorithm guarantees monotonicity of the predictive function, regardless of where it is evaluated, and regardless of the underlying learned function. 3.2 Empirical Evaluation of Monotonic Envelopes
+We report the experimental results on the quality and performance of the envelope construction algorithm. Experiments were implemented in Python using the Keras deep learning library [9], we use the ADAM optimizer [29] to perform stochastic optimization of the neural network models, and we use the Optimathsat [39] solver for counterexample generation.
+Train Test s e l p m a x e r e t n u o
+C
+% 40 20 1 2
+#Monotonic Features 3
+Figure 2: Empirically, the best learned baseline model is not monotonic. The
+ﬁgure presents the percentage of exam-ples that have an upper or lower enve-lope counterexample for the Auto MPG dataset.
+Data and experiment setup: We use four datasets: Auto
+MPG and Boston Housing are regression datasets used for predicting miles per gallon (monotonically decreasing with respect to features weight (W), displacement (D), and horse-power (HP)) and housing prices (monotonically decreasing in crime rate and increasing in number of rooms) respectively and are obtained from the UCI machine learning repository [6];
+Heart Disease [19] and Adult [6] are classiﬁcation datasets used for predicting the presence of heart disease (monotoni-cally increasing with trestbps (T), cholestrol (C)) and income level (monotonically increasing with capital-gain and hours per week) respectively. For each dataset, we identify the best baseline architecture and parameters by conducting grid search and learn the best ReLU neural network (NNb). We carry out our experiments on three random 80/20 splits and report av-erage test results, except for the Adult dataset, for which we report on one random split.
+Q1. Is a deep neural network trained on such data monotonic? Figure 2 shows that the best baseline model (NNb) is not monotonic, motivating the need for envelope predictions that guarantee monotonicity. The percentage of data points that have a counterexample can be as high as 50% for
+Auto MPG. See Table 6 in the appendix for detailed results on all datasets, where the percentage can be as high as 98%.
+Table 1: For regression (MSE, Left Table) and classiﬁcation (Accuracy, Right Table) datasets, envelope predictions on test data have similar quality compared to baseline models. This means we can guarantee monotonic predictions with little to no loss in model quality.
+Dataset
+Feature
+Auto-MPG
+Boston
+Weight
+Displ.
+W,D
+W,D,HP
+Rooms
+Crime
+NNb 9.33±3.22 9.33±3.22 9.33±3.22 9.33±3.22 14.37±2.4 14.37±2.4
+Envelope 9.19±3.41 9.63±2.61 9.63±2.61 9.63±2.61 14.19±2.28 14.02±2.17
+Dataset
+Feature
+Heart
+Adult
+Trestbps
+Chol.
+T,C
+Cap. Gain
+Hours
+NNb 0.85±0.04 0.85±0.04 0.85±0.04
+Envelope 0.85±0.04 0.85±0.05 0.85±0.05 0.84 0.84 0.84 0.84
+Q2. When enforcing monotonicity using an envelope, does it come at a cost in terms of pre-diction quality? In this experiment, we compare the quality of the original model (NNb) with its 5
+envelope on the test data. We select the envelope with the lowest train mean squared error (MSE) in case of regression and highest train accuracy in case of classiﬁcation. Table 1 demonstrates that an envelope can be used with a single or multiple monotonic features with little to no loss in prediction quality. In fact, in some cases (see rows in bold), the envelope has better average quality. This can be explained as follows: although the true data distribution is naturally monotonic, existing learning algorithms might be missing simpler monotonic models and instead overﬁt a non-monotonic function because of noise in the training data.
+Q3. How scalable is on-the-ﬂy en-velope construction? In this exper-iment, we report the run times for the Auto MPG dataset. Recall that the envelope approach need only search for maximal counterexam-ples relative to a given input. Owing to the narrowed search space, we see that envelope prediction time is comparable to the baseline model’s prediction time in smaller models (see Figure 4). Overhead caused by envelope construction is only a few seconds. In contrast, the overhead to ﬁnding a maximal counterexample pair (Deﬁnition 2) for a single monotonic feature is 48.29 minutes. As a scalability study, in Figure 4, we plot the time taken to obtain a monotonic prediction for various model sizes. We can see that the envelope prediction time is comparable to the baseline prediction time in smaller models but grows with the model size. The growth is signiﬁcantly less pronounced in the number of monotonic features (see Figure 3). Of course, when violating monotonicity leads to safety, ethical or legal problems, the question is not whether we can scale monotonicity enforcement, but whether it is safe to use machine learning at all. In this context, the computational price of enforcing monotonicity, even if it ends up being signiﬁcant, is entirely warranted.
+Figure 3: Prediction Time (s) vs.
+#Monotonic Features
+Figure 4: Prediction Time (s) vs.
+Model Size 4 Counterexample-Guided Monotonicity Enforced Training
+In this section we propose an algorithm that uses monotonicity as an inductive bias during learning to improve model quality. This algorithm is orthogonal to the envelope prediction technique of the previous section; we evaluate the learning algorithm both on its own and in conjunction with the envelope technique. 4.1 Counterexample-guided Learning
+The learning algorithm consists of two phases that alternate: the training phase and the veriﬁcation phase. The training phase is given labeled input data and produces the best candidate model f . The veriﬁcation phase checks if a given model is monotonic; if not, it generates one or more counterexamples, which are provided as additional data for the next iteration of the training phase.
+These two phases repeat for T epochs, which is a hyperparameter to the algorithm.
+The algorithm is universal in the sense that it is compatible with any training technique that produces
+ReLU models and does not further restrict the hypothesis class. This gives our approach an advantage over prior monotonic learners [40, 53].
+The veriﬁcation phase could use Deﬁnition 2 to identify monotonicity counterexamples, but this has two major drawbacks: (1) it is computationally expensive as the size of the pre-trained model grows; (2) an arbitrary counterexample might include out-of-distribution examples, which are therefore not representative. Hence, we instead appeal to Deﬁnition 6 to generate maximal counterexamples relative to each training point. In each epoch, for each train point we generate and use both upper and lower envelope counterexamples as additional data for the next round of training.
+At this point, we are almost done with the algorithm, with the following detail to address. Counterex-amples generated by the veriﬁcation procedure do not have a known ground-truth label. There are different heuristics that one could adopt to label these points and encourage the learned function to become more monotonic. In our algorithm, for regression tasks we calculate the average prediction 6
+values of upper and lower counterexamples and the given training point and assign this average as the label for these counterexamples and the training point. The hypothesis is that using the average value will result in a smoother loss with respect to monotonicity. For classiﬁcation tasks, we assign each counterexample point the same label as the corresponding training point. Empirically (see Table 3), we will show that this labelling heuristic is sufﬁcient to improve the model quality.
+Data augmentation through counterexamples could cause drift in the model quality. Our approach guards against this in multiple ways. First, data augmentation with counterexamples is recomputed for each batch at every epoch. This ensures that: 1) an incorrect old counterexample does not burden the learning, and 2) learning incorporates multiple counterexamples at a time and so is less sensitive to any particular one. Second, the labeling heuristic for counterexamples provides a smoother loss with respect to monotonicity. Empirically (see Table 2), we will show that there is no drift in the model quality. The quality of our model is similar or better than a model trained without monotonicity constraints. 4.2 Empirical Evaluation of COMET
+We will now evaluate our iterative algorithm for training with monotonicity counterexamples, as well as the entire COMET pipeline, which also includes the envelope technique from the previous section.
+We use the same datasets as in Section 3.2.
+Table 2: Monotonicity is an effective inductive bias. Counterexample-guided Learning (CGL) improves the quality of the baseline model in regression (MSE, Left Table) and classiﬁcation (Accuracy, Right Table) datasets
+Dataset
+Feature
+Auto-MPG
+Boston
+Weight
+Displ.
+W,D
+W,D,HP
+Rooms
+Crime
+NNb 9.33±3.22 9.33±3.22 9.33±3.22 9.33±3.22 14.37±2.4 14.37±2.4
+CGL 9.04±2.76 9.08±2.87 8.86±2.67 8.63±2.21 12.24±2.87 11.66±2.89
+Dataset
+Feature
+Heart
+Adult
+Trestbps
+Chol.
+T,C
+Cap. Gain
+Hours
+NNb 0.85±0.04 0.85±0.04 0.85±0.04
+CGL 0.86±0.02 0.85±0.05 0.86±0.06 0.84 0.84 0.84 0.84
+Q4. Is the stronger inductive bias of our learning algorithm able to improve the overall quality of the original non-monotonic model? In this experiment we compare the test quality of the model learned with monotonicity counterexamples with the original model (NNb). From Table 2, we can see that monotonicity is indeed an effective inductive bias that helps improve the model quality. It is able to reduce the error on all regression datasets, with the biggest decrease from 14.37 to 11.66 for the Boston Housing dataset when employing monotonicity counterexamples based on the Crime Rate feature. Although the algorithm improves the quality, it does not guarantee monotonic predictions.
+Q5. Does our learning algorithm make the original non-monotonic model more monotonic? To quantify if a function is more monotonic, we calculate the reduction in the number of counterexamples.
+On average, our algorithm reduces the number of test counterexamples by 62%. Although in some cases we can remove all counterexamples, in general this is not the case (see Table 7 in Appendix for detailed results). This motivates the need for using monotonic envelopes (described in Section 3) in conjunction with the counterexample-guided learning algorithm, to guarantee monotonic predictions.
+Table 3: For regression (MSE, Left Table) and classiﬁcation (Accuracy, Right Table) datasets, counterexample-guided learning improves the envelope quality
+Dataset Features
+Auto-MPG
+Boston
+Weight
+Displ.
+W,D
+W,D,HP
+Rooms
+Crime
+NNb Env. 9.19±3.41 9.63±2.61 9.63±2.61 9.33±2.61
+COMET 8.92±2.93 9.11±2.25 8.89±2.29 8.81±1.81 14.19±2.28 14.02±2.17 11.54±2.55 11.07±2.99
+Dataset
+Features
+Heart
+Adult
+Trestbps
+Chol.
+T,C
+Cap. Gain
+Hours
+NNb Env. 0.85±0.04 0.85±0.05 0.85±0.05
+COMET 0.86±0.03 0.87±0.03 0.86±0.03 0.84 0.84 0.84 0.84
+Q6. Does counterexample-guided learning help improve the quality of the original model’s envelope? In Section 3.2 Q2, (Table 1), we showed that the envelope has similar model qual-ity compared to the baseline model. By additionally enforcing monotonicity constraints through counterexample-guided re-training, we further improve the envelope quality (Table 3). In this ex-periment we re-train NNb with counterexamples for 40 epochs, model selection is based on train 7
+quality, and we report the change in the quality of the test envelope (see the appendix for additional model selection experiments). Thus, we get both a monotonicity guarantee and better generalization performance.
+Table 4: COMET outperforms Min-Max networks on all datasets. COMET outperforms DLN in regression datasets and achieves similar results in classiﬁcation datasets.
+Dataset Features Min-Max
+COMET
+DLN
+Dataset
+Features Min-Max
+DLN
+COMET
+Auto-MPG
+Boston
+Weight
+Displ.
+W,D
+W,D,HP
+Rooms
+Crime 9.91±1.20 11.78±2.20 11.60±0.54 10.14±1.54 16.77±2.57 16.67±2.25 16.56±2.27 13.34±2.42 8.92±2.93 9.11±2.25 8.89±2.29 8.81±1.81 30.88±13.78 25.89±2.47 15.93±1.40 12.06±1.44 11.54±2.55 11.07±2.99
+Heart
+Adult
+Trestbps
+Chol.
+T,C
+Cap. Gain
+Hours 0.75±0.04 0.75±0.04 0.75±0.04 0.85±0.02 0.85±0.04 0.86±0.02 0.86±0.03 0.87±0.03 0.86±0.03 0.77 0.73 0.84 0.85 0.84 0.84
+Q7. How does the performance of COMET compare to existing work? Table 4 reports the MSE and accuracy of COMET compared to two existing methods that guarantee monotonicity: min-max networks [12] and deep lattice networks (DLN) [53]. We tune Adam stepsize, learning rate, number of epochs, and batch size on all methods. Additionally, for DLN we tune calibration keypoints and report the results based on the six-layer architecture as proposed by the authors. The results in Table 4 indicate that COMET outperforms min-max networks on all datasets and DLN on all except for Adult, where we are similar.
+Q8. How robust is COMET to data outliers? COMET constructs its monotonic envelope on the learned function and not on the data. Therefore, individual data outliers will not affect it too much.
+Moreover, if the function to be learned is naturally monotonic, enforcing invariants counteracts noise and outliers, leading to improved robustness. To illustrate this advantage, we duplicate 1% of the data and modify the value of the monotonic feature and the label for each new point in order to introduce monotonicity outliers (violations). For example, for an increasing monotonic feature, we reduce the label and increase the value of the monotonic feature. Table 5 shows that our approach produces more robust models, with COMET improving baseline model quality.
+Table 5: With monotonicity data outliers, COMET produces models that are more robust than the baseline models (NNb) for regression (MSE, Left Table) and classiﬁcation (Accuracy, Right Table) datasets.
+Dataset Features
+Auto-MPG
+Boston
+Weight
+Displ.
+W,D
+W,D,HP
+Rooms
+Crime
+NNb 13.54±4.65 12.00±2.94 15.35±2.30 10.26±2.19
+COMET 10.50±1.87 10.34±1.25 13.84±3.09 9.48±1.29 12.79±3.88 21.13±4.41 10.23±1.95 19.20±6.64
+Dataset
+Features
+Heart
+Adult
+Trestbps
+Chol.
+T,C
+Cap. Gain
+Hours
+NNb 0.77±0.07 0.77±0.06 0.77±0.06
+COMET 0.78±0.07 0.77±0.06 0.81±0.03 0.82 0.82 0.82 0.82 5

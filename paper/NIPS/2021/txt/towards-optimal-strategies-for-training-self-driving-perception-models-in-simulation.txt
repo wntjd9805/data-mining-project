@@ -1,0 +1,251 @@
+Abstract
+Autonomous driving relies on a huge volume of real-world data to be labeled to high precision. Alternative solutions seek to exploit driving simulators that can generate large amounts of labeled data with a plethora of content variations.
+However, the domain gap between the synthetic and real data remains, raising the following important question: What are the best way to utilize a self-driving simulator for perception tasks? In this work, we build on top of recent advances in domain-adaptation theory, and from this perspective, propose ways to minimize the reality gap. We primarily focus on the use of labels in the synthetic domain alone. Our approach introduces both a principled way to learn neural-invariant representations and a theoretically inspired view on how to sample the data from the simulator. Our method is easy to implement in practice as it is agnostic of the network architecture and the choice of the simulator. We showcase our approach on the bird’s-eye-view vehicle segmentation task with multi-sensor data (cameras, lidar) using an open-source simulator (CARLA), and evaluate the entire framework on a real-world dataset (nuScenes). Last but not least, we show what types of variations (e.g. weather conditions, number of assets, map design and color diversity) matter to perception networks when trained with driving simulators, and which ones can be compensated for with our domain adaptation technique. 1
+
+Introduction
+The dominant strategy in self-driving for training perception models is to deploy cars that collect massive amounts of real-world data, hire a large pool of annotators to label it and then train the models on that data using supervised learning. Although this approach is likely to succeed asymptotically, the ﬁnancial cost scales with the amount of data being collected and labeled. Furthermore, changing sensors may require redoing the effort to a large extent. Some tasks such as labeling ambiguous far away or occluded objects may be hard or even impossible for humans.
+In comparison, sampling data from self-driving simulators such as [46, 2, 6, 13] has several beneﬁts.
+First, one has control over the content inside a simulator which makes all self-driving scenarios equally efﬁcient to generate, indepedent of how rare the event might be in the real world. Second, full world state information is known in a simulator, allowing one to synthesize perfect labels for information that humans might annotate noisily, as well as labels for fully occluded objects that would be impossible to label outside of simulation. Finally, one has control over sensor extrinsics and intrinsics in a simulator, allowing one to collect data for a ﬁxed scenario under any chosen sensor rig.
+Given these features of simulation, it would be tremendously valuable to be able to train deployable perception models on data obtained from a self-driving simulation. There are, however, two critical challenges in using a driving simulator out of the box. First, sensor models in simulation do not mimic real world sensors perfectly; even with exact calibration of extrinsics and intrinsics, it is extremely
+∗denotes equal contribution, https://nv-tlabs.github.io/simulation-strategies 35th Conference on Neural Information Processing Systems (NeurIPS 2021).
+Figure 1: nuScenes vs CARLA Visualization of real-world data & labels from nuScenes [7] (top) and synthetic data & labels we obtain from CARLA [13] (bottom). As in nuScenes, we scrape 6 cameras, 1 LiDAR, ego-motion (for temporal fusion of LiDAR scans), and 3D bounding boxes from CARLA. On the right, we show the target binary image for the bird’s-eye-view vehicle segmentation task that we consider in this paper [43, 37, 22]. hard to perfectly label all scene materials and model complicated interactions between sensors and objects – at least today [34, 8, 56, 42]. Second, real world content is difﬁcult to incorporate into simulation; world layout may be different, object assets may not be diverse enough, and synthetic materials, textures and weather may all not align well with their real world counterparts [51, 6, 19, 55].
+To make matters worse, machine learning models and more speciﬁcally neural networks are very sensitive to these discrepancies, and are known to generalize poorly from virtual (source domain) to real world (target domain) [52, 14, 44].
+Contributions and Outline. In this paper, we seek to ﬁnd the best strategies for exploiting a driving simulator, that can alleviate some of the aforementioned problems. Speciﬁcally, we build on recent advances in domain adaptation theory, and from this perspective, propose a theoretically inspired method for synthetic data generation. We also propose a novel domain adaptation method that extends the recently proposed f -DAL [3] to dense prediction tasks and combines it with pseudo-labels.
+We start by formalizing our problem from a DA perspective. In Section 2, we introduce the mathe-matical tools, generalization bounds and highlight main similarities and differences between standard
+DA and learning from a simulator. Our analysis leads to a simple but effective method for sampling data from the self-driving simulator introduced in Section 3. This technique is simulator agnostic, simple to implement in practice and builds on the principle of reducing the distance between the labels’ marginals, thereby reducing the domain-gap and allowing adversarial frameworks to learn meaningfully in a representation space. Section 4 generalizes recently proposed discrepancy mini-mization adversarial methods using Pearson χ2 [3] to dense prediction tasks. It also shows a novel way to combine domain adversarial methods with pseudo-labels. In Section 6, we experimentally validate the efﬁcacy of our method and show the same approach can be simply applied to different sensors and data modalities (oftentimes implying different architectures). Although we focus on the scenario where labeled data is not available in the target domain, we show our framework also provides gains when labels in the target domain are available. Finally, we show that variations such as number of vehicle assets, map design and camera post-processing effects can be compensated for with our method, thus showing what variations are less important to include in the simulator. 2 Learning from a Simulator: A Domain Adaptation Perspective
+We can learn a great deal about a model’s generalization capabilities under distribution shifts by analyzing its corresponding binary classiﬁer. Therefore, building on the existing work in domain-adaptation theory [5, 4, 59, 3], we assume the output domain be and restrict the mathematical analysis to the binary classiﬁcation setting. Section 6 shows experiments in more general settings, validating the usefulness of this perspective and our algorithmic solution which is inspired by the theoretical analysis presented in this section. Speciﬁcally, here, we interpret learning from a simulator as a domain adaptation problem. We ﬁrst formulate the problem and introduce the notation that will be used throughout the work. Then, we introduce mathematical tools and generalization bounds that this work builds upon. We also highlight main similarities and differences between standard DA and learning from a simulator. 0, 1
+{
+=
+Y
+} 2
+We start by assuming the self-driving simulator can automatically produce labels for the task in hand (as is typical), and refer to data samples obtained from the simulator as the synthetic dataset (S) with ns i , ys (xs labeled datapoints S = i=1. Let’s also assume we have access to another dataset (T) with i )
+}
+{ nt (xt unlabeled examples T = i=1 that are collected in the real world. We emphasize that no labels i)
+}
+{ are available for T. Our goal then is to learn a model (hypothesis) h for the task using data from the labeled dataset S such that h performs well in the real-world. Intuitively, one should incorporate the unlabeled dataset T during the learning process as it captures the real world data distribution.
+Certainly, there are different ways in which the dataset S can be generated (e.g. domain randomization
+[52, 38]), and also several algorithms that a practitioner can come up with in order to solve the task (e.g. style transfer). In order to narrow the scope and propose a formal solution to the problem, we propose to interpret this problem from a DA perspective. The goal of this learning paradigm is to deal with the lack of labeled data in a target domain (e.g real world) by transferring knowledge from a labeled source domain (e.g. virtual word). Therefore, clearly applicable to our problem setting. i and target inputs xt
+. We assume the output domain be
+In order to properly formalize this view, we must add a few extra assumptions and notation. Speciﬁ-cally, we assume that both the source inputs xs i are sampled i.i.d. from distributions
+Ps and Pt respectively, both over and deﬁne the 0, 1
+} w.r.t. the labeling function f , using indicator of performance to be the risk of a hypothesis h :
+R+ under distribution
+[(cid:96)(h(x), f (x))]. a loss function (cid:96) :
+We let the labeling function be the optimal Bayes classiﬁer f (x) = arg maxˆy x) [35], x) denotes the class conditional distribution for either the source-domain (simulator) where P (y
+| (Ps(y x)) or the target domain (real-world) (Pt(y
+Ps(h, fs)
+|
+T (h) := R(cid:96) and R(cid:96) (h, f ) := E
+D
+P (y = ˆy
+|
+∈Y
+S(h) := R(cid:96) x)). For simplicity, we deﬁne R(cid:96)
+X → Y
+, or formally R(cid:96)
+D
+Y × Y →
+Pt(h, ft).
+=
+D
+X
+Y
+{
+|
+For reasons that will become obvious later (Sec. 4), we will interpret the hypothesis h (model) as the composition of h = ˆh is a representation space. Thus,
+Z → Y
+ˆ we deﬁne the hypothesis class
+. With this in hand, we
+, g
+H can use the generalization bound from [3] to measure the generalization performance of a model h:
+, and ˆh : g : ˆh
+X → Z
+ˆh
+:=
+◦
+{
+Z such that h g with g :
+, where
+∈ G}
+∈ H
+H
+∈
+◦
+Theorem 1 (Acuna et al. [3]). Suppose (cid:96) :
+R(cid:96)
+T (h). We have:
+Y × Y →
+[0, 1] and denote λ∗ := minh
+∈H
+R(cid:96)
+S(h) +
+R(cid:96)
+T (h)
+≤
+R(cid:96)
+S(h) + Dφ h,
+H (Ps
+Pt) + λ∗, where
+|| (1) where: Dφ h, tion φ : R+
+H
+→ (Ps
+Pt) := suph(cid:48)
+||
+R deﬁnes a particular f -divergence with φ∗ being its (Fenchel) conjugate.
+Pt[φ∗((cid:96)(h(x), h(cid:48)(x)))
+|
+Ps [(cid:96)(h(x), h(cid:48)(x))]
+∈H |
+−
+∼
+∼
+, and the func-Ex
+Ex
+Theorem 1 is important for our analysis as it shows us what we have to take into account such that a model can generalize from the virtual to the real-world. Intuitively, the ﬁrst term in the bound accounts for the performance of the model on simulation, and shows us, ﬁrst and foremost, that we must perform well on S (this is intuitive). The second term corresponds to the discrepancy between the marginal distributions Ps(x) and Pt(x), in simpler words, how dissimilar the virtual and real world are from an observer‘s view (this is also intuitive). The third term measures the ideal joint hypothesis (λ∗) which incorporates the notion of adaptability and can be tracked back to the dissimilarity between the labeling functions [3, 59, 4]. In short, when the optimal hypothesis performs poorly in either domain, we cannot expect successful adaptation. We remark that this condition is necessary for adaptation [5, 4, 3, 59].
+Comparison vs standard DA. In standard DA, two main lines of work dominate. These mainly depend on what assumptions are placed on λ∗. The ﬁrst group (1) assumes that the last term in equation 1 is negligible thus learning is performed in an adversarial fashion by minimizing the risk
+[16, 3, 33, 57]. The second group (2) introduces in source domain and the domain discrepancy in
+Z reweighting schemes to account for the dissimilarity between the label marginals Ps(y) and Pt(y).
+This can be either implicit [24] or explicit [32, 50, 48]. In our scenario the synthetic dataset is sampled from the self-driving simulator. Therefore, we have control over how the data is generated, what classes appear, the frequency of appearance, what variations could be introduced and where the assets are placed. Thus, Theorem 1 additionally tell us that the data generation process must be done in such a way that λ∗ is negligible, and if so, we could focus only on learning invariant-representations.
+We exploit this idea in Section 3 for the data generation procedure, and in Section 4 for the training algorithm. We emphasize the importance of controlling the dissimilarity between the label marginals 3
+Figure 2: Marginals induced by different sampling strategies for the task of BEV vehicle segmentation.
+Figures (a) and (b) show the induced marginal Ps(y) when the sampling strategy follows standard approaches: e.g. the NPC locations are sampled based on the structure of the road or the map’s drivable area (pseudocode in appendix). Figure (c) shows the induced marginal when the NPC locations are sampled using our spatial prior (see Sec.3.1). Figure (d) is for reference as it assumes access to target labeled data. It shows the induced marginal when the NPC locations are sampled using a target prior estimated on the nuScenes training set (see
+Sec.3.2). Figure (e) shows the estimated label marginal of the nuScenes validation set for the task of vehicle
+BEV segmentation Pt(y). The number on the top-left of the ﬁgures corresponds to the JSD between the induced marginal, and the nuScenes validation set estimated marginal (lower is better). In comparison with standard approaches, our sampling strategy minimizes the divergence between the task label marginals (e.g. 5.7e−4 vs 1.40e−3) and leads to a more diverse synthetic dataset. Notably, comparing (c) and (d), we can observe their distances are in the same order, yet sampling based on the spatial prior does not require access to labeled data.
+Ps(y) and Pt(y), as it determines the training strategy that we could use. This is illustrated by the following lower bound from [59]:
+Theorem 2 (Zhao et al. [59]) Suppose that DJS (Ps(y)
+R(cid:96)
+S(h) the Jensen-Shanon divergence.
+Pt(z)) We have: (cid:107) where DJS corresponds to
+DJS (Ps(z) (cid:17)2
+DJS (Ps(y) (cid:107)
+DJS (Ps(z) (cid:107)
+T (h) + R(cid:96)
+Pt(y)) (cid:107)
+≥
+Pt(z))
+Pt(y)) (cid:16)(cid:112) (cid:112)
+−
+≥ 1 2
+Theorem 2 is important since it is placing a lower bound on the joint risk, and it is particularly applicable to algorithms that aim to learn domain-invariant representations. In our case, it illustrates the paramount importance of the data generation procedure in the simulator. If we deliberately sample data from the simulator and position objects in a way that creates a mismatch between real and virtual world, simply minimizing the risk in the source domain and the discrepancy between source and target domain in the representation space may not help. Simply put, failing to align the marginals may prevent us from using recent SoTA adversarial learning algorithms. 3 Synthetic Data Generation
+In the previous section, we analyzed learning from a simulator from a domain adaptation perspective, and showed the importance of the data sampling strategy as this could create a mismatch between the label marginals. In this section, we take insipiration from this analysis and propose two simple, but effective methods to sample data from the self-driving simulator. The ﬁrst one proposes the use of spatial priors and is targeted to a regime where there is a complete absence of real-world labeled data. The second one assumes that a few datapoints are labeled in the target domain and exploits these labels to estimate a prior for the positions of the vehicles in the map. 3.1 Sampling with Spatial Priors
+If labels in the target domain are not available, we cannot measure the divergence between the labels marginals P (y) between the generated and the real world data. That said, given the bird‘s-eye view segmentation map, it is not hard for a human to design spatial priors representing locations with high probability of ﬁnding a vehicle. As visualized in
+Figure 2, we design a simple prior that samples locations for non-player characters (NPCs) proportional to the longi-tudinal distance of the vehicle to the ego car. For position
+R2 in meters relative to the ego car: (x1, x2)
+∈
+Pspatial(x1, x2) (cid:26) 1 125 | 1 75 (
+| x2 x2
++ 0.6 50)
+|
+| −
+−
+−
+∝ x2
+| x2
+| 12.5
+> 12.5
+| ≤
+| (2) 4
+Figure 3: Sampling Methods (Left) Stan-dard approaches sample NPC locations from the map’s drivable area based on the struc-ture of the road. (Right) We sample the NPC locations based on our spatial prior (indepen-dent of the structure of the road) which aims for diversity in the generated data and mini-mizes the divergence between the task label marginals (see also Fig 2 ).
+Figure 4: Matching nuScenes Statistics From left to right, we show the distribution of number of vehicles per scene in nuScenes, the distribution of ﬁeld of view of the nuScenes cameras, the yaw relative to the ego coordinate frame of the cameras (6 peaks for the 6 different camera directions), and the height of the LiDAR (roughly the same across all scenes). These statistics are matched when sampling data from CARLA.
+|
+= 50 meters, 0.5 for
+These numbers correspond to linearly interpolating between a probability proportional to 0.0 for
+= 0 meters. Intuitively, the prior x2
+| models the fact that other vehicles are generally located along the length-wise axis of the ego vehicle.
+The density is independent of x1 which models our prior that on a straight road, a vehicle is equally likely to be ˆx1 meters in front or behind the ego, for any ˆx1
+= 12.5 meters, and 0.6 for x2
+|
+R. x2
+|
+|
+|
+∈ 3.2 Sampling based on Target Priors
+Often in practical applications, a small proportion of data is available in the target domain. In such scenarios a natural prior for sampling would be to compute Pt(y) (see Figure 2 for an example), and generate the data based on that. Depending on how large the amount of data in the target domain
+α)Pt and sample NPC locations from it, for any is, we could also create a blend αPspatial + (1
+−
+[0, 1]. We emphasize that we do not use sampling based on target priors in our experiments since
+α our work focuses on the challenging setting where labeled data is not available in target domain.
+∈ 4 Training Strategy
+In the previous section, we designed a simulator-agnostic sampling strategy that builds on the intuition of minimizing the distance between the label marginals. From Theorem 1, we can also observe that in order to improve performance in the real world, we must minimize the distance between the input distributions Ps(x) and Pt(x). In this section, we extend the training algorithm from [3] to dense prediction tasks, with the aim to learn domain-invariant representations and minimize the divergence between virtual and real world in a latent space
+. Minimizing the divergence in a representation
+Z space allows domain adaptation algorithms to be sensor and architecture agnostic. We additionally take inspiration from [47] and incorporate the use of pseudolabels into the f -DAL framework.
+We remark in our scenario we cannot effectively learn invariant representations using adversarial learning unless the data sampling strategy from Section 3 is used because otherwise there may be a misalignment between the task label marginals (see Section 2 and [3, 59] for more details).
+Learning Domain-Invariant Representations. Our training algorithm can be interpreted as simul-taneously minimizing the source domain error and aligning the two distributions (virtual and real
+. Formally, we aim at ﬁnding a hypothesis h that jointly worlds) in some representation space w which corresponds to a minimizes the ﬁrst two terms of Theorem 1. Let h :
+· corresponding to an pixel-wise binary segmentation map of dimensions h and w respectively, with
+RN
+W , unordered set of multi-view images for camera-based bird’s-eye-view segmentation
+·
+X ⊆
+R3
+N . Our objective function and a point cloud for the lidar-based bird’s-eye-view segmentation
+· is then formulated in an adversarial fashion by minimizing the following objective:
+X → Y
+X ⊆
+Y ⊆ with
+H 3
+·
+Rh
+Z
+X
+· max
+ˆh(cid:48)
+ˆ
+H
+R+ is deﬁned as: (cid:96)(p, q) := 1 qi), w h
+×
+·
+[0, 1] (the averaged binary-cross entropy loss). β is a hyperparameter that weights where (cid:96) : Rh w
+·
+− and pi and qi the importance of positive pixels in the pixel-wise binary segmentation map. We deﬁne dst as: (cid:80)h w i=0 βpi log qi + (1
+· g, y)] + dst, min
+ˆ
+,g
+H pi) log(1
+Rh w
+· (3)
+→
+−
+∈G
+∈
+◦
+∼
+ˆh
+∈
+∈
+Ex,y ps [(cid:96)(ˆh dst := Ex (cid:104) ps
+∼ w[(ˆh(cid:48)
+Eh
+·
+◦ (cid:105) g)]
+Ex pt
+∼
+− (cid:20)
+Eh w[
+· 1 4 (ˆh(cid:48)
+◦ g)2 i + ˆh(cid:48) g(x)i]
+◦ (cid:21) (4) 5
+(cid:80)h w which corresponds to the Pearson χ2 divergence, and Eh w[x] := 1 i=0 xi. Different from the
+· w h
+·
+· original formulation of f -DAL Pearson [3], dst can be interpreted in our case as a per-location-domain-classiﬁer. For simplicity, we use the gradient reversal layer from [16, 15] to deal with the min-max objective in a single forward-backward pass.
+Pseudo-Labels. In addition to the objective in Equation 3, we use the following pseudo-loss: (cid:96)pseudo(p, paug) := h w (cid:88)
+· i=0 1[pi
+≥
+τ ][β log paugi] + 1[1 pi 1
+−
+≤
+−
+τ ] log(1 paugi)
+− (5)
+X → X
+[0, 1], 1[x] corresponds to the indicator function, p := h aug(xt) where τ
+∈ with aug : a function that produces a strong augmentation on the input data point. For camera sensors, we let aug be a version of RandAugment [10] that additionally incorporates camera dropping.
+For lidar, we follow the same idea from [10] but replace the image augmentations by random noise over the points positions as well as points dropout. We let τ = 0.9 in all our experiments. More details are provided in the supplementary material. g(xt) and paug := h
+◦
+◦
+◦ g
+The objective in Equation 5 is inspired by [47]. Intuitively, it is based on the generation of pseudo-labels using the conﬁdent pixels in the model’s predictions, as determined by τ , on the target domain, on a non-strongly augmented version of the same data point. Therefore, it explicitly exposes the model during training to real-world data. We experimentally observed that using pseudo-labels without enforcing invariant representations performs worse than a simple vanilla model trained only on the source dataset, likely because as opposed to [47] in our scenario the target/unlabeled data comes from different distributions. The use of pseudo-labels and adversarial learning in our algorithm can be justiﬁed through the results of [45] and Theorem 1. In summary, our training algorithm jointly minimizes equations 3 and 5.
+Other theoretically inspired training strategies. In principle several other training algorithms that minimize the discrepancy between source and target can be used. For example, style transfer using MUNIT [23], the original formulation of [16] or f -DAL [3]. Experimentally, we found our generalization of f -DAL-Pearson and the use of pseudo-labels to be more performant (see Table 3).
+We hypothesise the reason for domain-invariant representation methods being better is because these minimize the dissimilarity between source and target in a low dimensional space. In contrast, style transfer approaches operate directly on higher dimensional input data (e.g. images). Moreover, the use of pseudo-labels further exposes the model to training examples on real-world data.
+Figure 5: Style Transfer Baseline (MUNIT) For our style transfer baseline, we sample a style indepedently for each image and “translate” the CARLA images into nuScenes as shown above. The Lift Splat model receives images like those on the right as input during training. 5

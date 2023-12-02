@@ -1,0 +1,169 @@
+Abstract
+Recently, contrastive learning has achieved great results in self-supervised learning, where the main idea is to pull two augmentations of an image (positive pairs) closer com-pared to other random images (negative pairs). We argue that not all negative images are equally negative. Hence, we introduce a self-supervised learning algorithm where we use a soft similarity for the negative images rather than a binary distinction between positive and negative pairs. We iteratively distill a slowly evolving teacher model to the stu-dent model by capturing the similarity of a query image to some random images and transferring that knowledge to the student. Specifically, our method should handle unbal-anced and unlabeled data better than existing contrastive learning methods, because the randomly chosen negative set might include many samples that are semantically simi-lar to the query image. In this case, our method labels them as highly similar while standard contrastive methods label them as negatives. Our method achieves comparable results to the state-of-the-art models. Our code is available here: https://github.com/UMBCvision/ISD. 1.
+
+Introduction
+We can view the recent crop of SSL methods as itera-tive self-distillation where there is a teacher and a student.
+Both teacher and student improve simultaneously while the teacher is evolving more slowly (running average) com-pared to the student: (1) In the case of contrastive methods e.g. MoCo [20], we classify images to positive and nega-tive pairs in the binary form. (2) In the case of clustering methods (DC-v2 [8], SwAV [8], SeLA [50]), the student predicts the quantized representations from the teacher. (3)
+In the case of BYOL [18], the student simply regresses the teacher’s embeddings vector. Here, we introduce a novel method using similarity based distillation to transfer the knowledge from the teacher to the student. We argue that our method is more regularized compared to prior work and
+*Equal contribution improves the quality of the features in transfer learning.
+In the standard contrastive setting, e.g., MoCo [20], there is a binary distinction between positive and negative pairs, but in practice, many negative pairs may be from the same category as the positive one. Thus, forcing the model to classify them as negative is misleading. This can be more important when the unlabeled training data is unbalanced, for example, when a large portion of images are from a small number of categories. Such scenario can happen in applications like self-driving cars, where most of the data is just repetitive data captured from a high-way scene with a couple of cars in it. In such cases, the standard contrastive learning methods will try to learn features to distinguish two instances of the most frequent category that are in a negative pair, which may not be helpful for the down-stream task of understanding rare cases.
+We are interested in relaxing the binary classification of contrastive learning with soft labeling, where the teacher network calculates the similarity of the query image with re-spect to a set of anchor points in the memory bank, converts that into a probability distribution over neighboring exam-ples, and then transfers that knowledge to the student, so that the student also mimics the same neighborhood similar-ity. In the experiments, we show that our method is compet-itive with SOTA self-supervised methods on ImageNet and show an improved accuracy when trained on unbalanced, unlabeled data (for which we use a subset of ImageNet).
+Our method is different from BYOL [18] in that we are comparing the query image with other random images rather than only with a different augmentation of the same query image. We believe our method can be seen as a more relaxed version of BYOL. Instead of imposing that the em-bedding of the query image should not change at all due to an augmentation (as done in BYOL), we are allowing the embedding to vary as long as its neighborhood simi-larity does not change. In other words, the augmentation should not change the similarity of the image compared to its neighboring images. This relaxation lets self-supervised learning focus on what matters most in learning rich fea-tures rather than forcing an unnecessary constraint of no change at all, which is difficult to achieve.
+Figure 1. Our method: We initialize both teacher and student networks from scratch and update the teacher as running average of the student. We feed some random images to the teacher, and feed two different augmentations of a query image to both teacher and student.
+We capture the similarity of the query to the anchor points in the teacher’s embedding space and transfer that knowledge to the student. We update the student based on KL divergence loss and update the teacher to be a slow moving average of the student. This can be seen as a soft version of MoCo [20] which can handle negative images that are similar to the query image. Note that unlike contrastive learning and
+BYOL [18], we never compare two augmentations of the query images directly (positive pair).
+Our distillation method is inspired by the CompRess method [1], which introduces an analogous similarity-based distillation method to compress a deeper self-supervised model to a smaller one and get better results compared to training the small model from scratch. Our method is dif-ferent from [1] in that in our case, both teacher and student share the same architecture, we do self-supervised learning from scratch rather than compressing from another deeper model, and also the teacher evolves over time as a running average of the student rather than being frozen as in [1]. 2. Method
+We are interested in learning rich representations from unlabeled data. We have a teacher network and a student network. We initialize both models from scratch and up-date the teacher to be a slower version of the student: we use the momentum idea from MoCo in updating the teacher so that it is running average of the student. The method is described in Figure 1. Following the notation in [1], at each iteration, we pick a random query image and a bunch of random other images that we call anchor points. We aug-ment those images and feed them to the teacher model to get their embeddings. Then, we augment the query again independent of the earlier augmentation and feed it to the student model only. We calculate the similarity of the query point compared to the anchor points in the teacher’s embed-ding space and then optimize the student to mimic the same similarity for the anchor point at the student’s embedding space. Finally, we update the teacher with a momentum to be the running average of the student similar to MoCo and BYOL. Note that our method is closely related to Com-Press method [1] which uses the similarity distillation for compressing a frozen larger model to a smaller one.
+More formally, we assume a teacher model t and a stu-dent model s. Given a query image q, we augment it twice independently to get qt and qs. We also assume a set of n augmented random images {xi}n i=1 to the teacher model to get their embeddings {t(xi)}n i=1 and call them anchor points. We also feed qt to the teacher and qs to the student to get t(qt) and s(qs) respectively. Then, we cal-culate the similarity of the query embedding t(qt) compared to all anchor points, divide by a temperature, and convert to a probability distribution using a SoftMax operator to get: i=1. We feed {xi}n pt(i) = −log exp(cid:0)sim(cid:0)t(qt), t(xi)(cid:1)/τt j=1 exp(cid:0)sim(cid:0)t(qt), t(xj)(cid:1)/τt (cid:1) (cid:80)n (cid:1) where τt is the teacher’s temperature parameter and sim(., .) refers to the similarity between two vectors. In our exper-Figure 2. Positives vs. negatives: We sample some query images randomly (left column), calculate their teacher probability distribution over all anchor points in the memory bank (size=128K) and rank them in descending order (right columns). The second left column is another augmented version of the query image that contrastive learning methods use for the positive pair. Our students learns to mimic the probability number written below each anchor image while contrastive learning method (e.g., MoCo) learn to predict the one-hot encoding written below the images. Note that there are lots of images in the top anchor points that are semantically similar to the query point that
+MoCo tries to discriminate them from the query while our method does not. iments, we use cosine similarity which is standard in most recent contrastive learning methods.
+Then, we calculate a similar probability distribution for the student’s query embedding to get: ps(i) = −log exp(cid:0)sim(cid:0)s(qs), t(xi)(cid:1)/τs j=1 exp(cid:0)sim(cid:0)s(qs), t(xj)(cid:1)/τs (cid:1) (cid:80)n (cid:1)
+Where, τs is the student’s temperature parameter. Fi-nally, we optimize the student only by minimizing the fol-lowing loss:
+L = KL(pt||ps) and the teacher is updated using the following rule:
+θt ← mθt + (1 − m)θs where θ refers to the parameters of a model and m is a the momentum hyperparameter that is set be close to one (0.99 in our ResNet50 experiments) as in MoCo. Since the teacher is not optimized by the loss directly, the loss can be simplified as cross entropy loss instead of KL divergence.
+Note that unlike the positive pair in contrastive learn-ing methods and BYOL, the query image is never com-pared to its own augmentation as it is not included in the anchor points. We do this since when the features are ma-ture, the similarity of the query to itself will be very large and will dominate the whole probability distribution. Note that one can convert our method to MoCo by including the query in anchor points and replacing the probability of the teacher pt with a one-hot encoding vector in which the pos-itive pair (query) corresponds to one and all other anchor points correspond to zero. Figure 2 shows some example teacher probabilities for both ISD and MoCo.
+Our method can benefit from a large number of an-chor points to cover the neighborhood of any query image, and also the anchor points are fed to the teacher only that evolves slowly. Hence, we use MoCo’s trick of a large memory bank (queue) for the anchor points. The queue size is 128K in our experiments which uses only 1.6% of the total memory and less than 1% of the total computation.
+Different Temperature for student and teacher: Since the student is learning from the teacher, we can use a lower temperature for the teacher compared to the student to make the teacher more confident. In the extreme case, when the teacher uses zero temperature, its output will be a one-hot encoding over the anchor points which is a very sharp dis-tribution. In the experiments we observe best results when the teacher has 10 times smaller temperature.
+Method
+Ref Batch
+Size
+Epochs
+Top-1
+Sym. Loss 2x FLOPS Linear
+NN 20-NN
+Supervised
+SwAV [8]
+SimCLR[9]
+MoCo-V2 [20]
+SimSiam [11]
+BYOL [18]
+MoCo-V2 [10]
+MoCo-V2 [20]
+CompRess* [1]
+BYOL [18]
+SwAV † [8]
+MoCo-V2 [20]
+CO2 [45]
+BYOL-asym
+MSF ‡ [25]
+ISD
+Supervised
+MoCo-V2 [20]
+BYOL-asym
+ISD
+-[11]
+[9]
+[11]
+[11]
+[11]
+[10]
+[20]
+[1]
+[18]
+[8]
+[11]
+[45]
+-[25]
+--[11]
+--256 4096 4096 256 256 4096 256 256 256 4096 4096 256 256 256 256 256 256 256 256 256
+ResNet-50 100 200 1000 200 200 200 400 800 1K+130 1000 800 200 200 200 200 200
+ResNet-18 100 200 200 200
+-✓
+✓
+✓
+✓
+✓
+✓
+✗
+✗
+✓
+✓
+✗
+✗
+✗
+✗
+✗
+-✗
+✗
+✗ 76.2 69.1 69.3 69.9 70.0 70.6 71.0 71.1 71.9 74.3 75.3 67.5 68.0 69.3 72.4 69.8 69.8 51.0 52.6 53.8 71.4
+------57.3 63.3 62.8
+---55.0 62.0 59.2 63.0 37.7 40.0 41.5 74.8
+------61.0 66.8 66.9
+---59.2 64.9 62.0 67.6 42.1 44.8 46.6
+Table 1. Evaluation on full ImageNet: We compare our method with other state-of-the-art SSL methods by evaluating the learned features on the full ImageNet. A single linear layer is trained on top of a frozen backbone. Note that methods using symmetric losses use 2× computation per mini-batch. Thus, it is not fair to compare them with the asymmetric loss methods. Further, we find that given a similar computational budget, both asymmetric MoCo-V2 (400 epochs) and symmetric MoCo-V2 (800 epochs) have similar accuracies (71.0 vs 71.1). Under similar resource constraints, our method performs competitively with other state-of-the-art methods. * is compressed from
+ResNet-50x4. †: SwAV is not comparable as it uses multiple crops together. ‡: is our concurrent (future of this!) work. 3. Experiments 3.1. Self-supervised learning
+We describe various experiments and their results in this section. We compare our proposed self-supervised method with other state-of-the-art methods on ImageNet and transfer learning. We also demonstrate the advantage of our method compared to MoCo on unbalanced, unlabeled dataset.
+Implementation details: For all experiments, we use
+PyTorch with SGD optimizer (momentum = 0.9, weight de-cay = 1e−4, batch size = 256) except when stated otherwise.
+Details about the specific architecture, epochs for training, and learning rate are described for each experiment in its re-spective section. We follow the evaluation protocols in [1] for nearest neighbor (NN) and linear layer (Linear) evalua-tion. We use the ImageNet labels only in the setting of eval-uating the learned features. To evaluate how SSL features transfer to new tasks, we perform Linear layer evaluation on different datasets including Food101 [6], SUN397 [47],
+CIFAR10 [27], CIFAR100 [27], Cars [26], Flowers [30],
+Pets [35], Caltech-101 [15] and DTD [13]. More details about the datasets and training can be found in the appendix.
+We follow [18] setting for transfer learning and reproduce
+BYOL results for fairness.
+BYOL-asym (baseline). ResNet-50 is recently used as a benchmark in the community. Unfortunately, we can-not run it for 1000 epochs because of resource constraints.
+Some methods [18, 8] are even slower as they forward the mini-batch through the model more than once. For in-stance, BYOL method forwards the images twice to calcu-late the symmetric loss, so 100 epochs of symmetric BYOL is equivalent to almost 200 epochs of asymmetric BYOL in terms of running time. As shown in [11], given a con-stant budget, there is no big difference between symmetric and asymmetric losses. Thus, for a fair comparison with our method and MoCo, we use asymmetric loss, a small batch size (256), momentum for the teacher is 0.99, and train for 200 epochs. We implement BYOL in PyTorch fol-lowing [18]. We call this baseline as BYOL-asym since it’s asymmetric version of BYOL. For ResNet18, hidden units in the MLP for projection and prediction layers is 1024, and output embedding dimension is 128. For ResNet50, hid-den units in the MLP for projection and prediction layers is 4096, and output embedding dimension is 512. We use cos learning rate scheduler with initial learning rate of 0.05.
+Method
+Ref. Epochs
+Food CIFAR CIFAR SUN Cars DTD Pets Caltech 101 397 196 101 10
+Sup-IN
+SimCLR [9]
+MoCo v2 [10]
+BYOL [18]
+BYOL [18]
+BYOL-asym [18]
+MoCo v2 [10]
+MSF ‡ [25]
+ISD
+[18]
+[18]
+-rep.
+[18]
+--[25]
+-BYOL-asym [18]
+MoCo v2 [10]
+ISD
+---1000 800 1000 1000 200 200 200 200 200 200 200 72.3 72.8 72.5 75.4 75.3 70.2 70.4 71.2 68.6 55.0 56.7 58.3 93.6 90.5 92.2 92.7 91.3 91.5 91.0 92.6 90.8 83.4 83.0 83.3 100
+ResNet-50 78.3 74.4 74.6 78.1 78.4 74.2 73.5 76.3 72.0
+ResNet-18 59.3 59.7 62.7 61.9 60.6 59.6 62.1 62.2 59.0 57.5 59.2 55.8 48.2 48.8 49.6 66.7 49.3 50.5 67.1 67.8 54.0 47.7 55.6 45.8 26.6 30.4 36.1 74.9 75.7 74.4 76.8 75.5 73.4 73.9 73.2 68.6 65.4 64.4 65.6 91.5 84.6 84.6 89.8 90.4 86.2 81.3 88.7 89.1 74.1 70.1 76.4 94.5 89.3 90.0 92.2 94.2 90.4 88.7 92.7 90.3 82.7 80.5 84.5
+Flowers Mean 102 94.7 92.6 90.5 95.5 96.1 92.1 91.1 92.0 87.4 82.3 83.1 87.4 80.9 68.6 76.5 81.1 81.2 76.8 75.0 77.9 74.3 64.1 64.1 67.1
+Table 2. Linear transfer evaluation: We linear classifiers on top of frozen features for various downstream datasets. Hyperparameters are tuned individually for each method and the results are reported on the hold-out test sets. Our ResNet-18 is significantly better than other state-of-the-art SSL methods. “rep.” refers to the reproduction with our framework for a fair comparison. ‡: our concurrent work.
+Method
+Epochs
+Top-1
+Top-5 1% 10% 1% 10%
+Entire network is fine-tuned.
+Supervised
+PIRL [28]
+CO2 [45]
+SimCLR [9]
+InvP [44]
+BYOL [18]
+SwAV† [8]
+Only the linear layer is trained.
+BYOL‡ [18]
+CompRess* [1] 800 200 1000 800 1000 800 1000 1K+130
+MoCo v2 [10]
+BYOL-asym [18]
+ISD 200 200 200 25.4
+--48.3
+-53.2 53.9 55.7 59.7 43.6 47.9 53.4 56.4
+--65.6
+-68.8 70.2 68.6 67.0 58.4 61.3 63.0 48.4 57.2 71.0 75.5 78.2 78.4 78.5 80.0 82.3 71.2 74.6 78.8 80.4 83.8 85.7 87.8 88.7 89.0 89.9 88.6 87.5 82.9 84.7 85.9
+Table 3. Evaluation on limited labels ImageNet for ResNet-50:
+We evaluate our model for the 1% and 10% ImageNet linear eval-uation. Unlike other methods, we only train a single linear layer on top of the frozen backbone. We observe that our method is bet-ter than other state-of-the-art methods given similar computational budgets. * is compressed from ResNet-50x4
+ResNet-18 experiments: Following CompRess [1], we train our self-supervised ResNet-18 model with the initial learning rate set to 0.01 and multiplied by 0.2 at epochs 140 and 180. We follow [18] and add a prediction layer for the student. The hidden and output dimensions of the prediction
+MLP layer are set to 512. We do not have any projection layer for ResNet18. We use the same set of augmentations used in [10, 9, 18]. We use the same temperature for teacher and student τs = τt = 0.02. The memory bank size is 128K and momentum m for teacher encoder is 0.999. We choose these parameters based on ablations which can be found in the appendix. The results are shown in Tables 1 and 2. Our model outperforms both baselines on full ImageNet linear and transfer linear benchmarks.
+It is important to note that our method can be seen as a soft version of MoCo. So, ISD outperforming MoCo, em-pirically supports our main motivation of improving repre-sentations by smoothing the contrastive learning: not con-sidering all negatives equally negative.
+ResNet-50 experiments: We train ResNet-50 with dif-ferent settings than ResNet-18. We use same architecture and settings as ResNet-50 BYOL-asym. We use cos learn-ing rate scheduler with initial learning rate of 0.05. We use temperature of τs = 0.1 for the student and τt = 0.01 for the teacher. Memory bank size is 128K, and momentum m for teacher encoder is 0.99. We study the effect of memory bank size in Figure 3 which shows that memory bank size of even 16K is on-par with 128K and above. Additionally, inspired by [40], we train our model with two different aug-mentation sets which we call it weak (random cropping and random horizontal flipping) and strong (same as [10, 9, 18]).
+The teacher view uses weak augmentation while the student view uses the strong augmentation. We evaluate the effect of different augmentation in Table 5. ResNet50 results are shown in Tables 1 and 2.
+Tables 1 and 2 show the results on ImageNet and transfer learning settings respectively. Our method is comparable to
+SOTA SSL methods including BYOL in Linear and nearest neighbor evaluation on ImageNet. As mentioned earlier, we believe our method is more relaxed compared to BYOL as our method lets the embeddings of augmented images move as long as their similarity relationship with neighbors has
+not changed. Table 3 shows our results when only limited labels are available in ImageNet dataset. Figure 5 shows random image samples from random clusters where each row corresponds to a cluster. Note that each row contains almost semantically similar images.
+Evolution of teacher and student models: In Figure 4, for every 10 epoch of ResNet-18, we evaluate both teacher and student models for BYOL, MoCo, and ISD methods us-ing nearest neighbor. For all methods, the teacher performs usually better than the student in the initial epochs when the learning rate is relatively large and then is very close to the student when it shrinks. This is interesting as we have not seen previous papers comparing the teacher with the stu-dent. This might happen since the teacher is a running aver-age of the student so can be seen as an ensemble over many student networks similar to [41]. We believe this deserves more investigation as future work.
+Figure 3. Effect of Memory Bank Size: We study the effect of memory bank size by varying from 256 to 1024K for ISD on
+ResNet-50 model.
+Ablation study: We varied the temperature for our method on ResNet-18 with 130 epochs and reported the re-sults in Table 6. Here, LR = 0.01 and it is multiplied by 0.2 at 90 and 120 epochs. Also, for more fair comparison with BYOL on ResNet18, we varied the learning rate and chose the best one for BYOL. Table 7 shows the results of this experiment. believe it is important to design and evaluate self-supervised learning methods for such unbalanced data.
+As mentioned earlier, since standard contrastive learning methods e.g., MoCo, consider all negative examples equally negative, when the query image is from a large category, it is possible to have multiple samples from the same cat-egory in the memory bank. Then, the contrastive loss in
+MoCo pushes their embeddings to be far apart as negative pairs. However, our method can handle such cases since our teacher assigns a soft label to the negative samples, so if an anchor example is very similar to the query, it will have high similarity and the student is optimized to reproduce such similarity.
+To study our method on unbalanced data, we design a controlled setting to introduce the unbalanced data in the
+SSL training only and factor out its effect in the feature evaluation step. Hence, we sub-sample ImageNet data with 38 random categories where 8 categories are large (use all of almost 1300 images per category) and 30 categories are small (use only 100 images per category.) We train our SSL method and then evaluate by nearest neighbor (NN) classi-fier on the balanced validation data. To make sure that the feature evaluation is not affected by the unbalanced data, we keep both evaluation and the training data of NN search balanced, so for NN search, we use all ImageNet training images (almost 1300 × 38 images) for those 38 categories.
+We repeat the sampling of 38 categories 10 times to come up with 10 datasets and report the results for our method and also MoCo in Table 4. To measure the effect of the unbalanced data. we report the accuracy on all 38 categories and also on those 30 small categories only sepa-rately. Our method performs consistently better than MoCo, but more interestingly, the gap the improvement is larger when we evaluate on the 30 small categories only. We be-lieve this empirically proves our hypothesis that our method may be able to handle unbalanced data more effectively. For a fair comparison, we train both our model and MoCo for 400 epochs with a memory bank size of 8192 and cosine learning schedule. 3.2. Self-Supervised Learning on Unbalanced 4.
